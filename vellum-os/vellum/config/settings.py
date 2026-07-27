@@ -41,9 +41,9 @@ class Settings(BaseSettings):
 
     # --- Concurrency Limits (RPM-aware) ---
     gemini_concurrency: int = 5   # Conservative: stay well under 30 RPM
-    groq_concurrency: int = 5
-    mistral_concurrency: int = 5
-    max_job_pipelines: int = 3    # Max concurrent per-job pipelines
+    groq_concurrency: int = 1
+    mistral_concurrency: int = 1
+    max_job_pipelines: int = 2    # Max concurrent per-job pipelines
 
     @property
     def available_providers(self) -> list[str]:

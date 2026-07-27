@@ -39,6 +39,9 @@ PENALTY_DOMAINS = {
     "indeed.com", "indeed.co.in",
     "naukri.com", "monster.com", "internshala.com",
     "ambitionbox.com", "payscale.com",
+    "jooble.org", "jooble.in", "ziprecruiter.com",
+    "simplyhired.com", "careerjet.com", "talent.com",
+    "jobrapido.com", "adzuna.com", "jora.com",
 }
 
 # Career-path patterns (boost)
@@ -79,8 +82,7 @@ def score_career_url(url: str, company_name: str = "") -> float:
     # Penalty for aggregators
     for penalty in PENALTY_DOMAINS:
         if penalty in domain:
-            score -= 0.6
-            break
+            return 0.0
 
     # Penalty for noise pages
     if NOISE_PATTERNS.search(path):

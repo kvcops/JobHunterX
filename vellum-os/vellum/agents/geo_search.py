@@ -153,7 +153,7 @@ async def run(state: dict) -> dict:
                 continue
 
             top_result = career_results[0]
-            if top_result["score"] < 0.3:
+            if top_result["score"] < 0.65:
                 continue  # Too noisy
 
             # Fetch and parse the career page
@@ -169,31 +169,41 @@ async def run(state: dict) -> dict:
                 html=html,
             )
 
-            # Extract JD text
-            jd_text = await scrape.extract_jd_text(html) if not links else ""
-
-            job = JobListing(
-                company=company["name"],
-                career_page_url=top_result["url"],
-                apply_url=links[0]["url"] if links else None,
-                jd_text=jd_text,
-                source=company.get("source", "ddgs"),
-                discovery_confidence=top_result["score"],
-            )
-            job_dict = job.model_dump(mode="json")
-
-            # Persist to SQLite (dedup via URL hash)
-            job_id = await db.insert_job(job_dict)
-            if job_id:
-                job_dict["id"] = job_id
-                jobs.append(job_dict)
-                events.append(AgentEvent(
-                    agent="geo_search",
-                    event_type="discovery",
-                    job_id=job_id,
-                    message=f"Discovered: {company['name']}",
-                    confidence=top_result["score"],
-                ).model_dump(mode="json"))
+            # Store individual job posts, not the whole careers landing page.
+            for link in links[:8]:
+                role_title = (link.get("text") or "").strip()
+                if (
+                    not role_title
+                    or role_title.lower() in {"apply", "view job", "learn more"}
+                    or link["url"].rstrip("/") == top_result["url"].rstrip("/")
+                ):
+                    continue
+                job_page = await scrape.fetch_page(link["url"])
+                job_html = job_page.get("html", "")
+                jd_text = await scrape.extract_jd_text(job_html or html)
+                if len(jd_text) < 180:
+                    continue
+                job = JobListing(
+                    company=company["name"],
+                    role=role_title[:160],
+                    career_page_url=top_result["url"],
+                    apply_url=link["url"],
+                    jd_text=jd_text[:20000],
+                    source=company.get("source", "ddgs"),
+                    discovery_confidence=top_result["score"],
+                )
+                job_dict = job.model_dump(mode="json")
+                job_id = await db.insert_job(job_dict)
+                if job_id:
+                    job_dict["id"] = job_id
+                    jobs.append(job_dict)
+                    events.append(AgentEvent(
+                        agent="geo_search",
+                        event_type="discovery",
+                        job_id=job_id,
+                        message=f"Discovered: {company['name']} - {role_title[:100]}",
+                        confidence=top_result["score"],
+                    ).model_dump(mode="json"))
 
         except Exception as exc:
             errors.append(f"Error processing {company['name']}: {exc}")
@@ -213,12 +223,20 @@ async def run(state: dict) -> dict:
             name_match = re.search(r"greenhouse\.io/(\w+)|lever\.co/(\w+)", board_url)
             company_name = (name_match.group(1) or name_match.group(2)).title() if name_match else "Unknown"
 
-            for link in links[:5]:  # Cap per board
+            for link in links[:8]:
+                role_title = (link.get("text") or "").strip()
+                if not role_title or role_title.lower() in {"apply", "view job", "learn more"}:
+                    continue
+                job_page = await scrape.fetch_page(link["url"])
+                jd_text = await scrape.extract_jd_text(job_page.get("html", ""))
+                if len(jd_text) < 180:
+                    continue
                 job = JobListing(
                     company=company_name,
+                    role=role_title[:160],
                     career_page_url=board_url,
                     apply_url=link["url"],
-                    jd_text="",
+                    jd_text=jd_text[:20000],
                     source="curated",
                     discovery_confidence=0.8,
                 )

@@ -325,7 +325,7 @@ function renderJobs() {
     if (job.status === "applied") appliedCount++;
 
     const card = document.createElement("div");
-    card.className = "job-card";
+    card.className = "job-card job-card-enhanced";
 
     // Build badges for scoring
     const confidenceScore = job.discovery_confidence || 0;

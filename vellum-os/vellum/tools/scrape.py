@@ -227,17 +227,10 @@ async def extract_apply_links(
         log.info("tier1_deterministic_success", url=url, count=len(links))
         return links
 
-    # Tier 2: If no links found but we have HTML, still usable for JD text
-    log.info("tier1_no_links_trying_llm", url=url)
-
-    # Tier 3: LLM fallback (only if we have an API key)
-    if api_key:
-        links = await extract_apply_links_llm(url, api_key)
-        if links:
-            log.info("tier3_llm_success", url=url, count=len(links))
-            return links
-
-    log.warning("all_tiers_failed", url=url)
+    # Do not invoke the legacy ScrapeGraphAI fallback here. It hard-codes
+    # gemini-pro, adds a LangChain provider dependency, and can turn an
+    # aggregator page into fake job links. Job links must be deterministic.
+    log.info("deterministic_job_links_not_found", url=url)
     return []
 
 

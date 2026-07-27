@@ -2096,3 +2096,42 @@ button, input, select, textarea {
   0% { transform: scale(0.9); opacity: 0.6; }
   100% { transform: scale(1.1); opacity: 1; }
 }
+
+/* Refined pipeline cards */
+.job-card-enhanced {
+  position: relative;
+  padding: 18px;
+  border-radius: 16px;
+  background: linear-gradient(145deg, var(--bg-widget), var(--bg-app));
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+.job-card-enhanced:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent-color);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .10);
+}
+.job-card-enhanced .company-title {
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent-color);
+}
+.job-card-enhanced .role-title { margin-top: 5px; line-height: 1.25; }
+.job-card-enhanced .badge-row { margin-top: 14px; }
+.job-card-enhanced .card-footer { margin-top: 16px; }
+.polished-empty {
+  min-height: 240px;
+  border: 1px dashed var(--border-color);
+  border-radius: 16px;
+  background: linear-gradient(145deg, var(--bg-widget), var(--bg-app));
+}
+.polished-empty .empty-icon-circle {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  color: var(--accent-color);
+  background: var(--accent-light);
+  font-size: 28px;
+}

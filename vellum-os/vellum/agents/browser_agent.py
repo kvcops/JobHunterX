@@ -113,6 +113,10 @@ async def run(state: dict) -> dict:
         # --- Initialize browser-use Agent with our LLM ---
         from browser_use import Agent
         from browser_use.llm.litellm import ChatLiteLLM
+        try:
+            from browser_use import BrowserProfile
+        except ImportError:
+            BrowserProfile = None
 
         # Use our LiteLLM router — forced to gemini-3.1-flash-lite per spec
         llm = ChatLiteLLM(model="gemini/gemini-3.1-flash-lite")
@@ -139,7 +143,7 @@ Instructions:
 
         from vellum.api.ws import manager as ws_manager
 
-        def browser_step_callback(state, model_output, step_num):
+        async def browser_step_callback(state, model_output, step_num):
             url = getattr(state, "url", "")
             screenshot = getattr(state, "screenshot", None)
             action = ""
@@ -151,7 +155,9 @@ Instructions:
                 else:
                     action = str(model_output)
             
-            loop = asyncio.get_event_loop()
+            if isinstance(screenshot, bytes):
+                import base64
+                screenshot = base64.b64encode(screenshot).decode("ascii")
             event_data = {
                 "agent": "browser_agent",
                 "event_type": "browser_step",
@@ -166,14 +172,20 @@ Instructions:
                     "role": job.get("role", "Software Engineer")
                 }
             }
-            if loop.is_running():
-                loop.create_task(ws_manager.broadcast(event_data))
+            await ws_manager.broadcast(event_data)
 
-        agent = Agent(
-            task=task,
-            llm=llm,
-            register_new_step_callback=browser_step_callback,
-        )
+        agent_kwargs = {
+            "task": task,
+            "llm": llm,
+            "register_new_step_callback": browser_step_callback,
+            "use_vision": True,
+            "available_file_paths": [str(pdf_path)] if pdf_path else [],
+        }
+        if BrowserProfile is not None:
+            agent_kwargs["browser_profile"] = BrowserProfile(
+                headless=settings.browser_use_headless
+            )
+        agent = Agent(**agent_kwargs)
 
         # Run with timeout
         try:

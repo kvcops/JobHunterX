@@ -8,6 +8,7 @@ The extracted `skills` list is ground truth and never modified.
 from __future__ import annotations
 
 import json
+import re
 
 from vellum.config.llm_router import call_llm_with_fallback
 from vellum.config.logging import get_logger
@@ -54,6 +55,24 @@ Rules:
 - Return valid JSON only. No markdown, no explanation."""
 
 
+def _parse_json_object(content: str) -> dict:
+    """Extract one complete JSON object from Gemma/Gemini text output."""
+    text = content or ""
+    text = text.replace("<|channel|>thought", "").replace("<|channel|>", "")
+    text = re.sub(r"\x60{3}(?:json)?", "", text, flags=re.I)
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and ("name" in value or "skills" in value or "experience" in value):
+            return value
+    raise json.JSONDecodeError("No complete profile JSON object found", text, 0)
+
+
 async def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract text from a PDF using PyMuPDF with sort=True for column-aware reading."""
     import asyncio
@@ -96,17 +115,25 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
         result = await call_llm_with_fallback(
             chain_name="extraction",
             messages=messages,
-            use_cache=False,  # Each resume is unique
+            use_cache=False,
+            max_tokens=1400,
         )
-        content = result["content"]
+        try:
+            data = _parse_json_object(result["content"])
+        except json.JSONDecodeError:
+            log.warning("profile_json_retry", model=result.get("model", "unknown"))
+            retry_messages = [
+                {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT + "\nOutput only one complete JSON object. No reasoning, markdown, or commentary."},
+                {"role": "user", "content": raw_text[:8000]},
+            ]
+            retry = await call_llm_with_fallback(
+                chain_name="fast",
+                messages=retry_messages,
+                use_cache=False,
+                max_tokens=1200,
+            )
+            data = _parse_json_object(retry["content"])
 
-        # Parse JSON from response (handle markdown code blocks)
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-
-        data = json.loads(content.strip())
         profile = CandidateProfile(**data)
         log.info(
             "profile_extracted",

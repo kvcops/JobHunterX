@@ -33,21 +33,19 @@ from vellum.config.settings import get_settings
 log = get_logger("llm_router")
 
 # ---------------------------------------------------------------------------
-# Thinking-model configuration (from spec Section 4)
+# Provider-specific reasoning configuration.
 # ---------------------------------------------------------------------------
 
 THINKING_MODELS = {
     "groq/openai/gpt-oss-120b",
     "groq/openai/gpt-oss-20b",
-    "mistral/magistral-medium-2509",
-    "mistral/mistral-large-2512",
 }
 
 # Models that use reasoning_effort parameter (Groq GPT-OSS)
 REASONING_EFFORT_MODELS = {"groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"}
 
-# Models that use thinking parameter (Mistral)
-THINKING_PARAM_MODELS = {"mistral/magistral-medium-2509", "mistral/mistral-large-2512"}
+# Do not inject LiteLLM thinking into Mistral: the provider rejects it for these IDs.
+THINKING_PARAM_MODELS: set[str] = set()
 
 # Provider → model fallback chains
 FALLBACK_CHAINS: Dict[str, List[str]] = {
@@ -66,7 +64,7 @@ FALLBACK_CHAINS: Dict[str, List[str]] = {
         "gemini/gemini-3.1-flash-lite",
     ],
     "extraction": [
-        "gemini/gemma-4-31b",
+        "gemini/gemma-4-31b-it",
         "groq/openai/gpt-oss-120b",
         "gemini/gemini-3.1-flash-lite",
     ],
@@ -164,15 +162,25 @@ def get_llm_params(model_name: str) -> Dict[str, Any]:
 # Core: call_llm (async, with retry + cache + semaphore + logging)
 # ---------------------------------------------------------------------------
 
-@retry(
-    retry=retry_if_exception_type((litellm.RateLimitError, litellm.ServiceUnavailableError)),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
-    stop=stop_after_attempt(4),
-    reraise=True,
-)
 async def _raw_completion(params: Dict[str, Any]) -> Any:
-    """Raw litellm.acompletion call with retry on rate-limits and 5xx."""
-    return await litellm.acompletion(**params)
+    """Call LiteLLM with provider-aware, reset-respecting retries."""
+    for attempt in range(4):
+        try:
+            return await litellm.acompletion(**params)
+        except (litellm.RateLimitError, litellm.ServiceUnavailableError) as exc:
+            # Mistral's 429 response has no reset duration. Retrying it four
+            # times only delays the configured fallback providers.
+            if (
+                params.get("model", "").startswith("mistral/")
+                and isinstance(exc, litellm.RateLimitError)
+            ):
+                raise
+            if attempt == 3:
+                raise
+            import re
+            match = re.search(r"try again in ([0-9]+(?:\.[0-9]+)?)s", str(exc), re.I)
+            delay = float(match.group(1)) if match else min(2 ** (attempt + 1), 30)
+            await asyncio.sleep(max(1.0, min(delay, 30.0)))
 
 
 async def call_llm(
@@ -208,6 +216,12 @@ async def call_llm(
     params = get_llm_params(model)
     params["messages"] = messages
     params.update(kwargs)
+
+    # Never leak provider-incompatible reasoning fields into Mistral.
+    if model.startswith("mistral/"):
+        params.pop("thinking", None)
+        params.pop("reasoning_effort", None)
+    params.setdefault("max_tokens", 768)
 
     # --- Semaphore + call ---
     sem = _get_semaphore(model)
