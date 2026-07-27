@@ -11,10 +11,72 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 
 from vellum.config.logging import get_logger
 
 log = get_logger("scrape")
+
+# Link texts that are clearly navigation/section headers, not job postings
+NON_JOB_LINK_TEXTS = {
+    "hiring journey", "using ai", "work environment", "benefits",
+    "working here", "career areas", "search for jobs", "job search",
+    "job categories", "categories", "remote jobs", "executive jobs",
+    "jobs by location", "jobs by city", "department", "teams",
+    "life at", "culture", "values", "diversity", "apply now",
+    "view all jobs", "all jobs", "featured jobs", "recommended jobs",
+    "relevance", "date posted", " العربية", "english", "hindi",
+    "job alerts", "create alert", "save search", "recent searches",
+    "startup jobs", "frontend developer jobs", "ios development jobs",
+    "android developer jobs", "it jobs", "technology jobs",
+    "product jobs", "design jobs", "marketing jobs", "sales jobs",
+    "engineering jobs", "data science jobs",
+}
+
+# Known bad aggregator domains — their "job links" are category pages
+BAD_AGGREGATOR_DOMAINS = {
+    "12indiajobs", "12jobsindia", "winit", "jooble",
+    "careerjet", "jobrapido", "adzuna", "jora", "talent",
+}
+
+
+def _is_non_job_link(url: str, text: str) -> bool:
+    """Check if a link is navigation/category, not an actual job posting."""
+    text_lower = text.lower().strip()
+
+    # Empty or very short text
+    if not text_lower or len(text_lower) < 4:
+        return True
+
+    # Known non-job phrases
+    if text_lower in NON_JOB_LINK_TEXTS:
+        return True
+    for prefix in ("jobs in", "jobs at", "all jobs", "view all", "browse "):
+        if text_lower.startswith(prefix):
+            return True
+    for suffix in (" jobs", " careers", " openings"):
+        if text_lower.endswith(suffix) and len(text_lower) < 30:
+            return True
+
+    # URL patterns that are clearly category/navigation pages
+    url_lower = url.lower()
+    category_patterns = [
+        "/category/", "/department/", "/team/", "/location/",
+        "/language/", "/remote/", "/country/", "/city/",
+    ]
+    for pat in category_patterns:
+        if pat in url_lower:
+            return True
+
+    # Bad aggregator domains
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    for bad in BAD_AGGREGATOR_DOMAINS:
+        if bad in domain:
+            return True
+
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Known ATS CSS selectors for deterministic link extraction (Tier 1)
@@ -79,10 +141,13 @@ async def extract_apply_links_deterministic(html: str, base_url: str = "") -> li
                         full_url = urljoin(base_url, href) if base_url else href
                         if full_url in seen_urls:
                             continue
+                        link_text = a_tag.get_text(strip=True)[:100]
+                        if _is_non_job_link(full_url, link_text):
+                            continue
                         seen_urls.add(full_url)
                         links.append({
                             "url": full_url,
-                            "text": a_tag.get_text(strip=True)[:100],
+                            "text": link_text,
                             "method": "deterministic",
                             "confidence": 0.9,
                             "ats_type": ats_type,

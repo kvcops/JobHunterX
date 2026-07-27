@@ -7,6 +7,8 @@ Deduplication, URL scoring, and career-page extraction pipeline.
 
 from __future__ import annotations
 
+import re
+
 from vellum.config.logging import get_logger
 from vellum.config import database as db
 from vellum.tools import maps_api, search, scrape
@@ -17,6 +19,8 @@ log = get_logger("geo_search")
 # ---------------------------------------------------------------------------
 # Curated ATS boards for major Indian tech hubs
 # ---------------------------------------------------------------------------
+
+MAX_TOTAL_JOBS = 30
 
 CURATED_BOARDS = {
     "bengaluru": [
@@ -44,6 +48,74 @@ def _normalise_city(location: str) -> str:
         "calcutta": "kolkata",
     }
     return aliases.get(city, city)
+
+
+# ---------------------------------------------------------------------------
+# Quality filters
+# ---------------------------------------------------------------------------
+
+# Job-relevant keywords that should appear in real job descriptions
+JD_KEYWORDS = [
+    "experience", "skill", "responsibilit", "qualification",
+    "requirement", "role", "position", "job", "work",
+    "team", "develop", "manage", "lead", "design", "build",
+    "engineer", "analyst", "specialist", "coordinator",
+    "salary", "benefit", "location", "report", "degree",
+]
+
+# Words/phrases that indicate a real job title (vs a category/nav page)
+JOB_TITLE_INDICATORS = [
+    "engineer", "developer", "manager", "analyst", "specialist",
+    "coordinator", "architect", "consultant", "director", "head of",
+    "lead", "associate", "intern", "trainee", "executive",
+    "officer", "representative", "scientist", "designer",
+    "administrator", "assistant", "advisor", "auditor",
+    "supervisor", "president", "vp ", "vice president",
+]
+
+# Non-job title patterns to exclude
+NON_JOB_TITLE_PATTERNS = [
+    r"^jobs?\s+(in|at|by|near)", r"^all\s+jobs",
+    r"^(remote|executive|startup|it|tech)\s+jobs",
+    r"job\s+(search|categories?|alerts?)",
+    r"(by\s+location|by\s+city|by\s+department)",
+    r"^browse\s+", r"^view\s+all",
+]
+
+
+def _is_valid_job_title(title: str) -> bool:
+    """Check if a title looks like a real job posting, not a nav page."""
+    title_lower = title.lower().strip()
+    if len(title_lower) < 25:
+        return False
+    for pat in NON_JOB_TITLE_PATTERNS:
+        if re.search(pat, title_lower):
+            return False
+    for indicator in JOB_TITLE_INDICATORS:
+        if indicator in title_lower:
+            return True
+    return False
+
+
+def _jd_has_job_keywords(jd_text: str, min_keywords: int = 3) -> bool:
+    """Check if JD text contains enough job-relevant keywords."""
+    text_lower = jd_text.lower()
+    count = sum(1 for kw in JD_KEYWORDS if kw in text_lower)
+    return count >= min_keywords
+
+
+def _matches_location(title: str, jd_text: str, target_location: str) -> bool:
+    """Check if job title or JD mentions the target location."""
+    if not target_location:
+        return True
+    target_lower = target_location.lower().strip()
+    # Check for city name in title (strong signal)
+    city_key = target_lower.split(",")[0].split(" ")[0]  # first word of city
+    if len(city_key) > 2:
+        combined = (title + " " + jd_text).lower()
+        if city_key in combined:
+            return True
+    return True  # lenient — don't filter out good jobs on location alone
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +219,8 @@ async def run(state: dict) -> dict:
 
     # --- Career page discovery for each company ---
     for company in all_companies[:20]:  # Cap at 20 to stay within rate limits
+        if len(jobs) >= MAX_TOTAL_JOBS:
+            break
         try:
             career_results = await search.search_career_pages(company["name"])
             if not career_results:
@@ -171,6 +245,8 @@ async def run(state: dict) -> dict:
 
             # Store individual job posts, not the whole careers landing page.
             for link in links[:8]:
+                if len(jobs) >= MAX_TOTAL_JOBS:
+                    break
                 role_title = (link.get("text") or "").strip()
                 if (
                     not role_title
@@ -178,10 +254,14 @@ async def run(state: dict) -> dict:
                     or link["url"].rstrip("/") == top_result["url"].rstrip("/")
                 ):
                     continue
+                if not _is_valid_job_title(role_title):
+                    continue
                 job_page = await scrape.fetch_page(link["url"])
                 job_html = job_page.get("html", "")
                 jd_text = await scrape.extract_jd_text(job_html or html)
-                if len(jd_text) < 180:
+                if len(jd_text) < 180 or not _jd_has_job_keywords(jd_text):
+                    continue
+                if not _matches_location(role_title, jd_text, location):
                     continue
                 job = JobListing(
                     company=company["name"],
@@ -211,6 +291,8 @@ async def run(state: dict) -> dict:
 
     # --- Process curated ATS boards ---
     for board_url in curated_urls:
+        if len(jobs) >= MAX_TOTAL_JOBS:
+            break
         try:
             page = await scrape.fetch_page(board_url)
             html = page.get("html", "")
@@ -219,17 +301,22 @@ async def run(state: dict) -> dict:
 
             links = await scrape.extract_apply_links_deterministic(html, base_url=board_url)
             # Extract company name from URL
-            import re
             name_match = re.search(r"greenhouse\.io/(\w+)|lever\.co/(\w+)", board_url)
             company_name = (name_match.group(1) or name_match.group(2)).title() if name_match else "Unknown"
 
             for link in links[:8]:
+                if len(jobs) >= MAX_TOTAL_JOBS:
+                    break
                 role_title = (link.get("text") or "").strip()
                 if not role_title or role_title.lower() in {"apply", "view job", "learn more"}:
                     continue
+                if not _is_valid_job_title(role_title):
+                    continue
                 job_page = await scrape.fetch_page(link["url"])
                 jd_text = await scrape.extract_jd_text(job_page.get("html", ""))
-                if len(jd_text) < 180:
+                if len(jd_text) < 180 or not _jd_has_job_keywords(jd_text):
+                    continue
+                if not _matches_location(role_title, jd_text, location):
                     continue
                 job = JobListing(
                     company=company_name,

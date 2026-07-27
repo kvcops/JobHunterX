@@ -187,9 +187,26 @@ Instructions:
             )
         agent = Agent(**agent_kwargs)
 
-        # Run with timeout
+        # Run browser agent in a dedicated thread with ProactorEventLoop.
+        # On Windows, the main uvicorn event loop may be a SelectorEventLoop
+        # (e.g. from watchfiles reload subprocess), which cannot create
+        # subprocesses. A dedicated thread with ProactorEventLoop fixes this.
+        def _run_agent_in_proactor_loop():
+            import concurrent.futures
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    asyncio.wait_for(agent.run(), timeout=120)
+                )
+            finally:
+                loop.close()
+
+        loop = asyncio.get_running_loop()
         try:
-            history = await asyncio.wait_for(agent.run(), timeout=120)
+            history = await loop.run_in_executor(
+                None, _run_agent_in_proactor_loop
+            )
             final_result = history.final_result() if hasattr(history, 'final_result') else str(history)
         except asyncio.TimeoutError:
             final_result = "TIMEOUT"

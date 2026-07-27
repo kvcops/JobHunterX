@@ -42,6 +42,10 @@ PENALTY_DOMAINS = {
     "jooble.org", "jooble.in", "ziprecruiter.com",
     "simplyhired.com", "careerjet.com", "talent.com",
     "jobrapido.com", "adzuna.com", "jora.com",
+    "12indiajobs", "winit.com", "winitjobs.com",
+    "foundit.in", "shine.com", "timesjobs.com",
+    "updazz.com", "cutshort.io", "instahyre.com",
+    "hirect.in", "apna.co", "safalta.com",
 }
 
 # Career-path patterns (boost)

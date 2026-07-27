@@ -40,9 +40,9 @@ class Settings(BaseSettings):
     screenshots_dir: str = "./data/screenshots"
 
     # --- Concurrency Limits (RPM-aware) ---
-    gemini_concurrency: int = 5   # Conservative: stay well under 30 RPM
-    groq_concurrency: int = 1
-    mistral_concurrency: int = 1
+    gemini_concurrency: int = 3   # Gemini free: ~15 RPM, conservative
+    groq_concurrency: int = 1     # Groq free: 30 RPM, serial with 2s delay
+    mistral_concurrency: int = 1  # Mistral free: ~60 RPM, serial with 1s delay
     max_job_pipelines: int = 2    # Max concurrent per-job pipelines
 
     @property

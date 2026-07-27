@@ -6,9 +6,15 @@ Initialises database, logging, and serves the API + WebSocket + static frontend.
 
 from __future__ import annotations
 
+# Windows: Force ProactorEventLoop for subprocess/Playwright compatibility.
+# Must be set before ANY asyncio usage (including imports that trigger it).
+import sys
+import asyncio
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 # Monkeypatch legacy langchain_community import for scrapegraphai compatibility
 try:
-    import sys
     import langchain_community.chat_models
     from langchain_ollama import ChatOllama
     langchain_community.chat_models.ChatOllama = ChatOllama

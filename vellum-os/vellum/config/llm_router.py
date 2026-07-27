@@ -76,6 +76,20 @@ FALLBACK_CHAINS: Dict[str, List[str]] = {
 
 _semaphores: Dict[str, asyncio.Semaphore] = {}
 
+# Minimum delay (seconds) between requests per provider to respect RPM limits.
+# Groq free: 30 RPM → 1 req per 2s minimum
+# Mistral free: ~60 RPM → 1 req per 1s minimum
+# Gemini free: ~15 RPM → 1 req per 4s minimum (conservative)
+_PROVIDER_MIN_DELAY: Dict[str, float] = {
+    "groq": 2.0,
+    "mistral": 1.0,
+    "gemini": 4.0,
+    "default": 1.0,
+}
+
+# Track last request timestamp per provider for rate limiting
+_provider_last_request: Dict[str, float] = {}
+
 
 def _get_semaphore(model: str) -> asyncio.Semaphore:
     """Get or create a concurrency semaphore for the model's provider."""
@@ -96,6 +110,30 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
     if key not in _semaphores:
         _semaphores[key] = asyncio.Semaphore(limit)
     return _semaphores[key]
+
+
+def _get_provider_key(model: str) -> str:
+    """Extract provider key from model name."""
+    if model.startswith("gemini/"):
+        return "gemini"
+    elif model.startswith("groq/"):
+        return "groq"
+    elif model.startswith("mistral/"):
+        return "mistral"
+    return "default"
+
+
+async def _enforce_rate_limit(model: str) -> None:
+    """Sleep if needed to respect the provider's minimum inter-request delay."""
+    import time as _time
+    provider = _get_provider_key(model)
+    min_delay = _PROVIDER_MIN_DELAY.get(provider, 1.0)
+    last = _provider_last_request.get(provider, 0.0)
+    now = _time.monotonic()
+    wait = min_delay - (now - last)
+    if wait > 0:
+        await asyncio.sleep(wait)
+    _provider_last_request[provider] = _time.monotonic()
 
 
 # ---------------------------------------------------------------------------
@@ -163,23 +201,40 @@ def get_llm_params(model_name: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 async def _raw_completion(params: Dict[str, Any]) -> Any:
-    """Call LiteLLM with provider-aware, reset-respecting retries."""
-    for attempt in range(4):
+    """Call LiteLLM with provider-aware rate limiting and retries."""
+    import re
+
+    model = params.get("model", "")
+    max_attempts = 4
+
+    for attempt in range(max_attempts):
+        # Enforce per-provider minimum delay between requests
+        await _enforce_rate_limit(model)
+
         try:
             return await litellm.acompletion(**params)
         except (litellm.RateLimitError, litellm.ServiceUnavailableError) as exc:
-            # Mistral's 429 response has no reset duration. Retrying it four
-            # times only delays the configured fallback providers.
-            if (
-                params.get("model", "").startswith("mistral/")
-                and isinstance(exc, litellm.RateLimitError)
-            ):
-                raise
-            if attempt == 3:
-                raise
-            import re
+            # Parse retry-after from provider response
             match = re.search(r"try again in ([0-9]+(?:\.[0-9]+)?)s", str(exc), re.I)
-            delay = float(match.group(1)) if match else min(2 ** (attempt + 1), 30)
+            if match:
+                delay = float(match.group(1))
+            else:
+                # Exponential backoff: 2s, 4s, 8s, 16s
+                delay = min(2 ** (attempt + 1), 30)
+
+            # For Mistral, always retry with backoff (free tier is tight but
+            # the retry-after header gives us the right delay).
+            # For other providers, also retry with backoff.
+            if attempt == max_attempts - 1:
+                raise
+
+            log.warning(
+                "rate_limit_retry",
+                model=model,
+                attempt=attempt + 1,
+                delay=round(delay, 1),
+                error=str(exc)[:200],
+            )
             await asyncio.sleep(max(1.0, min(delay, 30.0)))
 
 
