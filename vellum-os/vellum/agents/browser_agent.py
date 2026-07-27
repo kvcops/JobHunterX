@@ -137,9 +137,42 @@ Instructions:
 7. After filling, click the Submit/Apply button.
 8. Report the final status: SUCCESS or the reason for stopping."""
 
+        from vellum.api.ws import manager as ws_manager
+
+        def browser_step_callback(state, model_output, step_num):
+            url = getattr(state, "url", "")
+            screenshot = getattr(state, "screenshot", None)
+            action = ""
+            if model_output:
+                if hasattr(model_output, "text"):
+                    action = model_output.text
+                elif isinstance(model_output, dict):
+                    action = model_output.get("text", "")
+                else:
+                    action = str(model_output)
+            
+            loop = asyncio.get_event_loop()
+            event_data = {
+                "agent": "browser_agent",
+                "event_type": "browser_step",
+                "job_id": job_id,
+                "message": f"Browser step {step_num}: {action[:100]}",
+                "data": {
+                    "step": step_num,
+                    "url": url,
+                    "screenshot": screenshot,
+                    "action": action,
+                    "company": job.get("company", ""),
+                    "role": job.get("role", "Software Engineer")
+                }
+            }
+            if loop.is_running():
+                loop.create_task(ws_manager.broadcast(event_data))
+
         agent = Agent(
             task=task,
             llm=llm,
+            register_new_step_callback=browser_step_callback,
         )
 
         # Run with timeout

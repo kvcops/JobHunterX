@@ -16,6 +16,8 @@ from vellum.models import CandidateProfile
 log = get_logger("extractor")
 
 EXTRACTION_SYSTEM_PROMPT = """You are a resume parser. Extract structured information from the resume text below.
+Based on the candidate's skills and experience, also analyze their profile and suggest the most suitable job role or title (e.g. "Software Engineer", "Frontend Developer", "Data Scientist", "DevOps Engineer").
+
 Return a JSON object with exactly these keys:
 {
   "name": "Full Name",
@@ -24,6 +26,7 @@ Return a JSON object with exactly these keys:
   "location": "City, Country",
   "linkedin": "linkedin.com/in/...",
   "summary": "Professional summary paragraph",
+  "suggested_role": "Sleek suggested job title that fits best",
   "skills": ["skill1", "skill2", ...],
   "experience": [
     {
@@ -45,7 +48,8 @@ Return a JSON object with exactly these keys:
 }
 
 Rules:
-- Extract ONLY what is explicitly written. Do NOT infer or add anything.
+- For name, email, phone, location, linkedin, summary, skills, experience, and education: Extract ONLY what is explicitly written. Do NOT infer or add anything.
+- For suggested_role: Analyze the candidate's skills and past work roles, and output the single best target job title/role that they are most qualified for.
 - For skills, list every technology, tool, language, and framework mentioned.
 - Return valid JSON only. No markdown, no explanation."""
 

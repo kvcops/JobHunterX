@@ -87,13 +87,18 @@ function toggleTheme() {
 // Tab Navigation
 // ---------------------------------------------------------------------------
 function switchTab(tabName) {
-  // Update nav buttons
+  // Update nav buttons in top bar
   document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
-  document.getElementById(`tab-${tabName}`).classList.add("active");
+  const topTabBtn = document.getElementById(`tab-${tabName}`);
+  if (topTabBtn) {
+    topTabBtn.classList.add("active");
+    topTabBtn.classList.remove("pulse-highlight");
+  }
 
   // Update views
   document.querySelectorAll(".tab-view").forEach(view => view.classList.remove("active"));
-  document.getElementById(`view-${tabName}`).classList.add("active");
+  const activeView = document.getElementById(`view-${tabName}`);
+  if (activeView) activeView.classList.add("active");
 }
 
 // ---------------------------------------------------------------------------
@@ -119,9 +124,21 @@ async function loadInitialData() {
     outreachDrafts = outreachData.drafts || [];
     renderOutreach();
 
-    // Try loading latest profile implicitly
-    const profileRes = await fetch(`${API_BASE}/status`); // Let routes evaluate
-    // If a profile exists in the DB, it gets populated inside active state
+    // Load latest profile
+    const profileRes = await fetch(`${API_BASE}/profile`);
+    if (profileRes.ok) {
+      const profileData = await profileRes.json();
+      if (profileData.profile) {
+        currentProfile = profileData.profile;
+        renderProfileCard();
+        renderProfileEditor();
+        if (currentProfile.suggested_role) {
+          const roleInput = document.getElementById("target-role");
+          if (roleInput) roleInput.value = currentProfile.suggested_role;
+        }
+        document.getElementById("start-search-btn").removeAttribute("disabled");
+      }
+    }
   } catch (err) {
     console.error("Error loading initial dashboard data", err);
     logEvent("system", "Failed to contact local API server.");
@@ -183,13 +200,15 @@ function renderProfileCard() {
   document.getElementById("profile-location").innerText = currentProfile.location;
 
   const container = document.getElementById("profile-skills");
-  container.innerHTML = "";
-  (currentProfile.skills || []).forEach(skill => {
-    const tag = document.createElement("span");
-    tag.className = "skill-tag";
-    tag.innerText = skill;
-    container.appendChild(tag);
-  });
+  if (container) {
+    container.innerHTML = "";
+    (currentProfile.skills || []).forEach(skill => {
+      const tag = document.createElement("span");
+      tag.className = "skill-tag";
+      tag.innerText = skill;
+      container.appendChild(tag);
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -197,16 +216,17 @@ function renderProfileCard() {
 // ---------------------------------------------------------------------------
 async function startSearch() {
   const location = document.getElementById("target-location").value.trim();
+  const role = document.getElementById("target-role").value.trim();
   if (!location) return;
 
-  logEvent("system", `Starting job search in location: ${location}`);
+  logEvent("system", `Starting job search for "${role || 'Software Engineer'}" in "${location}"`);
   document.getElementById("start-search-btn").setAttribute("disabled", "true");
 
   try {
     const res = await fetch(`${API_BASE}/start-search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ location })
+      body: JSON.stringify({ location, role })
     });
     const data = await res.json();
     updateStatusIndicator("running");
@@ -256,9 +276,19 @@ function handleSocketMessage(msg) {
     loadInitialData(); // Lazy refresh
   }
 
-  // Handle explicit profile loads
-  if (msg.event_type === "profile_loaded") {
+  // Handle explicit profile loads or updates
+  if (msg.event_type === "profile_loaded" || msg.event_type === "profile_updated") {
     loadInitialData();
+  }
+
+  // Handle system reset
+  if (msg.event_type === "reset") {
+    handleSystemReset();
+  }
+
+  // Handle browser agent automation steps
+  if (msg.event_type === "browser_step") {
+    handleBrowserStep(msg.data);
   }
 
   // Handle HITL Request Event
@@ -393,26 +423,68 @@ function updateTokenTelemetry(tokenMap) {
 }
 
 function logEvent(agent, message, isError = false) {
-  const container = document.getElementById("logs-container");
+  const statusTextEl = document.getElementById("sidebar-progress-status");
+  const dotEl = document.getElementById("sidebar-progress-dot");
+  const miniLogsEl = document.getElementById("progress-mini-logs");
   
-  const entry = document.createElement("div");
-  entry.className = `log-entry ${agent} ${isError ? 'error' : ''}`;
-  
-  const time = document.createElement("span");
-  time.className = "log-time";
-  time.innerText = new Date().toLocaleTimeString();
-
-  const text = document.createElement("span");
-  text.innerText = `[${agent.toUpperCase()}] ${message}`;
-
-  entry.appendChild(time);
-  entry.appendChild(text);
-  container.appendChild(entry);
-  container.scrollTop = container.scrollHeight;
+  if (statusTextEl && dotEl && miniLogsEl) {
+    const msgLower = message.toLowerCase();
+    let statusLabel = "System Active";
+    let isIdle = false;
+    
+    if (msgLower.includes("idle") || msgLower.includes("system initialized")) {
+      statusLabel = "System Idle";
+      isIdle = true;
+    } else if (msgLower.includes("discovery") || msgLower.includes("searching") || msgLower.includes("scraped")) {
+      statusLabel = "Searching Roles";
+    } else if (msgLower.includes("validat") || msgLower.includes("score")) {
+      statusLabel = "Matching Profile";
+    } else if (msgLower.includes("apply") || msgLower.includes("filling") || msgLower.includes("automation")) {
+      statusLabel = "Auto-Applying";
+    } else if (msgLower.includes("submitted") || msgLower.includes("completed")) {
+      statusLabel = "Job Applied!";
+    } else if (agent === "outreach") {
+      statusLabel = "Outreach Active";
+    }
+    
+    statusTextEl.innerText = statusLabel;
+    
+    dotEl.className = "status-dot";
+    if (isError) {
+      dotEl.classList.add("error");
+    } else if (isIdle) {
+      // Idle has no pulse
+    } else {
+      dotEl.classList.add("running");
+    }
+    
+    const entry = document.createElement("div");
+    entry.className = "mini-log-item";
+    if (isError) entry.classList.add("error");
+    else if (msgLower.includes("success") || msgLower.includes("completed") || msgLower.includes("submitted")) {
+      entry.classList.add("success");
+    }
+    entry.innerText = message;
+    
+    if (miniLogsEl.children.length === 1 && miniLogsEl.children[0].innerText.includes("Ready")) {
+      miniLogsEl.innerHTML = "";
+    }
+    
+    miniLogsEl.appendChild(entry);
+    
+    while (miniLogsEl.children.length > 5) {
+      miniLogsEl.removeChild(miniLogsEl.firstChild);
+    }
+    
+    miniLogsEl.scrollTop = miniLogsEl.scrollHeight;
+  }
 }
 
 function clearLogs() {
-  document.getElementById("logs-container").innerHTML = "";
+  const miniLogsEl = document.getElementById("progress-mini-logs");
+  if (miniLogsEl) {
+    miniLogsEl.innerHTML = `<div class="mini-log-item">Ready.</div>`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -555,4 +627,324 @@ function filterJobs(status) {
       card.style.display = "none";
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Candidate Profile & Reset Features
+// ---------------------------------------------------------------------------
+let editedSkills = [];
+let editedExperience = [];
+let editedEducation = [];
+
+function renderProfileEditor() {
+  if (!currentProfile) return;
+  
+  // Set personal details
+  document.getElementById("prof-name").value = currentProfile.name || "";
+  document.getElementById("prof-email").value = currentProfile.email || "";
+  document.getElementById("prof-phone").value = currentProfile.phone || "";
+  document.getElementById("prof-linkedin").value = currentProfile.linkedin || "";
+  document.getElementById("prof-location").value = currentProfile.location || "";
+  document.getElementById("prof-summary").value = currentProfile.summary || "";
+  
+  // Initialize scoped lists
+  if (editedSkills.length === 0 && currentProfile.skills) {
+    editedSkills = [...currentProfile.skills];
+  }
+  if (editedExperience.length === 0 && currentProfile.experience) {
+    editedExperience = JSON.parse(JSON.stringify(currentProfile.experience));
+  }
+  if (editedEducation.length === 0 && currentProfile.education) {
+    editedEducation = JSON.parse(JSON.stringify(currentProfile.education));
+  }
+  
+  renderSkillsEditor();
+  renderExperienceEditor();
+  renderEducationEditor();
+  setupEditorListeners();
+}
+
+function renderSkillsEditor() {
+  const container = document.getElementById("editor-skills-list");
+  container.innerHTML = "";
+  editedSkills.forEach(skill => {
+    const chip = document.createElement("span");
+    chip.className = "editor-skill-chip";
+    chip.innerHTML = `${escapeHtml(skill)} <button type="button" class="del-skill-btn">&times;</button>`;
+    chip.querySelector(".del-skill-btn").addEventListener("click", () => {
+      editedSkills = editedSkills.filter(s => s !== skill);
+      renderSkillsEditor();
+    });
+    container.appendChild(chip);
+  });
+}
+
+function renderExperienceEditor() {
+  const container = document.getElementById("editor-experience-list");
+  container.innerHTML = "";
+  
+  editedExperience.forEach((exp, index) => {
+    const block = document.createElement("div");
+    block.className = "experience-block-card";
+    block.innerHTML = `
+      <div class="exp-block-header">
+        <h4>Experience Entry ${index + 1}</h4>
+        <button type="button" class="btn-delete-item">Remove</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Company</label>
+          <input type="text" class="exp-company" value="${escapeHtml(exp.company || '')}">
+        </div>
+        <div class="form-group">
+          <label>Role</label>
+          <input type="text" class="exp-role" value="${escapeHtml(exp.role || '')}">
+        </div>
+        <div class="form-group">
+          <label>Start Date</label>
+          <input type="text" class="exp-start" value="${escapeHtml(exp.start || '')}">
+        </div>
+        <div class="form-group">
+          <label>End Date</label>
+          <input type="text" class="exp-end" value="${escapeHtml(exp.end || '')}">
+        </div>
+        <div class="form-group full-width">
+          <label>Bullets (one per line)</label>
+          <textarea class="exp-bullets" rows="3">${(exp.bullets || []).map(b => escapeHtml(b)).join('\n')}</textarea>
+        </div>
+      </div>
+    `;
+    
+    block.querySelector(".btn-delete-item").addEventListener("click", () => {
+      syncCurrentEditorArrays();
+      editedExperience.splice(index, 1);
+      renderExperienceEditor();
+    });
+    
+    container.appendChild(block);
+  });
+}
+
+function renderEducationEditor() {
+  const container = document.getElementById("editor-education-list");
+  container.innerHTML = "";
+  
+  editedEducation.forEach((edu, index) => {
+    const block = document.createElement("div");
+    block.className = "education-block-card";
+    block.innerHTML = `
+      <div class="edu-block-header">
+        <h4>Education Entry ${index + 1}</h4>
+        <button type="button" class="btn-delete-item">Remove</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Institution</label>
+          <input type="text" class="edu-institution" value="${escapeHtml(edu.institution || '')}">
+        </div>
+        <div class="form-group">
+          <label>Degree</label>
+          <input type="text" class="edu-degree" value="${escapeHtml(edu.degree || '')}">
+        </div>
+        <div class="form-group">
+          <label>Start Date</label>
+          <input type="text" class="edu-start" value="${escapeHtml(edu.start || '')}">
+        </div>
+        <div class="form-group">
+          <label>End Date</label>
+          <input type="text" class="edu-end" value="${escapeHtml(edu.end || '')}">
+        </div>
+      </div>
+    `;
+    
+    block.querySelector(".btn-delete-item").addEventListener("click", () => {
+      syncCurrentEditorArrays();
+      editedEducation.splice(index, 1);
+      renderEducationEditor();
+    });
+    
+    container.appendChild(block);
+  });
+}
+
+function syncCurrentEditorArrays() {
+  const expCards = document.querySelectorAll(".experience-block-card");
+  editedExperience = Array.from(expCards).map(card => {
+    const bulletsText = card.querySelector(".exp-bullets").value;
+    const bullets = bulletsText.split('\n').map(b => b.trim()).filter(b => b.length > 0);
+    return {
+      company: card.querySelector(".exp-company").value.trim(),
+      role: card.querySelector(".exp-role").value.trim(),
+      start: card.querySelector(".exp-start").value.trim(),
+      end: card.querySelector(".exp-end").value.trim(),
+      bullets: bullets
+    };
+  });
+
+  const eduCards = document.querySelectorAll(".education-block-card");
+  editedEducation = Array.from(eduCards).map(card => {
+    return {
+      institution: card.querySelector(".edu-institution").value.trim(),
+      degree: card.querySelector(".edu-degree").value.trim(),
+      start: card.querySelector(".edu-start").value.trim(),
+      end: card.querySelector(".edu-end").value.trim()
+    };
+  });
+}
+
+let editorListenersInitialized = false;
+
+function setupEditorListeners() {
+  if (editorListenersInitialized) return;
+  
+  // Add Skill button
+  document.getElementById("add-skill-btn").addEventListener("click", addSkillFromInput);
+  document.getElementById("new-skill-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addSkillFromInput();
+    }
+  });
+  
+  // Add Experience
+  document.getElementById("add-exp-btn").addEventListener("click", () => {
+    syncCurrentEditorArrays();
+    editedExperience.push({ company: "", role: "", start: "", end: "", bullets: [] });
+    renderExperienceEditor();
+  });
+  
+  // Add Education
+  document.getElementById("add-edu-btn").addEventListener("click", () => {
+    syncCurrentEditorArrays();
+    editedEducation.push({ institution: "", degree: "", start: "", end: "" });
+    renderEducationEditor();
+  });
+  
+  // Save Profile Changes
+  document.getElementById("save-profile-btn").addEventListener("click", saveProfileChanges);
+  
+  // Reset Database & Stop Agent
+  document.getElementById("reset-system-btn").addEventListener("click", resetSystemAction);
+  
+  editorListenersInitialized = true;
+}
+
+function addSkillFromInput() {
+  const input = document.getElementById("new-skill-input");
+  const value = input.value.trim();
+  if (value && !editedSkills.includes(value)) {
+    editedSkills.push(value);
+    input.value = "";
+    renderSkillsEditor();
+  }
+}
+
+async function saveProfileChanges() {
+  syncCurrentEditorArrays();
+  
+  const updatedProfile = {
+    name: document.getElementById("prof-name").value.trim(),
+    email: document.getElementById("prof-email").value.trim(),
+    phone: document.getElementById("prof-phone").value.trim(),
+    linkedin: document.getElementById("prof-linkedin").value.trim(),
+    location: document.getElementById("prof-location").value.trim(),
+    summary: document.getElementById("prof-summary").value.trim(),
+    skills: editedSkills,
+    experience: editedExperience,
+    education: editedEducation
+  };
+  
+  try {
+    const res = await fetch(`${API_BASE}/profile`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(updatedProfile)
+    });
+    
+    if (res.ok) {
+      logEvent("system", "Candidate profile details saved successfully.");
+      currentProfile = updatedProfile;
+      renderProfileCard();
+      alert("Profile changes saved successfully!");
+    } else {
+      throw new Error("Save request failed");
+    }
+  } catch (err) {
+    console.error("Save profile error", err);
+    logEvent("error", "Failed to save profile changes.");
+  }
+}
+
+async function resetSystemAction() {
+  if (!confirm("Are you sure you want to stop all active agents and clear all jobs, history, and profile data? This cannot be undone.")) {
+    return;
+  }
+  
+  try {
+    const res = await fetch(`${API_BASE}/reset`, {
+      method: "POST"
+    });
+    if (res.ok) {
+      alert("System has been halted and all database records wiped.");
+    }
+  } catch (err) {
+    console.error("Reset error", err);
+  }
+}
+
+function handleSystemReset() {
+  logEvent("system", "System database wiped. Reloading dashboard...");
+  setTimeout(() => {
+    window.location.reload();
+  }, 1000);
+}
+
+let browserStepLog = [];
+
+function handleBrowserStep(data) {
+  const activeBadge = document.getElementById("browser-active-badge");
+  if (activeBadge) activeBadge.classList.remove("hidden");
+  
+  const urlInput = document.getElementById("browser-url-input");
+  if (urlInput) urlInput.innerText = data.url || "about:blank";
+  
+  const img = document.getElementById("browser-viewport-img");
+  const idle = document.getElementById("browser-idle-state");
+  if (data.screenshot && img && idle) {
+    img.src = `data:image/png;base64,${data.screenshot}`;
+    img.classList.remove("hidden");
+    idle.classList.add("hidden");
+  }
+  
+  const stepCount = document.getElementById("timeline-step-count");
+  if (stepCount) {
+    stepCount.innerText = `${data.step} Steps Executed`;
+  }
+  
+  const stepsLogContainer = document.getElementById("browser-steps-log");
+  if (stepsLogContainer) {
+    if (data.step === 1 || browserStepLog.length === 0) {
+      stepsLogContainer.innerHTML = "";
+      browserStepLog = [];
+    }
+    
+    const stepItem = document.createElement("div");
+    stepItem.className = "browser-step-item";
+    stepItem.innerHTML = `
+      <div class="step-badge">Step ${data.step}</div>
+      <div class="step-desc">${escapeHtml(data.action)}</div>
+      <div class="step-meta">${escapeHtml(data.company)} — ${escapeHtml(data.role)}</div>
+    `;
+    stepsLogContainer.appendChild(stepItem);
+    stepsLogContainer.scrollTop = stepsLogContainer.scrollHeight;
+  }
+  
+  browserStepLog.push(data);
+  
+  const browserTabBtn = document.getElementById("tab-browser");
+  if (browserTabBtn && !browserTabBtn.classList.contains("active")) {
+    browserTabBtn.classList.add("pulse-highlight");
+  }
 }

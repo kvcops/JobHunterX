@@ -81,8 +81,16 @@ async def find_tech_companies(
     """
 
     def _query():
+        import requests
+        url = "https://overpass-api.de/api/interpreter"
+        headers = {
+            "User-Agent": "VellumOSCareerAgent/1.0 (contact: vamsi@example.com)",
+            "Accept": "application/json"
+        }
+        res = requests.post(url, data={"data": query}, headers=headers, timeout=30)
+        res.raise_for_status()
         api = overpy.Overpass()
-        return api.query(query)
+        return api.parse_json(res.text)
 
     try:
         result = await asyncio.to_thread(_query)

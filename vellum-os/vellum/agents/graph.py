@@ -111,12 +111,13 @@ def get_job_pipeline():
     return _job_pipeline
 
 
-async def run_discovery(location: str, profile: dict, event_callback=None) -> list[dict]:
+async def run_discovery(location: str, profile: dict, role: str | None = None, event_callback=None) -> list[dict]:
     """Run the discovery graph and return discovered jobs.
 
     Args:
         location: City name.
         profile: CandidateProfile dict.
+        role: Job role / title.
         event_callback: Async callable for streaming events.
 
     Returns list of discovered job dicts.
@@ -126,6 +127,7 @@ async def run_discovery(location: str, profile: dict, event_callback=None) -> li
     initial_state: DiscoveryState = {
         "location": location,
         "profile": profile,
+        "role": role or "software engineer",
         "discovered_jobs": [],
         "errors": [],
         "events": [],
@@ -230,6 +232,7 @@ async def resume_job_pipeline(job_id: str, action: str = "done") -> dict:
 async def run_full_search(
     location: str,
     profile: dict,
+    role: str | None = None,
     event_callback=None,
 ) -> dict:
     """Run the complete flow: discovery → per-job pipelines.
@@ -240,15 +243,15 @@ async def run_full_search(
     settings = get_settings()
 
     # Phase 1: Discovery
-    log.info("starting_discovery", location=location, run_id=run_id)
+    log.info("starting_discovery", location=location, role=role, run_id=run_id)
     if event_callback:
         await event_callback({
             "agent": "graph",
             "event_type": "progress",
-            "message": f"Starting discovery for {location}...",
+            "message": f"Starting discovery for {location} (role: {role or 'software engineer'})...",
         })
 
-    discovered_jobs = await run_discovery(location, profile, event_callback)
+    discovered_jobs = await run_discovery(location, profile, role, event_callback)
     log.info("discovery_complete", job_count=len(discovered_jobs), run_id=run_id)
 
     if not discovered_jobs:

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+  <defs>
+    <!-- Background / base gradients -->
+    <linearGradient id="primary-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F111A" />
+      <stop offset="100%" stop-color="#1E2235" />
+    </linearGradient>
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6" />
+      <stop offset="50%" stop-color="#8B5CF6" />
+      <stop offset="100%" stop-color="#EC4899" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.15" />
+    </filter>
+  </defs>
+  
+  <!-- Outer circle geometric accents -->
+  <circle cx="60" cy="60" r="54" fill="none" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="4 4" opacity="0.3" />
+  
+  <!-- Main interlocking loops forming "V" and infinity/intelligence concept -->
+  <!-- Left Wing (Dark Slate) -->
+  <path d="M 32 36 
+           C 25 36, 20 44, 20 54 
+           C 20 68, 32 82, 60 100 
+           C 52 84, 48 72, 48 58 
+           C 48 48, 42 36, 32 36 Z" 
+        fill="url(#primary-grad)" 
+        filter="url(#shadow)" />
+        
+  <!-- Right Wing (Gradient Accent) -->
+  <path d="M 88 36 
+           C 95 36, 100 44, 100 54 
+           C 100 68, 88 82, 60 100 
+           C 68 84, 72 72, 72 58 
+           C 72 48, 78 36, 88 36 Z" 
+        fill="url(#accent-grad)" 
+        filter="url(#shadow)" 
+        opacity="0.95" />
+        
+  <!-- Core folding dynamic center piece -->
+  <path d="M 60 48 L 74 76 L 60 100 L 46 76 Z" 
+        fill="#FFFFFF" 
+        opacity="0.15" />
+        
+  <!-- Sparkle/Agent node -->
+  <circle cx="60" cy="100" r="5" fill="#3B82F6" />
+  <circle cx="60" cy="100" r="10" fill="none" stroke="#3B82F6" stroke-width="1.5" opacity="0.5" />
+</svg>

@@ -6,6 +6,16 @@ Initialises database, logging, and serves the API + WebSocket + static frontend.
 
 from __future__ import annotations
 
+# Monkeypatch legacy langchain_community import for scrapegraphai compatibility
+try:
+    import sys
+    import langchain_community.chat_models
+    from langchain_ollama import ChatOllama
+    langchain_community.chat_models.ChatOllama = ChatOllama
+    sys.modules['langchain_community.chat_models.ChatOllama'] = ChatOllama
+except Exception:
+    pass
+
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path

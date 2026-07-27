@@ -23,12 +23,12 @@ log = get_logger("validator_tailor")
 
 VALIDATION_PROMPT = """You are a job-matching expert. Compare the candidate profile against the job description.
 Return a JSON object:
-{
+{{
   "match_score": 0.0-1.0,
   "matching_skills": ["skill1", "skill2"],
   "missing_skills": ["skill3", "skill4"],
   "reasoning": "Brief explanation of fit"
-}
+}}
 
 Candidate Profile:
 {profile_summary}

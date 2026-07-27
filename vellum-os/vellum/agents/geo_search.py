@@ -86,7 +86,8 @@ async def run(state: dict) -> dict:
         ).model_dump(mode="json"))
 
     # --- Source 2: ddgs search (confidence: 0.6) ---
-    ddgs_query = f"{location} tech companies hiring software engineer"
+    role = state.get("role") or "software engineer"
+    ddgs_query = f"{location} tech companies hiring {role}"
     ddgs_companies = []
     try:
         import asyncio

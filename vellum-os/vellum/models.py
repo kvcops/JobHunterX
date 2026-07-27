@@ -43,28 +43,29 @@ class HITLType(str, Enum):
 # ---------------------------------------------------------------------------
 
 class Experience(BaseModel):
-    role: str
-    company: str
-    start: str
-    end: str
+    role: Optional[str] = ""
+    company: Optional[str] = ""
+    start: Optional[str] = ""
+    end: Optional[str] = ""
     bullets: list[str] = Field(default_factory=list)
 
 
 class Education(BaseModel):
-    degree: str
-    institution: str
-    start: str
-    end: str
+    degree: Optional[str] = ""
+    institution: Optional[str] = ""
+    start: Optional[str] = ""
+    end: Optional[str] = ""
 
 
 class CandidateProfile(BaseModel):
     """Ground truth from resume extraction.  `skills` is never modified."""
-    name: str = ""
-    email: str = ""
-    phone: str = ""
-    location: str = ""
-    linkedin: str = ""
-    summary: str = ""
+    name: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    location: Optional[str] = ""
+    linkedin: Optional[str] = ""
+    summary: Optional[str] = ""
+    suggested_role: Optional[str] = ""
     skills: list[str] = Field(default_factory=list)
     experience: list[Experience] = Field(default_factory=list)
     education: list[Education] = Field(default_factory=list)
@@ -175,6 +176,7 @@ class DiscoveryState(TypedDict, total=False):
     """State for the discovery graph."""
     location: str
     profile: dict
+    role: str
     discovered_jobs: Annotated[list[dict], operator.add]
     errors: Annotated[list[str], operator.add]
     events: Annotated[list[dict], operator.add]

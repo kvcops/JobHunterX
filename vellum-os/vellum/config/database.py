@@ -374,3 +374,16 @@ async def get_token_usage_summary() -> dict:
             }
             for row in rows
         }
+
+
+async def clear_database() -> None:
+    """Clear all records from all tables."""
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("DELETE FROM outreach_drafts")
+        await db.execute("DELETE FROM jobs")
+        await db.execute("DELETE FROM agent_runs")
+        await db.execute("DELETE FROM applied_urls")
+        await db.execute("DELETE FROM profiles")
+        # Clean FTS virtual table
+        await db.execute("DELETE FROM jobs_fts")
+        await db.commit()

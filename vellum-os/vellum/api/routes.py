@@ -29,6 +29,7 @@ router = APIRouter(prefix="/api")
 
 class StartSearchRequest(BaseModel):
     location: str = "Bengaluru"
+    role: str | None = None
 
 
 class ResumeAgentRequest(BaseModel):
@@ -114,6 +115,7 @@ async def start_search(request: StartSearchRequest):
             result = await graph.run_full_search(
                 location=request.location,
                 profile=profile,
+                role=request.role,
                 event_callback=event_callback,
             )
             log.info("search_complete", result=result)
@@ -229,3 +231,49 @@ async def get_status():
         "total_jobs": len(jobs),
         "token_usage": token_usage,
     }
+
+
+@router.post("/reset")
+async def reset_system():
+    """Cancel any active search task and clear the entire database."""
+    global _search_task, _current_profile
+    if _search_task and not _search_task.done():
+        _search_task.cancel()
+        _search_task = None
+    
+    # Clear active pipelines cache
+    graph._active_pipelines.clear()
+    
+    await db.clear_database()
+    _current_profile = None
+    
+    await ws_manager.broadcast({
+        "agent": "system",
+        "event_type": "reset",
+        "message": "System halted and database successfully reset.",
+    })
+    return {"status": "ok"}
+
+
+@router.get("/profile")
+async def get_profile():
+    """Get the current loaded profile details."""
+    global _current_profile
+    if _current_profile is None:
+        _current_profile = await db.get_latest_profile()
+    return {"profile": _current_profile}
+
+
+@router.post("/profile")
+async def update_profile(profile_data: dict):
+    """Save/update the candidate profile details."""
+    global _current_profile
+    profile_id = await db.insert_profile(profile_data)
+    _current_profile = profile_data
+    
+    await ws_manager.broadcast({
+        "agent": "system",
+        "event_type": "profile_updated",
+        "message": f"Profile updated: {profile_data.get('name', 'Candidate')}",
+    })
+    return {"status": "ok", "profile_id": profile_id, "profile": profile_data}
