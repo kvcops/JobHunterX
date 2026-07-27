@@ -57,18 +57,33 @@ class Education(BaseModel):
     end: Optional[str] = ""
 
 
+class Project(BaseModel):
+    title: Optional[str] = ""
+    description: Optional[str] = ""
+    url: Optional[str] = ""
+    technologies: list[str] = Field(default_factory=list)
+
+
 class CandidateProfile(BaseModel):
     """Ground truth from resume extraction.  `skills` is never modified."""
     name: Optional[str] = ""
     email: Optional[str] = ""
     phone: Optional[str] = ""
     location: Optional[str] = ""
+    present_address: Optional[str] = ""
+    permanent_address: Optional[str] = ""
     linkedin: Optional[str] = ""
+    github: Optional[str] = ""
+    portfolio: Optional[str] = ""
     summary: Optional[str] = ""
     suggested_role: Optional[str] = ""
     skills: list[str] = Field(default_factory=list)
     experience: list[Experience] = Field(default_factory=list)
     education: list[Education] = Field(default_factory=list)
+    projects: list[Project] = Field(default_factory=list)
+    competitions: list[str] = Field(default_factory=list)
+    achievements: list[str] = Field(default_factory=list)
+
 
 
 # ---------------------------------------------------------------------------

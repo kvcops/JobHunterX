@@ -52,12 +52,20 @@ def _render_html(profile: dict, tailored_bullets: dict | None = None) -> str:
         email=profile.get("email", ""),
         phone=profile.get("phone", ""),
         location=profile.get("location", ""),
+        present_address=profile.get("present_address", ""),
+        permanent_address=profile.get("permanent_address", ""),
         linkedin=profile.get("linkedin", ""),
+        github=profile.get("github", ""),
+        portfolio=profile.get("portfolio", ""),
         summary=profile.get("summary", ""),
         experience=experience,
         skills_flat=skills_flat,
         education=profile.get("education", []),
+        projects=profile.get("projects", []),
+        competitions=profile.get("competitions", []),
+        achievements=profile.get("achievements", []),
     )
+
 
 
 def _html_to_pdf(html: str) -> tuple[bytes, int]:

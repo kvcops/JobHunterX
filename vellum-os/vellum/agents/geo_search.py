@@ -83,39 +83,71 @@ NON_JOB_TITLE_PATTERNS = [
 ]
 
 
-def _is_valid_job_title(title: str) -> bool:
-    """Check if a title looks like a real job posting, not a nav page."""
-    title_lower = title.lower().strip()
-    if len(title_lower) < 25:
-        return False
-    for pat in NON_JOB_TITLE_PATTERNS:
-        if re.search(pat, title_lower):
-            return False
-    for indicator in JOB_TITLE_INDICATORS:
-        if indicator in title_lower:
-            return True
-    return False
+def _clean_company_name(raw_name: str) -> str:
+    """Clean company name by stripping search noise and rejecting aggregator titles."""
+    if not raw_name:
+        return ""
+    name = raw_name.strip()
+    # Strip common search result suffixes
+    name = re.sub(r"\s*[\-|–|—|\|].*", "", name).strip()
+    name = re.sub(r"(?i)\s*(careers?|jobs?|hiring|tech companies|inc\.?|ltd\.?).*", "", name).strip()
+    
+    # Reject aggregator query titles
+    name_lower = name.lower()
+    if any(p in name_lower for p in ["ai jobs in", "jobs in", "top 10", "software companies in", "best tech", "hiring in"]):
+        return ""
+    if len(name) < 3 or len(name) > 50:
+        return ""
+    return name.title()
 
 
-def _jd_has_job_keywords(jd_text: str, min_keywords: int = 3) -> bool:
-    """Check if JD text contains enough job-relevant keywords."""
-    text_lower = jd_text.lower()
-    count = sum(1 for kw in JD_KEYWORDS if kw in text_lower)
-    return count >= min_keywords
+INDIAN_CITIES = {
+    "hyderabad": ["hyderabad", "secunderabad", "cyberabad", "hitec city", "gachibowli"],
+    "bengaluru": ["bengaluru", "bangalore", "whitefield", "electronic city", "bellandur"],
+    "mumbai": ["mumbai", "bombay", "thane", "navi mumbai", "powai"],
+    "delhi": ["delhi", "ncr", "noida", "gurgaon", "gurugram", "faridabad"],
+    "chennai": ["chennai", "madras"],
+    "pune": ["pune"],
+}
 
 
-def _matches_location(title: str, jd_text: str, target_location: str) -> bool:
-    """Check if job title or JD mentions the target location."""
+def _matches_location_strict(title: str, jd_text: str, target_location: str) -> bool:
+    """Two-tier strict location matching. Reject explicit conflicting cities."""
     if not target_location:
         return True
     target_lower = target_location.lower().strip()
-    # Check for city name in title (strong signal)
-    city_key = target_lower.split(",")[0].split(" ")[0]  # first word of city
-    if len(city_key) > 2:
-        combined = (title + " " + jd_text).lower()
-        if city_key in combined:
-            return True
-    return True  # lenient — don't filter out good jobs on location alone
+    combined_text = (title + " " + jd_text).lower()
+
+    # Remote check (always allowed)
+    if "remote" in combined_text or "pan india" in combined_text or "work from home" in combined_text:
+        return True
+
+    target_key = _normalise_city(target_lower)
+    target_synonyms = INDIAN_CITIES.get(target_key, [target_key])
+
+    # Check if target city is present
+    target_found = any(syn in combined_text for syn in target_synonyms)
+
+    # Check if a conflicting city is explicitly named without target city
+    for city_key, synonyms in INDIAN_CITIES.items():
+        if city_key == target_key:
+            continue
+        for syn in synonyms:
+            # If explicit conflicting city name in title (e.g. "Manager - BAREILLY" or "Hubballi"), reject if target not mentioned
+            if syn in title.lower() and not target_found:
+                return False
+
+    if target_found:
+        return True
+
+    # If title explicitly names another city or state, reject
+    conflicting_other_places = ["bareilly", "hubballi", "aurangabad", "lucknow", "chandigarh", "jaipur", "kochi", "trivandrum"]
+    for place in conflicting_other_places:
+        if place in title.lower() and not target_found:
+            return False
+
+    return target_found  # Strict match required if non-remote
+
 
 
 # ---------------------------------------------------------------------------
@@ -172,11 +204,11 @@ async def run(state: dict) -> dict:
         results = await asyncio.to_thread(_search)
         for r in results:
             title = r.get("title", "")
-            # Extract company name from search result titles
-            name = title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
-            if name and len(name) < 60:
+            raw_name = title.split(" - ")[0].split(" | ")[0].split(" — ")[0].strip()
+            clean_name = _clean_company_name(raw_name)
+            if clean_name:
                 ddgs_companies.append({
-                    "name": name,
+                    "name": clean_name,
                     "website": r.get("href", ""),
                     "source": "ddgs",
                     "confidence": 0.6,
@@ -184,41 +216,59 @@ async def run(state: dict) -> dict:
     except Exception as exc:
         errors.append(f"ddgs search error: {exc}")
 
-    events.append(AgentEvent(
-        agent="geo_search",
-        event_type="progress",
-        message=f"ddgs: Found {len(ddgs_companies)} company leads",
-        confidence=0.6,
-    ).model_dump(mode="json"))
+    # --- Source 3: Unadvertised Social Hiring Posts ---
+    try:
+        social_posts = await search.search_unadvertised_social_posts(role=role, location=location, max_results=5)
+        for post in social_posts:
+            if post.get("contact_email"):
+                # Save directly as an outreach draft
+                draft = {
+                    "company": post.get("company", "Tech Company"),
+                    "contact_name": "Hiring Manager",
+                    "contact_role": "Hiring Lead",
+                    "email_guesses": [{"address": post["contact_email"], "pattern": "direct_social", "mx_valid": post.get("is_mx_verified")}],
+                    "subject": f"Application for {role} role at {post.get('company', 'your company')}",
+                    "body": f"Hi,\n\nI saw your post regarding the {role} position in {location}. Attached is my CV.\n\nBest regards,\n{profile.get('name', 'Candidate')}",
+                    "mailto_uri": f"mailto:{post['contact_email']}?subject=Application%20for%20{role}%20Role",
+                    "confidence": 0.85,
+                    "status": "drafted",
+                }
+                await db.insert_outreach(draft)
+        events.append(AgentEvent(
+            agent="geo_search",
+            event_type="progress",
+            message=f"Social Post Miner: Found {len(social_posts)} direct email hiring posts",
+            confidence=0.85,
+        ).model_dump(mode="json"))
+    except Exception as exc:
+        log.warning("social_post_miner_error", error=str(exc))
 
-    # --- Source 3: Curated ATS boards (confidence: 0.8) ---
+    # --- Source 4: Curated ATS boards (confidence: 0.8) ---
     city_key = _normalise_city(location)
     curated_urls = CURATED_BOARDS.get(city_key, [])
-    events.append(AgentEvent(
-        agent="geo_search",
-        event_type="progress",
-        message=f"Curated boards: {len(curated_urls)} known ATS pages",
-        confidence=0.8,
-    ).model_dump(mode="json"))
 
     # --- Merge and deduplicate ---
     all_companies = []
     seen_names = set()
 
     for company in osm_companies + ddgs_companies:
-        name_key = company["name"].lower().strip()
-        if name_key not in seen_names and len(name_key) > 2:
+        c_name = _clean_company_name(company["name"])
+        if not c_name:
+            continue
+        name_key = c_name.lower()
+        if name_key not in seen_names:
             seen_names.add(name_key)
+            company["name"] = c_name
             all_companies.append(company)
 
     events.append(AgentEvent(
         agent="geo_search",
         event_type="progress",
-        message=f"Total unique companies: {len(all_companies)} + {len(curated_urls)} curated",
+        message=f"Total verified unique companies: {len(all_companies)} + {len(curated_urls)} curated",
     ).model_dump(mode="json"))
 
     # --- Career page discovery for each company ---
-    for company in all_companies[:20]:  # Cap at 20 to stay within rate limits
+    for company in all_companies[:15]:
         if len(jobs) >= MAX_TOTAL_JOBS:
             break
         try:
@@ -228,41 +278,38 @@ async def run(state: dict) -> dict:
 
             top_result = career_results[0]
             if top_result["score"] < 0.65:
-                continue  # Too noisy
+                continue
 
-            # Fetch and parse the career page
             page = await scrape.fetch_page(top_result["url"])
             html = page.get("html", "")
             if not html:
                 continue
 
-            # Extract apply links (deterministic first)
             links = await scrape.extract_apply_links(
                 top_result["url"],
                 api_key=settings.google_api_key or "",
                 html=html,
             )
 
-            # Store individual job posts, not the whole careers landing page.
-            for link in links[:8]:
+            for link in links[:6]:
                 if len(jobs) >= MAX_TOTAL_JOBS:
                     break
                 role_title = (link.get("text") or "").strip()
-                if (
-                    not role_title
-                    or role_title.lower() in {"apply", "view job", "learn more"}
-                    or link["url"].rstrip("/") == top_result["url"].rstrip("/")
-                ):
+                if not role_title or link["url"].rstrip("/") == top_result["url"].rstrip("/"):
                     continue
-                if not _is_valid_job_title(role_title):
-                    continue
+
                 job_page = await scrape.fetch_page(link["url"])
                 job_html = job_page.get("html", "")
                 jd_text = await scrape.extract_jd_text(job_html or html)
-                if len(jd_text) < 180 or not _jd_has_job_keywords(jd_text):
+
+                if len(jd_text) < 180:
                     continue
-                if not _matches_location(role_title, jd_text, location):
+
+                # Strict location check!
+                if not _matches_location_strict(role_title, jd_text, location):
+                    log.info("location_mismatch_skipped", company=company["name"], title=role_title, location=location)
                     continue
+
                 job = JobListing(
                     company=company["name"],
                     role=role_title[:160],
@@ -281,13 +328,12 @@ async def run(state: dict) -> dict:
                         agent="geo_search",
                         event_type="discovery",
                         job_id=job_id,
-                        message=f"Discovered: {company['name']} - {role_title[:100]}",
+                        message=f"Discovered: {company['name']} - {role_title[:80]}",
                         confidence=top_result["score"],
                     ).model_dump(mode="json"))
 
         except Exception as exc:
             errors.append(f"Error processing {company['name']}: {exc}")
-            log.error("company_processing_error", company=company["name"], error=str(exc))
 
     # --- Process curated ATS boards ---
     for board_url in curated_urls:
@@ -300,24 +346,27 @@ async def run(state: dict) -> dict:
                 continue
 
             links = await scrape.extract_apply_links_deterministic(html, base_url=board_url)
-            # Extract company name from URL
             name_match = re.search(r"greenhouse\.io/(\w+)|lever\.co/(\w+)", board_url)
             company_name = (name_match.group(1) or name_match.group(2)).title() if name_match else "Unknown"
 
-            for link in links[:8]:
+            for link in links[:6]:
                 if len(jobs) >= MAX_TOTAL_JOBS:
                     break
                 role_title = (link.get("text") or "").strip()
-                if not role_title or role_title.lower() in {"apply", "view job", "learn more"}:
+                if not role_title:
                     continue
-                if not _is_valid_job_title(role_title):
-                    continue
+
                 job_page = await scrape.fetch_page(link["url"])
                 jd_text = await scrape.extract_jd_text(job_page.get("html", ""))
-                if len(jd_text) < 180 or not _jd_has_job_keywords(jd_text):
+
+                if len(jd_text) < 180:
                     continue
-                if not _matches_location(role_title, jd_text, location):
+
+                # Strict location check!
+                if not _matches_location_strict(role_title, jd_text, location):
+                    log.info("curated_location_mismatch_skipped", company=company_name, title=role_title, location=location)
                     continue
+
                 job = JobListing(
                     company=company_name,
                     role=role_title[:160],
@@ -339,7 +388,7 @@ async def run(state: dict) -> dict:
     events.append(AgentEvent(
         agent="geo_search",
         event_type="complete",
-        message=f"Discovery complete. {len(jobs)} jobs found.",
+        message=f"Discovery complete. {len(jobs)} jobs verified and stored.",
     ).model_dump(mode="json"))
 
     return {
@@ -347,3 +396,4 @@ async def run(state: dict) -> dict:
         "events": events,
         "errors": errors,
     }
+

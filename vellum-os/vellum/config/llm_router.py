@@ -64,11 +64,12 @@ FALLBACK_CHAINS: Dict[str, List[str]] = {
         "gemini/gemini-3.1-flash-lite",
     ],
     "extraction": [
-        "gemini/gemma-4-31b-it",
-        "groq/openai/gpt-oss-120b",
         "gemini/gemini-3.1-flash-lite",
+        "groq/openai/gpt-oss-120b",
+        "gemini/gemma-4-31b-it",
     ],
 }
+
 
 # ---------------------------------------------------------------------------
 # Concurrency semaphores — per-provider
@@ -167,9 +168,14 @@ def _cache_key(model: str, messages: list[dict], kwargs: dict) -> str:
 def _ensure_api_keys() -> None:
     """Push API keys from settings into env so LiteLLM picks them up."""
     settings = get_settings()
+    litellm.drop_params = True
+    litellm.suppress_debug_info = True
+    litellm.set_verbose = False
     if settings.google_api_key:
         os.environ.setdefault("GEMINI_API_KEY", settings.google_api_key)
+        os.environ.setdefault("GOOGLE_API_KEY", settings.google_api_key)
     if settings.groq_api_key:
+
         os.environ.setdefault("GROQ_API_KEY", settings.groq_api_key)
     if settings.mistral_api_key:
         os.environ.setdefault("MISTRAL_API_KEY", settings.mistral_api_key)
@@ -205,7 +211,7 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
     import re
 
     model = params.get("model", "")
-    max_attempts = 4
+    max_attempts = 5
 
     for attempt in range(max_attempts):
         # Enforce per-provider minimum delay between requests
@@ -213,29 +219,24 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
 
         try:
             return await litellm.acompletion(**params)
-        except (litellm.RateLimitError, litellm.ServiceUnavailableError) as exc:
-            # Parse retry-after from provider response
-            match = re.search(r"try again in ([0-9]+(?:\.[0-9]+)?)s", str(exc), re.I)
-            if match:
-                delay = float(match.group(1))
+        except Exception as exc:
+            err_str = str(exc).lower()
+            if "rate limit" in err_str or "429" in err_str or "too many requests" in err_str or isinstance(exc, (litellm.RateLimitError, litellm.ServiceUnavailableError)):
+                match = re.search(r"try again in ([0-9]+(?:\.[0-9]+)?)s", str(exc), re.I)
+                delay = float(match.group(1)) if match else min(3.0 * (attempt + 1), 30.0)
+                if attempt == max_attempts - 1:
+                    raise
+                log.warning(
+                    "rate_limit_retry",
+                    model=model,
+                    attempt=attempt + 1,
+                    delay=round(delay, 1),
+                    error=str(exc)[:200],
+                )
+                await asyncio.sleep(max(1.5, min(delay, 30.0)))
             else:
-                # Exponential backoff: 2s, 4s, 8s, 16s
-                delay = min(2 ** (attempt + 1), 30)
-
-            # For Mistral, always retry with backoff (free tier is tight but
-            # the retry-after header gives us the right delay).
-            # For other providers, also retry with backoff.
-            if attempt == max_attempts - 1:
                 raise
 
-            log.warning(
-                "rate_limit_retry",
-                model=model,
-                attempt=attempt + 1,
-                delay=round(delay, 1),
-                error=str(exc)[:200],
-            )
-            await asyncio.sleep(max(1.0, min(delay, 30.0)))
 
 
 async def call_llm(

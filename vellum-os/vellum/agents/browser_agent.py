@@ -129,7 +129,11 @@ Candidate Information:
 - Email: {profile.get('email', '')}
 - Phone: {profile.get('phone', '')}
 - Location: {profile.get('location', '')}
+- Present Address: {profile.get('present_address', '')}
 - LinkedIn: {profile.get('linkedin', '')}
+
+CRITICAL TOKEN SAVING & SPEED RULE:
+Keep your thinking extremely brief and short (1 concise sentence max). Do NOT write long explanations or reasoning. Execute actions directly to minimize token usage and complete the task fast!
 
 Instructions:
 1. Fill in all required fields with the candidate information above.
@@ -141,19 +145,27 @@ Instructions:
 7. After filling, click the Submit/Apply button.
 8. Report the final status: SUCCESS or the reason for stopping."""
 
+
         from vellum.api.ws import manager as ws_manager
+
+        def _clean_action_text(output_obj: Any) -> str:
+            if not output_obj:
+                return "Executing browser action..."
+            raw = str(output_obj)
+            import re
+            goal_match = re.search(r"next_goal=['\"]([^'\"]+)['\"]", raw)
+            thinking_match = re.search(r"thinking=['\"]([^'\"]+)['\"]", raw)
+            if goal_match:
+                return f"Goal: {goal_match.group(1)}"
+            elif thinking_match:
+                t = thinking_match.group(1)
+                return f"Thinking: {t[:120]}..." if len(t) > 120 else f"Thinking: {t}"
+            return raw[:150]
 
         async def browser_step_callback(state, model_output, step_num):
             url = getattr(state, "url", "")
             screenshot = getattr(state, "screenshot", None)
-            action = ""
-            if model_output:
-                if hasattr(model_output, "text"):
-                    action = model_output.text
-                elif isinstance(model_output, dict):
-                    action = model_output.get("text", "")
-                else:
-                    action = str(model_output)
+            action = _clean_action_text(model_output)
             
             if isinstance(screenshot, bytes):
                 import base64
@@ -173,6 +185,7 @@ Instructions:
                 }
             }
             await ws_manager.broadcast(event_data)
+
 
         agent_kwargs = {
             "task": task,

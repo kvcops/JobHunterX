@@ -64,7 +64,33 @@ function setupEventListeners() {
 
   // Start Search Button
   document.getElementById("start-search-btn").addEventListener("click", startSearch);
+
+  // Global Action Buttons (Reset System & Save Profile)
+  const resetBtn = document.getElementById("reset-system-btn");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", resetSystemAction);
+  }
+
+  const headerResetBtn = document.getElementById("header-reset-btn");
+  if (headerResetBtn) {
+    headerResetBtn.addEventListener("click", resetSystemAction);
+  }
+
+  const saveProfBtn = document.getElementById("save-profile-btn");
+  if (saveProfBtn) {
+    saveProfBtn.addEventListener("click", saveProfileChanges);
+  }
+
+  // Keyboard escape handler for modals
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeResetModal();
+      if (typeof closeOutreachModal === "function") closeOutreachModal();
+      if (typeof closeHitlModal === "function") closeHitlModal();
+    }
+  });
 }
+
 
 // ---------------------------------------------------------------------------
 // Theme Management
@@ -117,12 +143,14 @@ async function loadInitialData() {
     const jobsData = await jobsRes.json();
     jobs = jobsData.jobs || [];
     renderJobs();
+    renderResumes();
 
     // Load existing outreach
     const outreachRes = await fetch(`${API_BASE}/outreach`);
     const outreachData = await outreachRes.json();
     outreachDrafts = outreachData.drafts || [];
     renderOutreach();
+
 
     // Load latest profile
     const profileRes = await fetch(`${API_BASE}/profile`);
@@ -356,6 +384,51 @@ function renderJobs() {
   document.getElementById("stat-discovered").innerText = jobs.length;
   document.getElementById("stat-applied").innerText = appliedCount;
 }
+
+function renderResumes() {
+  const container = document.getElementById("resumes-container");
+  if (!container) return;
+
+  const matchedJobs = jobs.filter(j => j.status === 'matched' || j.status === 'applied' || j.status === 'applying' || j.status === 'needs_attention');
+
+  if (matchedJobs.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon-circle">📄</div>
+        <h3>No tailored resumes generated yet</h3>
+        <p>Tailored resumes and CVs created for matched job postings will appear here automatically.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = "";
+  matchedJobs.forEach(job => {
+    const card = document.createElement("div");
+    card.className = "job-card job-card-enhanced";
+
+    const matchScore = job.match_score || 0;
+    const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
+
+    card.innerHTML = `
+      <div class="card-header">
+        <div>
+          <div class="company-title">${escapeHtml(job.company)}</div>
+          <div class="role-title">${escapeHtml(job.role || "Software Role")}</div>
+        </div>
+      </div>
+      <div class="badge-row">
+        <span class="conf-badge ${matchClass}">Match: ${(matchScore * 100).toFixed(0)}%</span>
+        <span class="conf-badge conf-high">ATS Resume Tailored</span>
+      </div>
+      <div class="card-footer">
+        <span class="job-status-indicator ${job.status}">${job.status.replace('_', ' ')}</span>
+        <button class="card-action-btn" onclick="downloadResume('${job.id}')">📥 Download PDF CV</button>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
 
 function renderOutreach() {
   const container = document.getElementById("outreach-container");
@@ -644,8 +717,13 @@ function renderProfileEditor() {
   document.getElementById("prof-email").value = currentProfile.email || "";
   document.getElementById("prof-phone").value = currentProfile.phone || "";
   document.getElementById("prof-linkedin").value = currentProfile.linkedin || "";
+  if (document.getElementById("prof-github")) document.getElementById("prof-github").value = currentProfile.github || "";
+  if (document.getElementById("prof-portfolio")) document.getElementById("prof-portfolio").value = currentProfile.portfolio || "";
   document.getElementById("prof-location").value = currentProfile.location || "";
+  if (document.getElementById("prof-present-address")) document.getElementById("prof-present-address").value = currentProfile.present_address || "";
+  if (document.getElementById("prof-permanent-address")) document.getElementById("prof-permanent-address").value = currentProfile.permanent_address || "";
   document.getElementById("prof-summary").value = currentProfile.summary || "";
+
   
   // Initialize scoped lists
   if (editedSkills.length === 0 && currentProfile.skills) {
@@ -847,12 +925,20 @@ async function saveProfileChanges() {
     email: document.getElementById("prof-email").value.trim(),
     phone: document.getElementById("prof-phone").value.trim(),
     linkedin: document.getElementById("prof-linkedin").value.trim(),
+    github: document.getElementById("prof-github") ? document.getElementById("prof-github").value.trim() : (currentProfile.github || ""),
+    portfolio: document.getElementById("prof-portfolio") ? document.getElementById("prof-portfolio").value.trim() : (currentProfile.portfolio || ""),
     location: document.getElementById("prof-location").value.trim(),
+    present_address: document.getElementById("prof-present-address") ? document.getElementById("prof-present-address").value.trim() : (currentProfile.present_address || ""),
+    permanent_address: document.getElementById("prof-permanent-address") ? document.getElementById("prof-permanent-address").value.trim() : (currentProfile.permanent_address || ""),
     summary: document.getElementById("prof-summary").value.trim(),
     skills: editedSkills,
     experience: editedExperience,
-    education: editedEducation
+    education: editedEducation,
+    projects: currentProfile.projects || [],
+    competitions: currentProfile.competitions || [],
+    achievements: currentProfile.achievements || []
   };
+
   
   try {
     const res = await fetch(`${API_BASE}/profile`, {
@@ -877,20 +963,52 @@ async function saveProfileChanges() {
   }
 }
 
-async function resetSystemAction() {
-  if (!confirm("Are you sure you want to stop all active agents and clear all jobs, history, and profile data? This cannot be undone.")) {
-    return;
+function resetSystemAction() {
+  const modal = document.getElementById("reset-confirm-modal");
+  const btn = document.getElementById("confirm-reset-btn");
+  if (btn) {
+    btn.removeAttribute("disabled");
+    const spinner = btn.querySelector(".btn-spinner");
+    const text = btn.querySelector(".btn-text");
+    if (spinner) spinner.classList.add("hidden");
+    if (text) text.innerText = "Yes, Stop Agent & Reset";
   }
-  
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closeResetModal() {
+  const modal = document.getElementById("reset-confirm-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function confirmResetSystem() {
+  const btn = document.getElementById("confirm-reset-btn");
+  const spinner = btn ? btn.querySelector(".btn-spinner") : null;
+  const text = btn ? btn.querySelector(".btn-text") : null;
+
+  if (btn) btn.setAttribute("disabled", "true");
+  if (spinner) spinner.classList.remove("hidden");
+  if (text) text.innerText = "Halting Agents & Wiping Data...";
+
   try {
     const res = await fetch(`${API_BASE}/reset`, {
       method: "POST"
     });
     if (res.ok) {
-      alert("System has been halted and all database records wiped.");
+      if (text) text.innerText = "System Reset Complete!";
+      logEvent("system", "System database wiped and active tasks halted.");
+      setTimeout(() => {
+        closeResetModal();
+        window.location.reload();
+      }, 800);
+    } else {
+      throw new Error("Reset call failed");
     }
   } catch (err) {
     console.error("Reset error", err);
+    if (text) text.innerText = "Reset Failed - Try Again";
+    if (btn) btn.removeAttribute("disabled");
+    if (spinner) spinner.classList.add("hidden");
   }
 }
 
@@ -900,6 +1018,7 @@ function handleSystemReset() {
     window.location.reload();
   }, 1000);
 }
+
 
 let browserStepLog = [];
 

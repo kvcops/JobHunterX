@@ -13,7 +13,11 @@ import asyncio
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-# Monkeypatch legacy langchain_community import for scrapegraphai compatibility
+# Silence legacy langchain_community deprecation warnings on startup
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
 try:
     import langchain_community.chat_models
     from langchain_ollama import ChatOllama
@@ -21,6 +25,8 @@ try:
     sys.modules['langchain_community.chat_models.ChatOllama'] = ChatOllama
 except Exception:
     pass
+
+
 
 import os
 from contextlib import asynccontextmanager

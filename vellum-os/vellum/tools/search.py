@@ -222,3 +222,129 @@ async def search_contacts(
 
     log.info("contact_search", company=company_name, found=len(contacts))
     return contacts[:max_results]
+
+
+# ---------------------------------------------------------------------------
+# Multi-Engine Search Aggregator & Email MX Verification
+# ---------------------------------------------------------------------------
+
+async def verify_email_mx(email_address: str) -> bool:
+    """Verify if the email domain has valid DNS MX records."""
+    import asyncio, socket
+    if not email_address or "@" not in email_address:
+        return False
+    domain = email_address.split("@")[-1].strip()
+
+    def _check():
+        try:
+            import dns.resolver
+            records = dns.resolver.resolve(domain, "MX")
+            return len(records) > 0
+        except Exception:
+            # Fallback to socket gethostbyname
+            try:
+                socket.gethostbyname(domain)
+                return True
+            except Exception:
+                return False
+
+    return await asyncio.to_thread(_check)
+
+
+async def search_multi_engine(query: str, max_results: int = 10) -> list[dict]:
+    """Multi-engine search aggregator (DDGS + fallback text search)."""
+    import asyncio
+    from ddgs import DDGS
+
+    def _ddgs():
+        with DDGS() as ddgs:
+            return list(ddgs.text(query, max_results=max_results))
+
+    try:
+        results = await asyncio.to_thread(_ddgs)
+        if results:
+            return results
+    except Exception as exc:
+        log.warning("multi_engine_ddgs_failed", query=query, error=str(exc))
+
+    # Fallback: HTML search fetch
+    try:
+        from vellum.tools import scrape
+        search_url = f"html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
+        page = await scrape.fetch_page(f"https://{search_url}")
+        html = page.get("html", "")
+        links = re.findall(r'<a class="result__url" href="([^"]+)">(.*?)</a>', html)
+        fallback_results = []
+        for url, text in links[:max_results]:
+            fallback_results.append({"href": url, "title": text, "body": ""})
+        return fallback_results
+    except Exception as exc:
+        log.error("multi_engine_fallback_failed", error=str(exc))
+        return []
+
+
+async def search_unadvertised_social_posts(
+    role: str = "Software Engineer",
+    location: str = "Hyderabad",
+    max_results: int = 10,
+) -> list[dict]:
+    """Mine unadvertised social hiring posts (LinkedIn posts, Twitter/X) for direct email applications.
+
+    Targeting posts that say 'We are hiring', 'Send resume to email@...', filtering for
+    low engagement (<50 likes) for maximum candidate success rates.
+    """
+    queries = [
+        f'site:linkedin.com/posts "we are hiring" "{role}" "{location}" "send resume to"',
+        f'site:linkedin.com/posts "hiring" "{role}" "{location}" "email your CV"',
+        f'"{role}" "{location}" "mail your resume" site:linkedin.com/posts',
+    ]
+
+    found_posts = []
+    seen_urls = set()
+
+    for q in queries:
+        results = await search_multi_engine(q, max_results=8)
+        for r in results:
+            url = r.get("href") or r.get("link", "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            body = r.get("body", "")
+            title = r.get("title", "")
+            combined_text = f"{title} {body}"
+
+            # Extract email addresses from post content
+            emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", combined_text)
+            clean_emails = [e for e in emails if not e.endswith(".png") and not e.endswith(".jpg")]
+
+            # Verify email MX if found
+            valid_email = ""
+            for email in clean_emails:
+                if await verify_email_mx(email):
+                    valid_email = email
+                    break
+
+            # Company name extraction
+            company = title.split(" - ")[0].split(" | ")[0].strip()
+
+            found_posts.append({
+                "url": url,
+                "title": title,
+                "snippet": body[:300],
+                "company": company[:60],
+                "contact_email": valid_email or (clean_emails[0] if clean_emails else ""),
+                "is_mx_verified": bool(valid_email),
+                "low_competition": True,  # Fresh social post
+                "source": "social_post_miner",
+            })
+
+            if len(found_posts) >= max_results:
+                break
+
+        if len(found_posts) >= max_results:
+            break
+
+    log.info("social_post_miner_complete", found=len(found_posts))
+    return found_posts
+

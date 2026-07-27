@@ -16,7 +16,7 @@ from vellum.models import CandidateProfile
 
 log = get_logger("extractor")
 
-EXTRACTION_SYSTEM_PROMPT = """You are a resume parser. Extract structured information from the resume text below.
+EXTRACTION_SYSTEM_PROMPT = """You are an expert resume parser. Extract structured information from the resume text and extracted links below.
 Based on the candidate's skills and experience, also analyze their profile and suggest the most suitable job role or title (e.g. "Software Engineer", "Frontend Developer", "Data Scientist", "DevOps Engineer").
 
 Return a JSON object with exactly these keys:
@@ -25,10 +25,14 @@ Return a JSON object with exactly these keys:
   "email": "email@example.com",
   "phone": "+91-XXXXXXXXXX",
   "location": "City, Country",
-  "linkedin": "linkedin.com/in/...",
+  "present_address": "Full Present / Current Address",
+  "permanent_address": "Full Permanent Address",
+  "linkedin": "https://linkedin.com/in/...",
+  "github": "https://github.com/...",
+  "portfolio": "https://...",
   "summary": "Professional summary paragraph",
-  "suggested_role": "Sleek suggested job title that fits best",
-  "skills": ["skill1", "skill2", ...],
+  "suggested_role": "Suggested job title that fits best",
+  "skills": ["skill1", "skill2"],
   "experience": [
     {
       "role": "Job Title",
@@ -45,12 +49,23 @@ Return a JSON object with exactly these keys:
       "start": "YYYY",
       "end": "YYYY"
     }
-  ]
+  ],
+  "projects": [
+    {
+      "title": "Project Title",
+      "description": "Short description of project",
+      "url": "Project Link or Repo URL if present",
+      "technologies": ["tech1", "tech2"]
+    }
+  ],
+  "competitions": ["Competition or Hackathon 1", "Award 2"],
+  "achievements": ["Key Achievement 1", "Certification 2"]
 }
 
 Rules:
-- For name, email, phone, location, linkedin, summary, skills, experience, and education: Extract ONLY what is explicitly written. Do NOT infer or add anything.
-- For suggested_role: Analyze the candidate's skills and past work roles, and output the single best target job title/role that they are most qualified for.
+- Extract ONLY what is explicitly written or present in the embedded links. Do NOT fabricate or hallucinate.
+- Match project URLs, GitHub, and Portfolio URLs from the extracted embedded links section when applicable.
+- For suggested_role: Analyze the candidate's skills and past work roles, and output the single best target job title/role.
 - For skills, list every technology, tool, language, and framework mentioned.
 - Return valid JSON only. No markdown, no explanation."""
 
@@ -73,8 +88,8 @@ def _parse_json_object(content: str) -> dict:
     raise json.JSONDecodeError("No complete profile JSON object found", text, 0)
 
 
-async def extract_text_from_pdf(pdf_bytes: bytes) -> str:
-    """Extract text from a PDF using PyMuPDF with sort=True for column-aware reading."""
+async def extract_text_and_links_from_pdf(pdf_bytes: bytes) -> tuple[str, list[str]]:
+    """Extract raw text and embedded hyperlinked URIs from PDF bytes using PyMuPDF."""
     import asyncio
 
     def _extract():
@@ -82,11 +97,21 @@ async def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         pages_text = []
+        extracted_links = []
         for page in doc:
             text = page.get_text(sort=True)
             pages_text.append(text)
+            links = page.get_links()
+            for link in links:
+                uri = link.get("uri")
+                if uri and uri not in extracted_links:
+                    extracted_links.append(uri)
         doc.close()
-        return "\n\n".join(pages_text)
+        
+        full_text = "\n\n".join(pages_text)
+        if extracted_links:
+            full_text += "\n\n--- Extracted Embedded Hyperlinks in PDF ---\n" + "\n".join(extracted_links)
+        return full_text, extracted_links
 
     return await asyncio.to_thread(_extract)
 
@@ -94,21 +119,21 @@ async def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
     """Extract a structured CandidateProfile from PDF bytes.
 
-    Pipeline: PyMuPDF text extraction → LLM structured parsing.
+    Pipeline: PyMuPDF text & embedded link extraction → LLM structured parsing.
     Uses the 'extraction' fallback chain (gemma-4-31b preferred).
     """
-    # Step 1: Extract raw text
-    raw_text = await extract_text_from_pdf(pdf_bytes)
+    # Step 1: Extract raw text and embedded links
+    raw_text, links = await extract_text_and_links_from_pdf(pdf_bytes)
     if not raw_text.strip():
         log.error("empty_pdf_text")
         return CandidateProfile()
 
-    log.info("pdf_text_extracted", length=len(raw_text))
+    log.info("pdf_text_extracted", length=len(raw_text), links_count=len(links))
 
     # Step 2: LLM structured extraction
     messages = [
         {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-        {"role": "user", "content": raw_text[:8000]},  # Limit to 8k chars
+        {"role": "user", "content": raw_text[:30000]},  # Up to 30k chars
     ]
 
     try:
@@ -116,7 +141,7 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
             chain_name="extraction",
             messages=messages,
             use_cache=False,
-            max_tokens=1400,
+            max_tokens=8192,
         )
         try:
             data = _parse_json_object(result["content"])
@@ -124,15 +149,16 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
             log.warning("profile_json_retry", model=result.get("model", "unknown"))
             retry_messages = [
                 {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT + "\nOutput only one complete JSON object. No reasoning, markdown, or commentary."},
-                {"role": "user", "content": raw_text[:8000]},
+                {"role": "user", "content": raw_text[:30000]},
             ]
             retry = await call_llm_with_fallback(
                 chain_name="fast",
                 messages=retry_messages,
                 use_cache=False,
-                max_tokens=1200,
+                max_tokens=8192,
             )
             data = _parse_json_object(retry["content"])
+
 
         profile = CandidateProfile(**data)
         log.info(
@@ -140,9 +166,11 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
             name=profile.name,
             skills_count=len(profile.skills),
             experience_count=len(profile.experience),
+            projects_count=len(profile.projects),
         )
         return profile
 
     except (json.JSONDecodeError, Exception) as exc:
         log.error("profile_extraction_failed", error=str(exc))
         return CandidateProfile()
+

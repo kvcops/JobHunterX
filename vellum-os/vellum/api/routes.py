@@ -132,11 +132,30 @@ async def start_search(request: StartSearchRequest):
     return {"status": "started", "location": request.location}
 
 
+def sanitize_for_json(data: Any) -> Any:
+    """Recursively clean data for JSON serialization, replacing binary bytes with info strings."""
+    if isinstance(data, dict):
+        cleaned = {}
+        for k, v in data.items():
+            if isinstance(v, bytes):
+                cleaned[k] = f"<binary_bytes: {len(v)} bytes>"
+            else:
+                cleaned[k] = sanitize_for_json(v)
+        return cleaned
+    elif isinstance(data, list):
+        return [sanitize_for_json(item) for item in data]
+    elif isinstance(data, bytes):
+        return f"<binary_bytes: {len(data)} bytes>"
+    return data
+
+
 @router.post("/resume-agent")
 async def resume_agent(request: ResumeAgentRequest):
     """Resume a HITL-interrupted agent pipeline."""
     result = await graph.resume_job_pipeline(request.job_id, request.action)
-    return {"status": "ok", "result": result}
+    clean_result = sanitize_for_json(result)
+    return {"status": "ok", "result": clean_result}
+
 
 
 @router.get("/jobs")

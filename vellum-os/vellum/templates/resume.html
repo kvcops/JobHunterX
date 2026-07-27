@@ -17,7 +17,12 @@
 </head>
 <body>
   <h1>{{ name }}</h1>
-  <div class="contact">{{ email }} · {{ phone }} · {{ location }}{% if linkedin %} · {{ linkedin }}{% endif %}</div>
+  <div class="contact">
+    {{ email }} · {{ phone }} · {{ location }}
+    {% if linkedin %} · LinkedIn: {{ linkedin }}{% endif %}
+    {% if github %} · GitHub: {{ github }}{% endif %}
+    {% if portfolio %} · Portfolio: {{ portfolio }}{% endif %}
+  </div>
 
   {% if summary %}
   <h2>Summary</h2>
@@ -39,6 +44,17 @@
   {% endfor %}
   {% endif %}
 
+  {% if projects %}
+  <h2>Projects</h2>
+  {% for proj in projects %}
+  <div class="exp-item">
+    <div class="exp-head">{{ proj.title }}{% if proj.url %} ({{ proj.url }}){% endif %}</div>
+    <div class="exp-meta">Tech: {{ proj.technologies | join(', ') }}</div>
+    <p style="margin: 2px 0 4px 0; font-size: 9.5pt;">{{ proj.description }}</p>
+  </div>
+  {% endfor %}
+  {% endif %}
+
   {% if skills_flat %}
   <h2>Skills</h2>
   <p class="skills-list">{{ skills_flat }}</p>
@@ -53,5 +69,14 @@
   </div>
   {% endfor %}
   {% endif %}
+
+  {% if competitions or achievements %}
+  <h2>Competitions & Achievements</h2>
+  <ul>
+    {% for comp in competitions %}<li>{{ comp }}</li>{% endfor %}
+    {% for ach in achievements %}<li>{{ ach }}</li>{% endfor %}
+  </ul>
+  {% endif %}
 </body>
+
 </html>

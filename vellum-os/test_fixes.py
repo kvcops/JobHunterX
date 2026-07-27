@@ -237,6 +237,111 @@ def test_event_loop_policy():
         return False
 
 
+def test_candidate_profile_expansion():
+    """Test 9: CandidateProfile expansion with Project, Addresses, Competitions."""
+    header("TEST 9: CandidateProfile expansion")
+
+    from vellum.models import CandidateProfile, Project
+
+    proj = Project(title="AI Job Agent", description="Automated applicant tool", url="https://github.com/vamsi/job-agent", technologies=["Python", "FastAPI"])
+    profile = CandidateProfile(
+        name="Vamsi Krishna",
+        email="vamsi@example.com",
+        present_address="123 Hitec City, Hyderabad",
+        permanent_address="Visakhapatnam, India",
+        github="https://github.com/vamsi",
+        portfolio="https://vamsi.dev",
+        projects=[proj],
+        competitions=["Hackathon Winner 2025"],
+        achievements=["AWS Certified Architect"],
+    )
+
+    data = profile.model_dump()
+    assert data["projects"][0]["title"] == "AI Job Agent"
+    assert data["present_address"] == "123 Hitec City, Hyderabad"
+    assert data["competitions"][0] == "Hackathon Winner 2025"
+
+    print("  PASS: CandidateProfile expanded model works cleanly")
+    return True
+
+
+def test_json_sanitizer():
+    """Test 10: JSON Sanitizer prevents UnicodeDecodeError on binary bytes."""
+    header("TEST 10: JSON bytes sanitizer")
+
+    from vellum.api.routes import sanitize_for_json
+
+    sample_state = {
+        "job_id": "12345",
+        "tailored_pdf": b"%PDF-1.4 \x93\x84 binary PDF bytes header",
+        "nested": {"pdf_bytes": b"\x00\x01\x02\x03"},
+    }
+
+    cleaned = sanitize_for_json(sample_state)
+    assert "<binary_bytes: " in cleaned["tailored_pdf"]
+    assert "<binary_bytes: " in cleaned["nested"]["pdf_bytes"]
+
+    import json
+    json_str = json.dumps(cleaned)
+    assert "binary_bytes" in json_str
+
+    print("  PASS: JSON sanitizer prevents UnicodeDecodeError on bytes")
+    return True
+
+
+def test_strict_location_matrix():
+    """Test 11: Two-Tier Location Exclusion Matrix."""
+    header("TEST 11: Location exclusion matrix")
+
+    from vellum.agents.geo_search import _matches_location_strict, _clean_company_name
+
+    # Hyderabad target location tests
+    assert _matches_location_strict("Senior Software Engineer", "Based in Hyderabad office", "Hyderabad") == True
+    assert _matches_location_strict("Senior Engineer - Remote", "Work from anywhere", "Hyderabad") == True
+    assert _matches_location_strict("Cluster Manager - BAREILLY", "Located in Bareilly UP", "Hyderabad") == False
+    assert _matches_location_strict("Store Manager - Hubballi", "Job in Hubballi Karnataka", "Hyderabad") == False
+
+    # Company name cleaner tests
+    assert _clean_company_name("AI Jobs In Hyderabad Secunderabad - Senior Engineer") == ""
+    assert _clean_company_name("PhonePe - Software Company") == "Phonepe"
+
+    print("  PASS: Strict location matching and company cleaner work properly")
+    return True
+
+
+def test_pdf_rendering():
+    """Test 12: PDF resume rendering with projects & links."""
+    header("TEST 12: PDF resume rendering")
+
+    from vellum.tools.pdf_render import render_resume_pdf
+
+    profile = {
+        "name": "Karri Vamsi Krishna",
+        "email": "vamsi@example.com",
+        "phone": "+91 8074749058",
+        "location": "Hyderabad, India",
+        "github": "https://github.com/vamsi",
+        "projects": [
+            {
+                "title": "Vellum OS",
+                "description": "Career automation platform",
+                "url": "https://github.com/vamsi/vellum-os",
+                "technologies": ["Python", "FastAPI"],
+            }
+        ],
+        "experience": [
+            {"role": "Software Engineer", "company": "Tech Corp", "start": "2023", "end": "Present", "bullets": ["Built API microservices"]}
+        ],
+        "skills": ["Python", "React", "FastAPI"],
+    }
+
+    result = render_resume_pdf(profile)
+    assert isinstance(result["pdf_bytes"], bytes)
+    assert len(result["pdf_bytes"]) > 500
+    print(f"  PASS: Rendered resume PDF ({len(result['pdf_bytes'])} bytes, page_count={result['page_count']})")
+    return True
+
+
 def main():
     print(f"Python: {sys.version}")
     print(f"Platform: {sys.platform}")
@@ -250,6 +355,10 @@ def main():
         ("Fallback chains", test_fallback_chain),
         ("Browser agent import", test_browser_agent_import),
         ("Event loop policy", test_event_loop_policy),
+        ("CandidateProfile expansion", test_candidate_profile_expansion),
+        ("JSON bytes sanitizer", test_json_sanitizer),
+        ("Strict location matrix", test_strict_location_matrix),
+        ("PDF resume rendering", test_pdf_rendering),
     ]
 
     results = {}
@@ -281,3 +390,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
