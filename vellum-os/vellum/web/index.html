@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vellum OS — Career Intelligence & Application Agent</title>
+  <!-- Google Fonts: Inter and JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Header / Top Bar (56px) -->
+  <header class="top-bar">
+    <div class="logo">
+      <span class="logo-symbol">✦</span> Vellum <span class="logo-os">OS</span>
+    </div>
+    <nav class="tab-nav">
+      <button class="tab-btn active" id="tab-ats" onclick="switchTab('ats')">ATS Auto-Apply</button>
+      <button class="tab-btn" id="tab-outreach" onclick="switchTab('outreach')">Direct Outreach</button>
+    </nav>
+    <div class="actions">
+      <div id="status-badge" class="status-badge idle">Idle</div>
+      <button id="theme-toggle" class="theme-toggle-btn" aria-label="Toggle Theme">
+        <svg class="sun-icon" viewBox="0 0 24 24" width="18" height="18"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0s-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0s-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41s-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.01c.39-.39.39-1.03 0-1.41s-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
+        <svg class="moon-icon" viewBox="0 0 24 24" width="18" height="18"><path d="M9.37 5.51c-.18-.64-.91-.9-1.45-.51C5.63 6.69 4 9.4 4 12.5 4 16.64 7.36 20 11.5 20c3.1 0 5.81-1.63 7.5-4.08.39-.54.13-1.27-.51-1.45C13.9 13.25 9.3 8.66 9.37 5.51z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Grid Layout -->
+  <main class="dashboard-grid">
+    <!-- Sidebar: Profile Details (240px) -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <h3>Resume Upload</h3>
+        <div id="drop-zone" class="drop-zone">
+          <p>Drag & drop PDF here</p>
+          <span>or click to browse</span>
+          <input type="file" id="resume-input" accept="application/pdf" hidden>
+        </div>
+      </div>
+
+      <div id="profile-card" class="sidebar-section profile-card hidden">
+        <h3 id="profile-name">Candidate Name</h3>
+        <p class="profile-meta" id="profile-email">email@example.com</p>
+        <p class="profile-meta" id="profile-phone">+91 00000 00000</p>
+        <p class="profile-meta" id="profile-location">City, India</p>
+        <div class="profile-divider"></div>
+        <h4>Ground Truth Skills</h4>
+        <div id="profile-skills" class="skills-container"></div>
+      </div>
+
+      <div class="sidebar-section search-controls">
+        <h3>Target Location</h3>
+        <input type="text" id="target-location" value="Bengaluru" placeholder="e.g. Bengaluru, Hyderabad">
+        <button id="start-search-btn" class="cta-btn" disabled>Start Career Search</button>
+      </div>
+
+      <div class="sidebar-section stats-card">
+        <h3>Telemetry & Stats</h3>
+        <div class="stat-row">
+          <span>Jobs Discovered:</span>
+          <span id="stat-discovered" class="stat-val">0</span>
+        </div>
+        <div class="stat-row">
+          <span>Jobs Applied:</span>
+          <span id="stat-applied" class="stat-val">0</span>
+        </div>
+        <div class="stat-row">
+          <span>Outreach Drafts:</span>
+          <span id="stat-outreach" class="stat-val">0</span>
+        </div>
+        <div class="stat-row token-row">
+          <span>Token Usage:</span>
+          <span id="stat-tokens" class="stat-val">0</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center Content: Job Board / Outreach Lists (flex-1) -->
+    <section class="content-panel">
+      <!-- Tab 1: ATS Auto-Apply View -->
+      <div id="view-ats" class="tab-view active">
+        <div class="view-header">
+          <h2>Application Pipeline</h2>
+          <div class="filters">
+            <button class="filter-btn active" onclick="filterJobs('all')">All</button>
+            <button class="filter-btn" onclick="filterJobs('matched')">Matched</button>
+            <button class="filter-btn" onclick="filterJobs('applying')">Applying</button>
+            <button class="filter-btn" onclick="filterJobs('applied')">Applied</button>
+            <button class="filter-btn" onclick="filterJobs('needs_attention')">Attention</button>
+          </div>
+        </div>
+        <div id="jobs-container" class="cards-grid">
+          <div class="empty-state">
+            <span class="empty-icon">📁</span>
+            <p>Upload a resume and start search to discover local jobs</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Direct Outreach View -->
+      <div id="view-outreach" class="tab-view">
+        <div class="view-header">
+          <h2>Direct Contacts & Outreach</h2>
+        </div>
+        <div id="outreach-container" class="cards-grid">
+          <div class="empty-state">
+            <span class="empty-icon">✉️</span>
+            <p>Outreach candidates will appear here during the agent run</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Sidebar: Live Agent Stream (360px) -->
+    <aside class="stream-panel">
+      <div class="stream-header">
+        <h3>Live Agent Stream</h3>
+        <button onclick="clearLogs()" class="clear-logs-btn">Clear</button>
+      </div>
+      <div id="logs-container" class="logs-container">
+        <div class="system-log">System initialized. Awaiting user action.</div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Modals & Overlays -->
+  <!-- HITL Browser Intervention Modal -->
+  <div id="hitl-modal" class="modal-overlay hidden">
+    <div class="modal-container glass">
+      <div class="modal-header">
+        <h3><span class="alert-pulse">●</span> Human-in-the-Loop Intervention Required</h3>
+        <button class="close-modal-btn" onclick="closeHitlModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="hitl-message">The browser agent requires assistance.</p>
+        <div class="hitl-iframe-container">
+          <!-- Live screenshot/render of browser page -->
+          <img id="hitl-screenshot" src="" alt="Browser screenshot" class="hitl-screenshot">
+        </div>
+        <div class="hitl-details">
+          <span>Apply URL:</span>
+          <a id="hitl-url" href="#" target="_blank" rel="noopener noreferrer">Open link in new tab</a>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="cta-btn secondary" onclick="submitHitlResponse('skip')">Skip Job</button>
+        <button class="cta-btn" onclick="submitHitlResponse('done')">Completed Manual Step — Resume</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Direct Outreach Detail Modal -->
+  <div id="outreach-modal" class="modal-overlay hidden">
+    <div class="modal-container glass outreach-modal-container">
+      <div class="modal-header">
+        <h3>✉️ Direct Outreach Draft</h3>
+        <button class="close-modal-btn" onclick="closeOutreachModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="outreach-meta-grid">
+          <div class="meta-item">
+            <span class="meta-label">To (Unverified Guesstimates):</span>
+            <div id="modal-email-guesses" class="email-guesses-list"></div>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Contact:</span>
+            <span id="modal-contact-details" class="meta-val">Name (Role)</span>
+          </div>
+        </div>
+        <div class="email-composer">
+          <div class="composer-field">
+            <label for="composer-subject">Subject:</label>
+            <input type="text" id="composer-subject">
+          </div>
+          <div class="composer-field">
+            <label for="composer-body">Message:</label>
+            <textarea id="composer-body" rows="12"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="cta-btn secondary" onclick="discardOutreachDraft()">Discard</button>
+        <button class="cta-btn" onclick="triggerMailtoHandoff()">Open in Mail App</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

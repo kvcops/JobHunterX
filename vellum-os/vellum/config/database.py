@@ -1,0 +1,376 @@
+"""
+Vellum OS — Database Layer (aiosqlite 0.22.x)
+
+SQLite persistence for jobs, profiles, tailored resumes, outreach drafts,
+agent runs, and applied-URL deduplication.  Uses FTS5 for full-text
+search on job descriptions.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+import aiosqlite
+
+from vellum.config.logging import get_logger
+
+log = get_logger("database")
+
+# ---------------------------------------------------------------------------
+# Schema
+# ---------------------------------------------------------------------------
+
+_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS profiles (
+    id          TEXT PRIMARY KEY,
+    data_json   TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id                  TEXT PRIMARY KEY,
+    company             TEXT NOT NULL,
+    role                TEXT,
+    career_page_url     TEXT,
+    apply_url           TEXT,
+    apply_url_hash      TEXT UNIQUE,
+    jd_text             TEXT,
+    source              TEXT,
+    discovery_confidence REAL DEFAULT 0.0,
+    freshness_json      TEXT,
+    validation_json     TEXT,
+    match_score         REAL,
+    status              TEXT NOT NULL DEFAULT 'discovered',
+    tailored_pdf        BLOB,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS outreach_drafts (
+    id              TEXT PRIMARY KEY,
+    job_id          TEXT REFERENCES jobs(id),
+    company         TEXT NOT NULL,
+    contact_name    TEXT,
+    contact_role    TEXT,
+    email_guesses   TEXT,
+    subject         TEXT,
+    body            TEXT,
+    mailto_uri      TEXT,
+    confidence      REAL DEFAULT 0.0,
+    status          TEXT NOT NULL DEFAULT 'drafted',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT NOT NULL,
+    agent_name  TEXT NOT NULL,
+    job_id      TEXT,
+    event_type  TEXT NOT NULL,
+    message     TEXT,
+    data_json   TEXT,
+    tokens_in   INTEGER DEFAULT 0,
+    tokens_out  INTEGER DEFAULT 0,
+    model       TEXT,
+    latency_ms  REAL,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS applied_urls (
+    url_hash    TEXT PRIMARY KEY,
+    url         TEXT NOT NULL,
+    applied_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- FTS5 virtual table for full-text search on job descriptions
+CREATE VIRTUAL TABLE IF NOT EXISTS jobs_fts USING fts5(
+    company,
+    role,
+    jd_text,
+    content='jobs',
+    content_rowid='rowid'
+);
+
+-- Triggers to keep FTS index in sync
+CREATE TRIGGER IF NOT EXISTS jobs_ai AFTER INSERT ON jobs BEGIN
+    INSERT INTO jobs_fts(rowid, company, role, jd_text)
+    VALUES (new.rowid, new.company, new.role, new.jd_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS jobs_ad AFTER DELETE ON jobs BEGIN
+    INSERT INTO jobs_fts(jobs_fts, rowid, company, role, jd_text)
+    VALUES ('delete', old.rowid, old.company, old.role, old.jd_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS jobs_au AFTER UPDATE ON jobs BEGIN
+    INSERT INTO jobs_fts(jobs_fts, rowid, company, role, jd_text)
+    VALUES ('delete', old.rowid, old.company, old.role, old.jd_text);
+    INSERT INTO jobs_fts(rowid, company, role, jd_text)
+    VALUES (new.rowid, new.company, new.role, new.jd_text);
+END;
+"""
+
+# ---------------------------------------------------------------------------
+# Connection management
+# ---------------------------------------------------------------------------
+
+_db_path: str | None = None
+
+
+def set_db_path(path: str) -> None:
+    """Set the database file path (called during startup)."""
+    global _db_path
+    _db_path = path
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+
+async def get_connection() -> aiosqlite.Connection:
+    """Open a new connection to the database."""
+    if _db_path is None:
+        raise RuntimeError("Database path not set. Call set_db_path() first.")
+    conn = await aiosqlite.connect(_db_path)
+    conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA journal_mode=WAL")
+    await conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+async def init_db() -> None:
+    """Create tables and indexes if they don't already exist."""
+    log.info("initialising_database", path=_db_path)
+    conn = await get_connection()
+    try:
+        await conn.executescript(_SCHEMA_SQL)
+        await conn.commit()
+        log.info("database_ready")
+    finally:
+        await conn.close()
+
+
+# ---------------------------------------------------------------------------
+# CRUD Helpers
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
+
+
+async def insert_profile(data: dict) -> str:
+    """Insert a candidate profile and return its id."""
+    profile_id = _new_id()
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute(
+            "INSERT INTO profiles (id, data_json, created_at) VALUES (?, ?, ?)",
+            (profile_id, json.dumps(data), _now_iso()),
+        )
+        await db.commit()
+    return profile_id
+
+
+async def get_latest_profile() -> Optional[dict]:
+    """Return the most recently stored profile or None."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT data_json FROM profiles ORDER BY created_at DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        if row:
+            return json.loads(row["data_json"])
+    return None
+
+
+async def insert_job(job_data: dict) -> str:
+    """Insert a discovered job. Returns job id. Skips duplicates via url hash."""
+    import hashlib
+
+    job_id = job_data.get("id") or _new_id()
+    apply_url = job_data.get("apply_url") or job_data.get("career_page_url", "")
+    url_hash = hashlib.sha256(apply_url.encode()).hexdigest() if apply_url else None
+
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        # Duplicate check
+        if url_hash:
+            cursor = await db.execute(
+                "SELECT 1 FROM jobs WHERE apply_url_hash = ?", (url_hash,)
+            )
+            if await cursor.fetchone():
+                log.info("duplicate_job_skipped", url=apply_url)
+                return ""
+
+        await db.execute(
+            """INSERT INTO jobs
+               (id, company, role, career_page_url, apply_url, apply_url_hash,
+                jd_text, source, discovery_confidence, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job_id,
+                job_data.get("company", ""),
+                job_data.get("role"),
+                job_data.get("career_page_url"),
+                job_data.get("apply_url"),
+                url_hash,
+                job_data.get("jd_text"),
+                job_data.get("source"),
+                job_data.get("discovery_confidence", 0.0),
+                job_data.get("status", "discovered"),
+                _now_iso(),
+                _now_iso(),
+            ),
+        )
+        await db.commit()
+    return job_id
+
+
+async def update_job(job_id: str, **fields: Any) -> None:
+    """Update specific fields on a job row."""
+    if not fields:
+        return
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [_now_iso(), job_id]
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            f"UPDATE jobs SET {set_clause}, updated_at = ? WHERE id = ?", values
+        )
+        await db.commit()
+
+
+async def get_jobs(status: Optional[str] = None, limit: int = 100) -> list[dict]:
+    """Return jobs, optionally filtered by status."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        if status:
+            cursor = await db.execute(
+                "SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                (status, limit),
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+            )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_job(job_id: str) -> Optional[dict]:
+    """Return a single job by id."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def insert_outreach(draft: dict) -> str:
+    """Insert an outreach draft."""
+    draft_id = draft.get("id") or _new_id()
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            """INSERT INTO outreach_drafts
+               (id, job_id, company, contact_name, contact_role, email_guesses,
+                subject, body, mailto_uri, confidence, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                draft_id,
+                draft.get("job_id"),
+                draft.get("company", ""),
+                draft.get("contact_name"),
+                draft.get("contact_role"),
+                json.dumps(draft.get("email_guesses", [])),
+                draft.get("subject"),
+                draft.get("body"),
+                draft.get("mailto_uri"),
+                draft.get("confidence", 0.0),
+                draft.get("status", "drafted"),
+                _now_iso(),
+            ),
+        )
+        await db.commit()
+    return draft_id
+
+
+async def get_outreach_drafts(limit: int = 100) -> list[dict]:
+    """Return all outreach drafts."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM outreach_drafts ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("email_guesses"):
+                d["email_guesses"] = json.loads(d["email_guesses"])
+            result.append(d)
+        return result
+
+
+async def log_agent_event(
+    run_id: str,
+    agent_name: str,
+    event_type: str,
+    message: str = "",
+    job_id: str | None = None,
+    data: dict | None = None,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    model: str | None = None,
+    latency_ms: float | None = None,
+) -> None:
+    """Persist an agent run event for observability."""
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            """INSERT INTO agent_runs
+               (run_id, agent_name, job_id, event_type, message, data_json,
+                tokens_in, tokens_out, model, latency_ms, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_id,
+                agent_name,
+                job_id,
+                event_type,
+                message,
+                json.dumps(data) if data else None,
+                tokens_in,
+                tokens_out,
+                model,
+                latency_ms,
+                _now_iso(),
+            ),
+        )
+        await db.commit()
+
+
+async def get_token_usage_summary() -> dict:
+    """Aggregate token usage by model across all runs."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT model,
+                      SUM(tokens_in) as total_in,
+                      SUM(tokens_out) as total_out,
+                      COUNT(*) as call_count
+               FROM agent_runs
+               WHERE model IS NOT NULL
+               GROUP BY model"""
+        )
+        rows = await cursor.fetchall()
+        return {
+            row["model"]: {
+                "tokens_in": row["total_in"] or 0,
+                "tokens_out": row["total_out"] or 0,
+                "calls": row["call_count"],
+            }
+            for row in rows
+        }
