@@ -77,12 +77,15 @@ class CandidateProfile(BaseModel):
     portfolio: Optional[str] = ""
     summary: Optional[str] = ""
     suggested_role: Optional[str] = ""
+    relevant_experience: Optional[str] = ""
+    languages: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     experience: list[Experience] = Field(default_factory=list)
     education: list[Education] = Field(default_factory=list)
     projects: list[Project] = Field(default_factory=list)
     competitions: list[str] = Field(default_factory=list)
     achievements: list[str] = Field(default_factory=list)
+
 
 
 

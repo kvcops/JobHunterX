@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from vellum.config import database as db
 from vellum.config.logging import get_logger
 from vellum.agents import extractor, graph
+from vellum.agents.browser_agent import stop_all_active_browsers
 from vellum.api.ws import manager as ws_manager
 from vellum.tools.email_handoff import open_mail_client
 
@@ -105,6 +106,7 @@ async def start_search(request: StartSearchRequest):
     # Cancel any running search
     if _search_task and not _search_task.done():
         _search_task.cancel()
+    await stop_all_active_browsers()
 
     async def event_callback(event: dict):
         await ws_manager.broadcast(event)
@@ -130,6 +132,17 @@ async def start_search(request: StartSearchRequest):
     _search_task = asyncio.create_task(_run())
 
     return {"status": "started", "location": request.location}
+
+
+@router.post("/stop-browser")
+async def stop_browser_endpoint():
+    """Explicitly halt any running Playwright/browser-use sessions."""
+    log.info("received_stop_browser_request")
+    await stop_all_active_browsers()
+    global _search_task
+    if _search_task and not _search_task.done():
+        _search_task.cancel()
+    return {"status": "ok", "message": "Browser session stopped successfully."}
 
 
 def sanitize_for_json(data: Any) -> Any:

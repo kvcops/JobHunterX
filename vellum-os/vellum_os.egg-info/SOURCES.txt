@@ -19,6 +19,7 @@ vellum/config/logging.py
 vellum/config/settings.py
 vellum/templates/__init__.py
 vellum/tools/__init__.py
+vellum/tools/ats_api.py
 vellum/tools/email_handoff.py
 vellum/tools/embeddings.py
 vellum/tools/maps_api.py

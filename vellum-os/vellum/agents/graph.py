@@ -265,10 +265,26 @@ async def run_full_search(
 
     # Phase 2: Per-job pipelines (concurrent, limited)
     semaphore = asyncio.Semaphore(settings.max_job_pipelines)
+    completed_jobs = 0
+    total_jobs = len(discovered_jobs)
+
+    from vellum.api.ws import manager as ws_manager
 
     async def process_job(job_dict):
+        nonlocal completed_jobs
         async with semaphore:
-            return await run_job_pipeline(job_dict, profile, run_id, event_callback)
+            res = await run_job_pipeline(job_dict, profile, run_id, event_callback)
+            completed_jobs += 1
+            percentage = 80 + int((completed_jobs / total_jobs) * 20)
+            
+            # Broadcast search progress to UI
+            await ws_manager.broadcast({
+                "agent": "graph",
+                "event_type": "search_progress",
+                "message": f"Processed job {completed_jobs}/{total_jobs}: {job_dict.get('company')} - {job_dict.get('role')[:40]}",
+                "data": {"percentage": percentage, "processed": completed_jobs, "total": total_jobs}
+            })
+            return res
 
     tasks = [process_job(job) for job in discovered_jobs]
     results = await asyncio.gather(*tasks, return_exceptions=True)

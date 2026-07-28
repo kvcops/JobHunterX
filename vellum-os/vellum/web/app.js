@@ -227,6 +227,17 @@ function renderProfileCard() {
   document.getElementById("profile-phone").innerText = currentProfile.phone;
   document.getElementById("profile-location").innerText = currentProfile.location;
 
+  const expTag = document.getElementById("profile-relevant-exp");
+  if (expTag) {
+    expTag.innerText = currentProfile.relevant_experience ? `Exp: ${currentProfile.relevant_experience}` : "Exp: N/A";
+  }
+
+  const langTag = document.getElementById("profile-languages-badge");
+  if (langTag) {
+    const langs = Array.isArray(currentProfile.languages) ? currentProfile.languages.join(", ") : (currentProfile.languages || "");
+    langTag.innerText = langs ? `Languages: ${langs}` : "Languages: N/A";
+  }
+
   const container = document.getElementById("profile-skills");
   if (container) {
     container.innerHTML = "";
@@ -250,6 +261,16 @@ async function startSearch() {
   logEvent("system", `Starting job search for "${role || 'Software Engineer'}" in "${location}"`);
   document.getElementById("start-search-btn").setAttribute("disabled", "true");
 
+  // Reset progress bar
+  const bar = document.getElementById("sidebar-progress-bar");
+  if (bar) bar.style.width = "0%";
+  const progressStatus = document.getElementById("sidebar-progress-status");
+  if (progressStatus) progressStatus.innerText = "Initializing search...";
+
+  // Show halt button
+  const haltBtn = document.getElementById("halt-browser-btn");
+  if (haltBtn) haltBtn.classList.remove("hidden");
+
   try {
     const res = await fetch(`${API_BASE}/start-search`, {
       method: "POST",
@@ -262,6 +283,7 @@ async function startSearch() {
     console.error("Search start error", err);
     logEvent("error", "Failed to start active pipeline.");
     document.getElementById("start-search-btn").removeAttribute("disabled");
+    if (haltBtn) haltBtn.classList.add("hidden");
   }
 }
 
@@ -294,9 +316,42 @@ function connectWebSocket() {
 }
 
 function handleSocketMessage(msg) {
+  // Handle search progress events
+  if (msg.event_type === "search_progress") {
+    const pct = msg.data ? msg.data.percentage : 0;
+    const bar = document.getElementById("sidebar-progress-bar");
+    if (bar) bar.style.width = `${pct}%`;
+    const progressStatus = document.getElementById("sidebar-progress-status");
+    if (progressStatus) progressStatus.innerText = msg.message;
+    logEvent(msg.agent || "system", msg.message, false);
+  }
+
   // If it's standard logging event
   if (msg.event_type === "progress" || msg.event_type === "discovery" || msg.event_type === "error" || msg.event_type === "complete") {
     logEvent(msg.agent || "system", msg.message, msg.event_type === "error");
+  }
+
+  if (msg.event_type === "complete") {
+    const bar = document.getElementById("sidebar-progress-bar");
+    if (bar) bar.style.width = "100%";
+    const progressStatus = document.getElementById("sidebar-progress-status");
+    if (progressStatus) progressStatus.innerText = "Search Complete!";
+    
+    // Hide halt button
+    const haltBtn = document.getElementById("halt-browser-btn");
+    if (haltBtn) haltBtn.classList.add("hidden");
+    
+    // Re-enable start search
+    const startSearchBtn = document.getElementById("start-search-btn");
+    if (startSearchBtn) startSearchBtn.removeAttribute("disabled");
+  }
+
+  if (msg.event_type === "error") {
+    // Re-enable start search on error
+    const startSearchBtn = document.getElementById("start-search-btn");
+    if (startSearchBtn) startSearchBtn.removeAttribute("disabled");
+    const haltBtn = document.getElementById("halt-browser-btn");
+    if (haltBtn) haltBtn.classList.add("hidden");
   }
 
   // Reload telemetry usage if tokens updated
@@ -722,6 +777,12 @@ function renderProfileEditor() {
   document.getElementById("prof-location").value = currentProfile.location || "";
   if (document.getElementById("prof-present-address")) document.getElementById("prof-present-address").value = currentProfile.present_address || "";
   if (document.getElementById("prof-permanent-address")) document.getElementById("prof-permanent-address").value = currentProfile.permanent_address || "";
+  if (document.getElementById("prof-suggested-role")) document.getElementById("prof-suggested-role").value = currentProfile.suggested_role || "";
+  if (document.getElementById("prof-relevant-experience")) document.getElementById("prof-relevant-experience").value = currentProfile.relevant_experience || "";
+  if (document.getElementById("prof-languages")) {
+    const langs = Array.isArray(currentProfile.languages) ? currentProfile.languages.join(", ") : (currentProfile.languages || "");
+    document.getElementById("prof-languages").value = langs;
+  }
   document.getElementById("prof-summary").value = currentProfile.summary || "";
 
   
@@ -930,6 +991,9 @@ async function saveProfileChanges() {
     location: document.getElementById("prof-location").value.trim(),
     present_address: document.getElementById("prof-present-address") ? document.getElementById("prof-present-address").value.trim() : (currentProfile.present_address || ""),
     permanent_address: document.getElementById("prof-permanent-address") ? document.getElementById("prof-permanent-address").value.trim() : (currentProfile.permanent_address || ""),
+    suggested_role: document.getElementById("prof-suggested-role") ? document.getElementById("prof-suggested-role").value.trim() : (currentProfile.suggested_role || ""),
+    relevant_experience: document.getElementById("prof-relevant-experience") ? document.getElementById("prof-relevant-experience").value.trim() : (currentProfile.relevant_experience || ""),
+    languages: document.getElementById("prof-languages") ? document.getElementById("prof-languages").value.split(",").map(l => l.trim()).filter(l => l) : (currentProfile.languages || []),
     summary: document.getElementById("prof-summary").value.trim(),
     skills: editedSkills,
     experience: editedExperience,
@@ -1026,6 +1090,9 @@ function handleBrowserStep(data) {
   const activeBadge = document.getElementById("browser-active-badge");
   if (activeBadge) activeBadge.classList.remove("hidden");
   
+  const haltBtn = document.getElementById("halt-browser-btn");
+  if (haltBtn) haltBtn.classList.remove("hidden");
+  
   const urlInput = document.getElementById("browser-url-input");
   if (urlInput) urlInput.innerText = data.url || "about:blank";
   
@@ -1065,5 +1132,39 @@ function handleBrowserStep(data) {
   const browserTabBtn = document.getElementById("tab-browser");
   if (browserTabBtn && !browserTabBtn.classList.contains("active")) {
     browserTabBtn.classList.add("pulse-highlight");
+  }
+}
+
+async function haltBrowserAction() {
+  const haltBtn = document.getElementById("halt-browser-btn");
+  if (haltBtn) {
+    haltBtn.setAttribute("disabled", "true");
+    haltBtn.innerText = "Halting...";
+  }
+  try {
+    const res = await fetch(`${API_BASE}/stop-browser`, {
+      method: "POST"
+    });
+    if (res.ok) {
+      logEvent("system", "Halt requested. Active browser session stopped.");
+      const activeBadge = document.getElementById("browser-active-badge");
+      if (activeBadge) activeBadge.classList.add("hidden");
+      
+      const img = document.getElementById("browser-viewport-img");
+      const idle = document.getElementById("browser-idle-state");
+      if (img && idle) {
+        img.classList.add("hidden");
+        idle.classList.remove("hidden");
+      }
+    }
+  } catch (err) {
+    console.error("Error halting browser", err);
+    logEvent("error", "Failed to halt browser.");
+  } finally {
+    if (haltBtn) {
+      haltBtn.removeAttribute("disabled");
+      haltBtn.classList.add("hidden");
+      haltBtn.innerText = "Halt Browser";
+    }
   }
 }

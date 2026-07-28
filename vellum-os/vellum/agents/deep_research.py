@@ -63,12 +63,21 @@ async def run(state: dict) -> dict:
     events: list[dict] = []
     errors: list[str] = []
 
-    events.append(AgentEvent(
-        agent="deep_research",
-        event_type="progress",
-        job_id=job_id,
-        message=f"Researching contacts at {company}",
-    ).model_dump(mode="json"))
+    from vellum.api.ws import manager as ws_manager
+
+    async def log_and_broadcast_event(event_type: str, message: str, confidence: float = 0.0, data: dict = None):
+        evt = AgentEvent(
+            agent="deep_research",
+            event_type=event_type,
+            job_id=job_id,
+            message=message,
+            confidence=confidence,
+            data=data
+        ).model_dump(mode="json")
+        events.append(evt)
+        await ws_manager.broadcast(evt)
+
+    await log_and_broadcast_event("progress", f"Researching contacts at {company}")
 
     # ------------------------------------------------------------------
     # Step 1: Find contacts (role-priority)
@@ -77,24 +86,17 @@ async def run(state: dict) -> dict:
     contacts = await search.search_contacts(company, location)
 
     if not contacts:
-        events.append(AgentEvent(
-            agent="deep_research",
-            event_type="progress",
-            job_id=job_id,
-            message="No contacts found via search",
-        ).model_dump(mode="json"))
+        await log_and_broadcast_event("progress", "No contacts found via search")
         return {"outreach_draft": None, "events": events, "errors": errors}
 
     # Pick the best contact (first in priority order)
     best_contact = contacts[0]
 
-    events.append(AgentEvent(
-        agent="deep_research",
-        event_type="progress",
-        job_id=job_id,
-        message=f"Found: {best_contact['name']} ({best_contact['role']}) — confidence {best_contact['confidence']:.0%}",
-        confidence=best_contact["confidence"],
-    ).model_dump(mode="json"))
+    await log_and_broadcast_event(
+        "progress",
+        f"Found: {best_contact['name']} ({best_contact['role']}) — confidence {best_contact['confidence']:.0%}",
+        confidence=best_contact["confidence"]
+    )
 
     # ------------------------------------------------------------------
     # Step 2: Email permutation with MX check
@@ -126,26 +128,47 @@ async def run(state: dict) -> dict:
 
         # If MX check fails, note it
         if email_guesses and email_guesses[0].get("mx_valid") is False:
-            events.append(AgentEvent(
-                agent="deep_research",
-                event_type="progress",
-                job_id=job_id,
-                message=f"Warning: {domain} has no MX records — emails may not be deliverable",
-            ).model_dump(mode="json"))
+            await log_and_broadcast_event(
+                "progress",
+                f"Warning: {domain} has no MX records — emails may not be deliverable"
+            )
     else:
-        events.append(AgentEvent(
-            agent="deep_research",
-            event_type="progress",
-            job_id=job_id,
-            message="Could not determine company email domain",
-        ).model_dump(mode="json"))
+        await log_and_broadcast_event("progress", "Could not determine company email domain")
 
     # ------------------------------------------------------------------
     # Step 3: Draft outreach email
     # ------------------------------------------------------------------
-    profile_summary = f"""Name: {profile.get('name', '')}
-Skills: {', '.join(profile.get('skills', [])[:10])}
-Recent role: {profile.get('experience', [{}])[0].get('role', '')} at {profile.get('experience', [{}])[0].get('company', '')}"""
+    # Generate full candidate memory summary
+    exp_details = []
+    for exp in profile.get("experience", []):
+        bullets_str = "\n  * ".join(exp.get("bullets", []))
+        exp_details.append(
+            f"- {exp.get('role')} at {exp.get('company')} ({exp.get('start')} - {exp.get('end')}):\n  * {bullets_str}"
+        )
+    edu_details = []
+    for edu in profile.get("education", []):
+        edu_details.append(
+            f"- {edu.get('degree')} from {edu.get('institution')} ({edu.get('start')} - {edu.get('end')})"
+        )
+
+    profile_summary = f"""Candidate Profile Context:
+Name: {profile.get('name', '')}
+Email: {profile.get('email', '')}
+Phone: {profile.get('phone', '')}
+Location: {profile.get('location', '')}
+Present Address: {profile.get('present_address', '')}
+Permanent Address: {profile.get('permanent_address', '')}
+Suggested Role: {profile.get('suggested_role', '')}
+Relevant Experience Level: {profile.get('relevant_experience', '')}
+Languages: {', '.join(profile.get('languages', [])) if isinstance(profile.get('languages'), list) else profile.get('languages', '')}
+Skills: {', '.join(profile.get('skills', []))}
+Professional Summary: {profile.get('summary', '')}
+
+Detailed Work Experience:
+{chr(10).join(exp_details)}
+
+Education:
+{chr(10).join(edu_details)}"""
 
     draft_messages = [
         {"role": "system", "content": "You are a professional email writer."},
@@ -206,13 +229,11 @@ Recent role: {profile.get('experience', [{}])[0].get('role', '')} at {profile.ge
     draft_dict = draft.model_dump(mode="json")
     await db.insert_outreach(draft_dict)
 
-    events.append(AgentEvent(
-        agent="deep_research",
-        event_type="complete",
-        job_id=job_id,
-        message=f"Outreach draft ready for {best_contact['name']} ({best_contact['role']})",
+    await log_and_broadcast_event(
+        "complete",
+        f"Outreach draft ready for {best_contact['name']} ({best_contact['role']})",
         confidence=overall_conf,
-        data={"contact_role": best_contact["role"], "email_count": len(email_guesses)},
-    ).model_dump(mode="json"))
+        data={"contact_role": best_contact["role"], "email_count": len(email_guesses)}
+    )
 
     return {"outreach_draft": draft_dict, "events": events, "errors": errors}

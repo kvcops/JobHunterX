@@ -68,6 +68,10 @@
               <span class="dot-sep">•</span>
               <span id="profile-location">City, Country</span>
             </div>
+            <div class="profile-meta-tags">
+              <span id="profile-relevant-exp" class="meta-tag exp-tag">Exp: N/A</span>
+              <span id="profile-languages-badge" class="meta-tag lang-tag">Languages: N/A</span>
+            </div>
           </div>
         </div>
       </div>
@@ -134,6 +138,9 @@
         </div>
         <div class="progress-widget-body">
           <div id="sidebar-progress-status" class="progress-status-text">System Idle</div>
+          <div class="progress-bar-container">
+            <div id="sidebar-progress-bar" class="progress-bar" style="width: 0%;"></div>
+          </div>
           <div id="progress-mini-logs" class="progress-mini-logs">
             <div class="mini-log-item">Ready for resume upload.</div>
           </div>
@@ -375,6 +382,14 @@
                       <label for="prof-suggested-role">Suggested Target Role (AI Recommended)</label>
                       <input type="text" id="prof-suggested-role" placeholder="e.g. Software Engineer, Frontend Developer">
                     </div>
+                    <div class="form-group full-width">
+                      <label for="prof-relevant-experience">Relevant Experience (Extracted Total & Domain Focus)</label>
+                      <input type="text" id="prof-relevant-experience" placeholder="e.g. 3+ Years in AI/ML & Full Stack Development">
+                    </div>
+                    <div class="form-group full-width">
+                      <label for="prof-languages">Languages Known (Natural Languages)</label>
+                      <input type="text" id="prof-languages" placeholder="e.g. English, Telugu, Hindi, Spanish">
+                    </div>
                   </div>
                 </div>
 
@@ -453,6 +468,10 @@
                   <h2>Live Browsing Agent Viewport</h2>
                   <p class="view-sub">Real-time Chromium automation stream and DOM interaction telemetry.</p>
                 </div>
+                <button id="halt-browser-btn" class="header-stop-btn hidden" onclick="haltBrowserAction()" title="Halt Active Browser Session">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" fill="currentColor"/></svg>
+                  <span>Halt Browser</span>
+                </button>
               </div>
               
               <div id="browser-agent-console" class="browser-agent-console-side">

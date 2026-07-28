@@ -120,13 +120,16 @@ async def extract_apply_links_deterministic(html: str, base_url: str = "") -> li
     Returns list of {"url": str, "text": str, "method": "deterministic",
                       "confidence": 0.9, "ats_type": str}.
     """
+    if not html or not html.strip():
+        return []
+
     import asyncio
     from urllib.parse import urljoin
 
     def _parse():
         from bs4 import BeautifulSoup
 
-        soup = BeautifulSoup(html, "lxml")
+        soup = BeautifulSoup(html, "html.parser")
         links = []
         seen_urls = set()
 
@@ -161,36 +164,60 @@ async def extract_apply_links_deterministic(html: str, base_url: str = "") -> li
 
 
 # ---------------------------------------------------------------------------
-# Tier 2: curl_cffi + trafilatura for JD text extraction
+# Tier 2: curl_cffi + httpx fallback + trafilatura for JD text extraction
 # ---------------------------------------------------------------------------
 
 async def fetch_page(url: str) -> dict:
-    """Fetch a page using curl_cffi with Chrome TLS fingerprint.
+    """Fetch a page using curl_cffi with Chrome TLS fingerprint and httpx fallback.
 
     Returns {"html": str, "status": int, "headers": dict} or {"error": str}.
     """
+    if not url or not url.startswith(("http://", "https://")):
+        return {"error": "Invalid URL", "html": "", "status": 0, "headers": {}}
+
     import asyncio
-    from curl_cffi import requests as cffi_requests
 
     def _fetch():
-        resp = cffi_requests.get(
-            url,
-            impersonate="chrome",
-            timeout=20,
-            allow_redirects=True,
-        )
-        return {
-            "html": resp.text,
-            "status": resp.status_code,
-            "headers": dict(resp.headers),
-        }
+        # Tier 1: curl_cffi Chrome impersonation
+        try:
+            from curl_cffi import requests as cffi_requests
+            resp = cffi_requests.get(
+                url,
+                impersonate="chrome",
+                timeout=12,
+                allow_redirects=True,
+            )
+            if resp.status_code == 200 and resp.text:
+                return {
+                    "html": resp.text,
+                    "status": resp.status_code,
+                    "headers": dict(resp.headers),
+                }
+        except Exception as exc:
+            log.warning("curl_cffi_failed", url=url, error=str(exc)[:100])
+
+        # Tier 2: Standard httpx fallback
+        try:
+            import httpx
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36"}
+            with httpx.Client(timeout=10.0, follow_redirects=True, headers=headers) as client:
+                res = client.get(url)
+                return {
+                    "html": res.text,
+                    "status": res.status_code,
+                    "headers": dict(res.headers),
+                }
+        except Exception as exc:
+            log.warning("httpx_fallback_failed", url=url, error=str(exc)[:100])
+            return {"error": str(exc), "html": "", "status": 0, "headers": {}}
 
     try:
         result = await asyncio.to_thread(_fetch)
-        log.info("page_fetched", url=url, status=result["status"])
+        if result.get("status") == 200:
+            log.info("page_fetched", url=url, status=result["status"])
         return result
     except Exception as exc:
-        log.error("page_fetch_error", url=url, error=str(exc))
+        log.warning("page_fetch_error", url=url, error=str(exc)[:100])
         return {"error": str(exc), "html": "", "status": 0, "headers": {}}
 
 
@@ -199,6 +226,9 @@ async def extract_jd_text(html: str) -> str:
 
     Returns clean text string.
     """
+    if not html or not html.strip():
+        return ""
+
     import asyncio
     import trafilatura
 
@@ -209,7 +239,7 @@ async def extract_jd_text(html: str) -> str:
     try:
         return await asyncio.to_thread(_extract)
     except Exception as exc:
-        log.error("trafilatura_error", error=str(exc))
+        log.warning("trafilatura_error", error=str(exc)[:100])
         return ""
 
 

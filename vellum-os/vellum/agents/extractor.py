@@ -32,6 +32,8 @@ Return a JSON object with exactly these keys:
   "portfolio": "https://...",
   "summary": "Professional summary paragraph",
   "suggested_role": "Suggested job title that fits best",
+  "relevant_experience": "Summarized total experience e.g. '3+ Years in AI/ML & Full Stack Development' or 'Fresh Graduate / Entry Level'",
+  "languages": ["English", "Hindi", "Telugu"],
   "skills": ["skill1", "skill2"],
   "experience": [
     {
@@ -66,7 +68,9 @@ Rules:
 - Extract ONLY what is explicitly written or present in the embedded links. Do NOT fabricate or hallucinate.
 - Match project URLs, GitHub, and Portfolio URLs from the extracted embedded links section when applicable.
 - For suggested_role: Analyze the candidate's skills and past work roles, and output the single best target job title/role.
-- For skills, list every technology, tool, language, and framework mentioned.
+- For relevant_experience: Calculate/summarize the total years and domain experience from their past work and projects (e.g. "2+ Years in Software Engineering").
+- For languages: List all natural spoken/written languages mentioned (e.g. English, Telugu, Hindi, French).
+- For skills: List every technology, tool, programming language, and framework mentioned.
 - Return valid JSON only. No markdown, no explanation."""
 
 

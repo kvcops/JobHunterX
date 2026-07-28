@@ -342,6 +342,32 @@ def test_pdf_rendering():
     return True
 
 
+def test_ats_api():
+    """Test 13: Public ATS & VC API integrations (Greenhouse, Lever, Freshteam, Getro VC, Hasjob)."""
+    header("TEST 13: Public ATS & VC API integrations")
+
+    async def _test():
+        from vellum.tools.ats_api import fetch_greenhouse_jobs, fetch_lever_jobs, fetch_freshteam_jobs, fetch_getro_vc_jobs
+        from vellum.tools.search import fetch_hasjob_jobs
+
+        gh_jobs = await fetch_greenhouse_jobs("stripe")
+        lever_jobs = await fetch_lever_jobs("cred")
+        ft_jobs = await fetch_freshteam_jobs("happyfox")
+        vc_jobs = await fetch_getro_vc_jobs("blume.vc", "Blume Ventures")
+        hasjob_items = await fetch_hasjob_jobs(max_results=5)
+
+        assert isinstance(gh_jobs, list)
+        assert isinstance(lever_jobs, list)
+        assert isinstance(ft_jobs, list)
+        assert isinstance(vc_jobs, list)
+        assert isinstance(hasjob_items, list)
+
+        print(f"  PASS: GH={len(gh_jobs)}, Lever={len(lever_jobs)}, Freshteam={len(ft_jobs)}, VC Jobs={len(vc_jobs)}, Hasjob={len(hasjob_items)}")
+        return True
+
+    return asyncio.run(_test())
+
+
 def main():
     print(f"Python: {sys.version}")
     print(f"Platform: {sys.platform}")
@@ -359,6 +385,7 @@ def main():
         ("JSON bytes sanitizer", test_json_sanitizer),
         ("Strict location matrix", test_strict_location_matrix),
         ("PDF resume rendering", test_pdf_rendering),
+        ("Public ATS APIs", test_ats_api),
     ]
 
     results = {}

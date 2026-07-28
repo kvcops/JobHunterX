@@ -22,10 +22,6 @@ dependencies = [
     # --- Search (replaces broken googlesearch-python) ---
     "ddgs>=7.0.0",
 
-    # --- Geospatial ---
-    "geopy>=2.4.0",
-    "overpy>=0.7.0",
-
     # --- Scraping & Parsing ---
     "curl-cffi>=0.15.0",
     "trafilatura>=2.0.0",

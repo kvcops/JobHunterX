@@ -65,6 +65,26 @@ def _detect_page_type(page_text: str) -> str:
 # Browser agent runner
 # ---------------------------------------------------------------------------
 
+_active_sessions: list[tuple[asyncio.AbstractEventLoop, Any]] = []
+
+
+async def stop_all_active_browsers():
+    """Halt any active browser-use Agent sessions by closing their browsers."""
+    log.info("stopping_all_active_browsers", count=len(_active_sessions))
+    for loop, agent in list(_active_sessions):
+        try:
+            if hasattr(agent, "browser") and agent.browser:
+                async def _close():
+                    try:
+                        await agent.browser.close()
+                    except Exception:
+                        pass
+                asyncio.run_coroutine_threadsafe(_close(), loop)
+        except Exception as exc:
+            log.warning("error_triggering_browser_close", error=str(exc))
+    _active_sessions.clear()
+
+
 async def run(state: dict) -> dict:
     """Agent B: Browser execution for job application.
 
@@ -130,14 +150,21 @@ Candidate Information:
 - Phone: {profile.get('phone', '')}
 - Location: {profile.get('location', '')}
 - Present Address: {profile.get('present_address', '')}
+- Permanent Address: {profile.get('permanent_address', '')}
+- Languages Known: {', '.join(profile.get('languages', [])) if isinstance(profile.get('languages'), list) else profile.get('languages', '')}
+- Key Skills: {', '.join(profile.get('skills', [])[:15]) if isinstance(profile.get('skills'), list) else profile.get('skills', '')}
 - LinkedIn: {profile.get('linkedin', '')}
+- GitHub: {profile.get('github', '')}
+- Portfolio: {profile.get('portfolio', '')}
+- Professional Summary: {profile.get('summary', '')}
 
 CRITICAL TOKEN SAVING & SPEED RULE:
 Keep your thinking extremely brief and short (1 concise sentence max). Do NOT write long explanations or reasoning. Execute actions directly to minimize token usage and complete the task fast!
 
 Instructions:
 1. Fill in all required fields with the candidate information above.
-2. If there is a resume upload field, upload the file at: {pdf_path or 'N/A'}
+2. If there is a resume upload field, upload the file at: {pdf_path or 'N/A'}. 
+   CRITICAL FILE UPLOAD RULE: When uploading a resume, do NOT click the decorative/visible upload button directly. Instead, search for the hidden `<input type="file">` element (which has type="file") and perform the file upload action on that specific input element directly to avoid the Playwright 'Node is not a file input element' error.
 3. If you encounter a login page, STOP and report "LOGIN_REQUIRED".
 4. If you encounter a CAPTCHA, STOP and report "CAPTCHA_DETECTED".
 5. If you see an OTP/MFA prompt, STOP and report "MFA_REQUIRED".
@@ -208,11 +235,14 @@ Instructions:
             import concurrent.futures
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            _active_sessions.append((loop, agent))
             try:
                 return loop.run_until_complete(
                     asyncio.wait_for(agent.run(), timeout=120)
                 )
             finally:
+                if (loop, agent) in _active_sessions:
+                    _active_sessions.remove((loop, agent))
                 loop.close()
 
         loop = asyncio.get_running_loop()
@@ -329,6 +359,9 @@ Instructions:
         return {"browser_result": {"status": "error"}, "events": events, "errors": errors}
 
     except Exception as exc:
+        # DO NOT swallow or catch LangGraph Interrupt exceptions
+        if exc.__class__.__name__ == "Interrupt" or "Interrupt" in str(type(exc)):
+            raise exc
         log.error("browser_agent_error", job_id=job_id, error=str(exc))
         errors.append(str(exc))
         await db.update_job(job_id, status="failed")

@@ -82,9 +82,9 @@ _semaphores: Dict[str, asyncio.Semaphore] = {}
 # Mistral free: ~60 RPM → 1 req per 1s minimum
 # Gemini free: ~15 RPM → 1 req per 4s minimum (conservative)
 _PROVIDER_MIN_DELAY: Dict[str, float] = {
-    "groq": 2.0,
+    "groq": 2.5,
     "mistral": 1.0,
-    "gemini": 4.0,
+    "gemini": 3.5,
     "default": 1.0,
 }
 
@@ -277,6 +277,11 @@ async def call_llm(
     if model.startswith("mistral/"):
         params.pop("thinking", None)
         params.pop("reasoning_effort", None)
+    elif model.startswith("gemini/"):
+        # Gemini 3+ deprecates temperature, top_p, top_k; move sampling into prompt
+        params.pop("temperature", None)
+        params.pop("top_p", None)
+        params.pop("top_k", None)
     params.setdefault("max_tokens", 768)
 
     # --- Semaphore + call ---
