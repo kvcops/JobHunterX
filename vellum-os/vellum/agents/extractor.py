@@ -67,6 +67,7 @@ Return a JSON object with exactly these keys:
 Rules:
 - Extract ONLY what is explicitly written or present in the embedded links. Do NOT fabricate or hallucinate.
 - Match project URLs, GitHub, and Portfolio URLs from the extracted embedded links section when applicable.
+- For projects: Carefully identify all projects (personal, academic, professional, or open-source) listed in the resume. For each project, extract: the exact name/title as "title", a concise description of what was built and achieved as "description", the repository or live demo url as "url" (matching/resolving links from the resume or extracted hyperlinks section), and technologies used as a list. If a project has no link/URL, set it to "". Do not skip projects.
 - For suggested_role: Analyze the candidate's skills and past work roles, and output the single best target job title/role.
 - For relevant_experience: Calculate/summarize the total years and domain experience from their past work and projects (e.g. "2+ Years in Software Engineering").
 - For languages: List all natural spoken/written languages mentioned (e.g. English, Telugu, Hindi, French).
@@ -163,6 +164,24 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
             )
             data = _parse_json_object(retry["content"])
 
+        # Defensive key normalization for projects to ensure Pydantic parsing succeeds without dropping data
+        if isinstance(data, dict) and "projects" in data and isinstance(data["projects"], list):
+            normalized_projects = []
+            for proj in data["projects"]:
+                if isinstance(proj, dict):
+                    title = proj.get("title") or proj.get("name") or proj.get("project_name") or ""
+                    url = proj.get("url") or proj.get("link") or proj.get("github_url") or proj.get("project_url") or ""
+                    desc = proj.get("description") or proj.get("details") or proj.get("body") or proj.get("summary") or ""
+                    tech = proj.get("technologies") or proj.get("tech") or proj.get("tools") or proj.get("tech_stack") or []
+                    if isinstance(tech, str):
+                        tech = [t.strip() for t in tech.split(",") if t.strip()]
+                    normalized_projects.append({
+                        "title": title,
+                        "url": url,
+                        "description": desc,
+                        "technologies": tech
+                    })
+            data["projects"] = normalized_projects
 
         profile = CandidateProfile(**data)
         log.info(

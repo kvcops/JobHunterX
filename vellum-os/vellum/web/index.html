@@ -1,522 +1,529 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vellum OS — Career Intelligence & Application Agent</title>
+  <title>Vellum OS — Autonomous Career Agent</title>
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-  <!-- Google Fonts: Plus Jakarta Sans, Inter, JetBrains Mono -->
+  <!-- Google Fonts: Space Grotesk, Plus Jakarta Sans, Inter, JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260727_v5">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20260728_v1">
 </head>
 
 <body>
-  <!-- Ambient background glow elements -->
+  <!-- Cybernetic animated background glow shapes -->
   <div class="bg-glow bg-glow-1"></div>
   <div class="bg-glow bg-glow-2"></div>
+  <div class="bg-glow bg-glow-3"></div>
 
   <!-- Main Application Wrapper -->
-  <div class="app-container">
+  <div class="app-layout-wrapper">
     
-    <!-- Left Sidebar: Brand & Control Panel (270px) -->
-    <aside class="app-sidebar">
-      <!-- Logo and Brand -->
-      <div class="sidebar-brand">
-        <div class="brand-logo-container">
-          <img src="assets/logo.svg" alt="Vellum OS Logo" class="brand-logo">
+    <!-- Floating Glassmorphic Top Header -->
+    <header class="app-header glass">
+      <div class="header-brand">
+        <div class="brand-logo-glow">
+          <img src="assets/logo.svg" alt="Vellum OS" class="brand-logo">
         </div>
-        <div class="brand-text">
-          <span class="brand-name">Vellum <span class="brand-os">OS</span></span>
-          <span class="brand-sub">Career Intelligence</span>
-        </div>
-      </div>
-      
-      <!-- Resume Upload Widget -->
-      <div class="sidebar-widget upload-widget">
-        <div class="widget-header">
-          <div class="widget-header-title">
-            <svg class="widget-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <span>Upload Resume</span>
-          </div>
-          <span class="badge-mini">PDF</span>
-        </div>
-
-        <div id="drop-zone" class="drop-zone">
-          <div class="drop-icon-wrapper">
-            <svg class="drop-svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="12" y1="18" x2="12" y2="12"></line>
-              <line x1="9" y1="15" x2="15" y2="15"></line>
-            </svg>
-          </div>
-          <p class="drop-text">Drag & drop PDF resume</p>
-          <span class="drop-subtext">or click to browse file</span>
-          <input type="file" id="resume-input" accept="application/pdf" hidden>
-        </div>
-        
-        <!-- Profile Summary Snippet (Shown after upload) -->
-        <div id="profile-card" class="sidebar-profile-card hidden">
-          <div class="profile-card-badge">Parsed Candidate</div>
-          <div class="profile-header">
-            <h4 id="profile-name">Candidate Name</h4>
-            <p id="profile-email">email@example.com</p>
-            <div class="profile-details-row">
-              <span id="profile-phone">+91 00000 00000</span>
-              <span class="dot-sep">•</span>
-              <span id="profile-location">City, Country</span>
-            </div>
-            <div class="profile-meta-tags">
-              <span id="profile-relevant-exp" class="meta-tag exp-tag">Exp: N/A</span>
-              <span id="profile-languages-badge" class="meta-tag lang-tag">Languages: N/A</span>
-            </div>
-          </div>
+        <div class="brand-text-wrapper">
+          <span class="brand-title">Vellum <span class="brand-badge-core">OS</span></span>
+          <span class="brand-subtitle">Career Intelligence Node</span>
         </div>
       </div>
-      
-      <!-- Telemetry & Live Stats Widget -->
-      <div class="sidebar-widget stats-widget">
-        <div class="widget-header">
-          <div class="widget-header-title">
-            <svg class="widget-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            <span>Telemetry & Activity</span>
-          </div>
-        </div>
-        
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-card-icon discovered">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            </div>
-            <div class="stat-card-info">
-              <span id="stat-discovered" class="stat-count">0</span>
-              <span class="stat-label">Discovered</span>
-            </div>
-          </div>
 
-          <div class="stat-card">
-            <div class="stat-card-icon applied">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg>
-            </div>
-            <div class="stat-card-info">
-              <span id="stat-applied" class="stat-count">0</span>
-              <span class="stat-label">Applied</span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-card-icon outreach">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            </div>
-            <div class="stat-card-info">
-              <span id="stat-outreach" class="stat-count">0</span>
-              <span class="stat-label">Drafts</span>
-            </div>
-          </div>
-
-          <div class="stat-card token-card">
-            <div class="stat-card-icon tokens">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            </div>
-            <div class="stat-card-info">
-              <span id="stat-tokens" class="stat-count">0</span>
-              <span class="stat-label">LLM Tokens</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Agent Progress & Realtime Logs Widget -->
-      <div class="sidebar-widget progress-widget">
-        <div class="widget-header">
-          <div class="widget-header-title">
-            <span id="sidebar-progress-dot" class="status-pulse-dot"></span>
-            <span>Agent Status</span>
-          </div>
-        </div>
-        <div class="progress-widget-body">
-          <div id="sidebar-progress-status" class="progress-status-text">System Idle</div>
-          <div class="progress-bar-container">
-            <div id="sidebar-progress-bar" class="progress-bar" style="width: 0%;"></div>
-          </div>
-          <div id="progress-mini-logs" class="progress-mini-logs">
-            <div class="mini-log-item">Ready for resume upload.</div>
-          </div>
-        </div>
-      </div>
-    </aside>
-    
-    <!-- Right Container (Top Bar + Workspace) -->
-    <div class="main-workspace">
-      
-      <!-- Top Bar Header -->
-      <header class="app-header">
-        <!-- Switch tabs in the middle -->
-        <div class="header-nav-container">
-          <nav class="tab-nav">
-            <button class="tab-btn active" id="tab-profile" onclick="switchTab('profile')">
-              <svg class="tab-icon-svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              <span>Candidate Profile</span>
-            </button>
-
-            <button class="tab-btn" id="tab-resumes" onclick="switchTab('resumes')">
-              <svg class="tab-icon-svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-              <span>Tailored Resumes</span>
-            </button>
-
-            <button class="tab-btn" id="tab-ats" onclick="switchTab('ats')">
-              <svg class="tab-icon-svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-              <span>ATS Pipeline</span>
-            </button>
-
-            <button class="tab-btn" id="tab-outreach" onclick="switchTab('outreach')">
-              <svg class="tab-icon-svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              <span>Direct Outreach</span>
-            </button>
-
-            <button class="tab-btn" id="tab-browser" onclick="switchTab('browser')">
-              <svg class="tab-icon-svg" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-              <span>Live Agent Viewport</span>
-            </button>
-          </nav>
-        </div>
-        
-        <!-- Header Actions (Right) -->
-        <div class="header-actions">
-          <div id="status-badge" class="status-badge idle">
-            <span class="status-dot-inner"></span>
-            <span class="status-text">Idle</span>
-          </div>
-          
-          <button id="header-reset-btn" class="header-stop-btn" onclick="resetSystemAction()" title="Stop Agent & Reset Database">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="3"/></svg>
-            <span>Stop & Reset</span>
+      <!-- Centered Floating Navigation Dock -->
+      <div class="header-nav-dock">
+        <nav class="nav-dock-tabs">
+          <button class="dock-tab-btn active" id="tab-profile" onclick="switchTab('profile')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>Credentials</span>
           </button>
-          
-          <button id="theme-toggle" class="theme-btn" aria-label="Toggle Dark / Light Theme" title="Toggle Theme">
-            <!-- Sun icon -->
-            <svg class="sun-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            <!-- Moon icon -->
-            <svg class="moon-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+
+          <button class="dock-tab-btn" id="tab-resumes" onclick="switchTab('resumes')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <span>Optimized CVs</span>
           </button>
-          
-          <div class="user-avatar" title="Candidate Profile">VK</div>
+
+          <button class="dock-tab-btn" id="tab-ats" onclick="switchTab('ats')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+            <span>Applications</span>
+          </button>
+
+          <button class="dock-tab-btn" id="tab-outreach" onclick="switchTab('outreach')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <span>Outreach</span>
+          </button>
+
+          <button class="dock-tab-btn" id="tab-browser" onclick="switchTab('browser')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            <span>Live Viewport</span>
+          </button>
+        </nav>
+      </div>
+
+      <!-- Right Header Actions -->
+      <div class="header-actions-area">
+        <div id="status-badge" class="status-badge idle">
+          <span class="status-dot-inner"></span>
+          <span class="status-text">Idle</span>
         </div>
-      </header>
-      
-      <!-- Content Area -->
-      <div class="content-scrollable">
-        <main class="dashboard-content">
+
+        <button id="header-reset-btn" class="header-reset-action-btn" title="Halt Agent & Wipe Local Database">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+          <span>Halt Node</span>
+        </button>
+
+        <button id="theme-toggle" class="app-theme-toggle-btn" aria-label="Toggle Theme" title="Toggle Theme Mode">
+          <!-- Sun icon -->
+          <svg class="sun-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <!-- Moon icon -->
+          <svg class="moon-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+
+        <div class="user-profile-badge" title="Candidate Profile Info">VK</div>
+      </div>
+    </header>
+
+    <!-- Main Scrollable Grid Canvas -->
+    <div class="dashboard-scroll-viewport">
+      <div class="bento-grid-canvas">
+        
+        <!-- Bento Sidebar Column (Width: 28%) -->
+        <aside class="bento-col bento-sidebar-col">
           
-          <!-- Welcome Banner Section -->
-          <section class="welcome-banner">
-            <div class="welcome-text">
-              <h1>Autonomous Career <span class="hero-gradient-text">Agent Intelligence</span></h1>
-              <p>Upload your resume to discover matching opportunities, generate custom CVs, and trigger automated job applications.</p>
+          <!-- Quantum Upload Nexus Card -->
+          <div class="bento-card upload-portal-card glass">
+            <div class="nexus-glow-overlay"></div>
+            <div id="drop-zone" class="nexus-portal-zone">
+              <div class="nexus-circle-wrapper">
+                <div class="nexus-spinner nexus-spinner-1"></div>
+                <div class="nexus-spinner nexus-spinner-2"></div>
+                <div class="nexus-icon-core">
+                  <svg class="nexus-svg" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2v12M12 2l-4 4m4-4l4 4M20 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="nexus-text-block">
+                <p class="nexus-main-text">Upload Resume</p>
+                <span class="nexus-sub-text">Drag PDF or click to browse</span>
+              </div>
+              <input type="file" id="resume-input" accept="application/pdf" hidden>
             </div>
-            <div class="welcome-tag">
-              <span class="sparkle-icon">✦</span> 2026 Engine
+            
+            <!-- Holographic Parsed Candidate Profile Details Card -->
+            <div id="profile-card" class="hologram-profile-card hidden">
+              <div class="hologram-card-badge"><span class="hologram-dot"></span> Parsed Candidate</div>
+              <div class="hologram-header">
+                <h4 id="profile-name">Candidate Name</h4>
+                <p id="profile-email">email@example.com</p>
+                <div class="hologram-details-row">
+                  <span id="profile-phone">+91 00000 00000</span>
+                  <span class="hologram-sep">•</span>
+                  <span id="profile-location">City, Country</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Telemetry Matrix Card -->
+          <div class="bento-card telemetry-matrix-card glass">
+            <div class="card-title-header">
+              <svg class="card-title-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>System Core Telemetry</span>
+            </div>
+            
+            <div class="telemetry-grid">
+              <div class="telemetry-node discovered">
+                <div class="telemetry-node-header">
+                  <span class="telemetry-node-label">Discovered</span>
+                  <div class="telemetry-node-icon">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </div>
+                </div>
+                <span id="stat-discovered" class="telemetry-node-count">0</span>
+              </div>
+
+              <div class="telemetry-node applied">
+                <div class="telemetry-node-header">
+                  <span class="telemetry-node-label">Applied</span>
+                  <div class="telemetry-node-icon">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                </div>
+                <span id="stat-applied" class="telemetry-node-count">0</span>
+              </div>
+
+              <div class="telemetry-node outreach">
+                <div class="telemetry-node-header">
+                  <span class="telemetry-node-label">Outreach</span>
+                  <div class="telemetry-node-icon">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  </div>
+                </div>
+                <span id="stat-outreach" class="telemetry-node-count">0</span>
+              </div>
+
+              <div class="telemetry-node tokens">
+                <div class="telemetry-node-header">
+                  <span class="telemetry-node-label">LLM Tokens</span>
+                  <div class="telemetry-node-icon">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  </div>
+                </div>
+                <span id="stat-tokens" class="telemetry-node-count">0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Agent Console Terminal Card -->
+          <div class="bento-card agent-terminal-card glass">
+            <div class="card-title-header">
+              <span id="sidebar-progress-dot" class="status-pulse-dot"></span>
+              <span id="sidebar-progress-status" class="terminal-status-title">System Standby</span>
+            </div>
+            
+            <div class="terminal-bar-container">
+              <div id="sidebar-progress-bar" class="terminal-progress-bar" style="width: 0%;"></div>
+            </div>
+            
+            <div id="progress-mini-logs" class="terminal-logs-screen">
+              <div class="mini-log-item">Ready for candidate resume upload.</div>
+            </div>
+          </div>
+        </aside>
+        
+        <!-- Bento Workspace Column (Width: 72%) -->
+        <main class="bento-col bento-workspace-col">
+          
+          <!-- Futuristic Welcome & Dashboard Header Card -->
+          <section class="bento-card welcome-matrix-card glass">
+            <div class="welcome-card-content">
+              <span class="welcome-top-pill">✦ v2026.4 Core Node</span>
+              <h1>Autonomous Career <span class="accent-glow-text">Agent Intelligence</span></h1>
+              <p>Tailor resumes, validate fit scores, and orchestrate headless browser applications dynamically.</p>
             </div>
           </section>
-          
-          <!-- Bento Search & Controller Card -->
-          <section class="search-card bento-card">
-            <div class="bento-header">
-              <div class="bento-title">
+
+          <!-- Automated Search Board Bento Card -->
+          <section class="bento-card search-dashboard-card glass">
+            <div class="card-title-header">
+              <div class="header-icon-label">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <span>Automated Search Parameters</span>
               </div>
-              <span class="bento-badge">Multi-Source Crawler</span>
+              <span class="board-badge">Realtime Crawler</span>
             </div>
 
-            <div class="search-inputs-grid">
-              <div class="input-field-group">
+            <div class="search-flex-inputs-container">
+              <div class="glow-input-group">
                 <label for="target-location">Target Location</label>
-                <div class="input-with-icon">
-                  <svg class="field-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                  <input type="text" id="target-location" value="Bengaluru" placeholder="e.g. Bengaluru, Hyderabad, Remote">
+                <div class="glow-input-with-icon">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                  <input type="text" id="target-location" value="Bengaluru" placeholder="e.g. Bengaluru, Remote">
                 </div>
               </div>
               
-              <div class="input-field-group">
+              <div class="glow-input-group">
                 <label for="target-role">Target Job Title / Role</label>
-                <div class="input-with-icon">
-                  <svg class="field-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-                  <input type="text" id="target-role" value="Software Engineer" placeholder="e.g. Software Engineer, Frontend Developer">
+                <div class="glow-input-with-icon">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+                  <input type="text" id="target-role" value="Software Engineer" placeholder="e.g. Frontend Developer">
                 </div>
               </div>
               
-              <div class="search-btn-wrapper">
-                <button id="start-search-btn" class="search-jobs-btn" disabled>
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  <span>Start Career Search</span>
-                </button>
-              </div>
+              <button id="start-search-btn" class="glow-search-jobs-btn" disabled>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span>Launch Search Node</span>
+              </button>
             </div>
           </section>
           
-          <!-- View Sections Container -->
-          <div class="tab-content-views">
+          <!-- Holographic Viewports Container -->
+          <div class="viewport-contents-wrapper">
             
-            <!-- Tab View: Generated Resumes & CVs -->
+            <!-- Viewport View: Optimized CVs -->
             <div id="view-resumes" class="tab-view">
-              <div class="view-header">
+              <div class="viewport-section-header">
                 <div>
-                  <h2>Tailored Resumes & Cover Letters</h2>
-                  <p class="view-sub">AI-optimized CV variants generated for matched target job descriptions.</p>
+                  <h2>Tailored Resume Variants</h2>
+                  <p class="viewport-section-sub">AI-optimized CV variants customized for matched target job descriptions.</p>
                 </div>
               </div>
-              <div id="resumes-container" class="cards-grid">
-                <div class="empty-state">
-                  <div class="empty-icon-circle">
-                    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              <div id="resumes-container" class="bento-cards-grid">
+                <div class="empty-state-view">
+                  <div class="empty-state-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                   </div>
-                  <h3>No tailored resumes generated yet</h3>
-                  <p>Tailored resumes and CV variants created for matched job postings will appear here automatically.</p>
+                  <h3>No tailored resumes generated</h3>
+                  <p>Resumes created for matching job listings will appear here automatically.</p>
                 </div>
               </div>
             </div>
 
-            <!-- Tab View: ATS Auto-Apply Pipeline -->
+            <!-- Viewport View: ATS Applications Queue -->
             <div id="view-ats" class="tab-view">
-              <div class="view-header">
+              <div class="viewport-section-header flex-header">
                 <div>
-                  <h2>Application Pipeline</h2>
-                  <p class="view-sub">Track active job matches, browser form fills, and application progress.</p>
+                  <h2>Application Queue</h2>
+                  <p class="viewport-section-sub">Track active matches, form fields analysis, and Playwright automation progress.</p>
                 </div>
-                <div class="filters">
-                  <button class="filter-btn active" onclick="filterJobs('all')">All Jobs</button>
-                  <button class="filter-btn" onclick="filterJobs('matched')">Matched</button>
-                  <button class="filter-btn" onclick="filterJobs('applying')">Applying</button>
-                  <button class="filter-btn" onclick="filterJobs('applied')">Applied</button>
-                  <button class="filter-btn" onclick="filterJobs('needs_attention')">Attention</button>
+                <div class="filter-pill-bar">
+                  <button class="filter-pill active" onclick="filterJobs('all')">All Jobs</button>
+                  <button class="filter-pill" onclick="filterJobs('matched')">Matched</button>
+                  <button class="filter-pill" onclick="filterJobs('applying')">Applying</button>
+                  <button class="filter-pill" onclick="filterJobs('applied')">Applied</button>
+                  <button class="filter-pill" onclick="filterJobs('needs_attention')">Attention</button>
                 </div>
               </div>
               
-              <div id="jobs-container" class="cards-grid">
-                <div class="empty-state">
-                  <div class="empty-icon-circle">
-                    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+              <div id="jobs-container" class="bento-cards-grid">
+                <div class="empty-state-view">
+                  <div class="empty-state-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
                   </div>
-                  <h3>No job applications in queue</h3>
-                  <p>Upload your resume PDF and click "Start Career Search" to populate high-scoring opportunities.</p>
+                  <h3>No job listings in queue</h3>
+                  <p>Upload your resume PDF and click "Launch Search Node" to discover opportunities.</p>
                 </div>
               </div>
             </div>
             
-            <!-- Tab View: Direct Outreach -->
+            <!-- Viewport View: Direct Outreach Composer -->
             <div id="view-outreach" class="tab-view">
-              <div class="view-header">
+              <div class="viewport-section-header">
                 <div>
-                  <h2>Direct Outreach & Contacts</h2>
-                  <p class="view-sub">AI-crafted personalized email drafts and hiring team outreach messages.</p>
+                  <h2>Outreach drafts & Contacts</h2>
+                  <p class="viewport-section-sub">AI-generated personalized email drafts for recruiters and hiring managers.</p>
                 </div>
               </div>
-              <div id="outreach-container" class="cards-grid">
-                <div class="empty-state">
-                  <div class="empty-icon-circle">
-                    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              <div id="outreach-container" class="bento-cards-grid">
+                <div class="empty-state-view">
+                  <div class="empty-state-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                   </div>
-                  <h3>No outreach drafts available</h3>
-                  <p>Direct contact recommendations and personalized email drafts will display here when generated.</p>
+                  <h3>No outreach drafts found</h3>
+                  <p>Personalized outreach email templates will display here once matches are processed.</p>
                 </div>
               </div>
             </div>
 
-            <!-- Tab View: Candidate Profile Editor -->
+            <!-- Viewport View: Candidate Profile Editor -->
             <div id="view-profile" class="tab-view active">
-              <div class="view-header">
+              <div class="viewport-section-header">
                 <div>
                   <h2>Candidate Profile Credentials</h2>
-                  <p class="view-sub">Review parsed resume details and edit parameters used for form automation.</p>
+                  <p class="viewport-section-sub">Verify extracted resume properties and customize details used for form automation.</p>
                 </div>
               </div>
 
-              <div class="profile-editor-container">
-                <!-- Personal Info Card -->
-                <div class="profile-card">
+              <div class="hologram-profile-editor-layout">
+                <!-- Personal Info Panel -->
+                <div class="editor-section-card glass">
                   <div class="card-section-title">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    <span>Personal Information</span>
+                    <span>Personal Credentials</span>
                   </div>
-                  <div class="form-grid">
-                    <div class="form-group">
+                  <div class="glow-form-grid">
+                    <div class="glow-form-group">
                       <label for="prof-name">Full Name</label>
-                      <input type="text" id="prof-name" placeholder="John Doe">
+                      <input type="text" id="prof-name" placeholder="Candidate Name">
                     </div>
-                    <div class="form-group">
+                    <div class="glow-form-group">
                       <label for="prof-email">Email Address</label>
-                      <input type="email" id="prof-email" placeholder="john.doe@example.com">
+                      <input type="email" id="prof-email" placeholder="email@example.com">
                     </div>
-                    <div class="form-group">
+                    <div class="glow-form-group">
                       <label for="prof-phone">Phone Number</label>
-                      <input type="text" id="prof-phone" placeholder="+1 (555) 000-0000">
+                      <input type="text" id="prof-phone" placeholder="+91 00000 00000">
                     </div>
-                    <div class="form-group">
+                    <div class="glow-form-group">
                       <label for="prof-linkedin">LinkedIn URL</label>
-                      <input type="text" id="prof-linkedin" placeholder="https://linkedin.com/in/johndoe">
+                      <input type="text" id="prof-linkedin" placeholder="https://linkedin.com/in/... ">
                     </div>
-                    <div class="form-group">
+                    <div class="glow-form-group">
                       <label for="prof-github">GitHub URL</label>
-                      <input type="text" id="prof-github" placeholder="https://github.com/johndoe">
+                      <input type="text" id="prof-github" placeholder="https://github.com/... ">
                     </div>
-                    <div class="form-group">
+                    <div class="glow-form-group">
                       <label for="prof-portfolio">Portfolio / Website</label>
-                      <input type="text" id="prof-portfolio" placeholder="https://johndoe.dev">
+                      <input type="text" id="prof-portfolio" placeholder="https://... ">
                     </div>
-                    <div class="form-group full-width">
+                    <div class="glow-form-group full-width">
                       <label for="prof-location">Location (City, Country)</label>
-                      <input type="text" id="prof-location" placeholder="Hyderabad, India">
+                      <input type="text" id="prof-location" placeholder="City, Country">
                     </div>
-                    <div class="form-group full-width">
-                      <label for="prof-present-address">Present Address (Automation Form Filler)</label>
-                      <input type="text" id="prof-present-address" placeholder="123 Hitec City, Hyderabad, Telangana">
+                    <div class="glow-form-group full-width">
+                      <label for="prof-present-address">Present Address (For Automation Form Filler)</label>
+                      <input type="text" id="prof-present-address" placeholder="Present Address">
                     </div>
-                    <div class="form-group full-width">
+                    <div class="glow-form-group full-width">
                       <label for="prof-permanent-address">Permanent Address</label>
-                      <input type="text" id="prof-permanent-address" placeholder="Permanent House Address">
+                      <input type="text" id="prof-permanent-address" placeholder="Permanent Address">
                     </div>
-                    <div class="form-group full-width">
+                    <div class="glow-form-group full-width">
                       <label for="prof-suggested-role">Suggested Target Role (AI Recommended)</label>
-                      <input type="text" id="prof-suggested-role" placeholder="e.g. Software Engineer, Frontend Developer">
+                      <input type="text" id="prof-suggested-role" placeholder="e.g. Software Engineer">
                     </div>
-                    <div class="form-group full-width">
+                  </div>
+                </div>
+
+                <!-- Professional Highlights & Languages Card -->
+                <div class="editor-section-card highlights-languages-card glass">
+                  <div class="card-section-title">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                    <span>Professional Highlights & Languages</span>
+                  </div>
+                  <div class="glow-form-grid">
+                    <div class="glow-form-group full-width">
                       <label for="prof-relevant-experience">Relevant Experience (Extracted Total & Domain Focus)</label>
-                      <input type="text" id="prof-relevant-experience" placeholder="e.g. 3+ Years in AI/ML & Full Stack Development">
+                      <input type="text" id="prof-relevant-experience" placeholder="e.g. 3+ Years in Full Stack Development">
                     </div>
-                    <div class="form-group full-width">
-                      <label for="prof-languages">Languages Known (Natural Languages)</label>
-                      <input type="text" id="prof-languages" placeholder="e.g. English, Telugu, Hindi, Spanish">
+                    <div class="glow-form-group full-width">
+                      <label for="prof-languages">Languages Known (Natural Languages, comma-separated)</label>
+                      <div class="language-input-wrapper">
+                        <input type="text" id="prof-languages" placeholder="e.g. English, Hindi, Telugu">
+                        <div id="languages-chips-preview" class="languages-chips-preview"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 <!-- Professional Summary Card -->
-                <div class="profile-card">
+                <div class="editor-section-card glass">
                   <div class="card-section-title">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     <span>Professional Summary</span>
                   </div>
-                  <div class="form-group">
-                    <textarea id="prof-summary" rows="4" placeholder="Brief summary of your technical background, leadership experience, and achievements..."></textarea>
+                  <div class="glow-form-group">
+                    <textarea id="prof-summary" rows="4" placeholder="Brief summary of your technical background... "></textarea>
                   </div>
                 </div>
 
-                <!-- Skills Card -->
-                <div class="profile-card">
+                <!-- Skills & Technologies Card -->
+                <div class="editor-section-card glass">
                   <div class="card-section-title">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                     <span>Skills & Technologies</span>
                   </div>
-                  <div class="skills-editor">
-                    <div id="editor-skills-list" class="editor-skills-list"></div>
-                    <div class="add-skill-wrapper">
-                      <input type="text" id="new-skill-input" placeholder="Add a skill (e.g. React, Python, AWS)...">
-                      <button type="button" id="add-skill-btn" class="btn-sec">Add Skill</button>
+                  <div class="skills-editor-wrapper">
+                    <div id="editor-skills-list" class="editor-skills-chips-flow"></div>
+                    <div class="add-skill-control-group">
+                      <input type="text" id="new-skill-input" placeholder="Add custom skill (e.g. React, Docker)... ">
+                      <button type="button" id="add-skill-btn" class="glow-action-sec-btn">Add Skill</button>
                     </div>
                   </div>
                 </div>
 
                 <!-- Work Experience Card -->
-                <div class="profile-card">
+                <div class="editor-section-card glass">
                   <div class="card-section-title">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
                     <span>Work Experience</span>
                   </div>
-                  <div id="editor-experience-list" class="editor-list-container"></div>
-                  <button type="button" id="add-exp-btn" class="btn-sec btn-dashed">+ Add Work Experience</button>
+                  <div id="editor-experience-list" class="editor-block-list-container"></div>
+                  <button type="button" id="add-exp-btn" class="glow-action-dashed-btn">+ Add Work Experience</button>
                 </div>
 
                 <!-- Education Card -->
-                <div class="profile-card">
+                <div class="editor-section-card glass">
                   <div class="card-section-title">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
                     <span>Education</span>
                   </div>
-                  <div id="editor-education-list" class="editor-list-container"></div>
-                  <button type="button" id="add-edu-btn" class="btn-sec btn-dashed">+ Add Education</button>
+                  <div id="editor-education-list" class="editor-block-list-container"></div>
+                  <button type="button" id="add-edu-btn" class="glow-action-dashed-btn">+ Add Education</button>
                 </div>
 
-                <!-- Save Action -->
-                <div class="profile-actions">
-                  <button type="button" id="save-profile-btn" class="btn-save-profile">
+                <!-- Key Projects Card -->
+                <div class="editor-section-card glass">
+                  <div class="card-section-title">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    <span>Key Projects & Technical Implementations</span>
+                  </div>
+                  <div id="editor-projects-list" class="editor-block-list-container"></div>
+                  <button type="button" id="add-proj-btn" class="glow-action-dashed-btn">+ Add Project</button>
+                </div>
+
+                <!-- Save Action Footer -->
+                <div class="profile-editor-actions-bar">
+                  <button type="button" id="save-profile-btn" class="glow-profile-save-btn">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                     <span>Save Profile Credentials</span>
                   </button>
                 </div>
 
-                <!-- Danger Zone -->
-                <div class="profile-card danger-zone">
-                  <div class="danger-header">
-                    <h4>System Danger Zone</h4>
-                    <p>Halt active agent browser workers and clear local SQLite database tables (jobs, profiles, logs, and outreach drafts).</p>
+                <!-- Danger Zone Panel -->
+                <div class="editor-section-card danger-zone-card glass">
+                  <div class="danger-header-info">
+                    <h4>System Maintenance Node</h4>
+                    <p>Kill active web browser crawler threads and wipe local database profiles, outreach drafts, and logs.</p>
                   </div>
-                  <button type="button" id="reset-system-btn" class="btn-reset-db" onclick="resetSystemAction()">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                    <span>Stop Agent & Reset Database</span>
+                  <button type="button" id="reset-system-btn" class="glow-danger-reset-btn" onclick="resetSystemAction()">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                    <span>Halt & Reset Database</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            <!-- Tab View: Live Browsing Agent Console -->
+            <!-- Viewport View: Playwright Chromium Browser Stream -->
             <div id="view-browser" class="tab-view">
-              <div class="view-header">
+              <div class="viewport-section-header flex-header">
                 <div>
-                  <h2>Live Browsing Agent Viewport</h2>
-                  <p class="view-sub">Real-time Chromium automation stream and DOM interaction telemetry.</p>
+                  <h2>Live Browser Agent Viewport</h2>
+                  <p class="viewport-section-sub">Real-time Chromium automation viewport stream and DOM element logs.</p>
                 </div>
-                <button id="halt-browser-btn" class="header-stop-btn hidden" onclick="haltBrowserAction()" title="Halt Active Browser Session">
+                <button id="halt-browser-btn" class="dock-halt-browser-btn hidden" onclick="haltBrowserAction()" title="Halt Active Browser Session">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" fill="currentColor"/></svg>
-                  <span>Halt Browser</span>
+                  <span>Halt Session</span>
                 </button>
               </div>
               
-              <div id="browser-agent-console" class="browser-agent-console-side">
-                <!-- Browser Viewport Card -->
-                <div class="browser-viewport-card">
-                  <div class="browser-address-bar">
-                    <div class="browser-nav-dots">
-                      <span class="browser-dot red"></span>
-                      <span class="browser-dot yellow"></span>
-                      <span class="browser-dot green"></span>
+              <div class="browser-telemetry-console-wrapper">
+                <!-- Browser Viewport Screen Card -->
+                <div class="bento-card browser-screen-card glass">
+                  <div class="browser-navigation-bar">
+                    <div class="nav-control-dots">
+                      <span class="ctrl-dot red"></span>
+                      <span class="ctrl-dot yellow"></span>
+                      <span class="ctrl-dot green"></span>
                     </div>
-                    <div class="browser-nav-buttons">
-                      <span class="browser-nav-btn">←</span>
-                      <span class="browser-nav-btn">→</span>
+                    <div class="nav-arrows">
+                      <span class="nav-arrow-btn">←</span>
+                      <span class="nav-arrow-btn">→</span>
                     </div>
-                    <div class="browser-url-wrapper">
-                      <svg class="lock-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                      <div id="browser-url-input" class="browser-url-input-text">https://google.com</div>
+                    <div class="nav-url-bar">
+                      <svg class="url-lock-svg" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                      <div id="browser-url-input" class="url-input-display">https://google.com</div>
                     </div>
-                    <span id="browser-active-badge" class="badge-status-running hidden">
-                      <span class="live-blink-dot">●</span> Live Viewport
+                    <span id="browser-active-badge" class="viewport-live-pulse-badge hidden">
+                      <span class="live-pulse-dot">●</span> Live Stream
                     </span>
                   </div>
                   
-                  <div class="browser-screenshot-container">
-                    <img id="browser-viewport-img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Browser agent viewport stream" class="browser-screenshot-img hidden">
-                    <div id="browser-idle-state" class="browser-idle-state">
-                      <div class="idle-icon-wrapper">
-                        <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="12" cy="10" r="3"/></svg>
+                  <div class="browser-frame-viewport-display">
+                    <img id="browser-viewport-img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Browser Stream Frame" class="browser-img-element hidden">
+                    <div id="browser-idle-state" class="browser-viewport-standby">
+                      <div class="standby-icon-core">
+                        <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="12" cy="10" r="3"/></svg>
                       </div>
                       <h3>Browser Agent Standby</h3>
-                      <p>Awaiting application form trigger. The agent will launch a headless Chromium browser and stream form submission steps here live.</p>
+                      <p> Headless Playwright worker is offline. Live Chromium automation stream will display here upon launching job application nodes.</p>
                     </div>
                   </div>
                 </div>
                 
-                <!-- Browser Action Log Card -->
-                <div class="browser-actions-timeline-card">
-                  <div class="timeline-header">
-                    <h4>Automation Activity Timeline</h4>
-                    <span id="timeline-step-count" class="timeline-step-count">0 Steps Executed</span>
+                <!-- Browser Action Log Terminal Card -->
+                <div class="bento-card browser-activity-terminal glass">
+                  <div class="terminal-title-header">
+                    <h4>Automation Event Log</h4>
+                    <span id="timeline-step-count" class="terminal-step-badge">0 Steps Executed</span>
                   </div>
-                  <div id="browser-steps-log" class="browser-steps-timeline">
-                    <div class="empty-state">
-                      <p>No active automation steps logged yet.</p>
+                  <div id="browser-steps-log" class="terminal-activity-steps-container">
+                    <div class="empty-state-view">
+                      <p>Awaiting automation logs...</p>
                     </div>
                   </div>
                 </div>
@@ -524,45 +531,35 @@
             </div>
           </div>
           
-          <!-- Bottom Key Feature Cards Row -->
-          <section class="info-cards-row">
-            <div class="info-card">
-              <div class="info-card-icon-wrapper search-icon-wrap">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <!-- Bottom Features Info Bento Grid -->
+          <section class="bottom-features-grid">
+            <div class="bento-card feature-node glass">
+              <div class="feature-node-icon search-color">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               </div>
-              <div class="info-card-text">
-                <h3>Smart Matching</h3>
-                <p>Calculates multi-dimensional fit scores for every job post.</p>
-              </div>
-            </div>
-            
-            <div class="info-card">
-              <div class="info-card-icon-wrapper apply-icon-wrap">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-              </div>
-              <div class="info-card-text">
-                <h3>ATS Auto-Apply</h3>
-                <p>Automates complex web forms via Playwright browser workers.</p>
+              <div class="feature-node-texttext">
+                <h3>Multi-Source Crawler</h3>
+                <p>Locates global vacancies using Greenhouse, Lever, and Freshteam.</p>
               </div>
             </div>
             
-            <div class="info-card">
-              <div class="info-card-icon-wrapper outreach-icon-wrap">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <div class="bento-card feature-node glass">
+              <div class="feature-node-icon apply-color">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
               </div>
-              <div class="info-card-text">
-                <h3>Direct Outreach</h3>
-                <p>Generates tailored emails for recruiters and hiring managers.</p>
+              <div class="feature-node-texttext">
+                <h3>Playwright Engine</h3>
+                <p>Automates field insertion, checkboxes, and multi-page forms.</p>
               </div>
             </div>
             
-            <div class="info-card">
-              <div class="info-card-icon-wrapper tracking-icon-wrap">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <div class="bento-card feature-node glass">
+              <div class="feature-node-icon outreach-color">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </div>
-              <div class="info-card-text">
-                <h3>Real-time Telemetry</h3>
-                <p>Monitors LLM token usage, system events, and agent logs.</p>
+              <div class="feature-node-texttext">
+                <h3>Outreach Generator</h3>
+                <p>Crafts personalized hiring manager email pitches based on fit matching.</p>
               </div>
             </div>
           </section>
@@ -572,7 +569,7 @@
   </div>
   
   <!-- Modals & Overlays -->
-  <!-- HITL Browser Intervention Modal -->
+  <!-- HITL Intervention Modal -->
   <div id="hitl-modal" class="modal-overlay hidden">
     <div class="modal-container glass">
       <div class="modal-header">
@@ -580,23 +577,23 @@
         <button class="close-modal-btn" onclick="closeHitlModal()">&times;</button>
       </div>
       <div class="modal-body">
-        <p id="hitl-message">The automated browser agent requires manual input (e.g. CAPTCHA or OTP).</p>
+        <p id="hitl-message">The browser agent requires manual input (CAPTCHA, OTP, or verification).</p>
         <div class="hitl-iframe-container">
           <img id="hitl-screenshot" src="" alt="Browser screenshot" class="hitl-screenshot">
         </div>
         <div class="hitl-details">
-          <span>Target Application URL:</span>
-          <a id="hitl-url" href="#" target="_blank" rel="noopener noreferrer">Open application page in new tab</a>
+          <span>Target URL:</span>
+          <a id="hitl-url" href="#" target="_blank" rel="noopener noreferrer">Open application page in a new tab</a>
         </div>
       </div>
       <div class="modal-actions">
         <button class="cta-btn secondary" onclick="submitHitlResponse('skip')">Skip Job</button>
-        <button class="cta-btn" onclick="submitHitlResponse('done')">Completed Manual Step — Resume Agent</button>
+        <button class="cta-btn" onclick="submitHitlResponse('done')">Resume Automation</button>
       </div>
     </div>
   </div>
 
-  <!-- Direct Outreach Detail Modal -->
+  <!-- Direct Outreach composer modal -->
   <div id="outreach-modal" class="modal-overlay hidden">
     <div class="modal-container glass outreach-modal-container">
       <div class="modal-header">
@@ -606,11 +603,11 @@
       <div class="modal-body">
         <div class="outreach-meta-grid">
           <div class="meta-item">
-            <span class="meta-label">Recruiter / Contact Email:</span>
+            <label>Recruiter Email:</label>
             <div id="modal-email-guesses" class="email-guesses-list"></div>
           </div>
           <div class="meta-item">
-            <span class="meta-label">Contact Target:</span>
+            <label>Contact Target:</label>
             <span id="modal-contact-details" class="meta-val">Name (Role)</span>
           </div>
         </div>
@@ -627,12 +624,12 @@
       </div>
       <div class="modal-actions">
         <button class="cta-btn secondary" onclick="discardOutreachDraft()">Discard Draft</button>
-        <button class="cta-btn" onclick="triggerMailtoHandoff()">Open in Mail App</button>
+        <button class="cta-btn" onclick="triggerMailtoHandoff()">Open in Default Mail Client</button>
       </div>
     </div>
   </div>
 
-  <!-- System Reset Confirmation Modal -->
+  <!-- Reset Confirmation Modal -->
   <div id="reset-confirm-modal" class="modal-overlay hidden" onclick="if(event.target === this) closeResetModal()">
     <div class="modal-container glass reset-modal-container">
       <div class="modal-header danger">
@@ -659,6 +656,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260727_v5"></script>
+  <script src="app.js?v=20260728_v1"></script>
 </body>
 </html>

@@ -114,7 +114,7 @@ function toggleTheme() {
 // ---------------------------------------------------------------------------
 function switchTab(tabName) {
   // Update nav buttons in top bar
-  document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+  document.querySelectorAll(".dock-tab-btn, .tab-btn").forEach(btn => btn.classList.remove("active"));
   const topTabBtn = document.getElementById(`tab-${tabName}`);
   if (topTabBtn) {
     topTabBtn.classList.add("active");
@@ -372,6 +372,11 @@ function handleSocketMessage(msg) {
   // Handle browser agent automation steps
   if (msg.event_type === "browser_step") {
     handleBrowserStep(msg.data);
+  }
+
+  // Handle live browser real-time frame streaming
+  if (msg.event_type === "browser_stream_frame") {
+    handleBrowserStreamFrame(msg.data);
   }
 
   // Handle HITL Request Event
@@ -763,6 +768,21 @@ function filterJobs(status) {
 let editedSkills = [];
 let editedExperience = [];
 let editedEducation = [];
+let editedProjects = [];
+
+function updateLanguageChips() {
+  const input = document.getElementById("prof-languages");
+  const preview = document.getElementById("languages-chips-preview");
+  if (!input || !preview) return;
+  const langs = input.value.split(",").map(l => l.trim()).filter(l => l.length > 0);
+  preview.innerHTML = "";
+  langs.forEach(lang => {
+    const chip = document.createElement("span");
+    chip.className = "lang-preview-chip";
+    chip.innerText = lang;
+    preview.appendChild(chip);
+  });
+}
 
 function renderProfileEditor() {
   if (!currentProfile) return;
@@ -796,10 +816,15 @@ function renderProfileEditor() {
   if (editedEducation.length === 0 && currentProfile.education) {
     editedEducation = JSON.parse(JSON.stringify(currentProfile.education));
   }
+  if (editedProjects.length === 0 && currentProfile.projects) {
+    editedProjects = JSON.parse(JSON.stringify(currentProfile.projects));
+  }
   
+  updateLanguageChips();
   renderSkillsEditor();
   renderExperienceEditor();
   renderEducationEditor();
+  renderProjectsEditor();
   setupEditorListeners();
 }
 
@@ -906,6 +931,49 @@ function renderEducationEditor() {
   });
 }
 
+function renderProjectsEditor() {
+  const container = document.getElementById("editor-projects-list");
+  if (!container) return;
+  container.innerHTML = "";
+  
+  editedProjects.forEach((proj, index) => {
+    const block = document.createElement("div");
+    block.className = "project-block-card";
+    block.innerHTML = `
+      <div class="proj-block-header">
+        <h4>Project Entry ${index + 1}</h4>
+        <button type="button" class="btn-delete-item">Remove</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Project Title / Name</label>
+          <input type="text" class="proj-title" value="${escapeHtml(proj.title || '')}">
+        </div>
+        <div class="form-group">
+          <label>Project Link / URL</label>
+          <input type="text" class="proj-url" value="${escapeHtml(proj.url || '')}">
+        </div>
+        <div class="form-group full-width">
+          <label>Technologies Used (comma-separated)</label>
+          <input type="text" class="proj-tech" value="${escapeHtml(Array.isArray(proj.technologies) ? proj.technologies.join(', ') : (proj.technologies || ''))}">
+        </div>
+        <div class="form-group full-width">
+          <label>Project Description / Key Details</label>
+          <textarea class="proj-desc" rows="3">${escapeHtml(proj.description || '')}</textarea>
+        </div>
+      </div>
+    `;
+    
+    block.querySelector(".btn-delete-item").addEventListener("click", () => {
+      syncCurrentEditorArrays();
+      editedProjects.splice(index, 1);
+      renderProjectsEditor();
+    });
+    
+    container.appendChild(block);
+  });
+}
+
 function syncCurrentEditorArrays() {
   const expCards = document.querySelectorAll(".experience-block-card");
   editedExperience = Array.from(expCards).map(card => {
@@ -927,6 +995,18 @@ function syncCurrentEditorArrays() {
       degree: card.querySelector(".edu-degree").value.trim(),
       start: card.querySelector(".edu-start").value.trim(),
       end: card.querySelector(".edu-end").value.trim()
+    };
+  });
+
+  const projCards = document.querySelectorAll(".project-block-card");
+  editedProjects = Array.from(projCards).map(card => {
+    const techText = card.querySelector(".proj-tech").value;
+    const technologies = techText.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    return {
+      title: card.querySelector(".proj-title").value.trim(),
+      url: card.querySelector(".proj-url").value.trim(),
+      description: card.querySelector(".proj-desc").value.trim(),
+      technologies: technologies
     };
   });
 }
@@ -958,6 +1038,18 @@ function setupEditorListeners() {
     editedEducation.push({ institution: "", degree: "", start: "", end: "" });
     renderEducationEditor();
   });
+
+  // Add Project
+  document.getElementById("add-proj-btn").addEventListener("click", () => {
+    syncCurrentEditorArrays();
+    editedProjects.push({ title: "", description: "", url: "", technologies: [] });
+    renderProjectsEditor();
+  });
+
+  const langInput = document.getElementById("prof-languages");
+  if (langInput) {
+    langInput.addEventListener("input", updateLanguageChips);
+  }
   
   // Save Profile Changes
   document.getElementById("save-profile-btn").addEventListener("click", saveProfileChanges);
@@ -998,7 +1090,7 @@ async function saveProfileChanges() {
     skills: editedSkills,
     experience: editedExperience,
     education: editedEducation,
-    projects: currentProfile.projects || [],
+    projects: editedProjects,
     competitions: currentProfile.competitions || [],
     achievements: currentProfile.achievements || []
   };
@@ -1085,6 +1177,28 @@ function handleSystemReset() {
 
 
 let browserStepLog = [];
+
+function handleBrowserStreamFrame(data) {
+  const img = document.getElementById("browser-viewport-img");
+  const idle = document.getElementById("browser-idle-state");
+  const urlInput = document.getElementById("browser-url-input");
+  
+  if (urlInput && data.url) {
+    urlInput.innerText = data.url;
+  }
+  
+  if (data.screenshot && img && idle) {
+    img.src = `data:image/jpeg;base64,${data.screenshot}`;
+    img.classList.remove("hidden");
+    idle.classList.add("hidden");
+  }
+  
+  const activeBadge = document.getElementById("browser-active-badge");
+  if (activeBadge) activeBadge.classList.remove("hidden");
+  
+  const haltBtn = document.getElementById("halt-browser-btn");
+  if (haltBtn) haltBtn.classList.remove("hidden");
+}
 
 function handleBrowserStep(data) {
   const activeBadge = document.getElementById("browser-active-badge");

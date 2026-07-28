@@ -236,11 +236,44 @@ Instructions:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             _active_sessions.append((loop, agent))
+
+            async def screenshot_streamer(agent_instance):
+                import base64
+                # Give browser a few seconds to boot up
+                await asyncio.sleep(4.0)
+                while True:
+                    try:
+                        session = getattr(agent_instance, "browser_session", None)
+                        if session:
+                            page = await session.get_current_page()
+                            if page and not page.is_closed():
+                                screenshot_bytes = await page.screenshot(type="jpeg", quality=50)
+                                screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
+                                url = page.url
+                                
+                                event_data = {
+                                    "agent": "browser_agent",
+                                    "event_type": "browser_stream_frame",
+                                    "job_id": job_id,
+                                    "data": {
+                                        "url": url,
+                                        "screenshot": screenshot_b64
+                                    }
+                                }
+                                await ws_manager.broadcast(event_data)
+                    except asyncio.CancelledError:
+                        break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+
+            streamer_task = loop.create_task(screenshot_streamer(agent))
             try:
                 return loop.run_until_complete(
                     asyncio.wait_for(agent.run(), timeout=120)
                 )
             finally:
+                streamer_task.cancel()
                 if (loop, agent) in _active_sessions:
                     _active_sessions.remove((loop, agent))
                 loop.close()
