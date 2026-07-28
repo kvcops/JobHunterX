@@ -2005,6 +2005,17 @@ button {
   padding-top: 14px;
 }
 
+.modal-actions.space-between {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .cta-btn {
   border: none;
   background: var(--accent-gradient);
@@ -2016,6 +2027,10 @@ button {
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-fast);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .cta-btn:hover {
@@ -2032,6 +2047,194 @@ button {
   background-color: var(--bg-widget);
 }
 
+.cta-btn.outline {
+  border: 1px solid var(--border-active);
+  background: rgba(124, 58, 237, 0.1);
+  color: var(--border-active);
+}
+
+.cta-btn.outline:hover {
+  background: rgba(124, 58, 237, 0.2);
+}
+
 .cta-btn.danger {
   background: var(--error-color);
 }
+
+/* Pipeline Stepper Row */
+.flex-title-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.terminal-status-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-phase-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-light);
+  color: var(--border-active);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+}
+
+.pipeline-stepper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background-color: var(--bg-widget);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  margin-bottom: 10px;
+}
+
+.stepper-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.4;
+  transition: all var(--transition-fast);
+}
+
+.stepper-node.active {
+  opacity: 1.0;
+}
+
+.stepper-node.completed .stepper-dot {
+  background: var(--success-color);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+}
+
+.stepper-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.stepper-node.active .stepper-dot {
+  background: var(--border-active);
+  box-shadow: 0 0 8px var(--border-active);
+  animation: pulse-dot-glow 1.5s infinite;
+}
+
+.stepper-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-main);
+  text-transform: uppercase;
+}
+
+.stepper-line {
+  flex: 1;
+  height: 2px;
+  background: var(--border-color);
+  margin: 0 8px;
+}
+
+/* Activity Log Items */
+.mini-log-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.log-time {
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.log-agent-tag {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.log-agent-tag.system { background: #3b82f6; color: #fff; }
+.log-agent-tag.geo_search { background: #06b6d4; color: #fff; }
+.log-agent-tag.validator { background: #10b981; color: #fff; }
+.log-agent-tag.browser { background: #f59e0b; color: #fff; }
+.log-agent-tag.outreach { background: #8b5cf6; color: #fff; }
+
+/* Enhanced Job Card Extras */
+.job-jd-snippet {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 8px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--border-active);
+}
+
+.job-meta-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.job-location-badge {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.apply-link-badge {
+  color: var(--border-active);
+  text-decoration: none;
+  font-weight: 600;
+  transition: all var(--transition-fast);
+}
+
+.apply-link-badge:hover {
+  text-decoration: underline;
+}
+
+.hitl-details-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--accent-light);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: var(--radius-md);
+  margin-top: 12px;
+}
+
+.hitl-tab-link {
+  color: var(--border-active);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.hitl-tab-link:hover {
+  text-decoration: underline;
+}
+

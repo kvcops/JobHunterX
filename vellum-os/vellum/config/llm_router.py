@@ -82,10 +82,10 @@ _semaphores: Dict[str, asyncio.Semaphore] = {}
 # Mistral free: ~60 RPM → 1 req per 1s minimum
 # Gemini free: ~15 RPM → 1 req per 4s minimum (conservative)
 _PROVIDER_MIN_DELAY: Dict[str, float] = {
-    "groq": 2.5,
-    "mistral": 1.0,
-    "gemini": 3.5,
-    "default": 1.0,
+    "groq": 3.2,
+    "mistral": 2.0,
+    "gemini": 4.5,
+    "default": 1.5,
 }
 
 # Track last request timestamp per provider for rate limiting

@@ -6,8 +6,8 @@ Multi-source Indian startup & tech hiring discovery:
   - Channel 0.5: Getro-Powered Indian VC Portfolio Boards (Blume, Peak XV)
   - Channel 1: Indian Tech Community Job Feeds (Hasjob RSS)
   - Channel 2: Search-Engine Indexed Indian Startup Portals (Wellfound / Instahyre)
-  - Channel 3: Indian Founder Social Hiring Post Miner (LinkedIn / X Email Dorks)
-  - Channel 4: Direct High-Precision ATS Search
+  - Channel 3: Direct High-Precision ATS Search
+  - Channel 4: Unadvertised Social Hiring Post Miner (LinkedIn / X Email Dorks)
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from vellum.agents import job_evaluator
 
 log = get_logger("geo_search")
 
-MAX_TOTAL_JOBS = 30
+MAX_TOTAL_JOBS = 50
 
 
 def _normalise_city(location: str) -> str:
@@ -125,18 +125,21 @@ INDIAN_CITIES = {
 
 
 def _matches_location_strict(title: str, jd_text: str, target_location: str) -> bool:
-    """Strict location matching for Indian tech cities."""
+    """Flexible location matching for Indian tech cities."""
     if not target_location:
         return True
     target_lower = target_location.lower().strip()
     combined_text = (title + " " + jd_text).lower()
 
-    if "remote" in combined_text or "pan india" in combined_text or "work from home" in combined_text:
+    if "remote" in combined_text or "pan india" in combined_text or "work from home" in combined_text or "india" in combined_text:
         return True
 
     target_key = _normalise_city(target_lower)
     target_synonyms = INDIAN_CITIES.get(target_key, [target_key])
     target_found = any(syn in combined_text for syn in target_synonyms)
+
+    if target_found or not jd_text or len(jd_text) < 50:
+        return True
 
     for city_key, synonyms in INDIAN_CITIES.items():
         if city_key == target_key:
@@ -145,12 +148,9 @@ def _matches_location_strict(title: str, jd_text: str, target_location: str) -> 
             if syn in title.lower() and not target_found:
                 return False
 
-    other_cities = ["bareilly", "hubballi", "aurangabad", "lucknow", "chandigarh", "jaipur", "kochi", "trivandrum"]
-    for city in other_cities:
-        if city in title.lower() and not target_found:
-            return False
+    return True
 
-    return target_found
+
 async def run(state: dict) -> dict:
     """Agent A: Multi-source Indian tech hiring discovery.
 
@@ -179,7 +179,7 @@ async def run(state: dict) -> dict:
 
     # --- Channel 0: Direct Startup ATS APIs (Greenhouse, Lever, Ashby, Freshteam, Zoho) ---
     try:
-        hub_jobs = await ats_api.fetch_hub_ats_jobs(location=location, role=role, max_jobs=15)
+        hub_jobs = await ats_api.fetch_hub_ats_jobs(location=location, role=role, max_jobs=30)
         for h_item in hub_jobs:
             job_loc = h_item.get("location", "")
             jd_text = h_item.get("jd_text", "")
@@ -197,7 +197,7 @@ async def run(state: dict) -> dict:
     except Exception as exc:
         log.warning("hub_ats_scanner_error", error=str(exc))
 
-    await broadcast_progress(20, f"Direct ATS Scan complete: Found {len(raw_candidates)} potential jobs.")
+    await broadcast_progress(25, f"Direct ATS Scan complete: Found {len(raw_candidates)} potential jobs.")
 
     # --- Channel 0.5: Getro VC Portfolio Boards (Blume, Peak XV) ---
     try:
@@ -224,7 +224,7 @@ async def run(state: dict) -> dict:
     except Exception as exc:
         log.warning("vc_board_discovery_error", error=str(exc))
 
-    await broadcast_progress(35, f"VC Boards complete: Added {vc_count} potential jobs.")
+    await broadcast_progress(40, f"VC Boards complete: Added {vc_count} potential jobs.")
 
     # --- Channel 1: Hasjob Tech Feed (hasjob.co) ---
     try:
@@ -250,7 +250,7 @@ async def run(state: dict) -> dict:
 
     # --- Channel 2: Search-Indexed Indian Startup Portals (Wellfound / Instahyre) ---
     try:
-        portal_items = await search.search_wellfound_instahyre_jobs(role=role, location=location, max_results=6)
+        portal_items = await search.search_wellfound_instahyre_jobs(role=role, location=location, max_results=8)
         portal_count = 0
         for p_item in portal_items:
             if not _is_relevant_role(p_item["title"], role):
@@ -268,9 +268,31 @@ async def run(state: dict) -> dict:
     except Exception as exc:
         log.warning("portal_discovery_error", error=str(exc))
 
-    await broadcast_progress(65, f"Startup Portals complete: Added {portal_count} potential jobs.")
+    await broadcast_progress(60, f"Startup Portals complete: Added {portal_count} potential jobs.")
 
-    # --- Channel 3: Unadvertised Social Hiring Posts (LinkedIn/X Email Posts) ---
+    # --- Channel 3: Direct High-Precision ATS Search ---
+    try:
+        ats_search_items = await search.search_direct_ats_jobs(role=role, location=location, max_results=15)
+        ats_search_count = 0
+        for a_item in ats_search_items:
+            if not _is_relevant_role(a_item["title"], role):
+                continue
+            raw_candidates.append({
+                "company": a_item["company"],
+                "title": a_item["title"][:160],
+                "career_page_url": a_item["url"],
+                "apply_url": a_item["url"],
+                "jd_text": a_item.get("snippet", "")[:20000],
+                "source": "direct_ats_search",
+                "confidence": a_item.get("score", 0.88),
+            })
+            ats_search_count += 1
+    except Exception as exc:
+        log.warning("direct_ats_search_error", error=str(exc))
+
+    await broadcast_progress(70, f"Direct ATS Search complete: Added {ats_search_count} potential jobs.")
+
+    # --- Channel 4: Unadvertised Social Hiring Posts (LinkedIn/X Email Posts) ---
     try:
         social_posts = await search.search_unadvertised_social_posts(role=role, location=location, max_results=5)
         for post in social_posts:
@@ -290,7 +312,7 @@ async def run(state: dict) -> dict:
     except Exception as exc:
         log.warning("social_post_miner_error", error=str(exc))
 
-    await broadcast_progress(75, f"Founder Social Post Miner complete. Evaluating jobs with Job Evaluator Agent...")
+    await broadcast_progress(75, f"Social Post Miner complete ({len(raw_candidates)} total candidates). Evaluating candidate fit...")
 
     # --- Phase 1.5: Job Evaluator Filtering Agent ---
     try:

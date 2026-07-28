@@ -133,15 +133,7 @@ async def enrich_with_mx(permutations: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def create_mailto_uri(to: str, subject: str = "", body: str = "") -> str:
-    """Create a properly encoded mailto: URI.
-
-    Args:
-        to: Recipient email address.
-        subject: Email subject.
-        body: Email body text.
-
-    Returns: Encoded mailto: URI string.
-    """
+    """Create a properly encoded mailto: URI."""
     params = {}
     if subject:
         params["subject"] = subject
@@ -155,12 +147,20 @@ def create_mailto_uri(to: str, subject: str = "", body: str = "") -> str:
     return uri
 
 
-def open_mail_client(mailto_uri: str) -> bool:
-    """Open the user's default mail client with the mailto URI.
+def create_gmail_compose_url(to: str, subject: str = "", body: str = "") -> str:
+    """Create a web Gmail compose URL that opens directly in a new tab."""
+    params = {"view": "cm", "fs": "1", "to": to}
+    if subject:
+        params["su"] = subject
+    if body:
+        params["body"] = body
 
-    Returns True if the command succeeded, False otherwise.
-    Zero credential handling — user clicks "Send" themselves.
-    """
+    query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+    return f"https://mail.google.com/mail/?{query}"
+
+
+def open_mail_client(mailto_uri: str) -> bool:
+    """Open the user's default mail client with the mailto URI."""
     try:
         webbrowser.open(mailto_uri)
         log.info("mail_client_opened", uri_length=len(mailto_uri))
@@ -168,3 +168,4 @@ def open_mail_client(mailto_uri: str) -> bool:
     except Exception as exc:
         log.error("mail_client_error", error=str(exc))
         return False
+

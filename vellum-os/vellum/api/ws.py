@@ -48,6 +48,18 @@ class ConnectionManager:
         """Convenience wrapper for AgentEvent broadcasting."""
         await self.broadcast(event)
 
+    def broadcast_threadsafe(self, data: dict[str, Any], main_loop=None):
+        """Thread-safe broadcast for calls originating from background worker threads."""
+        import asyncio
+        if main_loop is None:
+            try:
+                main_loop = asyncio.get_event_loop()
+            except Exception:
+                return
+        if main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.broadcast(data), main_loop)
+
 
 # Singleton instance
 manager = ConnectionManager()
+

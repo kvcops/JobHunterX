@@ -296,6 +296,8 @@ TECH_HUB_STARTUPS = {
         "haptik", "scalereal", "plotline", "superops", "squadstack", "segwise",
         "opentext", "epam-systems", "deshaw", "arcesium", "factset", "mathworks",
         "synopsys", "cadence", "amd", "qualcomm", "nvidia", "micron", "virtusa", "cyient",
+        "commvault", "apollo247", "yulu", "skyroot", "qapita", "100ms", "talview",
+        "questglobal", "sailpoint", "servicenow", "salesforce", "teradata",
     ],
     "bengaluru": [
         "swiggy", "razorpay", "cred", "meesho", "zepto", "groww", "postman",
@@ -304,18 +306,32 @@ TECH_HUB_STARTUPS = {
         "lenskart", "paytm", "policybazaar", "shadowfax", "porter", "spinny",
         "kuku-fm", "pocket-fm", "atlan", "lambdatest", "sprinto", "invideo",
         "dhiwise", "truefoundry", "devtron", "middleware", "portkey", "unfoldai",
+        "jupiter", "dukaan", "apna", "vedantu", "simpl", "smallcase", "parkplus",
+        "moengage", "leadsquared", "workindia", "decentro", "kreditbee", "nobroker",
+        "rupeek", "stashfin", "open", "locus", "redbus", "bounce", "capillary",
     ],
     "mumbai": [
         "dream11", "games24x7", "mpl", "fractal-analytics", "nykaa", "clevertap",
-        "haptik", "bookmyshow", "upgrad", "pharmeasy", "eruditus",
+        "haptik", "bookmyshow", "upgrad", "pharmeasy", "eruditus", "pepperfry",
+        "coin-dcx", "wazirx", "upstox", "indwealth", "turtlemint",
     ],
     "ncr": [
         "zomato", "blinkit", "urbancompany", "cars24", "spinny", "paytm",
         "policybazaar", "mobikwik", "lenskart", "mamaearth", "cardekho", "lendingkart",
+        "doubtnut", "classplus", "shuttl", "sprinklr", "indiamart", "shiprocket",
     ],
     "pune": [
         "mindtickle", "druva", "pubmatic", "furlenco", "scalereal", "persistent",
+        "eclerx", "elasticrun", "rebeltrends", "birlasoft", "mastercard",
     ],
+    "chennai": [
+        "freshworks", "zoho", "chargebee", "kissflow", "vuram", "ideas2it",
+        "kovai", "orangescape", "indiumsoft", "guvi", "piper-labs", "nference",
+    ],
+    "remote": [
+        "hasura", "atlan", "postman", "browserstack", "duckduckgo", "git-lab",
+        "100ms", "dhiwise", "truefoundry", "portkey", "unfoldai", "devtron",
+    ]
 }
 
 # Universal Indian/Global Tech Startups pool
@@ -324,6 +340,7 @@ UNIVERSAL_STARTUPS = [
     "freshworks", "clevertap", "atlan", "lambdatest", "sprinto", "invideo",
     "dhiwise", "truefoundry", "devtron", "middleware", "portkey", "unfoldai",
     "scalereal", "plotline", "superops", "segwise", "skan", "gushwork",
+    "darwinbox", "highradius", "swiggy", "razorpay", "cred", "meesho",
 ]
 
 
@@ -370,8 +387,17 @@ async def fetch_jobs_for_ats_company(company_name: str, company_slug: str = "") 
     return []
 
 
-async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 25) -> list[dict]:
-    """Concurrently probe 30+ startup ATS boards for a target tech hub and role.
+ROLE_SYNONYMS = {
+    "software engineer": ["software", "engineer", "developer", "sde", "backend", "frontend", "full stack", "fullstack", "python", "java", "node", "react", "golang"],
+    "frontend developer": ["frontend", "react", "vue", "angular", "javascript", "typescript", "ui engineer", "web developer"],
+    "backend developer": ["backend", "python", "node", "java", "golang", "ruby", "django", "fastapi", "spring"],
+    "data scientist": ["data scientist", "data engineer", "machine learning", "ml engineer", "ai engineer"],
+    "full stack developer": ["full stack", "fullstack", "software engineer", "developer", "sde"],
+}
+
+
+async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 40) -> list[dict]:
+    """Concurrently probe 50+ startup ATS boards for a target tech hub and role.
 
     Bypasses fragile web search engines, returning structured JSON instantly.
     """
@@ -389,9 +415,12 @@ async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 25) -> li
         city_key = "ncr"
     elif "pune" in city_key:
         city_key = "pune"
+    elif "chennai" in city_key or "madras" in city_key:
+        city_key = "chennai"
+    else:
+        city_key = "remote"
 
-    target_slugs = list(TECH_HUB_STARTUPS.get(city_key, []))
-    # Add universal startups pool
+    target_slugs = list(TECH_HUB_STARTUPS.get(city_key, TECH_HUB_STARTUPS["bengaluru"]))
     for s in UNIVERSAL_STARTUPS:
         if s not in target_slugs:
             target_slugs.append(s)
@@ -403,7 +432,10 @@ async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 25) -> li
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_jobs = []
-    role_terms = [t.strip().lower() for t in role.split() if len(t.strip()) > 2]
+    
+    # Build synonym keywords for matching
+    role_lower = role.lower().strip()
+    synonyms = ROLE_SYNONYMS.get(role_lower, [t.strip().lower() for t in role.split() if len(t.strip()) > 2])
 
     for res in results:
         if isinstance(res, list):
@@ -412,13 +444,13 @@ async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 25) -> li
                 jd = job.get("jd_text", "").lower()
                 loc = job.get("location", "").lower()
 
-                # Basic relevance check: role term in title or JD
-                matches_role = any(term in title for term in role_terms) or ("engineer" in title or "developer" in title or "ai" in title or "ml" in title or "data" in title)
+                # Flexible relevance check
+                matches_role = any(syn in title for syn in synonyms) or ("engineer" in title or "developer" in title or "sde" in title or "architect" in title)
                 if not matches_role:
                     continue
 
-                # Basic location check: city name, remote, or india
-                matches_loc = not location or city_key in loc or "remote" in loc or "india" in loc or "remote" in title
+                # Flexible location check: city name, remote, or india
+                matches_loc = not location or city_key in loc or "remote" in loc or "india" in loc or "remote" in title or loc == "" or loc == "india"
 
                 if matches_loc:
                     all_jobs.append(job)
@@ -430,4 +462,5 @@ async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 25) -> li
 
     log.info("direct_ats_hub_scan_complete", city=city_key, jobs_found=len(all_jobs))
     return all_jobs
+
 

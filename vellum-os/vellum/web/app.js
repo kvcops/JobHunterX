@@ -393,6 +393,9 @@ function handleSocketMessage(msg) {
 // ---------------------------------------------------------------------------
 // UI Renders & Formatting
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// UI Renders & Formatting
+// ---------------------------------------------------------------------------
 function renderJobs() {
   const container = document.getElementById("jobs-container");
   if (jobs.length === 0) {
@@ -410,7 +413,7 @@ function renderJobs() {
   container.innerHTML = "";
 
   jobs.forEach(job => {
-    if (job.status === "applied") appliedCount++;
+    if (job.status === "applied" || job.status === "applied_manual") appliedCount++;
 
     const card = document.createElement("div");
     card.className = "job-card job-card-enhanced";
@@ -421,6 +424,9 @@ function renderJobs() {
     const confClass = confidenceScore > 0.7 ? "conf-high" : confidenceScore > 0.4 ? "conf-med" : "conf-low";
     const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
 
+    const snippetText = job.jd_text ? job.jd_text.slice(0, 140) + "..." : "";
+    const applyUrl = job.apply_url || job.career_page_url || "#";
+
     card.innerHTML = `
       <div class="card-header">
         <div>
@@ -429,12 +435,17 @@ function renderJobs() {
         </div>
       </div>
       <div class="badge-row">
-        <span class="conf-badge ${confClass}">Discover: ${(confidenceScore * 100).toFixed(0)}%</span>
+        <span class="conf-badge ${confClass}">Source: ${escapeHtml(job.source || 'ATS')}</span>
         <span class="conf-badge ${matchClass}">Match: ${(matchScore * 100).toFixed(0)}%</span>
       </div>
-      <div class="card-footer">
+      ${snippetText ? `<div class="job-jd-snippet">${escapeHtml(snippetText)}</div>` : ''}
+      <div class="job-meta-footer">
+        <span class="job-location-badge">📍 ${escapeHtml(job.location || 'India / Remote')}</span>
+        <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="apply-link-badge">Direct Link ↗</a>
+      </div>
+      <div class="card-footer" style="margin-top: 8px;">
         <span class="job-status-indicator ${job.status}">${job.status.replace('_', ' ')}</span>
-        ${job.status === 'matched' ? `<button class="card-action-btn" onclick="downloadResume('${job.id}')">Download tailored PDF</button>` : ''}
+        ${job.status === 'matched' || job.status === 'applied' ? `<button class="card-action-btn" onclick="downloadResume('${job.id}')">Download tailored PDF</button>` : ''}
         ${job.status === 'needs_attention' ? `<button class="card-action-btn" onclick="triggerHitlResume('${job.id}')">Review & Solve</button>` : ''}
       </div>
     `;
@@ -517,11 +528,12 @@ function renderOutreach() {
           <div class="role-title">${escapeHtml(draft.contact_name)} (${escapeHtml(draft.contact_role)})</div>
         </div>
       </div>
+      ${draft.subject ? `<div class="job-jd-snippet"><strong>Subject:</strong> ${escapeHtml(draft.subject)}</div>` : ''}
       <div class="badge-row">
         <span class="conf-badge ${confClass}">Confidence: ${(score * 100).toFixed(0)}%</span>
-        <span class="conf-badge conf-med">MX Records Checked</span>
+        <span class="conf-badge conf-med">MX Checked</span>
       </div>
-      <div class="card-footer">
+      <div class="card-footer" style="margin-top: 8px;">
         <span class="job-status-indicator matched">${escapeHtml(draft.status)}</span>
         <button class="card-action-btn" onclick="openOutreachComposer('${draft.id}')">Compose & Send</button>
       </div>
@@ -555,13 +567,48 @@ function updateTokenTelemetry(tokenMap) {
   document.getElementById("stat-tokens").innerText = total.toLocaleString();
 }
 
+function updatePipelinePhase(agent, msgLower) {
+  const phasePill = document.getElementById("terminal-phase-pill");
+  const stepDiscovery = document.getElementById("step-node-discovery");
+  const stepEval = document.getElementById("step-node-eval");
+  const stepTailor = document.getElementById("step-node-tailor");
+  const stepApply = document.getElementById("step-node-apply");
+
+  if (!phasePill) return;
+
+  if (msgLower.includes("discovery") || msgLower.includes("searching") || msgLower.includes("channel") || agent === "geo_search") {
+    phasePill.innerText = "Phase 1/4";
+    if (stepDiscovery) { stepDiscovery.className = "stepper-node active"; }
+  } else if (msgLower.includes("evaluat") || msgLower.includes("fit") || agent === "job_evaluator") {
+    phasePill.innerText = "Phase 2/4";
+    if (stepDiscovery) stepDiscovery.className = "stepper-node completed";
+    if (stepEval) stepEval.className = "stepper-node active";
+  } else if (msgLower.includes("tailor") || msgLower.includes("pdf") || agent === "validator_tailor") {
+    phasePill.innerText = "Phase 3/4";
+    if (stepDiscovery) stepDiscovery.className = "stepper-node completed";
+    if (stepEval) stepEval.className = "stepper-node completed";
+    if (stepTailor) stepTailor.className = "stepper-node active";
+  } else if (msgLower.includes("apply") || msgLower.includes("browser") || agent === "browser_agent") {
+    phasePill.innerText = "Phase 4/4";
+    if (stepDiscovery) stepDiscovery.className = "stepper-node completed";
+    if (stepEval) stepEval.className = "stepper-node completed";
+    if (stepTailor) stepTailor.className = "stepper-node completed";
+    if (stepApply) stepApply.className = "stepper-node active";
+  } else if (msgLower.includes("complete")) {
+    phasePill.innerText = "Complete";
+    [stepDiscovery, stepEval, stepTailor, stepApply].forEach(n => { if (n) n.className = "stepper-node completed"; });
+  }
+}
+
 function logEvent(agent, message, isError = false) {
   const statusTextEl = document.getElementById("sidebar-progress-status");
   const dotEl = document.getElementById("sidebar-progress-dot");
   const miniLogsEl = document.getElementById("progress-mini-logs");
+
+  const msgLower = message.toLowerCase();
+  updatePipelinePhase(agent, msgLower);
   
   if (statusTextEl && dotEl && miniLogsEl) {
-    const msgLower = message.toLowerCase();
     let statusLabel = "System Active";
     let isIdle = false;
     
@@ -570,14 +617,14 @@ function logEvent(agent, message, isError = false) {
       isIdle = true;
     } else if (msgLower.includes("discovery") || msgLower.includes("searching") || msgLower.includes("scraped")) {
       statusLabel = "Searching Roles";
-    } else if (msgLower.includes("validat") || msgLower.includes("score")) {
-      statusLabel = "Matching Profile";
+    } else if (msgLower.includes("validat") || msgLower.includes("score") || msgLower.includes("evaluat")) {
+      statusLabel = "Evaluating Candidate Fit";
     } else if (msgLower.includes("apply") || msgLower.includes("filling") || msgLower.includes("automation")) {
-      statusLabel = "Auto-Applying";
+      statusLabel = "Auto-Applying via Chromium";
     } else if (msgLower.includes("submitted") || msgLower.includes("completed")) {
       statusLabel = "Job Applied!";
-    } else if (agent === "outreach") {
-      statusLabel = "Outreach Active";
+    } else if (agent === "deep_research") {
+      statusLabel = "Researching Decision Makers";
     }
     
     statusTextEl.innerText = statusLabel;
@@ -585,19 +632,18 @@ function logEvent(agent, message, isError = false) {
     dotEl.className = "status-dot";
     if (isError) {
       dotEl.classList.add("error");
-    } else if (isIdle) {
-      // Idle has no pulse
-    } else {
+    } else if (!isIdle) {
       dotEl.classList.add("running");
     }
+
+    const now = new Date();
+    const timeStr = now.toTimeString().split(" ")[0];
     
     const entry = document.createElement("div");
-    entry.className = "mini-log-item";
-    if (isError) entry.classList.add("error");
-    else if (msgLower.includes("success") || msgLower.includes("completed") || msgLower.includes("submitted")) {
-      entry.classList.add("success");
-    }
-    entry.innerText = message;
+    entry.className = `mini-log-item ${isError ? 'error' : ''}`;
+    
+    const agentKey = agent || "system";
+    entry.innerHTML = `<span class="log-time">${timeStr}</span> <span class="log-agent-tag ${escapeHtml(agentKey)}">${escapeHtml(agentKey)}</span> ${escapeHtml(message)}`;
     
     if (miniLogsEl.children.length === 1 && miniLogsEl.children[0].innerText.includes("Ready")) {
       miniLogsEl.innerHTML = "";
@@ -605,7 +651,7 @@ function logEvent(agent, message, isError = false) {
     
     miniLogsEl.appendChild(entry);
     
-    while (miniLogsEl.children.length > 5) {
+    while (miniLogsEl.children.length > 25) {
       miniLogsEl.removeChild(miniLogsEl.firstChild);
     }
     
@@ -616,7 +662,7 @@ function logEvent(agent, message, isError = false) {
 function clearLogs() {
   const miniLogsEl = document.getElementById("progress-mini-logs");
   if (miniLogsEl) {
-    miniLogsEl.innerHTML = `<div class="mini-log-item">Ready.</div>`;
+    miniLogsEl.innerHTML = `<div class="mini-log-item"><span class="log-time">00:00:00</span> <span class="log-agent-tag system">SYSTEM</span> Ready.</div>`;
   }
 }
 
@@ -626,7 +672,12 @@ function clearLogs() {
 function showHitlModal(jobId, type, message, url) {
   hitlActiveJobId = jobId;
   document.getElementById("hitl-message").innerText = message;
-  document.getElementById("hitl-url").href = url;
+  
+  const hitlUrlEl = document.getElementById("hitl-url");
+  if (hitlUrlEl) hitlUrlEl.href = url || "#";
+
+  const hitlTabBtn = document.getElementById("hitl-open-tab-btn");
+  if (hitlTabBtn) hitlTabBtn.href = url || "#";
   
   // Try loading screenshot dynamically
   document.getElementById("hitl-screenshot").src = `${API_BASE}/screenshots/${jobId}/last.png?t=${Date.now()}`;
@@ -661,7 +712,7 @@ async function submitHitlResponse(action) {
 function triggerHitlResume(jobId) {
   const job = jobs.find(j => j.id === jobId);
   if (job) {
-    showHitlModal(job.id, "manual_form", "Needs attention — please verify details or perform the next steps.", job.apply_url || job.career_page_url);
+    showHitlModal(job.id, "manual_form", "Needs attention — please verify details or complete form steps manually.", job.apply_url || job.career_page_url);
   }
 }
 
@@ -720,7 +771,6 @@ async function discardOutreachDraft() {
 async function triggerMailtoHandoff() {
   if (!activeOutreachId) return;
   
-  // Sync local edits back to server representation (optional, let's just trigger URI)
   try {
     const res = await fetch(`${API_BASE}/outreach/${activeOutreachId}/open-mail`, {
       method: "POST"
@@ -729,6 +779,24 @@ async function triggerMailtoHandoff() {
     logEvent("system", "Handoff to default system mail client completed.");
   } catch (err) {
     console.error("Failed to handoff mail", err);
+  }
+}
+
+async function triggerGmailWebHandoff() {
+  if (!activeOutreachId) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/outreach/${activeOutreachId}/gmail-url`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.url) {
+        window.open(data.url, "_blank");
+        closeOutreachModal();
+        logEvent("outreach", "Opened draft in Gmail Web (New Tab).");
+      }
+    }
+  } catch (err) {
+    console.error("Failed to fetch Gmail URL", err);
   }
 }
 
@@ -746,10 +814,10 @@ function escapeHtml(str) {
 
 // Minimal job state filter
 function filterJobs(status) {
-  document.querySelectorAll(".filter-btn").forEach(btn => btn.classList.remove("active"));
-  event.target.classList.add("active");
+  document.querySelectorAll(".filter-pill").forEach(btn => btn.classList.remove("active"));
+  if (window.event && window.event.target) window.event.target.classList.add("active");
 
-  const cards = document.querySelectorAll(".job-card");
+  const cards = document.querySelectorAll("#jobs-container .job-card");
   cards.forEach(card => {
     const indicator = card.querySelector(".job-status-indicator");
     if (!indicator) return;

@@ -178,19 +178,45 @@
             </div>
           </div>
 
-          <!-- Agent Console Terminal Card -->
+          <!-- Agent Telemetry & Activity Feed Card -->
           <div class="bento-card agent-terminal-card glass">
-            <div class="card-title-header">
-              <span id="sidebar-progress-dot" class="status-pulse-dot"></span>
-              <span id="sidebar-progress-status" class="terminal-status-title">System Standby</span>
+            <div class="card-title-header flex-title-header">
+              <div class="terminal-status-block">
+                <span id="sidebar-progress-dot" class="status-pulse-dot"></span>
+                <span id="sidebar-progress-status" class="terminal-status-title">System Standby</span>
+              </div>
+              <span id="terminal-phase-pill" class="terminal-phase-tag">Phase 0/4</span>
             </div>
             
             <div class="terminal-bar-container">
               <div id="sidebar-progress-bar" class="terminal-progress-bar" style="width: 0%;"></div>
             </div>
+
+            <!-- Visual Pipeline Stepper -->
+            <div class="pipeline-stepper-row">
+              <div class="stepper-node active" id="step-node-discovery" title="Phase 1: Multi-Source Job Discovery">
+                <span class="stepper-dot"></span>
+                <span class="stepper-label">Find</span>
+              </div>
+              <div class="stepper-line"></div>
+              <div class="stepper-node" id="step-node-eval" title="Phase 2: Job Evaluator Fit Analysis">
+                <span class="stepper-dot"></span>
+                <span class="stepper-label">Fit</span>
+              </div>
+              <div class="stepper-line"></div>
+              <div class="stepper-node" id="step-node-tailor" title="Phase 3: ATS Resume Tailoring">
+                <span class="stepper-dot"></span>
+                <span class="stepper-label">Tailor</span>
+              </div>
+              <div class="stepper-line"></div>
+              <div class="stepper-node" id="step-node-apply" title="Phase 4: Chromium Auto-Apply & Outreach">
+                <span class="stepper-dot"></span>
+                <span class="stepper-label">Apply</span>
+              </div>
+            </div>
             
             <div id="progress-mini-logs" class="terminal-logs-screen">
-              <div class="mini-log-item">Ready for candidate resume upload.</div>
+              <div class="mini-log-item log-info"><span class="log-time">00:00:00</span> <span class="log-agent-tag system">SYSTEM</span> Ready for candidate resume upload.</div>
             </div>
           </div>
         </aside>
@@ -577,18 +603,21 @@
         <button class="close-modal-btn" onclick="closeHitlModal()">&times;</button>
       </div>
       <div class="modal-body">
-        <p id="hitl-message">The browser agent requires manual input (CAPTCHA, OTP, or verification).</p>
+        <p id="hitl-message">The browser agent requires manual input (CAPTCHA, OTP, or login verification).</p>
         <div class="hitl-iframe-container">
           <img id="hitl-screenshot" src="" alt="Browser screenshot" class="hitl-screenshot">
         </div>
-        <div class="hitl-details">
-          <span>Target URL:</span>
-          <a id="hitl-url" href="#" target="_blank" rel="noopener noreferrer">Open application page in a new tab</a>
+        <div class="hitl-details-banner">
+          <span>🔗 Application Link:</span>
+          <a id="hitl-url" href="#" target="_blank" rel="noopener noreferrer" class="hitl-tab-link">Open Application Page in New Tab ↗</a>
         </div>
       </div>
-      <div class="modal-actions">
+      <div class="modal-actions space-between">
         <button class="cta-btn secondary" onclick="submitHitlResponse('skip')">Skip Job</button>
-        <button class="cta-btn" onclick="submitHitlResponse('done')">Resume Automation</button>
+        <div class="modal-right-actions">
+          <a id="hitl-open-tab-btn" href="#" target="_blank" rel="noopener noreferrer" class="cta-btn outline">🔗 Open in New Tab</a>
+          <button class="cta-btn primary" onclick="submitHitlResponse('done')">✓ Resume Automation</button>
+        </div>
       </div>
     </div>
   </div>
@@ -603,7 +632,7 @@
       <div class="modal-body">
         <div class="outreach-meta-grid">
           <div class="meta-item">
-            <label>Recruiter Email:</label>
+            <label>Target Recruiter / Leader Email:</label>
             <div id="modal-email-guesses" class="email-guesses-list"></div>
           </div>
           <div class="meta-item">
@@ -622,9 +651,12 @@
           </div>
         </div>
       </div>
-      <div class="modal-actions">
+      <div class="modal-actions space-between">
         <button class="cta-btn secondary" onclick="discardOutreachDraft()">Discard Draft</button>
-        <button class="cta-btn" onclick="triggerMailtoHandoff()">Open in Default Mail Client</button>
+        <div class="modal-right-actions">
+          <button class="cta-btn outline" onclick="triggerGmailWebHandoff()">✉️ Open in Gmail (New Tab)</button>
+          <button class="cta-btn primary" onclick="triggerMailtoHandoff()">Open in Default Mail Client</button>
+        </div>
       </div>
     </div>
   </div>

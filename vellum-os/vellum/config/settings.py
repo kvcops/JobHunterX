@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     gemini_concurrency: int = 3   # Gemini free: ~15 RPM, conservative
     groq_concurrency: int = 1     # Groq free: 30 RPM, serial with 2s delay
     mistral_concurrency: int = 1  # Mistral free: ~60 RPM, serial with 1s delay
-    max_job_pipelines: int = 2    # Max concurrent per-job pipelines
+    max_job_pipelines: int = 1    # Max concurrent per-job pipelines (serial to respect rate limits)
 
     @property
     def available_providers(self) -> list[str]:

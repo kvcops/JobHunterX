@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
@@ -18,7 +19,7 @@ from vellum.config.logging import get_logger
 from vellum.agents import extractor, graph
 from vellum.agents.browser_agent import stop_all_active_browsers
 from vellum.api.ws import manager as ws_manager
-from vellum.tools.email_handoff import open_mail_client
+from vellum.tools.email_handoff import open_mail_client, create_gmail_compose_url
 
 log = get_logger("routes")
 
@@ -229,6 +230,24 @@ async def trigger_open_mail(draft_id: str):
 
     success = open_mail_client(mailto_uri)
     return {"status": "opened" if success else "failed"}
+
+
+@router.get("/outreach/{draft_id}/gmail-url")
+async def get_gmail_url(draft_id: str):
+    """Get direct Gmail web compose URL for an outreach draft."""
+    drafts = await db.get_outreach_drafts()
+    draft = next((d for d in drafts if d.get("id") == draft_id), None)
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+
+    email_guesses = draft.get("email_guesses", [])
+    to_addr = email_guesses[0].get("address", "") if email_guesses else ""
+    subject = draft.get("subject", "")
+    body = draft.get("body", "")
+
+    gmail_url = create_gmail_compose_url(to_addr, subject, body)
+    return {"url": gmail_url, "to": to_addr, "subject": subject}
+
 
 
 @router.post("/outreach/{draft_id}/discard")

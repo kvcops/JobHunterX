@@ -219,7 +219,7 @@ Instructions:
             "llm": llm,
             "register_new_step_callback": browser_step_callback,
             "use_vision": True,
-            "available_file_paths": [str(pdf_path)] if pdf_path else [],
+            "available_file_paths": [str(pdf_path.resolve())] if pdf_path else [],
         }
         if BrowserProfile is not None:
             agent_kwargs["browser_profile"] = BrowserProfile(
@@ -228,9 +228,8 @@ Instructions:
         agent = Agent(**agent_kwargs)
 
         # Run browser agent in a dedicated thread with ProactorEventLoop.
-        # On Windows, the main uvicorn event loop may be a SelectorEventLoop
-        # (e.g. from watchfiles reload subprocess), which cannot create
-        # subprocesses. A dedicated thread with ProactorEventLoop fixes this.
+        main_loop = asyncio.get_running_loop()
+
         def _run_agent_in_proactor_loop():
             import concurrent.futures
             loop = asyncio.new_event_loop()
@@ -239,15 +238,14 @@ Instructions:
 
             async def screenshot_streamer(agent_instance):
                 import base64
-                # Give browser a few seconds to boot up
-                await asyncio.sleep(4.0)
+                await asyncio.sleep(3.0)
                 while True:
                     try:
                         session = getattr(agent_instance, "browser_session", None)
                         if session:
                             page = await session.get_current_page()
                             if page and not page.is_closed():
-                                screenshot_bytes = await page.screenshot(type="jpeg", quality=50)
+                                screenshot_bytes = await page.screenshot(type="jpeg", quality=55)
                                 screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
                                 url = page.url
                                 
@@ -260,17 +258,17 @@ Instructions:
                                         "screenshot": screenshot_b64
                                     }
                                 }
-                                await ws_manager.broadcast(event_data)
+                                ws_manager.broadcast_threadsafe(event_data, main_loop)
                     except asyncio.CancelledError:
                         break
                     except Exception:
                         pass
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.4)
 
             streamer_task = loop.create_task(screenshot_streamer(agent))
             try:
                 return loop.run_until_complete(
-                    asyncio.wait_for(agent.run(), timeout=120)
+                    asyncio.wait_for(agent.run(), timeout=180)
                 )
             finally:
                 streamer_task.cancel()
@@ -278,9 +276,8 @@ Instructions:
                     _active_sessions.remove((loop, agent))
                 loop.close()
 
-        loop = asyncio.get_running_loop()
         try:
-            history = await loop.run_in_executor(
+            history = await main_loop.run_in_executor(
                 None, _run_agent_in_proactor_loop
             )
             final_result = history.final_result() if hasattr(history, 'final_result') else str(history)
