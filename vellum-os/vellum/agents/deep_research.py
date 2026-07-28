@@ -86,17 +86,19 @@ async def run(state: dict) -> dict:
     contacts = await search.search_contacts(company, location)
 
     if not contacts:
-        await log_and_broadcast_event("progress", "No contacts found via search")
-        return {"outreach_draft": None, "events": events, "errors": errors}
-
-    # Pick the best contact (first in priority order)
-    best_contact = contacts[0]
-
-    await log_and_broadcast_event(
-        "progress",
-        f"Found: {best_contact['name']} ({best_contact['role']}) — confidence {best_contact['confidence']:.0%}",
-        confidence=best_contact["confidence"]
-    )
+        await log_and_broadcast_event("progress", "No specific contacts found. Falling back to generic company contact...")
+        best_contact = {
+            "name": "Hiring Manager",
+            "role": "Hiring Team",
+            "confidence": 0.40,
+        }
+    else:
+        best_contact = contacts[0]
+        await log_and_broadcast_event(
+            "progress",
+            f"Found: {best_contact['name']} ({best_contact['role']}) — confidence {best_contact['confidence']:.0%}",
+            confidence=best_contact["confidence"]
+        )
 
     # ------------------------------------------------------------------
     # Step 2: Email permutation with MX check
@@ -110,11 +112,40 @@ async def run(state: dict) -> dict:
         # Strip ATS domains to get company domain
         ats_strip = [
             "boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com",
+            "myworkdayjobs.com", "smartrecruiters.com", "bamboohr.com",
+            "recruitee.com", "breezy.hr", "freshteam.com", "zoho.com"
         ]
         for ats in ats_strip:
             if ats in domain:
                 domain = ""
                 break
+
+    # If domain is not resolved, search for the official website domain
+    if not domain and company:
+        await log_and_broadcast_event("progress", f"Searching for {company} official website domain...")
+        search_query = f"{company} official website"
+        try:
+            results = await search.search_multi_engine(search_query, max_results=3)
+            for r in results:
+                url = r.get("href") or r.get("link", "")
+                if url:
+                    parsed = urlparse(url)
+                    d = parsed.netloc.replace("www.", "")
+                    # Filter out penalised domains and ATS domains
+                    is_ats = any(ats in d for ats in search.ATS_DOMAINS)
+                    is_penalty = any(p in d for p in search.PENALTY_DOMAINS)
+                    if not is_ats and not is_penalty:
+                        domain = d
+                        await log_and_broadcast_event("progress", f"Determined company domain from search: {domain}")
+                        break
+        except Exception as exc:
+            log.warning("failed_to_resolve_domain_via_search", error=str(exc))
+
+    if not domain and company:
+        # Fall back to slug.com
+        company_slug = re.sub(r"[^a-z0-9]", "", company.lower())
+        domain = f"{company_slug}.com"
+        await log_and_broadcast_event("progress", f"Using fallback company domain: {domain}")
 
     # Try to extract name parts
     name_parts = best_contact["name"].split()
@@ -122,11 +153,35 @@ async def run(state: dict) -> dict:
     last_name = name_parts[-1] if len(name_parts) > 1 else ""
 
     email_guesses = []
-    if first_name and domain:
-        email_guesses = email_handoff.generate_email_permutations(first_name, last_name, domain)
+    if domain:
+        # Generate contact name permutations if we have a real first name
+        if first_name and first_name.lower() not in ["hiring", "recruiting", "team"]:
+            email_guesses = email_handoff.generate_email_permutations(first_name, last_name, domain)
+
+        # Always append general fallback emails
+        generic_emails = [
+            f"careers@{domain}",
+            f"jobs@{domain}",
+            f"hr@{domain}",
+            f"info@{domain}",
+            f"contact@{domain}",
+        ]
+        
+        seen_addresses = {eg["address"].lower() for eg in email_guesses}
+        for g_email in generic_emails:
+            if g_email.lower() not in seen_addresses:
+                email_guesses.append({
+                    "address": g_email,
+                    "pattern": "generic_fallback",
+                    "confidence": 0.20,
+                    "mx_valid": None,
+                    "unverified_guess": True,
+                })
+        
+        # Enrich all permutations (including fallbacks) with MX validation
         email_guesses = await email_handoff.enrich_with_mx(email_guesses)
 
-        # If MX check fails, note it
+        # If MX check fails for the primary email, note it in logs
         if email_guesses and email_guesses[0].get("mx_valid") is False:
             await log_and_broadcast_event(
                 "progress",

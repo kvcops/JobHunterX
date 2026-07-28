@@ -128,10 +128,120 @@ function switchTab(tabName) {
 }
 
 // ---------------------------------------------------------------------------
-// Load Initial Data
+// Load Initial Data & Locations
 // ---------------------------------------------------------------------------
+let allLocations = [];
+
+async function loadLocations() {
+  try {
+    const res = await fetch(`${API_BASE}/locations`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const locs = data.locations || [];
+    allLocations = locs;
+    
+    setupCustomLocationDropdown(locs);
+  } catch (err) {
+    console.error("Failed to load locations", err);
+  }
+}
+
+function setupCustomLocationDropdown(locs) {
+  const hiddenInput = document.getElementById("target-location");
+  const triggerText = document.getElementById("custom-location-selected-text");
+  const popover = document.getElementById("custom-location-popover");
+  const trigger = document.getElementById("custom-location-trigger");
+  const searchInput = document.getElementById("custom-location-search-input");
+
+  if (!trigger || !popover) return;
+
+  const currentVal = hiddenInput ? hiddenInput.value : "hyderabad";
+
+  // Toggle popover on trigger click
+  trigger.onclick = (e) => {
+    e.stopPropagation();
+    const isHidden = popover.classList.contains("hidden");
+    if (isHidden) {
+      popover.classList.remove("hidden");
+      trigger.classList.add("open");
+      if (searchInput) {
+        searchInput.value = "";
+        renderCustomLocationOptions(allLocations, hiddenInput ? hiddenInput.value : "hyderabad");
+        searchInput.focus();
+      }
+    } else {
+      popover.classList.add("hidden");
+      trigger.classList.remove("open");
+    }
+  };
+
+  // Close popover when clicking outside
+  document.addEventListener("click", (e) => {
+    if (popover && !popover.contains(e.target) && trigger && !trigger.contains(e.target)) {
+      popover.classList.add("hidden");
+      trigger.classList.remove("open");
+    }
+  });
+
+  // Search filter handler
+  if (searchInput) {
+    searchInput.oninput = () => {
+      const q = searchInput.value.toLowerCase().trim();
+      const filtered = allLocations.filter(loc => 
+        loc.label.toLowerCase().includes(q) || loc.key.toLowerCase().includes(q)
+      );
+      renderCustomLocationOptions(filtered, hiddenInput ? hiddenInput.value : "hyderabad");
+    };
+  }
+
+  // Initial options render
+  renderCustomLocationOptions(allLocations, currentVal);
+}
+
+function renderCustomLocationOptions(locs, activeKey) {
+  const optionsList = document.getElementById("custom-location-options-list");
+  const hiddenInput = document.getElementById("target-location");
+  const triggerText = document.getElementById("custom-location-selected-text");
+  const popover = document.getElementById("custom-location-popover");
+  const trigger = document.getElementById("custom-location-trigger");
+
+  if (!optionsList) return;
+  optionsList.innerHTML = "";
+
+  if (!locs || locs.length === 0) {
+    optionsList.innerHTML = `<div class="custom-select-no-results">No tech hubs found</div>`;
+    return;
+  }
+
+  locs.forEach(loc => {
+    const item = document.createElement("div");
+    const isActive = loc.key.toLowerCase() === activeKey.toLowerCase();
+    item.className = `custom-select-option ${isActive ? 'active' : ''}`;
+    item.innerHTML = `
+      <span class="option-label">${escapeHtml(loc.label)}</span>
+      <span class="option-badge">${loc.company_count} Companies</span>
+    `;
+    item.onclick = (e) => {
+      e.stopPropagation();
+      if (hiddenInput) hiddenInput.value = loc.key;
+      if (triggerText) triggerText.innerText = `${loc.label} (${loc.company_count} Companies)`;
+      if (popover) popover.classList.add("hidden");
+      if (trigger) trigger.classList.remove("open");
+      renderCustomLocationOptions(allLocations, loc.key);
+    };
+    optionsList.appendChild(item);
+
+    if (isActive && triggerText) {
+      triggerText.innerText = `${loc.label} (${loc.company_count} Companies)`;
+    }
+  });
+}
+
 async function loadInitialData() {
   try {
+    // Load Locations Dropdown
+    await loadLocations();
+
     // Load Status & Token Telemetry
     const statusRes = await fetch(`${API_BASE}/status`);
     const statusData = await statusRes.json();
@@ -150,7 +260,6 @@ async function loadInitialData() {
     const outreachData = await outreachRes.json();
     outreachDrafts = outreachData.drafts || [];
     renderOutreach();
-
 
     // Load latest profile
     const profileRes = await fetch(`${API_BASE}/profile`);
@@ -256,16 +365,19 @@ function renderProfileCard() {
 async function startSearch() {
   const location = document.getElementById("target-location").value.trim();
   const role = document.getElementById("target-role").value.trim();
+  const limitInput = document.getElementById("target-analysis-limit");
+  const limit = limitInput ? parseInt(limitInput.value, 10) || 50 : 50;
+
   if (!location) return;
 
-  logEvent("system", `Starting job search for "${role || 'Software Engineer'}" in "${location}"`);
+  logEvent("system", `Starting job search for "${role || 'Software Engineer'}" in "${location}" (Max ${limit} Companies)`);
   document.getElementById("start-search-btn").setAttribute("disabled", "true");
 
   // Reset progress bar
   const bar = document.getElementById("sidebar-progress-bar");
   if (bar) bar.style.width = "0%";
   const progressStatus = document.getElementById("sidebar-progress-status");
-  if (progressStatus) progressStatus.innerText = "Initializing search...";
+  if (progressStatus) progressStatus.innerText = "Initializing search node...";
 
   // Show halt button
   const haltBtn = document.getElementById("halt-browser-btn");
@@ -275,7 +387,7 @@ async function startSearch() {
     const res = await fetch(`${API_BASE}/start-search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ location, role })
+      body: JSON.stringify({ location, role, limit })
     });
     const data = await res.json();
     updateStatusIndicator("running");
@@ -416,11 +528,11 @@ function renderJobs() {
     if (job.status === "applied" || job.status === "applied_manual") appliedCount++;
 
     const card = document.createElement("div");
-    card.className = "job-card job-card-enhanced";
+    card.className = "job-card job-card-enhanced clickable-card";
 
     // Build badges for scoring
     const confidenceScore = job.discovery_confidence || 0;
-    const matchScore = job.match_score || 0;
+    const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
     const confClass = confidenceScore > 0.7 ? "conf-high" : confidenceScore > 0.4 ? "conf-med" : "conf-low";
     const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
 
@@ -428,24 +540,25 @@ function renderJobs() {
     const applyUrl = job.apply_url || job.career_page_url || "#";
 
     card.innerHTML = `
-      <div class="card-header">
+      <div class="card-header" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
         <div>
           <div class="company-title">${escapeHtml(job.company)}</div>
           <div class="role-title">${escapeHtml(job.role || "Software Engineering Role")}</div>
         </div>
       </div>
-      <div class="badge-row">
+      <div class="badge-row" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
         <span class="conf-badge ${confClass}">Source: ${escapeHtml(job.source || 'ATS')}</span>
         <span class="conf-badge ${matchClass}">Match: ${(matchScore * 100).toFixed(0)}%</span>
       </div>
-      ${snippetText ? `<div class="job-jd-snippet">${escapeHtml(snippetText)}</div>` : ''}
+      ${snippetText ? `<div class="job-jd-snippet" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">${escapeHtml(snippetText)} <span class="jd-read-more-link">View Full JD & Details →</span></div>` : ''}
       <div class="job-meta-footer">
         <span class="job-location-badge">📍 ${escapeHtml(job.location || 'India / Remote')}</span>
         <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="apply-link-badge">Direct Link ↗</a>
       </div>
       <div class="card-footer" style="margin-top: 8px;">
+        <button class="card-action-btn view-jd-btn" onclick="openJobDetailsModal('${job.id}')">📄 View Job & JD</button>
         <span class="job-status-indicator ${job.status}">${job.status.replace('_', ' ')}</span>
-        ${job.status === 'matched' || job.status === 'applied' ? `<button class="card-action-btn" onclick="downloadResume('${job.id}')">Download tailored PDF</button>` : ''}
+        ${job.status === 'matched' || job.status === 'applied' ? `<button class="card-action-btn" onclick="downloadResume('${job.id}')">Download CV</button>` : ''}
         ${job.status === 'needs_attention' ? `<button class="card-action-btn" onclick="triggerHitlResume('${job.id}')">Review & Solve</button>` : ''}
       </div>
     `;
@@ -475,29 +588,127 @@ function renderResumes() {
   container.innerHTML = "";
   matchedJobs.forEach(job => {
     const card = document.createElement("div");
-    card.className = "job-card job-card-enhanced";
+    card.className = "job-card job-card-enhanced clickable-card";
 
-    const matchScore = job.match_score || 0;
+    const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
     const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
 
     card.innerHTML = `
-      <div class="card-header">
+      <div class="card-header" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
         <div>
           <div class="company-title">${escapeHtml(job.company)}</div>
           <div class="role-title">${escapeHtml(job.role || "Software Role")}</div>
         </div>
       </div>
-      <div class="badge-row">
+      <div class="badge-row" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
         <span class="conf-badge ${matchClass}">Match: ${(matchScore * 100).toFixed(0)}%</span>
         <span class="conf-badge conf-high">ATS Resume Tailored</span>
       </div>
       <div class="card-footer">
+        <button class="card-action-btn view-jd-btn" onclick="openJobDetailsModal('${job.id}')">📄 View Job & JD</button>
         <span class="job-status-indicator ${job.status}">${job.status.replace('_', ' ')}</span>
         <button class="card-action-btn" onclick="downloadResume('${job.id}')">📥 Download PDF CV</button>
       </div>
     `;
     container.appendChild(card);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Job & Job Description (JD) Details Modal Viewer
+// ---------------------------------------------------------------------------
+function openJobDetailsModal(jobId) {
+  const job = jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  document.getElementById("jd-modal-company").innerText = job.company || "Company Name";
+  document.getElementById("jd-modal-role-pill").innerText = job.role || "Software Engineering Role";
+  document.getElementById("jd-modal-location").innerText = job.location || "India / Remote";
+  document.getElementById("jd-modal-source").innerText = job.source || "ATS Discovery";
+
+  const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
+  const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
+  const matchBadge = document.getElementById("jd-modal-match-score");
+  if (matchBadge) {
+    matchBadge.className = `jd-meta-val conf-badge ${matchClass}`;
+    matchBadge.innerText = `${(matchScore * 100).toFixed(0)}% Fit Match`;
+  }
+
+  const statusBadge = document.getElementById("jd-modal-status");
+  if (statusBadge) {
+    statusBadge.className = `jd-meta-val job-status-indicator ${job.status}`;
+    statusBadge.innerText = (job.status || "discovered").replace('_', ' ');
+  }
+
+  const applyUrl = job.apply_url || job.career_page_url || "#";
+  const applyBtn = document.getElementById("jd-modal-apply-link");
+  if (applyBtn) applyBtn.href = applyUrl;
+
+  const downloadBtn = document.getElementById("jd-modal-download-cv-btn");
+  if (downloadBtn) {
+    downloadBtn.onclick = () => downloadResume(job.id);
+  }
+
+  const jdContainer = document.getElementById("jd-modal-body");
+  if (jdContainer) {
+    jdContainer.innerHTML = formatJdText(job.jd_text);
+  }
+
+  const modal = document.getElementById("job-details-modal");
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closeJobDetailsModal() {
+  const modal = document.getElementById("job-details-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function formatJdText(rawText) {
+  if (!rawText || !rawText.trim()) {
+    return `<p class="jd-placeholder-text">No detailed job description text recorded for this posting.</p>`;
+  }
+
+  const lines = rawText.split('\n');
+  let formattedHtml = '';
+  let inList = false;
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (inList) {
+        formattedHtml += '</ul>';
+        inList = false;
+      }
+      return;
+    }
+
+    if (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('*') || /^\d+\.\s/.test(trimmed)) {
+      if (!inList) {
+        formattedHtml += '<ul class="jd-bullet-list">';
+        inList = true;
+      }
+      const itemContent = escapeHtml(trimmed.replace(/^([•\-\*]|\d+\.)\s*/, ''));
+      formattedHtml += `<li>${itemContent}</li>`;
+    } else if (trimmed.endsWith(':') || (trimmed.length < 60 && (trimmed.toLowerCase().includes('requirement') || trimmed.toLowerCase().includes('responsibil') || trimmed.toLowerCase().includes('about') || trimmed.toLowerCase().includes('skill') || trimmed.toLowerCase().includes('qualificat')))) {
+      if (inList) {
+        formattedHtml += '</ul>';
+        inList = false;
+      }
+      formattedHtml += `<h5 class="jd-subheading">${escapeHtml(trimmed)}</h5>`;
+    } else {
+      if (inList) {
+        formattedHtml += '</ul>';
+        inList = false;
+      }
+      formattedHtml += `<p class="jd-paragraph">${escapeHtml(trimmed)}</p>`;
+    }
+  });
+
+  if (inList) {
+    formattedHtml += '</ul>';
+  }
+
+  return formattedHtml;
 }
 
 
@@ -516,26 +727,49 @@ function renderOutreach() {
   container.innerHTML = "";
   outreachDrafts.forEach(draft => {
     const card = document.createElement("div");
-    card.className = "outreach-card";
+    card.className = "outreach-card premium-glass-card";
 
     const score = draft.confidence || 0;
     const confClass = score > 0.7 ? "conf-high" : score > 0.4 ? "conf-med" : "conf-low";
+    
+    const initial = draft.company ? draft.company.trim().charAt(0).toUpperCase() : '?';
+    const bestEmail = draft.email_guesses && draft.email_guesses.length > 0 ? draft.email_guesses[0].address : "No email guessed";
+    const emailStatusLabel = draft.email_guesses && draft.email_guesses.length > 0 && draft.email_guesses[0].mx_valid ? "MX Verified" : "MX Checked";
+    const emailStatusClass = draft.email_guesses && draft.email_guesses.length > 0 && draft.email_guesses[0].mx_valid ? "email-verified" : "email-unverified";
 
     card.innerHTML = `
-      <div class="card-header">
-        <div>
+      <div class="outreach-card-header">
+        <div class="company-avatar">${initial}</div>
+        <div class="company-info-block">
           <div class="company-title">${escapeHtml(draft.company)}</div>
-          <div class="role-title">${escapeHtml(draft.contact_name)} (${escapeHtml(draft.contact_role)})</div>
+          <div class="role-title">${escapeHtml(draft.contact_name)}</div>
+          <div class="contact-role-badge">${escapeHtml(draft.contact_role)}</div>
         </div>
       </div>
-      ${draft.subject ? `<div class="job-jd-snippet"><strong>Subject:</strong> ${escapeHtml(draft.subject)}</div>` : ''}
+      
+      <div class="outreach-details-body">
+        <div class="detail-row">
+          <span class="detail-label">Recipient:</span>
+          <span class="detail-value ${emailStatusClass}">${escapeHtml(bestEmail)}</span>
+        </div>
+        ${draft.subject ? `
+        <div class="detail-row">
+          <span class="detail-label">Subject:</span>
+          <span class="detail-value subject-value">${escapeHtml(draft.subject)}</span>
+        </div>` : ''}
+      </div>
+
       <div class="badge-row">
         <span class="conf-badge ${confClass}">Confidence: ${(score * 100).toFixed(0)}%</span>
-        <span class="conf-badge conf-med">MX Checked</span>
+        <span class="conf-badge mx-badge ${emailStatusClass}">${emailStatusLabel}</span>
       </div>
-      <div class="card-footer" style="margin-top: 8px;">
-        <span class="job-status-indicator matched">${escapeHtml(draft.status)}</span>
-        <button class="card-action-btn" onclick="openOutreachComposer('${draft.id}')">Compose & Send</button>
+
+      <div class="card-footer">
+        <span class="outreach-status-badge ${draft.status}">${escapeHtml(draft.status)}</span>
+        <button class="card-action-btn premium-btn" onclick="openOutreachComposer('${draft.id}')">
+          <span>Compose & Send</span>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
       </div>
     `;
     container.appendChild(card);
@@ -728,22 +962,40 @@ function openOutreachComposer(draftId) {
   document.getElementById("composer-subject").value = draft.subject;
   document.getElementById("composer-body").value = draft.body;
 
+  const toInput = document.getElementById("composer-to");
+  const bestEmail = draft.email_guesses && draft.email_guesses.length > 0 ? draft.email_guesses[0].address : "";
+  if (toInput) {
+    toInput.value = bestEmail;
+  }
+
   const guessesList = document.getElementById("modal-email-guesses");
   guessesList.innerHTML = "";
   
-  (draft.email_guesses || []).forEach(guess => {
+  (draft.email_guesses || []).forEach((guess, idx) => {
     const item = document.createElement("div");
-    item.className = "email-guess-item";
+    item.className = "email-guess-item clickable-guess" + (guess.address === bestEmail ? " active-guess" : "");
     
     const label = guess.mx_valid === false ? " (MX Failed)" : " (MX Verified)";
     const style = guess.mx_valid === false ? "color: var(--error-color)" : "color: var(--success-color)";
     
     item.innerHTML = `
-      <span>${escapeHtml(guess.address)}</span>
+      <div class="guess-address-line">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: middle;"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>${escapeHtml(guess.address)}</span>
+      </div>
       <div class="guess-meta">
         <span class="conf-badge conf-med" style="${style}">${guess.pattern}${label}</span>
       </div>
     `;
+    
+    item.onclick = () => {
+      if (toInput) {
+        toInput.value = guess.address;
+      }
+      document.querySelectorAll(".email-guess-item").forEach(el => el.classList.remove("active-guess"));
+      item.classList.add("active-guess");
+    };
+
     guessesList.appendChild(item);
   });
 
@@ -768,36 +1020,70 @@ async function discardOutreachDraft() {
   }
 }
 
+async function saveOutreachDraft() {
+  if (!activeOutreachId) return;
+  const to = document.getElementById("composer-to")?.value || "";
+  const subject = document.getElementById("composer-subject")?.value || "";
+  const body = document.getElementById("composer-body")?.value || "";
+  
+  try {
+    const res = await fetch(`${API_BASE}/outreach/${activeOutreachId}/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to_addr: to, subject: subject, body: body })
+    });
+    if (res.ok) {
+      logEvent("system", "Outreach draft changes saved successfully.");
+      // Update local cache
+      const draft = outreachDrafts.find(d => d.id === activeOutreachId);
+      if (draft) {
+        draft.subject = subject;
+        draft.body = body;
+        if (draft.email_guesses && draft.email_guesses.length > 0) {
+          if (draft.email_guesses[0].address !== to) {
+            draft.email_guesses = [{address: to, pattern: "user_edit", mx_valid: null}].concat(draft.email_guesses);
+          }
+        } else {
+          draft.email_guesses = [{address: to, pattern: "user_edit", mx_valid: null}];
+        }
+      }
+      renderOutreach();
+    }
+  } catch (err) {
+    console.error("Failed to save draft", err);
+  }
+}
+
 async function triggerMailtoHandoff() {
   if (!activeOutreachId) return;
   
-  try {
-    const res = await fetch(`${API_BASE}/outreach/${activeOutreachId}/open-mail`, {
-      method: "POST"
-    });
-    closeOutreachModal();
-    logEvent("system", "Handoff to default system mail client completed.");
-  } catch (err) {
-    console.error("Failed to handoff mail", err);
-  }
+  const to = document.getElementById("composer-to")?.value || "";
+  const subject = document.getElementById("composer-subject")?.value || "";
+  const body = document.getElementById("composer-body")?.value || "";
+  
+  // Save edits first, then open mail client
+  await saveOutreachDraft();
+  
+  const mailtoUri = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.location.href = mailtoUri;
+  closeOutreachModal();
+  logEvent("system", "Handoff to default system mail client completed.");
 }
 
 async function triggerGmailWebHandoff() {
   if (!activeOutreachId) return;
 
-  try {
-    const res = await fetch(`${API_BASE}/outreach/${activeOutreachId}/gmail-url`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.url) {
-        window.open(data.url, "_blank");
-        closeOutreachModal();
-        logEvent("outreach", "Opened draft in Gmail Web (New Tab).");
-      }
-    }
-  } catch (err) {
-    console.error("Failed to fetch Gmail URL", err);
-  }
+  const to = document.getElementById("composer-to")?.value || "";
+  const subject = document.getElementById("composer-subject")?.value || "";
+  const body = document.getElementById("composer-body")?.value || "";
+
+  // Save edits first, then open Gmail
+  await saveOutreachDraft();
+
+  const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.open(gmailUrl, "_blank");
+  closeOutreachModal();
+  logEvent("outreach", "Opened draft in Gmail Web (New Tab).");
 }
 
 // ---------------------------------------------------------------------------
@@ -959,6 +1245,7 @@ function renderExperienceEditor() {
 
 function renderEducationEditor() {
   const container = document.getElementById("editor-education-list");
+  if (!container) return;
   container.innerHTML = "";
   
   editedEducation.forEach((edu, index) => {
@@ -971,20 +1258,28 @@ function renderEducationEditor() {
       </div>
       <div class="form-grid">
         <div class="form-group">
-          <label>Institution</label>
+          <label>Institution / University / School</label>
           <input type="text" class="edu-institution" value="${escapeHtml(edu.institution || '')}">
         </div>
         <div class="form-group">
-          <label>Degree</label>
+          <label>Degree / Qualification</label>
           <input type="text" class="edu-degree" value="${escapeHtml(edu.degree || '')}">
         </div>
         <div class="form-group">
-          <label>Start Date</label>
+          <label>Start Date / Year</label>
           <input type="text" class="edu-start" value="${escapeHtml(edu.start || '')}">
         </div>
         <div class="form-group">
-          <label>End Date</label>
+          <label>End Date / Year</label>
           <input type="text" class="edu-end" value="${escapeHtml(edu.end || '')}">
+        </div>
+        <div class="form-group">
+          <label>Grade / CGPA / Percentage</label>
+          <input type="text" class="edu-grade" placeholder="e.g. 8.9 CGPA or 92%" value="${escapeHtml(edu.grade || '')}">
+        </div>
+        <div class="form-group full-width">
+          <label>Specialization / Coursework / Honors</label>
+          <input type="text" class="edu-details" placeholder="e.g. Computer Science, Algorithms, Honors" value="${escapeHtml(edu.details || '')}">
         </div>
       </div>
     `;
@@ -1058,11 +1353,15 @@ function syncCurrentEditorArrays() {
 
   const eduCards = document.querySelectorAll(".education-block-card");
   editedEducation = Array.from(eduCards).map(card => {
+    const gradeInput = card.querySelector(".edu-grade");
+    const detailsInput = card.querySelector(".edu-details");
     return {
       institution: card.querySelector(".edu-institution").value.trim(),
       degree: card.querySelector(".edu-degree").value.trim(),
       start: card.querySelector(".edu-start").value.trim(),
-      end: card.querySelector(".edu-end").value.trim()
+      end: card.querySelector(".edu-end").value.trim(),
+      grade: gradeInput ? gradeInput.value.trim() : "",
+      details: detailsInput ? detailsInput.value.trim() : ""
     };
   });
 

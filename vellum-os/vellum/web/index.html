@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260728_v1">
+  <link rel="stylesheet" href="styles.css?v=20260728_v4">
 </head>
 
 <body>
@@ -244,11 +244,27 @@
             </div>
 
             <div class="search-flex-inputs-container">
-              <div class="glow-input-group">
-                <label for="target-location">Target Location</label>
-                <div class="glow-input-with-icon">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                  <input type="text" id="target-location" value="Bengaluru" placeholder="e.g. Bengaluru, Remote">
+              <!-- Custom Searchable Location Dropdown -->
+              <div class="glow-input-group custom-select-group">
+                <label for="target-location-search">Target Tech Hub / Location</label>
+                <div class="custom-select-wrapper" id="custom-location-wrapper">
+                  <div class="custom-select-trigger" id="custom-location-trigger">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span id="custom-location-selected-text">Hyderabad (1000+ IT Companies)</span>
+                    <svg class="dropdown-chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                  </div>
+                  <!-- Hidden native input to preserve existing state access -->
+                  <input type="hidden" id="target-location" value="hyderabad">
+                  <!-- Custom Glassmorphic Options Popover -->
+                  <div class="custom-select-popover glass hidden" id="custom-location-popover">
+                    <div class="custom-select-search-box">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                      <input type="text" id="custom-location-search-input" placeholder="Search tech hub city...">
+                    </div>
+                    <div class="custom-select-options-list" id="custom-location-options-list">
+                      <!-- Populated dynamically via JS -->
+                    </div>
+                  </div>
                 </div>
               </div>
               
@@ -257,6 +273,20 @@
                 <div class="glow-input-with-icon">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
                   <input type="text" id="target-role" value="Software Engineer" placeholder="e.g. Frontend Developer">
+                </div>
+              </div>
+
+              <!-- Dataset Analysis Limit Control -->
+              <div class="glow-input-group limit-input-group">
+                <label for="target-analysis-limit">Analysis Limit</label>
+                <div class="glow-input-with-icon">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  <select id="target-analysis-limit" class="glow-select-input">
+                    <option value="50" selected>50 Companies (Recommended)</option>
+                    <option value="25">25 Companies (Fastest)</option>
+                    <option value="100">100 Companies (Deep Search)</option>
+                    <option value="250">250 Companies (Ultra Search)</option>
+                  </select>
                 </div>
               </div>
               
@@ -626,33 +656,39 @@
   <div id="outreach-modal" class="modal-overlay hidden">
     <div class="modal-container glass outreach-modal-container">
       <div class="modal-header">
-        <h3>✉️ Direct Outreach Email Composer</h3>
+        <div class="modal-title-with-badge">
+          <h3>✉️ Direct Outreach Email Composer</h3>
+          <span id="modal-contact-details" class="jd-role-pill">Name (Role)</span>
+        </div>
         <button class="close-modal-btn" onclick="closeOutreachModal()">&times;</button>
       </div>
       <div class="modal-body">
         <div class="outreach-meta-grid">
-          <div class="meta-item">
-            <label>Target Recruiter / Leader Email:</label>
+          <div class="meta-item full-width">
+            <label>Select Recipient Email Guess (Click to choose):</label>
             <div id="modal-email-guesses" class="email-guesses-list"></div>
-          </div>
-          <div class="meta-item">
-            <label>Contact Target:</label>
-            <span id="modal-contact-details" class="meta-val">Name (Role)</span>
           </div>
         </div>
         <div class="email-composer">
           <div class="composer-field">
+            <label for="composer-to">To (Recipient Address)</label>
+            <input type="email" id="composer-to" placeholder="recruiter@company.com">
+          </div>
+          <div class="composer-field">
             <label for="composer-subject">Subject Line</label>
-            <input type="text" id="composer-subject">
+            <input type="text" id="composer-subject" placeholder="Subject">
           </div>
           <div class="composer-field">
             <label for="composer-body">Message Body</label>
-            <textarea id="composer-body" rows="11"></textarea>
+            <textarea id="composer-body" rows="10" placeholder="Type your message here..."></textarea>
           </div>
         </div>
       </div>
       <div class="modal-actions space-between">
-        <button class="cta-btn secondary" onclick="discardOutreachDraft()">Discard Draft</button>
+        <div class="modal-left-actions" style="display: flex; gap: 8px;">
+          <button class="cta-btn secondary" onclick="discardOutreachDraft()">Discard Draft</button>
+          <button class="cta-btn outline" onclick="saveOutreachDraft()">Save Changes</button>
+        </div>
         <div class="modal-right-actions">
           <button class="cta-btn outline" onclick="triggerGmailWebHandoff()">✉️ Open in Gmail (New Tab)</button>
           <button class="cta-btn primary" onclick="triggerMailtoHandoff()">Open in Default Mail Client</button>
@@ -688,6 +724,55 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260728_v1"></script>
+  <!-- Job & Job Description (JD) Details Modal -->
+  <div id="job-details-modal" class="modal-overlay hidden" onclick="if(event.target === this) closeJobDetailsModal()">
+    <div class="modal-container glass jd-modal-container">
+      <div class="modal-header">
+        <div class="modal-title-with-badge">
+          <h3 id="jd-modal-company">Company Name</h3>
+          <span id="jd-modal-role-pill" class="jd-role-pill">Software Engineer</span>
+        </div>
+        <button class="close-modal-btn" onclick="closeJobDetailsModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Quick Meta Row -->
+        <div class="jd-meta-grid">
+          <div class="jd-meta-card">
+            <span class="jd-meta-label">Location</span>
+            <span id="jd-modal-location" class="jd-meta-val">Hyderabad / India</span>
+          </div>
+          <div class="jd-meta-card">
+            <span class="jd-meta-label">Source</span>
+            <span id="jd-modal-source" class="jd-meta-val">Greenhouse ATS</span>
+          </div>
+          <div class="jd-meta-card">
+            <span class="jd-meta-label">Fit Score</span>
+            <span id="jd-modal-match-score" class="jd-meta-val conf-badge conf-high">88% Match</span>
+          </div>
+          <div class="jd-meta-card">
+            <span class="jd-meta-label">Pipeline Status</span>
+            <span id="jd-modal-status" class="jd-meta-val job-status-indicator matched">Matched</span>
+          </div>
+        </div>
+
+        <!-- Job Description Body Section -->
+        <div class="jd-section">
+          <h4 class="jd-section-heading">📄 Complete Job Description</h4>
+          <div id="jd-modal-body" class="jd-body-formatted">
+            <p>Loading job description...</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions space-between">
+        <button class="cta-btn secondary" onclick="closeJobDetailsModal()">Close</button>
+        <div class="modal-right-actions" id="jd-modal-actions">
+          <a id="jd-modal-apply-link" href="#" target="_blank" rel="noopener noreferrer" class="cta-btn outline">Direct Apply ↗</a>
+          <button id="jd-modal-download-cv-btn" class="cta-btn primary" onclick="">Download Tailored CV PDF</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260728_v2"></script>
 </body>
 </html>

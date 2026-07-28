@@ -41,15 +41,17 @@ Return a JSON object with exactly these keys:
       "company": "Company Name",
       "start": "Mon YYYY",
       "end": "Mon YYYY or Present",
-      "bullets": ["Achievement 1", "Achievement 2"]
+      "bullets": ["Detailed achievement/contribution 1", "Detailed achievement/contribution 2"]
     }
   ],
   "education": [
     {
-      "degree": "Degree Name",
-      "institution": "University Name",
+      "degree": "Degree / Diploma Name",
+      "institution": "University / College / School Name",
       "start": "YYYY",
-      "end": "YYYY"
+      "end": "YYYY",
+      "grade": "CGPA e.g. 8.9/10 or Percentage e.g. 92%",
+      "details": "Major, Specialization, or Key Coursework"
     }
   ],
   "projects": [
@@ -66,11 +68,13 @@ Return a JSON object with exactly these keys:
 
 Rules:
 - Extract ONLY what is explicitly written or present in the embedded links. Do NOT fabricate or hallucinate.
+- Extract ALL education qualifications mentioned (Degrees, Diplomas, High School, Certifications) without missing any. Include CGPA/grades and details/coursework if mentioned.
+- Extract ALL work experience and internship positions. Include ALL bullets/contributions/achievements listed for each role without dropping or summarizing them into single lines.
 - Match project URLs, GitHub, and Portfolio URLs from the extracted embedded links section when applicable.
-- For projects: Carefully identify all projects (personal, academic, professional, or open-source) listed in the resume. For each project, extract: the exact name/title as "title", a concise description of what was built and achieved as "description", the repository or live demo url as "url" (matching/resolving links from the resume or extracted hyperlinks section), and technologies used as a list. If a project has no link/URL, set it to "". Do not skip projects.
+- For projects: Carefully identify all projects (personal, academic, professional, or open-source) listed in the resume. For each project, extract: the exact name/title as "title", a concise description as "description", the url as "url", and technologies used as a list.
 - For suggested_role: Analyze the candidate's skills and past work roles, and output the single best target job title/role.
-- For relevant_experience: Calculate/summarize the total years and domain experience from their past work and projects (e.g. "2+ Years in Software Engineering").
-- For languages: List all natural spoken/written languages mentioned (e.g. English, Telugu, Hindi, French).
+- For relevant_experience: Calculate/summarize the total years and domain experience from their past work and projects.
+- For languages: List all natural spoken/written languages mentioned.
 - For skills: List every technology, tool, programming language, and framework mentioned.
 - Return valid JSON only. No markdown, no explanation."""
 
@@ -165,23 +169,70 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
             data = _parse_json_object(retry["content"])
 
         # Defensive key normalization for projects to ensure Pydantic parsing succeeds without dropping data
-        if isinstance(data, dict) and "projects" in data and isinstance(data["projects"], list):
-            normalized_projects = []
-            for proj in data["projects"]:
-                if isinstance(proj, dict):
-                    title = proj.get("title") or proj.get("name") or proj.get("project_name") or ""
-                    url = proj.get("url") or proj.get("link") or proj.get("github_url") or proj.get("project_url") or ""
-                    desc = proj.get("description") or proj.get("details") or proj.get("body") or proj.get("summary") or ""
-                    tech = proj.get("technologies") or proj.get("tech") or proj.get("tools") or proj.get("tech_stack") or []
-                    if isinstance(tech, str):
-                        tech = [t.strip() for t in tech.split(",") if t.strip()]
-                    normalized_projects.append({
-                        "title": title,
-                        "url": url,
-                        "description": desc,
-                        "technologies": tech
-                    })
-            data["projects"] = normalized_projects
+        if isinstance(data, dict):
+            if "projects" in data and isinstance(data["projects"], list):
+                normalized_projects = []
+                for proj in data["projects"]:
+                    if isinstance(proj, dict):
+                        title = proj.get("title") or proj.get("name") or proj.get("project_name") or ""
+                        url = proj.get("url") or proj.get("link") or proj.get("github_url") or proj.get("project_url") or ""
+                        desc = proj.get("description") or proj.get("details") or proj.get("body") or proj.get("summary") or ""
+                        tech = proj.get("technologies") or proj.get("tech") or proj.get("tools") or proj.get("tech_stack") or []
+                        if isinstance(tech, str):
+                            tech = [t.strip() for t in tech.split(",") if t.strip()]
+                        normalized_projects.append({
+                            "title": title,
+                            "url": url,
+                            "description": desc,
+                            "technologies": tech
+                        })
+                data["projects"] = normalized_projects
+
+            # Defensive key normalization for education
+            if "education" in data and isinstance(data["education"], list):
+                normalized_edu = []
+                for edu in data["education"]:
+                    if isinstance(edu, dict):
+                        degree = edu.get("degree") or edu.get("qualification") or edu.get("course") or ""
+                        institution = edu.get("institution") or edu.get("university") or edu.get("school") or edu.get("college") or ""
+                        start = edu.get("start") or edu.get("start_date") or ""
+                        end = edu.get("end") or edu.get("end_date") or edu.get("year") or edu.get("years") or ""
+                        grade = edu.get("grade") or edu.get("cgpa") or edu.get("marks") or edu.get("score") or edu.get("percentage") or ""
+                        details = edu.get("details") or edu.get("description") or edu.get("major") or edu.get("field_of_study") or edu.get("coursework") or ""
+                        normalized_edu.append({
+                            "degree": str(degree),
+                            "institution": str(institution),
+                            "start": str(start),
+                            "end": str(end),
+                            "grade": str(grade),
+                            "details": str(details)
+                        })
+                data["education"] = normalized_edu
+
+            # Defensive key normalization for experience
+            if "experience" in data and isinstance(data["experience"], list):
+                normalized_exp = []
+                for exp in data["experience"]:
+                    if isinstance(exp, dict):
+                        role = exp.get("role") or exp.get("title") or exp.get("position") or ""
+                        company = exp.get("company") or exp.get("organization") or exp.get("employer") or ""
+                        start = exp.get("start") or exp.get("start_date") or ""
+                        end = exp.get("end") or exp.get("end_date") or ""
+                        bullets_raw = exp.get("bullets") or exp.get("contributions") or exp.get("responsibilities") or exp.get("achievements") or exp.get("highlights") or exp.get("description") or []
+                        if isinstance(bullets_raw, str):
+                            bullets = [b.strip("-*• ").strip() for b in bullets_raw.split("\n") if b.strip()]
+                        elif isinstance(bullets_raw, list):
+                            bullets = [str(b).strip("-*• ").strip() for b in bullets_raw if str(b).strip()]
+                        else:
+                            bullets = []
+                        normalized_exp.append({
+                            "role": str(role),
+                            "company": str(company),
+                            "start": str(start),
+                            "end": str(end),
+                            "bullets": bullets
+                        })
+                data["experience"] = normalized_exp
 
         profile = CandidateProfile(**data)
         log.info(

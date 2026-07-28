@@ -141,7 +141,7 @@ async def run(state: dict) -> dict:
     try:
         # --- Initialize browser-use Agent with our LLM ---
         from browser_use import Agent, Controller, ActionResult
-        from browser_use.browser.context import BrowserContext
+        from browser_use.browser import BrowserSession
         from browser_use.llm.litellm import ChatLiteLLM
         try:
             from browser_use import BrowserProfile
@@ -151,12 +151,12 @@ async def run(state: dict) -> dict:
         controller = Controller()
 
         @controller.action("Upload candidate resume file (PDF/CV) to application form input")
-        async def upload_resume_file(browser: BrowserContext) -> ActionResult:
+        async def upload_resume_file(browser_session) -> ActionResult:
             """Locate file input element or upload dropzone on the page and upload candidate resume PDF."""
             if not pdf_path or not pdf_path.exists():
                 return ActionResult(error="Resume PDF file path not found")
             try:
-                page = await browser.get_current_page()
+                page = await browser_session.get_current_page()
                 # 1. Search for standard hidden or visible <input type="file">
                 file_input = page.locator("input[type='file']").first
                 if await file_input.count() > 0:

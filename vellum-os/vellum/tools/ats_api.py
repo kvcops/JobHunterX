@@ -1881,8 +1881,14 @@ async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 40) -> li
 
     log.info("direct_ats_hub_scan_started", city=city_key, slug_count=len(target_slugs), role=role)
 
-    # Gather jobs concurrently
-    tasks = [fetch_jobs_for_ats_company(slug, slug) for slug in target_slugs]
+    # Gather jobs concurrently with a semaphore limit of 15 to avoid Windows select() FD exhaustion
+    semaphore = asyncio.Semaphore(15)
+
+    async def sem_fetch(company_slug):
+        async with semaphore:
+            return await fetch_jobs_for_ats_company(company_slug, company_slug)
+
+    tasks = [sem_fetch(slug) for slug in target_slugs]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_jobs = []

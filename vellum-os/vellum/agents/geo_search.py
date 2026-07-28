@@ -159,6 +159,7 @@ async def run(state: dict) -> dict:
     """
     location = state.get("location", "Bengaluru")
     profile = state.get("profile", {})
+    limit = state.get("limit") or MAX_TOTAL_JOBS
     jobs: list[dict] = []
     events: list[dict] = []
     errors: list[str] = []
@@ -321,8 +322,8 @@ async def run(state: dict) -> dict:
         log.error("job_evaluator_error", error=str(exc))
         filtered_candidates = raw_candidates
 
-    # Only process up to MAX_TOTAL_JOBS
-    for item in filtered_candidates[:MAX_TOTAL_JOBS]:
+    # Only process up to requested limit
+    for item in filtered_candidates[:limit]:
         try:
             job = JobListing(
                 company=item["company"],

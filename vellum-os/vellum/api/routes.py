@@ -32,6 +32,7 @@ router = APIRouter(prefix="/api")
 class StartSearchRequest(BaseModel):
     location: str = "Bengaluru"
     role: str | None = None
+    limit: int = 50
 
 
 class ResumeAgentRequest(BaseModel):
@@ -50,6 +51,22 @@ _search_task: asyncio.Task | None = None
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@router.get("/locations")
+async def get_available_locations():
+    """Get list of all Indian tech hub locations configured in ats_api.py."""
+    from vellum.tools.ats_api import TECH_HUB_STARTUPS
+    keys = list(TECH_HUB_STARTUPS.keys())
+    locations = []
+    for k in keys:
+        display = k.replace("-", " ").title()
+        if k == "ncr":
+            display = "NCR (Delhi / Gurgaon / Noida)"
+        elif k == "remote":
+            display = "Remote India"
+        locations.append({"key": k, "label": display, "company_count": len(TECH_HUB_STARTUPS[k])})
+    return {"locations": locations}
+
 
 @router.post("/upload-resume")
 async def upload_resume(file: UploadFile = File(...)):
@@ -119,6 +136,7 @@ async def start_search(request: StartSearchRequest):
                 location=request.location,
                 profile=profile,
                 role=request.role,
+                limit=request.limit,
                 event_callback=event_callback,
             )
             log.info("search_complete", result=result)

@@ -55,6 +55,8 @@ class Education(BaseModel):
     institution: Optional[str] = ""
     start: Optional[str] = ""
     end: Optional[str] = ""
+    grade: Optional[str] = ""
+    details: Optional[str] = ""
 
 
 class Project(BaseModel):
@@ -195,6 +197,7 @@ class DiscoveryState(TypedDict, total=False):
     location: str
     profile: dict
     role: str
+    limit: int
     discovered_jobs: Annotated[list[dict], operator.add]
     errors: Annotated[list[str], operator.add]
     events: Annotated[list[dict], operator.add]
