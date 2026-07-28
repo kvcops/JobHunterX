@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vellum OS — Autonomous Career Agent</title>
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-  <!-- Google Fonts: Space Grotesk, Plus Jakarta Sans, Inter, JetBrains Mono -->
+  <!-- Google Fonts: Plus Jakarta Sans (display), Inter (UI), JetBrains Mono (code) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260728_v4">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=20260728_v6">
 </head>
 
 <body>
@@ -524,12 +524,12 @@
               </div>
             </div>
 
-            <!-- Viewport View: Playwright Chromium Browser Stream -->
+            <!-- Viewport View: Live Browser Agent (real window, no screenshots) -->
             <div id="view-browser" class="tab-view">
               <div class="viewport-section-header flex-header">
                 <div>
-                  <h2>Live Browser Agent Viewport</h2>
-                  <p class="viewport-section-sub">Real-time Chromium automation viewport stream and DOM element logs.</p>
+                  <h2>Live Browser Agent</h2>
+                  <p class="viewport-section-sub">The agent drives a real Chrome window on your desktop. Click the viewport to take over and interact manually.</p>
                 </div>
                 <button id="halt-browser-btn" class="dock-halt-browser-btn hidden" onclick="haltBrowserAction()" title="Halt Active Browser Session">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" fill="currentColor"/></svg>
@@ -538,8 +538,8 @@
               </div>
               
               <div class="browser-telemetry-console-wrapper">
-                <!-- Browser Viewport Screen Card -->
-                <div class="bento-card browser-screen-card glass">
+                <!-- Live Browser Interactive Panel -->
+                <div class="bento-card browser-screen-card glass" id="browser-live-panel">
                   <div class="browser-navigation-bar">
                     <div class="nav-control-dots">
                       <span class="ctrl-dot red"></span>
@@ -552,21 +552,56 @@
                     </div>
                     <div class="nav-url-bar">
                       <svg class="url-lock-svg" viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                      <div id="browser-url-input" class="url-input-display">https://google.com</div>
+                      <div id="browser-url-input" class="url-input-display">Waiting for agent…</div>
                     </div>
                     <span id="browser-active-badge" class="viewport-live-pulse-badge hidden">
-                      <span class="live-pulse-dot">●</span> Live Stream
+                      <span class="live-pulse-dot">●</span> Live
                     </span>
                   </div>
                   
-                  <div class="browser-frame-viewport-display">
-                    <img id="browser-viewport-img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Browser Stream Frame" class="browser-img-element hidden">
+                  <div class="browser-frame-viewport-display" id="browser-viewport-surface">
+                    <!-- CDP Live Stream Canvas -->
+                    <canvas id="browser-cdp-canvas" class="browser-cdp-canvas hidden" width="1280" height="720"></canvas>
+
+                    <!-- Idle / Standby state -->
                     <div id="browser-idle-state" class="browser-viewport-standby">
                       <div class="standby-icon-core">
                         <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="12" cy="10" r="3"/></svg>
                       </div>
                       <h3>Browser Agent Standby</h3>
-                      <p> Headless Playwright worker is offline. Live Chromium automation stream will display here upon launching job application nodes.</p>
+                      <p>The live Chrome window will open on your desktop when an application starts. No screenshots — you see and control the real browser.</p>
+                    </div>
+
+                    <!-- Active live state (shown when agent is running) -->
+                    <div id="browser-live-state" class="browser-viewport-live hidden">
+                      <div class="live-page-title" id="browser-page-title">Loading…</div>
+                      <div class="live-url-pill" id="browser-live-url">—</div>
+                      <div class="live-takeover-cta" id="browser-takeover-cta">
+                        <div class="takeover-cursor-icon">
+                          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        </div>
+                        <div class="takeover-cta-text">
+                          <strong>Click to interact</strong>
+                          <span>Takes over the real Chrome window for manual control</span>
+                        </div>
+                      </div>
+                      <div class="live-status-chips">
+                        <span class="live-chip live-chip-agent" id="live-chip-agent">Agent driving</span>
+                        <span class="live-chip live-chip-window hidden" id="live-chip-window">Chrome focused</span>
+                      </div>
+                    </div>
+
+                    <!-- Takeover active overlay (manual control) -->
+                    <div id="browser-takeover-overlay" class="browser-viewport-takeover hidden">
+                      <div class="takeover-banner">
+                        <div class="takeover-pulse"></div>
+                        <h3>You're in control</h3>
+                        <p>The real Chrome window is focused on your desktop. Solve CAPTCHAs, edit fields, or submit manually.</p>
+                        <button class="takeover-resume-btn" onclick="releaseBrowserControl()">
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                          <span>Resume Agent</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -773,6 +808,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260728_v2"></script>
+  <script src="app.js?v=20260728_v3"></script>
 </body>
 </html>

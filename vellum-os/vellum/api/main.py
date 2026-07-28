@@ -28,9 +28,11 @@ except Exception:
 
 
 
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +43,8 @@ from vellum.config.settings import get_settings
 from vellum.config.database import set_db_path, init_db
 from vellum.api.routes import router
 from vellum.api.ws import manager
+
+log = get_logger("main")
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +120,161 @@ async def websocket_endpoint(websocket: WebSocket):
             # Could handle client commands here in the future
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# Browser CDP Live Stream WebSocket
+# ---------------------------------------------------------------------------
+
+_browser_ws_clients: list[WebSocket] = []
+_browser_screencast_task: asyncio.Task | None = None
+_browser_screencast_running = False
+
+
+async def _screencast_broadcaster(page: Any):
+    """Stream CDP screencast frames to all connected browser WS clients."""
+    global _browser_screencast_running
+    _browser_screencast_running = True
+
+    import base64
+
+    async def on_frame(frame):
+        if not _browser_ws_clients:
+            return
+        # frame.data is raw JPEG bytes, frame.viewportWidth/Height are ints
+        b64_data = base64.b64encode(frame.data).decode("ascii")
+        msg = json.dumps({
+            "type": "frame",
+            "data": b64_data,
+            "width": frame.viewportWidth,
+            "height": frame.viewportHeight,
+        })
+        dead = []
+        for ws in list(_browser_ws_clients):
+            try:
+                await ws.send_text(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            if ws in _browser_ws_clients:
+                _browser_ws_clients.remove(ws)
+
+    try:
+        screencast = page.screencast
+        async with screencast.start(
+            on_frame=on_frame,
+            quality=50,
+            size={"width": 1280, "height": 720},
+        ):
+            # Keep streaming until no clients or stopped
+            while _browser_ws_clients and _browser_screencast_running:
+                await asyncio.sleep(0.1)
+    except Exception as exc:
+        log.warning("screencast_error", error=str(exc))
+    finally:
+        _browser_screencast_running = False
+
+
+@app.websocket("/ws/browser")
+async def browser_websocket(websocket: WebSocket):
+    """CDP live-stream WebSocket: streams browser frames + receives input events."""
+    await websocket.accept()
+    _browser_ws_clients.append(websocket)
+    log.info("browser_ws_client_connected", total=len(_browser_ws_clients))
+
+    # If we have an active page, start screencast if not already running
+    global _browser_screencast_task
+    page = None
+    try:
+        from vellum.agents import browser_agent as ba
+        page = await ba.get_active_page()
+    except Exception:
+        pass
+
+    if page and not _browser_screencast_running:
+        _browser_screencast_task = asyncio.create_task(_screencast_broadcaster(page))
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+
+            # Handle input events from the client
+            if page and not page.is_closed():
+                await _forward_input_event(page, msg)
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        log.warning("browser_ws_error", error=str(exc))
+    finally:
+        if websocket in _browser_ws_clients:
+            _browser_ws_clients.remove(websocket)
+        log.info("browser_ws_client_disconnected", total=len(_browser_ws_clients))
+        # If no clients left, stop screencast
+        if not _browser_ws_clients:
+            _stop_screencast()
+
+
+def _stop_screencast():
+    """Stop the screencast broadcaster."""
+    global _browser_screencast_running, _browser_screencast_task
+    _browser_screencast_running = False
+    if _browser_screencast_task and not _browser_screencast_task.done():
+        _browser_screencast_task.cancel()
+        _browser_screencast_task = None
+
+
+async def _forward_input_event(page: Any, msg: dict):
+    """Forward mouse/keyboard input events from the client to the Playwright page."""
+    event_type = msg.get("type")
+
+    try:
+        if event_type == "mouse":
+            action = msg.get("action")
+            x = msg.get("x", 0)
+            y = msg.get("y", 0)
+            button = msg.get("button", "left")
+            pw_button = "left" if button == 0 else "right" if button == 2 else "middle"
+
+            if action == "click":
+                await page.mouse.click(x, y, button=pw_button)
+            elif action == "down":
+                await page.mouse.down(button=pw_button)
+            elif action == "up":
+                await page.mouse.up(button=pw_button)
+            elif action == "move":
+                await page.mouse.move(x, y)
+            elif action == "dblclick":
+                await page.mouse.dblclick(x, y, button=pw_button)
+
+        elif event_type == "wheel":
+            delta_x = msg.get("deltaX", 0)
+            delta_y = msg.get("deltaY", 0)
+            await page.mouse.wheel(delta_x, delta_y)
+
+        elif event_type == "keyboard":
+            action = msg.get("action")
+            key = msg.get("key", "")
+            code = msg.get("code", "")
+            text = msg.get("text", "")
+
+            if action == "keyDown":
+                if text:
+                    await page.keyboard.insert_text(text)
+                elif key:
+                    await page.keyboard.down(key)
+            elif action == "keyUp":
+                if key:
+                    await page.keyboard.up(key)
+
+        elif event_type == "scroll":
+            x = msg.get("x", 0)
+            y = msg.get("y", 0)
+            delta_y = msg.get("deltaY", 0)
+            await page.mouse.wheel(0, delta_y)
+
+    except Exception as exc:
+        log.warning("input_forward_error", error=str(exc), type=event_type)
 
 
 # Static files (frontend) — mounted last so API routes take priority

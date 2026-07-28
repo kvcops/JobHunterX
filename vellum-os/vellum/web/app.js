@@ -668,7 +668,21 @@ function formatJdText(rawText) {
     return `<p class="jd-placeholder-text">No detailed job description text recorded for this posting.</p>`;
   }
 
-  const lines = rawText.split('\n');
+  // Strip any raw HTML tags/entities that leaked through, producing clean text.
+  let text = rawText;
+  if (/<\/?(p|div|span|h\d|ul|ol|li|br|strong|em|a|b|i)\b/i.test(text)) {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = text;
+    // Convert <li> to bullet lines and <br>/<p> to newlines first
+    tmp.querySelectorAll("li").forEach(li => li.insertAdjacentText("afterbegin", "\n• "));
+    tmp.querySelectorAll("br, p, div, h1, h2, h3, h4, h5, h6").forEach(el => el.insertAdjacentText("afterend", "\n"));
+    text = tmp.textContent || "";
+  }
+  // Decode leftover entities (&nbsp; &amp; etc.) and tidy whitespace
+  text = text.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'");
+  text = text.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+
+  const lines = text.split('\n');
   let formattedHtml = '';
   let inList = false;
 
@@ -1546,23 +1560,27 @@ function handleSystemReset() {
 let browserStepLog = [];
 
 function handleBrowserStreamFrame(data) {
-  const img = document.getElementById("browser-viewport-img");
-  const idle = document.getElementById("browser-idle-state");
+  // Live URL + title only (no screenshots). The real Chrome window is on the
+  // user's desktop; this panel shows what page the agent is currently on.
   const urlInput = document.getElementById("browser-url-input");
-  
-  if (urlInput && data.url) {
-    urlInput.innerText = data.url;
-  }
-  
-  if (data.screenshot && img && idle) {
-    img.src = `data:image/jpeg;base64,${data.screenshot}`;
-    img.classList.remove("hidden");
+  const liveUrl = document.getElementById("browser-live-url");
+  const pageTitle = document.getElementById("browser-page-title");
+
+  if (urlInput && data.url) urlInput.innerText = data.url;
+  if (liveUrl && data.url) liveUrl.innerText = data.url;
+  if (pageTitle && data.title) pageTitle.innerText = data.title || data.url;
+
+  // Switch from idle standby to live state
+  const idle = document.getElementById("browser-idle-state");
+  const live = document.getElementById("browser-live-state");
+  if (idle && live) {
     idle.classList.add("hidden");
+    live.classList.remove("hidden");
   }
-  
+
   const activeBadge = document.getElementById("browser-active-badge");
   if (activeBadge) activeBadge.classList.remove("hidden");
-  
+
   const haltBtn = document.getElementById("halt-browser-btn");
   if (haltBtn) haltBtn.classList.remove("hidden");
 }
@@ -1576,13 +1594,17 @@ function handleBrowserStep(data) {
   
   const urlInput = document.getElementById("browser-url-input");
   if (urlInput) urlInput.innerText = data.url || "about:blank";
-  
-  const img = document.getElementById("browser-viewport-img");
+
+  const liveUrl = document.getElementById("browser-live-url");
+  const pageTitle = document.getElementById("browser-page-title");
+  if (liveUrl && data.url) liveUrl.innerText = data.url;
+  if (pageTitle) pageTitle.innerText = data.action ? data.action.slice(0, 60) : "Working…";
+
   const idle = document.getElementById("browser-idle-state");
-  if (data.screenshot && img && idle) {
-    img.src = `data:image/png;base64,${data.screenshot}`;
-    img.classList.remove("hidden");
+  const live = document.getElementById("browser-live-state");
+  if (idle && live) {
     idle.classList.add("hidden");
+    live.classList.remove("hidden");
   }
   
   const stepCount = document.getElementById("timeline-step-count");
@@ -1630,13 +1652,13 @@ async function haltBrowserAction() {
       logEvent("system", "Halt requested. Active browser session stopped.");
       const activeBadge = document.getElementById("browser-active-badge");
       if (activeBadge) activeBadge.classList.add("hidden");
-      
-      const img = document.getElementById("browser-viewport-img");
+
       const idle = document.getElementById("browser-idle-state");
-      if (img && idle) {
-        img.classList.add("hidden");
-        idle.classList.remove("hidden");
-      }
+      const live = document.getElementById("browser-live-state");
+      const canvas = document.getElementById("browser-cdp-canvas");
+      if (live) live.classList.add("hidden");
+      if (canvas) canvas.classList.add("hidden");
+      if (idle) idle.classList.remove("hidden");
     }
   } catch (err) {
     console.error("Error halting browser", err);
@@ -1649,3 +1671,245 @@ async function haltBrowserAction() {
     }
   }
 }
+
+// Track the active job_id for takeover/release calls.
+let _activeBrowserJobId = "";
+let _takeoverActive = false;
+
+// Wire up the click-to-takeover surface once DOM is ready.
+(function wireTakeoverSurface() {
+  const attach = () => {
+    const surface = document.getElementById("browser-viewport-surface");
+    const cta = document.getElementById("browser-takeover-cta");
+    const target = cta || surface;
+    if (!target) { setTimeout(attach, 200); return; }
+    target.addEventListener("click", () => {
+      if (_takeoverActive) return;
+      requestBrowserTakeover();
+    });
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", attach);
+  } else {
+    attach();
+  }
+})();
+
+async function requestBrowserTakeover() {
+  try {
+    const url = `${API_BASE}/browser/takeover${_activeBrowserJobId ? "?job_id=" + encodeURIComponent(_activeBrowserJobId) : ""}`;
+    const res = await fetch(url, { method: "POST" });
+    if (!res.ok) throw new Error("takeover failed");
+    const data = await res.json();
+    _takeoverActive = true;
+    showTakeoverOverlay();
+    logEvent("system", "Browser control taken over. Chrome window focused.");
+  } catch (err) {
+    console.error("takeover error", err);
+    logEvent("error", "Could not take over browser. Is a session running?");
+  }
+}
+
+async function releaseBrowserControl() {
+  try {
+    const url = `${API_BASE}/browser/release${_activeBrowserJobId ? "?job_id=" + encodeURIComponent(_activeBrowserJobId) : ""}`;
+    const res = await fetch(url, { method: "POST" });
+    if (!res.ok) throw new Error("release failed");
+    _takeoverActive = false;
+    hideTakeoverOverlay();
+    logEvent("system", "Browser control released. Agent resuming.");
+  } catch (err) {
+    console.error("release error", err);
+    _takeoverActive = false;
+    hideTakeoverOverlay();
+  }
+}
+
+function showTakeoverOverlay() {
+  const overlay = document.getElementById("browser-takeover-overlay");
+  const live = document.getElementById("browser-live-state");
+  const canvas = document.getElementById("browser-cdp-canvas");
+  if (overlay) overlay.classList.remove("hidden");
+  if (live) live.classList.add("hidden");
+  if (canvas) canvas.classList.add("hidden");
+  const chipAgent = document.getElementById("live-chip-agent");
+  const chipWindow = document.getElementById("live-chip-window");
+  if (chipAgent) chipAgent.classList.add("hidden");
+  if (chipWindow) chipWindow.classList.remove("hidden");
+}
+
+function hideTakeoverOverlay() {
+  const overlay = document.getElementById("browser-takeover-overlay");
+  const live = document.getElementById("browser-live-state");
+  const canvas = document.getElementById("browser-cdp-canvas");
+  if (overlay) overlay.classList.add("hidden");
+  if (live) live.classList.remove("hidden");
+  if (canvas) canvas.classList.remove("hidden");
+  const chipAgent = document.getElementById("live-chip-agent");
+  const chipWindow = document.getElementById("live-chip-window");
+  if (chipAgent) chipAgent.classList.remove("hidden");
+  if (chipWindow) chipWindow.classList.add("hidden");
+}
+
+// Track the active job id from incoming browser events.
+const _origHandleBrowserStep = window.handleBrowserStep;
+window.handleBrowserStep = function(data) {
+  if (data && data.job_id) _activeBrowserJobId = data.job_id;
+  if (_origHandleBrowserStep) _origHandleBrowserStep(data);
+};
+const _origHandleBrowserStreamFrame = window.handleBrowserStreamFrame;
+window.handleBrowserStreamFrame = function(data) {
+  if (data && data.job_id) _activeBrowserJobId = data.job_id;
+  if (_origHandleBrowserStreamFrame) _origHandleBrowserStreamFrame(data);
+};
+
+// ---------------------------------------------------------------------------
+// CDP Live Stream — Embedded Browser Canvas
+// ---------------------------------------------------------------------------
+let _browserWs = null;
+let _browserCanvas = null;
+let _browserCtx = null;
+let _browserWsConnected = false;
+
+function initBrowserCDPStream() {
+  _browserCanvas = document.getElementById("browser-cdp-canvas");
+  if (_browserCanvas) {
+    _browserCtx = _browserCanvas.getContext("2d");
+    // Capture mouse events on the canvas
+    _browserCanvas.addEventListener("mousedown", (e) => _sendCanvasMouseEvent(e, "click"));
+    _browserCanvas.addEventListener("mouseup", (e) => _sendCanvasMouseEvent(e, "up"));
+    _browserCanvas.addEventListener("mousemove", (e) => {
+      if (e.buttons) _sendCanvasMouseEvent(e, "move");
+    });
+    _browserCanvas.addEventListener("dblclick", (e) => _sendCanvasMouseEvent(e, "dblclick"));
+    _browserCanvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      _sendCanvasWheelEvent(e);
+    }, { passive: false });
+    // Keyboard events — focus canvas first
+    _browserCanvas.setAttribute("tabindex", "0");
+    _browserCanvas.addEventListener("keydown", (e) => _sendCanvasKeyEvent(e, "keyDown"));
+    _browserCanvas.addEventListener("keyup", (e) => _sendCanvasKeyEvent(e, "keyUp"));
+  }
+  connectBrowserWebSocket();
+}
+
+function connectBrowserWebSocket() {
+  if (_browserWs && _browserWs.readyState === WebSocket.OPEN) return;
+  const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/browser`;
+  _browserWs = new WebSocket(wsUrl);
+
+  _browserWs.onopen = () => {
+    _browserWsConnected = true;
+    console.log("Browser CDP WebSocket connected");
+  };
+
+  _browserWs.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "frame" && msg.data) {
+      renderCDPFrame(msg.data, msg.width, msg.height);
+    }
+  };
+
+  _browserWs.onclose = () => {
+    _browserWsConnected = false;
+    // Reconnect after delay if still on browser tab
+    setTimeout(() => {
+      const browserTab = document.getElementById("tab-browser");
+      if (browserTab && browserTab.classList.contains("active")) {
+        connectBrowserWebSocket();
+      }
+    }, 3000);
+  };
+
+  _browserWs.onerror = (err) => {
+    console.error("Browser CDP WS error", err);
+  };
+}
+
+function renderCDPFrame(b64Data, width, height) {
+  if (!_browserCanvas || !_browserCtx) return;
+
+  // Show canvas, hide idle/live state overlays
+  const idle = document.getElementById("browser-idle-state");
+  const live = document.getElementById("browser-live-state");
+  const takeover = document.getElementById("browser-takeover-overlay");
+  if (idle) idle.classList.add("hidden");
+  if (live) live.classList.add("hidden");
+  if (takeover && !takeover.classList.contains("hidden")) return; // Don't hide takeover overlay
+  _browserCanvas.classList.remove("hidden");
+
+  const img = new Image();
+  img.onload = () => {
+    _browserCanvas.width = img.width;
+    _browserCanvas.height = img.height;
+    _browserCtx.drawImage(img, 0, 0);
+  };
+  img.src = "data:image/jpeg;base64," + b64Data;
+}
+
+function _getCanvasCoords(e) {
+  if (!_browserCanvas) return { x: 0, y: 0 };
+  const rect = _browserCanvas.getBoundingClientRect();
+  const scaleX = _browserCanvas.width / rect.width;
+  const scaleY = _browserCanvas.height / rect.height;
+  return {
+    x: Math.round((e.clientX - rect.left) * scaleX),
+    y: Math.round((e.clientY - rect.top) * scaleY),
+  };
+}
+
+function _sendCanvasMouseEvent(e, action) {
+  if (!_browserWs || _browserWs.readyState !== WebSocket.OPEN) return;
+  const coords = _getCanvasCoords(e);
+  _browserWs.send(JSON.stringify({
+    type: "mouse",
+    action: action,
+    x: coords.x,
+    y: coords.y,
+    button: e.button,
+  }));
+}
+
+function _sendCanvasWheelEvent(e) {
+  if (!_browserWs || _browserWs.readyState !== WebSocket.OPEN) return;
+  const coords = _getCanvasCoords(e);
+  _browserWs.send(JSON.stringify({
+    type: "wheel",
+    x: coords.x,
+    y: coords.y,
+    deltaX: e.deltaX,
+    deltaY: e.deltaY,
+  }));
+}
+
+function _sendCanvasKeyEvent(e, action) {
+  if (!_browserWs || _browserWs.readyState !== WebSocket.OPEN) return;
+  // Don't send modifier-only keys that would conflict with browser shortcuts
+  if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return;
+  _browserWs.send(JSON.stringify({
+    type: "keyboard",
+    action: action,
+    key: e.key,
+    code: e.code,
+    text: action === "keyDown" ? e.key : "",
+  }));
+  e.preventDefault();
+}
+
+// Initialize CDP stream when DOM is ready
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initBrowserCDPStream);
+} else {
+  initBrowserCDPStream();
+}
+
+// Reconnect browser WS when switching to browser tab
+const _origSwitchTab = window.switchTab;
+window.switchTab = function(tabName) {
+  if (_origSwitchTab) _origSwitchTab(tabName);
+  if (tabName === "browser") {
+    connectBrowserWebSocket();
+    if (_browserCanvas) _browserCanvas.focus();
+  }
+};

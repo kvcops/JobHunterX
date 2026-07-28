@@ -1792,6 +1792,83 @@ ROLE_SYNONYMS = {
 }
 
 
+# Countries / regions that indicate a job is NOT India-based. If any of these
+# appear in the location string the job is rejected, even when it is tagged
+# "remote", because most such roles are not open to candidates in India.
+FOREIGN_LOCATION_TOKENS = [
+    "usa", "u.s.", "u.s.a", "united states", "us-", "us office",
+    "canada", "toronto", "vancouver", "montreal",
+    "uk", "u.k.", "united kingdom", "london", "england", "scotland", "dublin", "ireland",
+    "germany", "berlin", "munich", "netherlands", "amsterdam", "france", "paris",
+    "spain", "barcelona", "madrid", "portugal", "lisbon", "italy", "milan", "rome",
+    "sweden", "stockholm", "norway", "oslo", "denmark", "copenhagen", "finland", "helsinki",
+    "poland", "warsaw", "israel", "tel aviv", "tel-aviv",
+    "australia", "sydney", "melbourne", "new zealand", "auckland",
+    "singapore", "japan", "tokyo", "china", "beijing", "shanghai", "hong kong",
+    "south korea", "seoul", "taiwan", "vietnam", "hanoi", "philippines", "manila",
+    "indonesia", "jakarta", "malaysia", "kuala lumpur", "thailand", "bangkok",
+    "brazil", "sao paulo", "mexico", "mexico city", "argentina", "buenos aires",
+    "south africa", "johannesburg", "cape town", "egypt", "cairo", "nigeria", "lagos",
+    "kenya", "nairobi", "dubai", "uae", "saudi arabia", "riyadh", "qatar", "doha",
+    "san francisco", "new york", "seattle", "austin", "boston", "chicago",
+    "mountain view", "palo alto", "redmond", "atlanta", "denver", "portland",
+    "berlin", "remote - us", "remote-us", "remote - us only", "remote (us)",
+    "remote - europe", "remote-emea", "remote - apac", "remote - uk",
+]
+
+# Explicit signals that a role is genuinely remote/worldwide and thus open to India.
+GLOBAL_REMOTE_TOKENS = [
+    "worldwide", "anywhere", "global", "pan india", "remote - india",
+    "remote (india)", "remote-india", "work from anywhere",
+]
+
+
+def _location_matches_india(location: str, title: str, target_city_key: str) -> bool:
+    """Return True only if a job is India-based or genuinely worldwide-remote.
+
+    Rules (evaluated in order):
+      1. Any foreign country/region token -> reject (catches "Remote - San Francisco").
+      2. Genuinely worldwide/anywhere remote -> accept.
+      3. Target city match or explicit India mention -> accept.
+      4. Empty location on a fresh board listing -> accept only if not obviously foreign.
+    """
+    loc = (location or "").lower().strip()
+    title_l = (title or "").lower()
+    combined = f"{loc} {title_l}"
+
+    # 1. Reject if a foreign location token is present anywhere.
+    for tok in FOREIGN_LOCATION_TOKENS:
+        if tok in combined:
+            return False
+
+    # 2. Genuinely worldwide remote.
+    if any(tok in combined for tok in GLOBAL_REMOTE_TOKENS):
+        return True
+
+    # 3. Generic "remote" with no foreign qualifier -> accept (assume India-eligible).
+    if "remote" in combined or "work from home" in combined:
+        return True
+
+    # 4. India mention.
+    if "india" in combined:
+        return True
+
+    # 5. Target city match.
+    if target_city_key and target_city_key in loc:
+        return True
+
+    # 6. Empty location — reject by default. An empty location is ambiguous and
+    #    is the main way non-target-location jobs leak in. Only accept if the
+    #    title itself looks remote-friendly.
+    if not loc:
+        if "remote" in title_l or "work from home" in title_l:
+            return True
+        return False
+
+    # 7. Otherwise the location names somewhere that is not India and not remote.
+    return False
+
+
 async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 40) -> list[dict]:
     """Concurrently probe 50+ startup ATS boards for a target tech hub and role.
 
@@ -1909,8 +1986,10 @@ async def fetch_hub_ats_jobs(location: str, role: str, max_jobs: int = 40) -> li
                 if not matches_role:
                     continue
 
-                # Flexible location check: city name, remote, or india
-                matches_loc = not location or city_key in loc or "remote" in loc or "india" in loc or "remote" in title or loc == "" or loc == "india"
+                # Flexible location check: city name, remote, or india.
+                # Reject jobs physically located in foreign countries even if
+                # they appear in a "remote"-tagged global board.
+                matches_loc = _location_matches_india(loc, title, city_key)
 
                 if matches_loc:
                     all_jobs.append(job)

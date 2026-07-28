@@ -315,6 +315,29 @@ async def call_llm(
         latency_ms=round(latency_ms, 1),
     )
 
+    # --- Persist token usage to DB so the UI telemetry reflects real totals ---
+    try:
+        from vellum.config import database as _db
+        if _db._db_path:
+            import asyncio as _aio
+            _log_coro = _db.log_agent_event(
+                run_id=_ck or "llm",
+                agent_name="llm_router",
+                event_type="llm_call",
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                model=model,
+                latency_ms=round(latency_ms, 1),
+            )
+            try:
+                loop = _aio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                loop.create_task(_log_coro)
+    except Exception:
+        pass
+
     # --- Cache store ---
     if use_cache and ck:
         cache = _get_cache()

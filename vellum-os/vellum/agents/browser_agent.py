@@ -8,14 +8,29 @@ Robust HITL state machine for login, CAPTCHA, MFA, complex forms.
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
+from typing import Any
 
 from vellum.config.logging import get_logger
 from vellum.config import database as db
-from vellum.config.settings import get_settings
+from vellum.config.settings import get_settings, Settings
 from vellum.models import AgentEvent, HITLType
 
 log = get_logger("browser_agent")
+
+# A realistic, non-headless-looking desktop User-Agent.
+# Cloudflare flags the default Playwright/automation UA very quickly.
+_STEALTH_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+# Persistent profile path reused across runs. A stable profile accumulates
+# cookies, localStorage and an auth "history" that Cloudflare scores as a
+# real returning user rather than a fresh headless instance.
+_STEALTH_USER_DATA_DIR = Path("./data/browser_profile")
 
 
 # ---------------------------------------------------------------------------
@@ -62,10 +77,181 @@ def _detect_page_type(page_text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Stealth browser profile builder (Cloudflare / bot-detection mitigation)
+# ---------------------------------------------------------------------------
+
+def _build_stealth_profile(settings: Settings) -> Any:
+    """Build a BrowserProfile tuned to evade Cloudflare / bot detection.
+
+    Strategy (tiered):
+      1. If BROWSER_USE_API_KEY is set -> use the browser-use cloud browser,
+         which provides managed stealth fingerprinting + residential proxy
+         rotation. This is the only reliable way past Cloudflare Turnstile.
+      2. Otherwise -> local stealth profile:
+         - Persistent user_data_dir (cookies/history accumulate trust).
+         - headless=False when allowed (old headless is trivially detected;
+           the new Chromium headless still leaks many fingerprints).
+         - Realistic User-Agent and locale.
+         - Default anti-tracking extensions (uBlock, cookie banner) enabled:
+           these reduce the tracking signals that feed bot-scoring.
+    """
+    from browser_use import BrowserProfile
+
+    use_cloud = bool(os.getenv("BROWSER_USE_API_KEY")) and bool(getattr(settings, "browser_use_cloud", False))
+
+    if use_cloud:
+        log.info("browser_profile_cloud", reason="BROWSER_USE_API_KEY present + cloud enabled")
+        return BrowserProfile(
+            use_cloud=True,
+            user_agent=_STEALTH_USER_AGENT,
+            captcha_solver=True,
+        )
+
+    # Local stealth profile
+    try:
+        _STEALTH_USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    return BrowserProfile(
+        headless=settings.browser_use_headless,
+        user_data_dir=str(_STEALTH_USER_DATA_DIR.resolve()),
+        user_agent=_STEALTH_USER_AGENT,
+        viewport={"width": 1920, "height": 1080},
+        enable_default_extensions=True,
+        disable_security=False,
+        captcha_solver=True,
+        keep_alive=False,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process,AutomationControlled",
+            "--disable-popup-blocking",
+        ],
+    )
+
+
+# ---------------------------------------------------------------------------
 # Browser agent runner
 # ---------------------------------------------------------------------------
 
 _active_sessions: list[tuple[asyncio.AbstractEventLoop, Any]] = []
+
+# Registry of takeover gates keyed by job_id. Allows the API layer to pause/
+# resume the URL streamer (and signal the agent to yield) when the user takes
+# over the live browser window. Each value is a thread-safe asyncio.Event
+# belonging to the agent thread's event loop.
+_takeover_gates: dict[str, asyncio.Event] = {}
+
+
+def register_takeover_gate(job_id: str, gate: asyncio.Event) -> None:
+    _takeover_gates[job_id] = gate
+
+
+def _set_gate_threadsafe(job_id: str, value: bool) -> None:
+    """Set the takeover gate for a job from any thread."""
+    gate = _takeover_gates.get(job_id)
+    if gate is None:
+        return
+    loop = None
+    for ev_loop, agent in _active_sessions:
+        sess = getattr(agent, "browser_session", None)
+        if sess is not None:
+            loop = ev_loop
+            break
+    if loop is None:
+        loop = gate._loop if hasattr(gate, "_loop") else None  # type: ignore[attr-defined]
+    if loop is None:
+        return
+    def _flip():
+        if value:
+            gate.set()
+        else:
+            gate.clear()
+    try:
+        loop.call_soon_threadsafe(_flip)
+    except RuntimeError:
+        pass
+
+
+def pause_streaming(job_id: str) -> None:
+    """User took over the browser window — pause URL broadcasts AND agent actions."""
+    _set_gate_threadsafe(job_id, False)
+    # Also pause the browser-use Agent so it stops taking steps
+    _pause_active_agent()
+
+
+def resume_streaming(job_id: str) -> None:
+    """User finished manual control — resume URL broadcasts AND agent actions."""
+    _set_gate_threadsafe(job_id, True)
+    # Also resume the browser-use Agent
+    _resume_active_agent()
+
+
+def _pause_active_agent() -> None:
+    """Pause the active browser-use Agent (stops executing steps).
+
+    Thread-safe: uses call_soon_threadsafe to modify the agent's asyncio.Event
+    from the API thread while the agent runs on a separate ProactorEventLoop.
+    """
+    for loop, agent in _active_sessions:
+        if hasattr(agent, "pause") and hasattr(agent, "_external_pause_event"):
+            try:
+                def _do_pause():
+                    agent.state.paused = True
+                    agent._external_pause_event.clear()
+                loop.call_soon_threadsafe(_do_pause)
+                log.info("agent_paused", session_id=getattr(agent, "session_id", ""))
+            except Exception as exc:
+                log.warning("agent_pause_failed", error=str(exc))
+
+
+def _resume_active_agent() -> None:
+    """Resume the active browser-use Agent (resumes executing steps).
+
+    Thread-safe: uses call_soon_threadsafe to modify the agent's asyncio.Event
+    from the API thread while the agent runs on a separate ProactorEventLoop.
+    """
+    for loop, agent in _active_sessions:
+        if hasattr(agent, "resume") and hasattr(agent, "_external_pause_event"):
+            try:
+                def _do_resume():
+                    agent.state.paused = False
+                    agent._external_pause_event.set()
+                loop.call_soon_threadsafe(_do_resume)
+                log.info("agent_resumed", session_id=getattr(agent, "session_id", ""))
+            except Exception as exc:
+                log.warning("agent_resume_failed", error=str(exc))
+
+
+def get_active_cdp_url() -> str:
+    """Return the CDP websocket URL of the currently active browser, if any."""
+    for _loop, agent in _active_sessions:
+        sess = getattr(agent, "browser_session", None)
+        if sess is not None:
+            cdp = getattr(sess, "cdp_url", "") or ""
+            if cdp:
+                return cdp
+    return ""
+
+
+def get_active_browser_session() -> Any:
+    """Return the active BrowserSession object, or None."""
+    for _loop, agent in _active_sessions:
+        sess = getattr(agent, "browser_session", None)
+        if sess is not None:
+            return sess
+    return None
+
+
+async def get_active_page() -> Any:
+    """Return the current Playwright Page of the active browser, or None."""
+    sess = get_active_browser_session()
+    if sess is None:
+        return None
+    try:
+        return await sess.get_current_page()
+    except Exception:
+        return None
 
 
 async def stop_all_active_browsers():
@@ -130,12 +316,18 @@ async def run(state: dict) -> dict:
 
     settings = get_settings()
 
-    # Save tailored PDF to temp file if available
+    # Save tailored PDF to temp file if available, named after candidate+company
     pdf_path = None
     if tailored_pdf:
         screenshots_dir = settings.screenshots_full_path / job_id
         screenshots_dir.mkdir(parents=True, exist_ok=True)
-        pdf_path = screenshots_dir / "tailored_resume.pdf"
+        import re as _re
+        def _slug(s):
+            return _re.sub(r"[^A-Za-z0-9_\-]", "", (s or "").strip().replace(" ", "_"))[:40]
+        cand = _slug(profile.get("name", ""))
+        comp = _slug(job.get("company", ""))
+        fname = "_".join(p for p in [cand, comp] if p) or "tailored_resume"
+        pdf_path = screenshots_dir / f"{fname}.pdf"
         pdf_path.write_bytes(tailored_pdf)
 
     try:
@@ -152,27 +344,57 @@ async def run(state: dict) -> dict:
 
         @controller.action("Upload candidate resume file (PDF/CV) to application form input")
         async def upload_resume_file(browser_session) -> ActionResult:
-            """Locate file input element or upload dropzone on the page and upload candidate resume PDF."""
+            """Robustly locate a file input on the page and upload the resume PDF.
+
+            Strategy (in order):
+              1. Any <input type="file"> on the page (visible or hidden) — set files directly.
+              2. Click an upload/resume/attach control and intercept the file chooser dialog.
+            Never clicks ambiguous text-matched elements to avoid mis-targeting.
+            """
             if not pdf_path or not pdf_path.exists():
                 return ActionResult(error="Resume PDF file path not found")
+            resolved = str(pdf_path.resolve())
             try:
                 page = await browser_session.get_current_page()
-                # 1. Search for standard hidden or visible <input type="file">
-                file_input = page.locator("input[type='file']").first
-                if await file_input.count() > 0:
-                    await file_input.set_input_files(str(pdf_path.resolve()))
-                    return ActionResult(extracted_content=f"Successfully attached candidate resume PDF ({pdf_path.name}) to file input.")
-                
-                # 2. Otherwise trigger file chooser dialog via click on upload button
-                async with page.expect_file_chooser(timeout=4000) as fc_info:
-                    upload_btn = page.locator("button:has-text('Upload'), label:has-text('Upload'), div:has-text('Upload Resume')").first
-                    if await upload_btn.count() > 0:
-                        await upload_btn.click(force=True)
-                        file_chooser = await fc_info.value
-                        await file_chooser.set_files(str(pdf_path.resolve()))
-                        return ActionResult(extracted_content=f"Successfully uploaded candidate resume PDF via file chooser dialog.")
 
-                return ActionResult(error="No file upload input element or chooser button found on page.")
+                # 1) Direct <input type="file"> — the reliable path.
+                file_inputs = page.locator("input[type='file']")
+                count = await file_inputs.count()
+                for idx in range(count):
+                    try:
+                        fi = file_inputs.nth(idx)
+                        # Some inputs are hidden but still accept set_input_files.
+                        await fi.set_input_files(resolved)
+                        return ActionResult(extracted_content=f"Successfully attached resume PDF ({pdf_path.name}) to file input #{idx + 1}.")
+                    except Exception:
+                        continue
+
+                # 2) File-chooser interception via upload-trigger elements.
+                #    Use precise, resume-specific selectors only (no generic "Attach"/"Account").
+                trigger_selectors = [
+                    "label:has-text('Resume')",
+                    "label:has-text('CV')",
+                    "button:has-text('Upload Resume')",
+                    "button:has-text('Upload CV')",
+                    "button:has-text('Attach Resume')",
+                    "[class*='resume' i][class*='upload' i]",
+                    "[data-testid*='resume' i]",
+                    "input[type='file']",
+                ]
+                for sel in trigger_selectors:
+                    loc = page.locator(sel).first
+                    if await loc.count() == 0:
+                        continue
+                    try:
+                        async with page.expect_file_chooser(timeout=5000) as fc_info:
+                            await loc.click(force=True, timeout=3000)
+                        chooser = await fc_info.value
+                        await chooser.set_files(resolved)
+                        return ActionResult(extracted_content=f"Successfully uploaded resume PDF via chooser (selector: {sel}).")
+                    except Exception:
+                        continue
+
+                return ActionResult(error="No file upload input or resume upload trigger found on page. Skipping resume upload.")
             except Exception as exc:
                 return ActionResult(error=f"Upload execution error: {str(exc)}")
 
@@ -228,12 +450,7 @@ Instructions:
 
         async def browser_step_callback(state, model_output, step_num):
             url = getattr(state, "url", "")
-            screenshot = getattr(state, "screenshot", None)
             action = _clean_action_text(model_output)
-            
-            if isinstance(screenshot, bytes):
-                import base64
-                screenshot = base64.b64encode(screenshot).decode("ascii")
             event_data = {
                 "agent": "browser_agent",
                 "event_type": "browser_step",
@@ -242,7 +459,6 @@ Instructions:
                 "data": {
                     "step": step_num,
                     "url": url,
-                    "screenshot": screenshot,
                     "action": action,
                     "company": job.get("company", ""),
                     "role": job.get("role", "Software Engineer")
@@ -260,13 +476,19 @@ Instructions:
             "available_file_paths": [str(pdf_path.resolve())] if pdf_path else [],
         }
         if BrowserProfile is not None:
-            agent_kwargs["browser_profile"] = BrowserProfile(
-                headless=settings.browser_use_headless
-            )
+            agent_kwargs["browser_profile"] = _build_stealth_profile(settings)
         agent = Agent(**agent_kwargs)
 
         # Run browser agent in a dedicated thread with ProactorEventLoop.
         main_loop = asyncio.get_running_loop()
+
+        # Cross-thread takeover gate. While cleared, the URL streamer pauses
+        # broadcasting (the user is manually controlling the real Chrome window).
+        # Set by default (broadcasting active); cleared on user "take over",
+        # re-set on "resume".
+        _takeover_gate = asyncio.Event()
+        _takeover_gate.set()
+        register_takeover_gate(job_id, _takeover_gate)
 
         def _run_agent_in_proactor_loop():
             import concurrent.futures
@@ -274,8 +496,13 @@ Instructions:
             asyncio.set_event_loop(loop)
             _active_sessions.append((loop, agent))
 
-            async def screenshot_streamer(agent_instance):
-                import base64
+            async def url_status_streamer(agent_instance):
+                """Lightweight streamer: broadcasts current URL + page title only.
+
+                No screenshots. The real browser window stays visible on the
+                user's desktop; the UI shows the live URL + activity feed and
+                the user clicks to take over the actual window when needed.
+                """
                 await asyncio.sleep(3.0)
                 while True:
                     try:
@@ -283,17 +510,19 @@ Instructions:
                         if session:
                             page = await session.get_current_page()
                             if page and not page.is_closed():
-                                screenshot_bytes = await page.screenshot(type="jpeg", quality=55)
-                                screenshot_b64 = base64.b64encode(screenshot_bytes).decode("ascii")
                                 url = page.url
-                                
+                                try:
+                                    title = await page.title()
+                                except Exception:
+                                    title = ""
                                 event_data = {
                                     "agent": "browser_agent",
                                     "event_type": "browser_stream_frame",
                                     "job_id": job_id,
                                     "data": {
                                         "url": url,
-                                        "screenshot": screenshot_b64
+                                        "title": title,
+                                        "cdp_url": getattr(session, "cdp_url", "") or "",
                                     }
                                 }
                                 ws_manager.broadcast_threadsafe(event_data, main_loop)
@@ -301,9 +530,12 @@ Instructions:
                         break
                     except Exception:
                         pass
-                    await asyncio.sleep(0.4)
 
-            streamer_task = loop.create_task(screenshot_streamer(agent))
+                    # Pause here if the user has taken over the browser window.
+                    await _takeover_gate.wait()
+                    await asyncio.sleep(1.0)
+
+            streamer_task = loop.create_task(url_status_streamer(agent))
             try:
                 return loop.run_until_complete(
                     asyncio.wait_for(agent.run(), timeout=180)
@@ -321,6 +553,8 @@ Instructions:
             final_result = history.final_result() if hasattr(history, 'final_result') else str(history)
         except asyncio.TimeoutError:
             final_result = "TIMEOUT"
+        finally:
+            _takeover_gates.pop(job_id, None)
 
         # --- Analyse result for HITL needs ---
         result_text = str(final_result).upper()

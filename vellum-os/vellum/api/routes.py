@@ -164,6 +164,59 @@ async def stop_browser_endpoint():
     return {"status": "ok", "message": "Browser session stopped successfully."}
 
 
+@router.get("/browser/cdp-url")
+async def get_browser_cdp_url():
+    """Return the CDP websocket URL of the currently active browser session."""
+    from vellum.agents.browser_agent import get_active_cdp_url
+    return {"cdp_url": get_active_cdp_url()}
+
+
+@router.post("/browser/takeover")
+async def browser_takeover(job_id: str = ""):
+    """User is taking over the live browser window.
+
+    Pauses URL streaming so the UI doesn't fight the user, and attempts to
+    bring the real Chrome window to the foreground (Windows).
+    Returns the active CDP url for display.
+    """
+    from vellum.agents import browser_agent as ba
+    if job_id:
+        ba.pause_streaming(job_id)
+    # Best-effort: bring Chrome to foreground on Windows.
+    try:
+        _focus_chrome_window()
+    except Exception as exc:
+        log.warning("focus_chrome_failed", error=str(exc))
+    return {"status": "ok", "cdp_url": ba.get_active_cdp_url()}
+
+
+@router.post("/browser/release")
+async def browser_release(job_id: str = ""):
+    """User finished manual control — resume URL streaming."""
+    from vellum.agents import browser_agent as ba
+    if job_id:
+        ba.resume_streaming(job_id)
+    return {"status": "ok"}
+
+
+def _focus_chrome_window() -> None:
+    """Bring the automation Chrome window to the foreground (Windows only)."""
+    import sys
+    if sys.platform != "win32":
+        return
+    try:
+        import subprocess
+        # Focus by window title substring. The persistent profile launches
+        # Chromium; "Chrome" / "Chromium" / "Edge" title fragments cover it.
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(New-Object -ComObject WScript.Shell).AppActivate('Chrome')"],
+            capture_output=True, timeout=4,
+        )
+    except Exception:
+        pass
+
+
 def sanitize_for_json(data: Any) -> Any:
     """Recursively clean data for JSON serialization, replacing binary bytes with info strings."""
     if isinstance(data, dict):
@@ -213,17 +266,27 @@ async def get_job(job_id: str):
 
 @router.get("/jobs/{job_id}/resume-pdf")
 async def download_resume_pdf(job_id: str):
-    """Download the tailored resume PDF for a job."""
+    """Download the tailored resume PDF for a job, named after candidate + company."""
     from fastapi.responses import Response
+    import re as _re
 
     job = await db.get_job(job_id)
     if not job or not job.get("tailored_pdf"):
         raise HTTPException(404, "No tailored resume for this job")
 
+    # Build a readable filename: <Name>_<Company>_<Role>.pdf
+    def _slug(s: str) -> str:
+        s = (s or "").strip().replace(" ", "_")
+        return _re.sub(r"[^A-Za-z0-9_\-]", "", s)[:40] or "resume"
+
+    parts = [_slug(job.get("company", "")), _slug(job.get("role", ""))]
+    fname = "_".join(p for p in parts if p) or f"resume_{job_id[:8]}"
+    fname = fname + ".pdf"
+
     return Response(
         content=job["tailored_pdf"],
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=resume_{job_id[:8]}.pdf"},
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
     )
 
 

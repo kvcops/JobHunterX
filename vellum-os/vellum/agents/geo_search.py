@@ -124,31 +124,79 @@ INDIAN_CITIES = {
 }
 
 
+# Foreign country / region tokens. If any appears in the location string we
+# treat the job as NOT open to India candidates, even when it is tagged remote.
+FOREIGN_LOCATION_TOKENS = [
+    "usa", "u.s.", "u.s.a", "united states", "us-", "san francisco", "new york",
+    "seattle", "austin", "boston", "chicago", "mountain view", "palo alto",
+    "redmond", "atlanta", "denver", "remote - us", "remote-us", "remote (us)",
+    "canada", "toronto", "vancouver", "montreal",
+    "uk", "u.k.", "united kingdom", "london", "england", "remote - uk",
+    "ireland", "dublin",
+    "germany", "berlin", "munich", "netherlands", "amsterdam", "france", "paris",
+    "spain", "barcelona", "madrid", "portugal", "lisbon", "italy", "milan",
+    "sweden", "stockholm", "norway", "oslo", "denmark", "copenhagen", "finland",
+    "poland", "warsaw", "remote - europe", "remote-emea",
+    "israel", "tel aviv", "tel-aviv",
+    "australia", "sydney", "melbourne", "new zealand", "auckland",
+    "singapore", "japan", "tokyo", "china", "beijing", "shanghai", "hong kong",
+    "south korea", "seoul", "taiwan", "vietnam", "hanoi", "philippines", "manila",
+    "indonesia", "jakarta", "malaysia", "kuala lumpur", "thailand", "bangkok",
+    "brazil", "sao paulo", "mexico", "mexico city", "argentina", "buenos aires",
+    "south africa", "johannesburg", "cape town", "remote - apac",
+    "dubai", "uae", "saudi arabia", "riyadh", "qatar", "doha",
+]
+
+
 def _matches_location_strict(title: str, jd_text: str, target_location: str) -> bool:
-    """Flexible location matching for Indian tech cities."""
+    """Strict location matching that rejects foreign-based jobs.
+
+    A job passes only if it is:
+      - explicitly in/near the target Indian city, OR
+      - tagged remote/worldwide with no foreign country qualifier, OR
+      - explicitly India-based.
+
+    A "Remote - San Francisco" or a Berlin-based job is rejected even if the
+    JD body happens to contain the word "india" or "remote".
+    """
     if not target_location:
         return True
     target_lower = target_location.lower().strip()
-    combined_text = (title + " " + jd_text).lower()
+    loc_line = (title + " " + jd_text[:300]).lower()  # location is usually in title/first lines
 
-    if "remote" in combined_text or "pan india" in combined_text or "work from home" in combined_text or "india" in combined_text:
+    # 1. Hard reject: any foreign country/region token in the location line.
+    for tok in FOREIGN_LOCATION_TOKENS:
+        if tok in loc_line:
+            return False
+
+    # 2. Genuinely worldwide remote (open to anyone, incl. India).
+    if any(t in loc_line for t in ["worldwide", "anywhere", "global", "work from anywhere"]):
         return True
 
+    # 3. Generic remote / WFH with no foreign qualifier -> India-eligible.
+    if "remote" in loc_line or "work from home" in loc_line or "pan india" in loc_line:
+        return True
+
+    # 4. Explicit India mention.
+    if "india" in loc_line:
+        return True
+
+    # 5. Target city match.
     target_key = _normalise_city(target_lower)
     target_synonyms = INDIAN_CITIES.get(target_key, [target_key])
-    target_found = any(syn in combined_text for syn in target_synonyms)
-
-    if target_found or not jd_text or len(jd_text) < 50:
+    if any(syn in loc_line for syn in target_synonyms):
         return True
 
-    for city_key, synonyms in INDIAN_CITIES.items():
-        if city_key == target_key:
-            continue
-        for syn in synonyms:
-            if syn in title.lower() and not target_found:
-                return False
+    # 6. Very short / empty JD -> unknown, keep permissive.
+    if not jd_text or len(jd_text) < 50:
+        return True
 
-    return True
+    # 7. Another Indian city in the title but not ours -> still in India, accept.
+    for city_synonyms in INDIAN_CITIES.values():
+        if any(syn in title.lower() for syn in city_synonyms):
+            return True
+
+    return False
 
 
 async def run(state: dict) -> dict:
