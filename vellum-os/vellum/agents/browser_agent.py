@@ -69,11 +69,20 @@ _active_sessions: list[tuple[asyncio.AbstractEventLoop, Any]] = []
 
 
 async def stop_all_active_browsers():
-    """Halt any active browser-use Agent sessions by closing their browsers."""
+    """Halt any active browser-use Agent sessions immediately."""
     log.info("stopping_all_active_browsers", count=len(_active_sessions))
     for loop, agent in list(_active_sessions):
         try:
-            if hasattr(agent, "browser") and agent.browser:
+            if hasattr(agent, "stop"):
+                agent.stop()
+            if hasattr(agent, "browser_session") and agent.browser_session:
+                async def _close_session():
+                    try:
+                        await agent.browser_session.close()
+                    except Exception:
+                        pass
+                asyncio.run_coroutine_threadsafe(_close_session(), loop)
+            elif hasattr(agent, "browser") and agent.browser:
                 async def _close():
                     try:
                         await agent.browser.close()
@@ -131,12 +140,41 @@ async def run(state: dict) -> dict:
 
     try:
         # --- Initialize browser-use Agent with our LLM ---
-        from browser_use import Agent
+        from browser_use import Agent, Controller, ActionResult
+        from browser_use.browser.context import BrowserContext
         from browser_use.llm.litellm import ChatLiteLLM
         try:
             from browser_use import BrowserProfile
         except ImportError:
             BrowserProfile = None
+
+        controller = Controller()
+
+        @controller.action("Upload candidate resume file (PDF/CV) to application form input")
+        async def upload_resume_file(browser: BrowserContext) -> ActionResult:
+            """Locate file input element or upload dropzone on the page and upload candidate resume PDF."""
+            if not pdf_path or not pdf_path.exists():
+                return ActionResult(error="Resume PDF file path not found")
+            try:
+                page = await browser.get_current_page()
+                # 1. Search for standard hidden or visible <input type="file">
+                file_input = page.locator("input[type='file']").first
+                if await file_input.count() > 0:
+                    await file_input.set_input_files(str(pdf_path.resolve()))
+                    return ActionResult(extracted_content=f"Successfully attached candidate resume PDF ({pdf_path.name}) to file input.")
+                
+                # 2. Otherwise trigger file chooser dialog via click on upload button
+                async with page.expect_file_chooser(timeout=4000) as fc_info:
+                    upload_btn = page.locator("button:has-text('Upload'), label:has-text('Upload'), div:has-text('Upload Resume')").first
+                    if await upload_btn.count() > 0:
+                        await upload_btn.click(force=True)
+                        file_chooser = await fc_info.value
+                        await file_chooser.set_files(str(pdf_path.resolve()))
+                        return ActionResult(extracted_content=f"Successfully uploaded candidate resume PDF via file chooser dialog.")
+
+                return ActionResult(error="No file upload input element or chooser button found on page.")
+            except Exception as exc:
+                return ActionResult(error=f"Upload execution error: {str(exc)}")
 
         # Use our LiteLLM router — forced to gemini-3.1-flash-lite per spec
         llm = ChatLiteLLM(model="gemini/gemini-3.1-flash-lite")
@@ -163,8 +201,7 @@ Keep your thinking extremely brief and short (1 concise sentence max). Do NOT wr
 
 Instructions:
 1. Fill in all required fields with the candidate information above.
-2. If there is a resume upload field, upload the file at: {pdf_path or 'N/A'}. 
-   CRITICAL FILE UPLOAD RULE: When uploading a resume, do NOT click the decorative/visible upload button directly. Instead, search for the hidden `<input type="file">` element (which has type="file") and perform the file upload action on that specific input element directly to avoid the Playwright 'Node is not a file input element' error.
+2. If there is a resume upload field, call the tool `Upload candidate resume file (PDF/CV) to application form input`.
 3. If you encounter a login page, STOP and report "LOGIN_REQUIRED".
 4. If you encounter a CAPTCHA, STOP and report "CAPTCHA_DETECTED".
 5. If you see an OTP/MFA prompt, STOP and report "MFA_REQUIRED".
@@ -217,6 +254,7 @@ Instructions:
         agent_kwargs = {
             "task": task,
             "llm": llm,
+            "controller": controller,
             "register_new_step_callback": browser_step_callback,
             "use_vision": True,
             "available_file_paths": [str(pdf_path.resolve())] if pdf_path else [],
