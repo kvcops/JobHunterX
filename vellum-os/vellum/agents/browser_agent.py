@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -108,19 +109,30 @@ def _build_stealth_profile(settings: Settings) -> Any:
         )
 
     # Local stealth profile
+    resolved_dir = str(_STEALTH_USER_DATA_DIR.resolve())
     try:
         _STEALTH_USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        # Kill any zombie Chrome processes still holding the user data dir
+        _kill_zombie_chrome(resolved_dir)
+        # Clean up stale lock files to prevent Chrome startup delay
+        for lock_name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+            lock_file = _STEALTH_USER_DATA_DIR / lock_name
+            if lock_file.exists() or lock_file.is_symlink():
+                try:
+                    lock_file.unlink()
+                except Exception:
+                    pass
     except Exception:
         pass
 
     return BrowserProfile(
         headless=settings.browser_use_headless,
-        user_data_dir=str(_STEALTH_USER_DATA_DIR.resolve()),
+        user_data_dir=resolved_dir,
         user_agent=_STEALTH_USER_AGENT,
         viewport={"width": 1920, "height": 1080},
         enable_default_extensions=False,  # DISABLED: extension downloads from Chrome Web Store hang on Windows, blocking CDP
         disable_security=False,
-        captcha_solver=True,
+        captcha_solver=False,  # DISABLED: cloud-only feature that adds startup overhead locally
         keep_alive=False,
         args=[
             "--disable-blink-features=AutomationControlled",
@@ -130,6 +142,34 @@ def _build_stealth_profile(settings: Settings) -> Any:
             "--no-default-browser-check",
         ],
     )
+
+
+def _kill_zombie_chrome(user_data_dir: str) -> None:
+    """Kill any Chrome processes still holding the given user_data_dir.
+
+    On Windows, Chrome locks the user data dir while running. If a previous
+    browser-use session crashed or wasn't cleaned up, the zombie Chrome
+    blocks the new launch from binding to the profile, causing a 60s CDP
+    timeout.
+    """
+    try:
+        import psutil
+        normalized = os.path.normcase(os.path.normpath(user_data_dir))
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            try:
+                if proc.info["name"] and proc.info["name"].lower() in ("chrome.exe", "chromium.exe"):
+                    cmdline = proc.info.get("cmdline") or []
+                    for arg in cmdline:
+                        if arg.startswith("--user-data-dir="):
+                            proc_dir = os.path.normcase(os.path.normpath(arg.split("=", 1)[1]))
+                            if proc_dir == normalized:
+                                log.info("killing_zombie_chrome", pid=proc.pid)
+                                proc.kill()
+                                break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except Exception as exc:
+        log.warning("zombie_chrome_cleanup_error", error=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +386,15 @@ async def run(state: dict) -> dict:
         # --- Initialize browser-use Agent with our LLM ---
         from browser_use import Agent, Controller, ActionResult
         from browser_use.browser import BrowserSession
-        from browser_use.llm.litellm import ChatLiteLLM
+        from browser_use.llm.google.chat import ChatGoogle
+        try:
+            from browser_use.llm.groq.chat import ChatGroq
+        except ImportError:
+            ChatGroq = None
+        try:
+            from browser_use.llm.mistral.chat import ChatMistral
+        except ImportError:
+            ChatMistral = None
         try:
             from browser_use import BrowserProfile
         except ImportError:
@@ -355,7 +403,7 @@ async def run(state: dict) -> dict:
         controller = Controller()
 
         @controller.action("Upload candidate resume file (PDF/CV) to application form input")
-        async def upload_resume_file(browser_session) -> ActionResult:
+        async def upload_resume_file(browser_session, file_path: str = "") -> ActionResult:
             """Robustly locate a file input on the page and upload the resume PDF.
 
             Strategy (in order):
@@ -589,20 +637,61 @@ async def run(state: dict) -> dict:
             except Exception as exc:
                 return ActionResult(error=f"Email OTP error: {str(exc)}")
 
-        # Use our LiteLLM router — gemma-4-31b-it avoids Gemini 3+ deprecation warnings
-        # and supports temperature/top_p/top_k natively
-        from vellum.config.settings import get_settings
+        # Primary LLM: gemini-3.1-flash-lite — 250K TPM, 15 RPM, 500 RPD on free tier
+        # (gemma-4-31b-it has only 16K TPM which causes constant 429 RESOURCE_EXHAUSTED)
         _settings = get_settings()
+        google_api_key = _settings.google_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
-        _fallback_models = []
-        if _settings.groq_api_key:
-            _fallback_models.append("groq/openai/gpt-oss-20b")
-        if _settings.mistral_api_key:
-            _fallback_models.append("mistral/mistral-large-2512")
-        if _settings.google_api_key:
-            _fallback_models.append("gemini/gemini-3.1-flash-lite")
+        llm = ChatGoogle(
+            model="gemini-3.1-flash-lite",
+            api_key=google_api_key,
+            temperature=0.2,
+            max_retries=10,
+            retry_base_delay=5.0,
+            retry_max_delay=60.0,
+            retryable_status_codes=[429, 500, 502, 503, 504],
+        )
 
-        llm = ChatLiteLLM(model="gemini/gemma-4-31b-it", fallbacks=_fallback_models if _fallback_models else None)
+        # Fallback LLM setup (Groq / Mistral / Gemini Flash) if primary model rate-limits
+        fallback_llm = None
+        groq_key = _settings.groq_api_key or os.getenv("GROQ_API_KEY")
+        mistral_key = _settings.mistral_api_key or os.getenv("MISTRAL_API_KEY")
+
+        if groq_key and ChatGroq is not None:
+            try:
+                fallback_llm = ChatGroq(
+                    model="llama-3.3-70b-versatile",
+                    api_key=groq_key,
+                    temperature=0.2,
+                    max_retries=10,
+                )
+                log.info("configured_fallback_llm", provider="groq", model="llama-3.3-70b-versatile")
+            except Exception as f_exc:
+                log.warning("fallback_llm_groq_init_failed", error=str(f_exc))
+        if fallback_llm is None and mistral_key and ChatMistral is not None:
+            try:
+                fallback_llm = ChatMistral(
+                    model="mistral-large-latest",
+                    api_key=mistral_key,
+                    temperature=0.2,
+                    max_retries=10,
+                )
+                log.info("configured_fallback_llm", provider="mistral", model="mistral-large-latest")
+            except Exception as f_exc:
+                log.warning("fallback_llm_mistral_init_failed", error=str(f_exc))
+        if fallback_llm is None and google_api_key:
+            try:
+                fallback_llm = ChatGoogle(
+                    model="gemma-4-27b-it",
+                    api_key=google_api_key,
+                    temperature=0.2,
+                    max_retries=10,
+                    retry_base_delay=5.0,
+                    retry_max_delay=60.0,
+                )
+                log.info("configured_fallback_llm", provider="google", model="gemma-4-27b-it")
+            except Exception as f_exc:
+                log.warning("fallback_llm_google_init_failed", error=str(f_exc))
 
         # Build comprehensive candidate credential memory for the task
         # --- Education History ---
@@ -763,14 +852,17 @@ ERROR DETECTION — STOP AND REPORT:
                 }
             }
             await ws_manager.broadcast(event_data)
+            # Pacing delay (4.0s) to respect Gemini API Free Tier 15 RPM limit
+            await asyncio.sleep(4.0)
 
 
         agent_kwargs = {
             "task": task,
             "llm": llm,
+            "fallback_llm": fallback_llm,
             "controller": controller,
             "register_new_step_callback": browser_step_callback,
-            "use_vision": True,
+            "use_vision": "auto",
             "available_file_paths": [str(pdf_path.resolve())] if pdf_path else [],
         }
         if BrowserProfile is not None:

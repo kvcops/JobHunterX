@@ -262,7 +262,7 @@ async def extract_apply_links_llm(url: str, api_key: str) -> list[dict]:
             graph_config = {
                 "llm": {
                     "api_key": api_key,
-                    "model": "gemini-pro",
+                    "model": "gemini-3.1-flash-lite",
                 },
                 "verbose": False,
                 "headless": True,

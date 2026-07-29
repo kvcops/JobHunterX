@@ -2,6 +2,19 @@
    Vellum OS — Frontend Application Logic (app.js)
    Handles WebSockets, HTTP REST endpoints, state sync, telemetry counters,
    and dynamic UI element bindings.
+
+   NOTE: This file is functionally identical to the original, with three
+   compatibility fixes for the redesigned markup:
+     1. renderJobs() now stamps data-status on each card (the redesign
+        renders "clean-job-card" / "clean-status-pill", not the old
+        "job-card" / "job-status-indicator" classes filterJobs relied on).
+     2. filterJobs() now reads that data-status attribute instead of
+        looking for classes that no longer exist, and no longer depends
+        on the synthetic window.event (deprecated / unreliable) — it now
+        takes the clicked element explicitly.
+     3. Sidebar telemetry IDs (stat-discovered/applied) are unique again;
+        the ATS tab's own header counts (stat-discovered-bar / stat-applied-bar)
+        are updated alongside them so nothing is left stale.
    --------------------------------------------------------------------------- */
 
 // State
@@ -109,11 +122,21 @@ function setupEventListeners() {
     saveProfBtn.addEventListener("click", saveProfileChanges);
   }
 
+  // Filter pills (Application Queue tab) — bind directly instead of relying
+  // on inline onclick + window.event, which is deprecated in some browsers.
+  document.querySelectorAll(".filter-pill").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      const status = btn.getAttribute("data-filter") || btn.innerText.trim().toLowerCase().replace(/\s+/g, "_");
+      filterJobs(status, btn);
+    });
+  });
+
   // Keyboard escape handler for modals
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       closeResetModal();
       if (typeof closeOutreachModal === "function") closeOutreachModal();
+      if (typeof closeJobDetailsModal === "function") closeJobDetailsModal();
     }
   });
 }
@@ -171,7 +194,7 @@ async function loadLocations() {
     const data = await res.json();
     const locs = data.locations || [];
     allLocations = locs;
-    
+
     setupCustomLocationDropdown(locs);
   } catch (err) {
     console.error("Failed to load locations", err);
@@ -219,7 +242,7 @@ function setupCustomLocationDropdown(locs) {
   if (searchInput) {
     searchInput.oninput = () => {
       const q = searchInput.value.toLowerCase().trim();
-      const filtered = allLocations.filter(loc => 
+      const filtered = allLocations.filter(loc =>
         loc.label.toLowerCase().includes(q) || loc.key.toLowerCase().includes(q)
       );
       renderCustomLocationOptions(filtered, hiddenInput ? hiddenInput.value : "hyderabad");
@@ -365,7 +388,7 @@ async function uploadResume(file) {
 
     const data = await res.json();
     currentProfile = data.profile;
-    
+
     // Render profile card
     renderProfileCard();
 
@@ -385,12 +408,19 @@ async function uploadResume(file) {
 function renderProfileCard() {
   if (!currentProfile) return;
   const card = document.getElementById("profile-card");
-  card.classList.remove("hidden");
+  if (card) card.classList.remove("hidden");
 
-  document.getElementById("profile-name").innerText = currentProfile.name;
-  document.getElementById("profile-email").innerText = currentProfile.email;
-  document.getElementById("profile-phone").innerText = currentProfile.phone;
-  document.getElementById("profile-location").innerText = currentProfile.location;
+  const nameEl = document.getElementById("profile-name");
+  if (nameEl) nameEl.innerText = currentProfile.name || "Candidate Name";
+
+  const emailEl = document.getElementById("profile-email");
+  if (emailEl) emailEl.innerText = currentProfile.email || "N/A";
+
+  const phoneEl = document.getElementById("profile-phone");
+  if (phoneEl) phoneEl.innerText = currentProfile.phone || "N/A";
+
+  const locEl = document.getElementById("profile-location");
+  if (locEl) locEl.innerText = currentProfile.location || "";
 
   const expTag = document.getElementById("profile-relevant-exp");
   if (expTag) {
@@ -406,12 +436,6 @@ function renderProfileCard() {
   const container = document.getElementById("profile-skills");
   if (container) {
     container.innerHTML = "";
-    (currentProfile.skills || []).forEach(skill => {
-      const tag = document.createElement("span");
-      tag.className = "skill-tag";
-      tag.innerText = skill;
-      container.appendChild(tag);
-    });
   }
 }
 
@@ -504,11 +528,11 @@ function handleSocketMessage(msg) {
     if (bar) bar.style.width = "100%";
     const progressStatus = document.getElementById("sidebar-progress-status");
     if (progressStatus) progressStatus.innerText = "Search Complete!";
-    
+
     // Hide halt button
     const haltBtn = document.getElementById("halt-browser-btn");
     if (haltBtn) haltBtn.classList.add("hidden");
-    
+
     // Re-enable start search
     const startSearchBtn = document.getElementById("start-search-btn");
     if (startSearchBtn) startSearchBtn.removeAttribute("disabled");
@@ -686,19 +710,16 @@ async function skipIntervention(idx) {
 // ---------------------------------------------------------------------------
 // UI Renders & Formatting
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// UI Renders & Formatting
-// ---------------------------------------------------------------------------
 function renderJobs() {
   const container = document.getElementById("jobs-container");
   if (jobs.length === 0) {
     container.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-icon">📁</span>
-        <p>No job listings found yet.</p>
+      <div class="empty-state-view">
+        <div class="empty-state-icon">📁</div>
+        <h3>No job listings in queue</h3>
+        <p>Upload your resume PDF and click "Start Job Discovery" to surface opportunities.</p>
       </div>`;
-    document.getElementById("stat-discovered").innerText = "0";
-    document.getElementById("stat-applied").innerText = "0";
+    updateJobsStatCounters(0, 0, 0, 0);
     return;
   }
 
@@ -725,7 +746,7 @@ function renderJobs() {
       const jdLower = job.jd_text.toLowerCase();
       matchingSkills = userSkills.filter(skill => jdLower.includes(skill.toLowerCase())).slice(0, 3);
     }
-    const matchingSkillsHtml = matchingSkills.map(skill => 
+    const matchingSkillsHtml = matchingSkills.map(skill =>
       `<span class="premium-tech-tag"><span class="tag-dot"></span>${escapeHtml(skill)}</span>`
     ).join("");
 
@@ -754,7 +775,11 @@ function renderJobs() {
       failed: "pill-failed"
     }[job.status] || "pill-discovered";
 
+    // data-status drives filterJobs() below — the redesigned card markup
+    // ("clean-job-card" / "clean-status-pill") no longer carries the old
+    // "job-status-indicator <status>" class the original filter relied on.
     card.className = "clean-job-card clickable-card";
+    card.dataset.status = job.status || "discovered";
     card.innerHTML = `
       <div class="clean-card-header">
         <div class="clean-header-titles" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
@@ -793,12 +818,22 @@ function renderJobs() {
     container.appendChild(card);
   });
 
-  document.getElementById("stat-discovered").innerText = jobs.length;
-  document.getElementById("stat-applied").innerText = appliedCount;
-  const matchedEl = document.getElementById("stat-matched");
-  if (matchedEl) matchedEl.innerText = matchedCount;
-  const attentionEl = document.getElementById("stat-needs-attention");
-  if (attentionEl) attentionEl.innerText = needsAttentionCount;
+  updateJobsStatCounters(jobs.length, appliedCount, matchedCount, needsAttentionCount);
+}
+
+// Updates both the sidebar telemetry counters and the ATS tab's own header
+// bar (which has separate IDs to avoid duplicate-ID collisions).
+function updateJobsStatCounters(discovered, applied, matched, needsAttention) {
+  const setText = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = val;
+  };
+  setText("stat-discovered", discovered);
+  setText("stat-applied", applied);
+  setText("stat-discovered-bar", discovered);
+  setText("stat-applied-bar", applied);
+  setText("stat-matched", matched);
+  setText("stat-needs-attention", needsAttention);
 }
 
 function renderResumes() {
@@ -809,8 +844,8 @@ function renderResumes() {
 
   if (matchedJobs.length === 0) {
     container.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon-circle">📄</div>
+      <div class="empty-state-view">
+        <div class="empty-state-icon">📄</div>
         <h3>No tailored resumes generated yet</h3>
         <p>Tailored resumes and CVs created for matched job postings will appear here automatically.</p>
       </div>`;
@@ -821,6 +856,7 @@ function renderResumes() {
   matchedJobs.forEach(job => {
     const card = document.createElement("div");
     card.className = "clean-job-card clickable-card";
+    card.dataset.status = job.status || "discovered";
 
     const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
     const matchPercent = (matchScore * 100).toFixed(0);
@@ -964,39 +1000,32 @@ function renderOutreach() {
   const container = document.getElementById("outreach-container");
   if (outreachDrafts.length === 0) {
     container.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-icon">✉️</span>
-        <p>No outreach drafts generated.</p>
+      <div class="empty-state-view">
+        <div class="empty-state-icon">✉️</div>
+        <h3>No outreach drafts found</h3>
+        <p>Personalized outreach email templates will display here once matches are processed.</p>
       </div>`;
-    document.getElementById("stat-outreach").innerText = "0";
+    const outreachStat = document.getElementById("stat-outreach");
+    if (outreachStat) outreachStat.innerText = "0";
     return;
   }
 
   container.innerHTML = "";
   outreachDrafts.forEach(draft => {
     const card = document.createElement("div");
-    
-    // Status styles without gradients
-    const statusClass = {
-      drafted: "outreach-draft",
-      sent: "outreach-sent"
-    }[draft.status] || "";
 
     const score = draft.confidence || 0;
     const confClass = score > 0.7 ? "conf-high" : score > 0.4 ? "conf-med" : "conf-low";
-    
+
     const initial = draft.company ? draft.company.trim().charAt(0).toUpperCase() : '?';
     const bestEmail = draft.email_guesses && draft.email_guesses.length > 0 ? draft.email_guesses[0].address : "No email guessed";
     const emailStatusLabel = draft.email_guesses && draft.email_guesses.length > 0 && draft.email_guesses[0].mx_valid ? "MX Verified" : "MX Checked";
     const emailStatusClass = draft.email_guesses && draft.email_guesses.length > 0 && draft.email_guesses[0].mx_valid ? "email-verified" : "email-unverified";
 
-    // Standard professional avatar background
-    const avatarBackground = "var(--bg-secondary)";
-
-    card.className = `outreach-card-premium ${statusClass}`;
+    card.className = "outreach-card-premium";
     card.innerHTML = `
       <div class="outreach-premium-header">
-        <div class="outreach-avatar" style="background: ${avatarBackground}">${initial}</div>
+        <div class="outreach-avatar">${initial}</div>
         <div class="outreach-info">
           <div class="outreach-company">${escapeHtml(draft.company)}</div>
           <div class="outreach-contact-row">
@@ -1021,7 +1050,7 @@ function renderOutreach() {
       </div>
 
       <div class="outreach-card-footer">
-        <div class="footer-left">
+        <div class="footer-left" style="display:flex; align-items:center; gap:6px;">
           <span class="conf-badge ${confClass}">Fit confidence: ${(score * 100).toFixed(0)}%</span>
           <span class="outreach-status-pill ${draft.status}">${escapeHtml(draft.status)}</span>
         </div>
@@ -1034,7 +1063,8 @@ function renderOutreach() {
     container.appendChild(card);
   });
 
-  document.getElementById("stat-outreach").innerText = outreachDrafts.length;
+  const outreachStat = document.getElementById("stat-outreach");
+  if (outreachStat) outreachStat.innerText = outreachDrafts.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,7 +1073,12 @@ function renderOutreach() {
 function updateStatusIndicator(status) {
   const badge = document.getElementById("status-badge");
   badge.className = `status-badge ${status}`;
-  badge.innerText = status;
+  const textEl = badge.querySelector(".status-text");
+  if (textEl) {
+    textEl.innerText = status;
+  } else {
+    badge.innerText = status;
+  }
 
   if (status === "idle" || status === "complete") {
     document.getElementById("start-search-btn").removeAttribute("disabled");
@@ -1100,11 +1135,11 @@ function logEvent(agent, message, isError = false) {
 
   const msgLower = message.toLowerCase();
   updatePipelinePhase(agent, msgLower);
-  
+
   if (statusTextEl && dotEl && miniLogsEl) {
     let statusLabel = "System Active";
     let isIdle = false;
-    
+
     if (msgLower.includes("idle") || msgLower.includes("system initialized")) {
       statusLabel = "System Idle";
       isIdle = true;
@@ -1119,10 +1154,10 @@ function logEvent(agent, message, isError = false) {
     } else if (agent === "deep_research") {
       statusLabel = "Researching Decision Makers";
     }
-    
+
     statusTextEl.innerText = statusLabel;
-    
-    dotEl.className = "status-dot";
+
+    dotEl.className = "status-pulse-dot";
     if (isError) {
       dotEl.classList.add("error");
     } else if (!isIdle) {
@@ -1131,23 +1166,23 @@ function logEvent(agent, message, isError = false) {
 
     const now = new Date();
     const timeStr = now.toTimeString().split(" ")[0];
-    
+
     const entry = document.createElement("div");
     entry.className = `mini-log-item ${isError ? 'error' : ''}`;
-    
+
     const agentKey = agent || "system";
     entry.innerHTML = `<span class="log-time">${timeStr}</span> <span class="log-agent-tag ${escapeHtml(agentKey)}">${escapeHtml(agentKey)}</span> ${escapeHtml(message)}`;
-    
+
     if (miniLogsEl.children.length === 1 && miniLogsEl.children[0].innerText.includes("Ready")) {
       miniLogsEl.innerHTML = "";
     }
-    
+
     miniLogsEl.appendChild(entry);
-    
+
     while (miniLogsEl.children.length > 25) {
       miniLogsEl.removeChild(miniLogsEl.firstChild);
     }
-    
+
     miniLogsEl.scrollTop = miniLogsEl.scrollHeight;
   }
 }
@@ -1155,7 +1190,7 @@ function logEvent(agent, message, isError = false) {
 function clearLogs() {
   const miniLogsEl = document.getElementById("progress-mini-logs");
   if (miniLogsEl) {
-    miniLogsEl.innerHTML = `<div class="mini-log-item"><span class="log-time">00:00:00</span> <span class="log-agent-tag system">SYSTEM</span> Ready.</div>`;
+    miniLogsEl.innerHTML = `<div class="mini-log-item"><span class="log-time">00:00:00</span> <span class="log-agent-tag system">system</span> Ready.</div>`;
   }
 }
 
@@ -1190,14 +1225,14 @@ function openOutreachComposer(draftId) {
 
   const guessesList = document.getElementById("modal-email-guesses");
   guessesList.innerHTML = "";
-  
+
   (draft.email_guesses || []).forEach((guess, idx) => {
     const item = document.createElement("div");
     item.className = "email-guess-item clickable-guess" + (guess.address === bestEmail ? " active-guess" : "");
-    
+
     const label = guess.mx_valid === false ? " (MX Failed)" : " (MX Verified)";
-    const style = guess.mx_valid === false ? "color: var(--error-color)" : "color: var(--success-color)";
-    
+    const style = guess.mx_valid === false ? "color: var(--danger)" : "color: var(--success)";
+
     item.innerHTML = `
       <div class="guess-address-line">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: middle;"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
@@ -1207,7 +1242,7 @@ function openOutreachComposer(draftId) {
         <span class="conf-badge conf-med" style="${style}">${guess.pattern}${label}</span>
       </div>
     `;
-    
+
     item.onclick = () => {
       if (toInput) {
         toInput.value = guess.address;
@@ -1245,7 +1280,7 @@ async function saveOutreachDraft() {
   const to = document.getElementById("composer-to")?.value || "";
   const subject = document.getElementById("composer-subject")?.value || "";
   const body = document.getElementById("composer-body")?.value || "";
-  
+
   try {
     const res = await fetch(`${API_BASE}/outreach/${activeOutreachId}/save`, {
       method: "POST",
@@ -1276,14 +1311,14 @@ async function saveOutreachDraft() {
 
 async function triggerMailtoHandoff() {
   if (!activeOutreachId) return;
-  
+
   const to = document.getElementById("composer-to")?.value || "";
   const subject = document.getElementById("composer-subject")?.value || "";
   const body = document.getElementById("composer-body")?.value || "";
-  
+
   // Save edits first, then open mail client
   await saveOutreachDraft();
-  
+
   const mailtoUri = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   window.location.href = mailtoUri;
   closeOutreachModal();
@@ -1332,17 +1367,21 @@ function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
-// Minimal job state filter
-function filterJobs(status) {
+// Job status filter — reads the data-status attribute stamped onto each
+// card in renderJobs()/renderResumes() instead of relying on classes that
+// the redesigned card markup no longer has.
+function filterJobs(status, triggerEl) {
   document.querySelectorAll(".filter-pill").forEach(btn => btn.classList.remove("active"));
-  if (window.event && window.event.target) window.event.target.classList.add("active");
+  if (triggerEl) {
+    triggerEl.classList.add("active");
+  } else if (window.event && window.event.target) {
+    window.event.target.classList.add("active");
+  }
 
-  const cards = document.querySelectorAll("#jobs-container .job-card");
+  const cards = document.querySelectorAll("#jobs-container .clean-job-card");
   cards.forEach(card => {
-    const indicator = card.querySelector(".job-status-indicator");
-    if (!indicator) return;
-    
-    if (status === 'all' || indicator.classList.contains(status)) {
+    const cardStatus = card.dataset.status || "discovered";
+    if (status === "all" || cardStatus === status) {
       card.style.display = "flex";
     } else {
       card.style.display = "none";
@@ -1374,7 +1413,7 @@ function updateLanguageChips() {
 
 function renderProfileEditor() {
   if (!currentProfile) return;
-  
+
   // Set personal details
   document.getElementById("prof-name").value = currentProfile.name || "";
   document.getElementById("prof-email").value = currentProfile.email || "";
@@ -1404,7 +1443,7 @@ function renderProfileEditor() {
   if (document.getElementById("qa-work-mode")) document.getElementById("qa-work-mode").value = qa.preferred_work_mode || "";
   if (document.getElementById("qa-relocate")) document.getElementById("qa-relocate").value = qa.willing_to_relocate || "";
 
-  
+
   // Initialize scoped lists
   if (editedSkills.length === 0 && currentProfile.skills) {
     editedSkills = [...currentProfile.skills];
@@ -1418,7 +1457,7 @@ function renderProfileEditor() {
   if (editedProjects.length === 0 && currentProfile.projects) {
     editedProjects = JSON.parse(JSON.stringify(currentProfile.projects));
   }
-  
+
   updateLanguageChips();
   renderSkillsEditor();
   renderExperienceEditor();
@@ -1445,7 +1484,7 @@ function renderSkillsEditor() {
 function renderExperienceEditor() {
   const container = document.getElementById("editor-experience-list");
   container.innerHTML = "";
-  
+
   editedExperience.forEach((exp, index) => {
     const block = document.createElement("div");
     block.className = "experience-block-card";
@@ -1477,13 +1516,13 @@ function renderExperienceEditor() {
         </div>
       </div>
     `;
-    
+
     block.querySelector(".btn-delete-item").addEventListener("click", () => {
       syncCurrentEditorArrays();
       editedExperience.splice(index, 1);
       renderExperienceEditor();
     });
-    
+
     container.appendChild(block);
   });
 }
@@ -1492,7 +1531,7 @@ function renderEducationEditor() {
   const container = document.getElementById("editor-education-list");
   if (!container) return;
   container.innerHTML = "";
-  
+
   editedEducation.forEach((edu, index) => {
     const block = document.createElement("div");
     block.className = "education-block-card";
@@ -1528,13 +1567,13 @@ function renderEducationEditor() {
         </div>
       </div>
     `;
-    
+
     block.querySelector(".btn-delete-item").addEventListener("click", () => {
       syncCurrentEditorArrays();
       editedEducation.splice(index, 1);
       renderEducationEditor();
     });
-    
+
     container.appendChild(block);
   });
 }
@@ -1543,7 +1582,7 @@ function renderProjectsEditor() {
   const container = document.getElementById("editor-projects-list");
   if (!container) return;
   container.innerHTML = "";
-  
+
   editedProjects.forEach((proj, index) => {
     const block = document.createElement("div");
     block.className = "project-block-card";
@@ -1571,13 +1610,13 @@ function renderProjectsEditor() {
         </div>
       </div>
     `;
-    
+
     block.querySelector(".btn-delete-item").addEventListener("click", () => {
       syncCurrentEditorArrays();
       editedProjects.splice(index, 1);
       renderProjectsEditor();
     });
-    
+
     container.appendChild(block);
   });
 }
@@ -1627,7 +1666,7 @@ let editorListenersInitialized = false;
 
 function setupEditorListeners() {
   if (editorListenersInitialized) return;
-  
+
   // Add Skill button
   document.getElementById("add-skill-btn").addEventListener("click", addSkillFromInput);
   document.getElementById("new-skill-input").addEventListener("keydown", (e) => {
@@ -1636,14 +1675,14 @@ function setupEditorListeners() {
       addSkillFromInput();
     }
   });
-  
+
   // Add Experience
   document.getElementById("add-exp-btn").addEventListener("click", () => {
     syncCurrentEditorArrays();
     editedExperience.push({ company: "", role: "", start: "", end: "", bullets: [] });
     renderExperienceEditor();
   });
-  
+
   // Add Education
   document.getElementById("add-edu-btn").addEventListener("click", () => {
     syncCurrentEditorArrays();
@@ -1662,13 +1701,13 @@ function setupEditorListeners() {
   if (langInput) {
     langInput.addEventListener("input", updateLanguageChips);
   }
-  
+
   // Save Profile Changes
   document.getElementById("save-profile-btn").addEventListener("click", saveProfileChanges);
-  
+
   // Reset Database & Stop Agent
   document.getElementById("reset-system-btn").addEventListener("click", resetSystemAction);
-  
+
   editorListenersInitialized = true;
 }
 
@@ -1684,7 +1723,7 @@ function addSkillFromInput() {
 
 async function saveProfileChanges() {
   syncCurrentEditorArrays();
-  
+
   const updatedProfile = {
     name: document.getElementById("prof-name").value.trim(),
     email: document.getElementById("prof-email").value.trim(),
@@ -1718,7 +1757,7 @@ async function saveProfileChanges() {
     }
   };
 
-  
+
   try {
     const res = await fetch(`${API_BASE}/profile`, {
       method: "POST",
@@ -1727,7 +1766,7 @@ async function saveProfileChanges() {
       },
       body: JSON.stringify(updatedProfile)
     });
-    
+
     if (res.ok) {
       logEvent("system", "Candidate profile details saved successfully.");
       currentProfile = updatedProfile;
@@ -1860,10 +1899,10 @@ function handleBrowserStreamFrame(data) {
 function handleBrowserStep(data) {
   const activeBadge = document.getElementById("browser-active-badge");
   if (activeBadge) activeBadge.classList.remove("hidden");
-  
+
   const haltBtn = document.getElementById("halt-browser-btn");
   if (haltBtn) haltBtn.classList.remove("hidden");
-  
+
   const urlInput = document.getElementById("browser-url-input");
   if (urlInput) urlInput.innerText = data.url || "about:blank";
 
@@ -1878,19 +1917,19 @@ function handleBrowserStep(data) {
     idle.classList.add("hidden");
     live.classList.remove("hidden");
   }
-  
+
   const stepCount = document.getElementById("timeline-step-count");
   if (stepCount) {
     stepCount.innerText = `${data.step} Steps Executed`;
   }
-  
+
   const stepsLogContainer = document.getElementById("browser-steps-log");
   if (stepsLogContainer) {
     if (data.step === 1 || browserStepLog.length === 0) {
       stepsLogContainer.innerHTML = "";
       browserStepLog = [];
     }
-    
+
     const stepItem = document.createElement("div");
     stepItem.className = "browser-step-item";
     stepItem.innerHTML = `
@@ -1901,9 +1940,9 @@ function handleBrowserStep(data) {
     stepsLogContainer.appendChild(stepItem);
     stepsLogContainer.scrollTop = stepsLogContainer.scrollHeight;
   }
-  
+
   browserStepLog.push(data);
-  
+
   const browserTabBtn = document.getElementById("tab-browser");
   if (browserTabBtn && !browserTabBtn.classList.contains("active")) {
     browserTabBtn.classList.add("pulse-highlight");

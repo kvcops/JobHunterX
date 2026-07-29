@@ -38,7 +38,27 @@ def build_discovery_graph():
 
 
 # ---------------------------------------------------------------------------
-# Graph 2: Per-Job Pipeline
+# Graph 2a: Validate-Only Pipeline (used during search)
+# ---------------------------------------------------------------------------
+
+def build_validate_only_pipeline():
+    """Build a validate-only pipeline for search results.
+
+    During search, jobs are discovered and validated/tailored but NOT
+    auto-applied.  The user must explicitly click Apply from the UI.
+    """
+    checkpointer = InMemorySaver()
+    graph = StateGraph(JobPipelineState)
+
+    graph.add_node("validate_tailor", validator_tailor.run)
+    graph.set_entry_point("validate_tailor")
+    graph.add_edge("validate_tailor", END)
+
+    return graph.compile(checkpointer=checkpointer)
+
+
+# ---------------------------------------------------------------------------
+# Graph 2b: Full Apply Pipeline (user-triggered)
 # ---------------------------------------------------------------------------
 
 def _should_apply(state: JobPipelineState) -> str:
@@ -51,8 +71,9 @@ def _should_apply(state: JobPipelineState) -> str:
 
 
 def build_job_pipeline():
-    """Build the per-job validation → apply + outreach pipeline.
+    """Build the full per-job validation → apply + outreach pipeline.
 
+    Only used when the user explicitly clicks Apply on a job card.
     Uses InMemorySaver for HITL checkpointing.
     """
     checkpointer = InMemorySaver()
@@ -92,6 +113,7 @@ def build_job_pipeline():
 # Module-level graph instances
 _discovery_graph = None
 _job_pipeline = None
+_validate_only_pipeline = None
 
 # Active pipeline references for HITL resume
 _active_pipelines: dict[str, dict] = {}
@@ -102,6 +124,13 @@ def get_discovery_graph():
     if _discovery_graph is None:
         _discovery_graph = build_discovery_graph()
     return _discovery_graph
+
+
+def get_validate_only_pipeline():
+    global _validate_only_pipeline
+    if _validate_only_pipeline is None:
+        _validate_only_pipeline = build_validate_only_pipeline()
+    return _validate_only_pipeline
 
 
 def get_job_pipeline():
@@ -151,8 +180,9 @@ async def run_job_pipeline(
     run_id: str = "",
     event_callback=None,
     search_location: str = "",
+    validate_only: bool = True,
 ) -> dict:
-    """Run the per-job pipeline (validate → apply → outreach).
+    """Run the per-job pipeline.
 
     Args:
         job: Job dict from database.
@@ -160,10 +190,15 @@ async def run_job_pipeline(
         run_id: Unique run identifier.
         event_callback: Async callable for streaming events.
         search_location: The location the user searched for (for matching).
+        validate_only: If True (default), only validate/tailor. If False,
+                       run full pipeline (validate → apply → outreach).
 
     Returns pipeline result dict.
     """
-    pipeline = get_job_pipeline()
+    if validate_only:
+        pipeline = get_validate_only_pipeline()
+    else:
+        pipeline = get_job_pipeline()
     job_id = job.get("id", str(uuid.uuid4()))
     thread_id = f"job-{job_id}"
 
@@ -352,5 +387,6 @@ async def run_single_job_apply(
     result = await run_job_pipeline(
         job, profile, run_id, _event_cb,
         search_location=job.get("search_location", ""),
+        validate_only=False,  # Full pipeline: validate → apply → outreach
     )
     return result
