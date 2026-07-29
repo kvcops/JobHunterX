@@ -142,47 +142,36 @@ _browser_screencast_running = False
 
 
 async def _screencast_broadcaster(page: Any):
-    """Stream CDP screencast frames to all connected browser WS clients."""
+    """Stream CDP screenshots to all connected browser WS clients."""
     global _browser_screencast_running
     _browser_screencast_running = True
 
-    import base64
+    while _browser_ws_clients and _browser_screencast_running:
+        try:
+            # page is browser_use.actor.page.Page
+            b64_data = await page.screenshot(format="jpeg", quality=40)
+            msg = json.dumps({
+                "type": "frame",
+                "data": b64_data,
+                "width": 1280,
+                "height": 720,
+            })
+            dead = []
+            for ws in list(_browser_ws_clients):
+                try:
+                    await ws.send_text(msg)
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                if ws in _browser_ws_clients:
+                    _browser_ws_clients.remove(ws)
+        except Exception as exc:
+            log.warning("screencast_frame_error", error=str(exc))
+            # Break loop if page is closed/destroyed
+            break
+        await asyncio.sleep(0.15)
 
-    async def on_frame(frame):
-        if not _browser_ws_clients:
-            return
-        # frame.data is raw JPEG bytes, frame.viewportWidth/Height are ints
-        b64_data = base64.b64encode(frame.data).decode("ascii")
-        msg = json.dumps({
-            "type": "frame",
-            "data": b64_data,
-            "width": frame.viewportWidth,
-            "height": frame.viewportHeight,
-        })
-        dead = []
-        for ws in list(_browser_ws_clients):
-            try:
-                await ws.send_text(msg)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            if ws in _browser_ws_clients:
-                _browser_ws_clients.remove(ws)
-
-    try:
-        screencast = page.screencast
-        async with screencast.start(
-            on_frame=on_frame,
-            quality=50,
-            size={"width": 1280, "height": 720},
-        ):
-            # Keep streaming until no clients or stopped
-            while _browser_ws_clients and _browser_screencast_running:
-                await asyncio.sleep(0.1)
-    except Exception as exc:
-        log.warning("screencast_error", error=str(exc))
-    finally:
-        _browser_screencast_running = False
+    _browser_screencast_running = False
 
 
 async def _screencast_manager():
@@ -201,7 +190,7 @@ async def _screencast_manager():
                     except Exception:
                         page = None
                     
-                    if page and not page.is_closed():
+                    if page:
                         if sess != last_session or not _browser_screencast_running:
                             _stop_screencast()
                             last_session = sess
@@ -244,7 +233,7 @@ async def browser_websocket(websocket: WebSocket):
             except Exception:
                 current_page = None
 
-            if current_page and not current_page.is_closed():
+            if current_page:
                 await _forward_input_event(current_page, msg)
     except WebSocketDisconnect:
         pass
@@ -269,7 +258,7 @@ def _stop_screencast():
 
 
 async def _forward_input_event(page: Any, msg: dict):
-    """Forward mouse/keyboard input events from the client to the Playwright page."""
+    """Forward mouse/keyboard input events from the client to the browser page."""
     event_type = msg.get("type")
 
     try:
@@ -277,24 +266,26 @@ async def _forward_input_event(page: Any, msg: dict):
             action = msg.get("action")
             x = msg.get("x", 0)
             y = msg.get("y", 0)
-            button = msg.get("button", "left")
+            button = msg.get("button", 0)
             pw_button = "left" if button == 0 else "right" if button == 2 else "middle"
 
+            mouse = await page.mouse
             if action == "click":
-                await page.mouse.click(x, y, button=pw_button)
+                await mouse.click(x, y, button=pw_button)
             elif action == "down":
-                await page.mouse.down(button=pw_button)
+                await mouse.down(button=pw_button)
             elif action == "up":
-                await page.mouse.up(button=pw_button)
+                await mouse.up(button=pw_button)
             elif action == "move":
-                await page.mouse.move(x, y)
+                await mouse.move(x, y)
             elif action == "dblclick":
-                await page.mouse.dblclick(x, y, button=pw_button)
+                await mouse.click(x, y, button=pw_button, click_count=2)
 
         elif event_type == "wheel":
             delta_x = msg.get("deltaX", 0)
             delta_y = msg.get("deltaY", 0)
-            await page.mouse.wheel(delta_x, delta_y)
+            mouse = await page.mouse
+            await mouse.scroll(delta_x=delta_x, delta_y=delta_y)
 
         elif event_type == "keyboard":
             action = msg.get("action")
@@ -302,20 +293,23 @@ async def _forward_input_event(page: Any, msg: dict):
             code = msg.get("code", "")
             text = msg.get("text", "")
 
-            if action == "keyDown":
-                if text:
-                    await page.keyboard.insert_text(text)
-                elif key:
-                    await page.keyboard.down(key)
-            elif action == "keyUp":
-                if key:
-                    await page.keyboard.up(key)
+            session_id = await page._ensure_session()
+            params = {
+                "type": action,  # "keyDown" or "keyUp"
+                "key": key,
+                "code": code,
+                "text": text,
+            }
+            if text:
+                params["unmodifiedText"] = text
+            await page._client.send.Input.dispatchKeyEvent(params, session_id=session_id)
 
         elif event_type == "scroll":
             x = msg.get("x", 0)
             y = msg.get("y", 0)
             delta_y = msg.get("deltaY", 0)
-            await page.mouse.wheel(0, delta_y)
+            mouse = await page.mouse
+            await mouse.scroll(x=x, y=y, delta_y=delta_y)
 
     except Exception as exc:
         log.warning("input_forward_error", error=str(exc), type=event_type)
@@ -340,7 +334,7 @@ def main():
         "vellum.api.main:app",
         host=settings.host,
         port=settings.port,
-        reload=True,
+        reload=False if sys.platform == "win32" else True,
         log_level=settings.log_level.lower(),
     )
 

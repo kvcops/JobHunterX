@@ -69,6 +69,8 @@ class Project(BaseModel):
 class QAMemory(BaseModel):
     """Pre-filled answers for common application questionnaire fields."""
     expected_salary: Optional[str] = ""
+    current_ctc: Optional[str] = ""
+    expected_ctc: Optional[str] = ""
     notice_period: Optional[str] = ""
     work_authorization: Optional[str] = ""  # e.g. "Yes", "No", "Citizen"
     requires_sponsorship: Optional[str] = ""  # e.g. "Yes", "No"

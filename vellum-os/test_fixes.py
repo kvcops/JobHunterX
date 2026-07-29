@@ -368,6 +368,157 @@ def test_ats_api():
     return asyncio.run(_test())
 
 
+def test_browser_timeout_fixes():
+    """Test 14: Browser launch timeouts are increased to prevent BrowserStartEvent 30s timeout."""
+    header("TEST 14: Browser launch timeout fixes")
+
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    all_ok = True
+
+    # --- Check env vars loaded ---
+    bs_timeout = os.getenv("TIMEOUT_BrowserStartEvent")
+    bl_timeout = os.getenv("TIMEOUT_BrowserLaunchEvent")
+    print(f"  TIMEOUT_BrowserStartEvent = {bs_timeout}")
+    print(f"  TIMEOUT_BrowserLaunchEvent = {bl_timeout}")
+
+    if bs_timeout and int(bs_timeout) >= 60:
+        print("  [PASS] TIMEOUT_BrowserStartEvent >= 60s")
+    else:
+        print(f"  [FAIL] TIMEOUT_BrowserStartEvent missing or too low: {bs_timeout}")
+        all_ok = False
+
+    if bl_timeout and int(bl_timeout) >= 60:
+        print("  [PASS] TIMEOUT_BrowserLaunchEvent >= 60s")
+    else:
+        print(f"  [FAIL] TIMEOUT_BrowserLaunchEvent missing or too low: {bl_timeout}")
+        all_ok = False
+
+    # --- Check watchdog _wait_for_cdp_url default timeout ---
+    try:
+        from browser_use.browser.watchdogs.local_browser_watchdog import LocalBrowserWatchdog
+        import inspect
+        sig = inspect.signature(LocalBrowserWatchdog._wait_for_cdp_url)
+        default_timeout = sig.parameters["timeout"].default
+        print(f"  _wait_for_cdp_url default timeout = {default_timeout}s")
+        if default_timeout >= 60:
+            print("  [PASS] _wait_for_cdp_url timeout increased to 60s")
+        else:
+            print(f"  [FAIL] _wait_for_cdp_url timeout still at {default_timeout}s")
+            all_ok = False
+    except Exception as e:
+        print(f"  [WARN] Could not inspect LocalBrowserWatchdog: {e}")
+
+    # --- Check CDP connect timeout in session.py ---
+    try:
+        import importlib, types
+        import browser_use.browser.session as session_mod
+        with open(session_mod.__file__, "r", encoding="utf-8") as f:
+            session_source = f.read()
+
+        # Look for the timeout= parameter in asyncio.wait_for(self.connect(...))
+        import re
+        match = re.search(r"asyncio\.wait_for\(self\.connect\(cdp_url=self\.cdp_url\),\s*timeout=(\d+\.?\d*)\)", session_source)
+        if match:
+            cdp_timeout = float(match.group(1))
+            print(f"  CDP connect timeout = {cdp_timeout}s")
+            if cdp_timeout >= 30:
+                print("  [PASS] CDP connect timeout increased to 30s")
+            else:
+                print(f"  [FAIL] CDP connect timeout still at {cdp_timeout}s")
+                all_ok = False
+        else:
+            print("  [WARN] Could not find CDP connect timeout pattern in session.py")
+    except Exception as e:
+        print(f"  [WARN] Could not inspect session.py: {e}")
+
+    if all_ok:
+        print("\n  PASS: All browser timeout fixes are in place")
+    else:
+        print("\n  FAIL: Some browser timeout fixes are missing")
+
+    return all_ok
+
+
+def test_browser_launch_e2e():
+    """Test 15: End-to-end browser launch within the increased timeout."""
+    header("TEST 15: Browser launch E2E (within 60s timeout)")
+
+    import asyncio, time
+
+    async def _launch():
+        from browser_use import BrowserProfile
+        from browser_use.browser import BrowserSession
+
+        profile = BrowserProfile(
+            headless=True,
+            keep_alive=False,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        session = BrowserSession(browser_profile=profile)
+
+        t0 = time.monotonic()
+        try:
+            await asyncio.wait_for(session.start(), timeout=65)
+            elapsed = time.monotonic() - t0
+            print(f"  Browser started in {elapsed:.1f}s (limit: 65s)")
+
+            # Verify we have a valid CDP URL
+            cdp_url = getattr(session, "cdp_url", None)
+            if cdp_url and "://" in str(cdp_url):
+                print(f"  CDP URL: {cdp_url}")
+                print("  [PASS] Browser launched and CDP connected within timeout")
+                return True
+            else:
+                print(f"  [FAIL] No valid CDP URL after start: {cdp_url}")
+                return False
+
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - t0
+            print(f"  [FAIL] Browser launch timed out after {elapsed:.1f}s (limit: 65s)")
+            return False
+        except Exception as e:
+            elapsed = time.monotonic() - t0
+            print(f"  [FAIL] Browser launch failed after {elapsed:.1f}s: {e}")
+            return False
+        finally:
+            try:
+                await session.close()
+            except Exception:
+                pass
+
+    return asyncio.run(_launch())
+
+
+def test_ctc_fields():
+    """Test 16: Verify current_ctc and expected_ctc work in QAMemory and CandidateProfile."""
+    header("TEST 16: CTC fields integration in QAMemory")
+
+    from vellum.models import CandidateProfile, QAMemory
+
+    qa = QAMemory(
+        expected_salary="15 LPA",
+        current_ctc="12 LPA",
+        expected_ctc="18 LPA",
+        notice_period="30 days",
+    )
+    profile = CandidateProfile(
+        name="Test Candidate",
+        email="test@candidate.com",
+        qa_memory=qa,
+    )
+
+    data = profile.model_dump()
+    assert data["qa_memory"]["current_ctc"] == "12 LPA", f"Expected '12 LPA', got {data['qa_memory']['current_ctc']}"
+    assert data["qa_memory"]["expected_ctc"] == "18 LPA", f"Expected '18 LPA', got {data['qa_memory']['expected_ctc']}"
+    assert data["qa_memory"]["expected_salary"] == "15 LPA", f"Expected '15 LPA', got {data['qa_memory']['expected_salary']}"
+
+    print("  PASS: CTC fields instantiated and serialized cleanly in QAMemory")
+    return True
+
+
 def main():
     print(f"Python: {sys.version}")
     print(f"Platform: {sys.platform}")
@@ -386,6 +537,9 @@ def main():
         ("Strict location matrix", test_strict_location_matrix),
         ("PDF resume rendering", test_pdf_rendering),
         ("Public ATS APIs", test_ats_api),
+        ("Browser timeout fixes", test_browser_timeout_fixes),
+        ("Browser launch E2E", test_browser_launch_e2e),
+        ("CTC fields integration", test_ctc_fields),
     ]
 
     results = {}

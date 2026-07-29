@@ -47,7 +47,7 @@ dependencies = [
     # --- Email Verification ---
     "dnspython>=2.8.0",
     "psutil>=7.0.0",
-    "browser-use[core]>=0.13.0",
+    "browser-use[core]>=0.13.7",
     "bubus==1.5.6",
 ]
 

@@ -52,6 +52,7 @@ Candidate Profile:
 - Target Role: {target_role}
 - Experience Level: {experience_level}
 - Key Skills: {skills}
+- Expected CTC: {expected_ctc}
 
 Job Listings:
 {jobs_block}
@@ -60,6 +61,7 @@ CRITICAL RULES:
 1. Role Alignment: Job title/role must align with candidate's target role or tech background ({target_role}). Reject sales, marketing, non-tech roles.
 2. Experience Match: Do not approve senior/staff/principal roles for junior candidates or intern roles for experienced candidates.
 3. Quality Check: Reject generic directory listings or corrupted text.
+4. Salary/CTC Match: If a job listing explicitly mentions a salary, compensation range, or budget, check it against the candidate's expected CTC ({expected_ctc}). If the listing's compensation is significantly below the candidate's expected CTC, reject it (evaluating as false). If the listing does not mention any compensation details, do NOT reject or penalize it.
 
 Return a JSON array of booleans corresponding to each job in order, e.g.:
 [true, false, true, true]
@@ -75,6 +77,8 @@ async def evaluate_batch_jobs(jobs: list[dict], profile: dict, target_role: str)
     name = profile.get("name", "Candidate")
     skills = ", ".join(profile.get("skills", [])[:15])
     exp_level = profile.get("relevant_experience", "N/A")
+    qa_memory = profile.get("qa_memory", {})
+    expected_ctc = qa_memory.get("expected_ctc") or qa_memory.get("expected_salary") or "Not specified"
 
     jobs_lines = []
     for idx, job in enumerate(jobs):
@@ -95,6 +99,7 @@ async def evaluate_batch_jobs(jobs: list[dict], profile: dict, target_role: str)
                 experience_level=exp_level,
                 skills=skills,
                 jobs_block=jobs_block,
+                expected_ctc=expected_ctc,
             ),
         },
     ]

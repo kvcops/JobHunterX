@@ -118,7 +118,7 @@ def _build_stealth_profile(settings: Settings) -> Any:
         user_data_dir=str(_STEALTH_USER_DATA_DIR.resolve()),
         user_agent=_STEALTH_USER_AGENT,
         viewport={"width": 1920, "height": 1080},
-        enable_default_extensions=True,
+        enable_default_extensions=False,  # DISABLED: extension downloads from Chrome Web Store hang on Windows, blocking CDP
         disable_security=False,
         captcha_solver=True,
         keep_alive=False,
@@ -126,6 +126,8 @@ def _build_stealth_profile(settings: Settings) -> Any:
             "--disable-blink-features=AutomationControlled",
             "--disable-features=IsolateOrigins,site-per-process,AutomationControlled",
             "--disable-popup-blocking",
+            "--no-first-run",
+            "--no-default-browser-check",
         ],
     )
 
@@ -134,7 +136,7 @@ def _build_stealth_profile(settings: Settings) -> Any:
 # Browser agent runner
 # ---------------------------------------------------------------------------
 
-_active_sessions: list[tuple[asyncio.AbstractEventLoop, Any]] = []
+_active_sessions: list[Any] = []
 
 # Registry of paused browser sessions. When the agent hits CAPTCHA/login/MFA,
 # the session is moved here instead of being destroyed, keeping the browser
@@ -143,8 +145,7 @@ _paused_sessions: dict[str, dict] = {}
 
 # Registry of takeover gates keyed by job_id. Allows the API layer to pause/
 # resume the URL streamer (and signal the agent to yield) when the user takes
-# over the live browser window. Each value is a thread-safe asyncio.Event
-# belonging to the agent thread's event loop.
+# over the live browser window. Each value is an asyncio.Event.
 _takeover_gates: dict[str, asyncio.Event] = {}
 
 
@@ -153,17 +154,13 @@ def register_takeover_gate(job_id: str, gate: asyncio.Event) -> None:
 
 
 def _set_gate_threadsafe(job_id: str, value: bool) -> None:
-    """Set the takeover gate for a job from any thread."""
+    """Set the takeover gate for a job from any thread (still threadsafe just in case)."""
     gate = _takeover_gates.get(job_id)
     if gate is None:
         return
-    loop = None
-    for ev_loop, agent in _active_sessions:
-        sess = getattr(agent, "browser_session", None)
-        if sess is not None:
-            loop = ev_loop
-            break
-    if loop is None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
         loop = gate._loop if hasattr(gate, "_loop") else None  # type: ignore[attr-defined]
     if loop is None:
         return
@@ -193,36 +190,24 @@ def resume_streaming(job_id: str) -> None:
 
 
 def _pause_active_agent() -> None:
-    """Pause the active browser-use Agent (stops executing steps).
-
-    Thread-safe: uses call_soon_threadsafe to modify the agent's asyncio.Event
-    from the API thread while the agent runs on a separate ProactorEventLoop.
-    """
-    for loop, agent in _active_sessions:
+    """Pause the active browser-use Agent (stops executing steps)."""
+    for agent in _active_sessions:
         if hasattr(agent, "pause") and hasattr(agent, "_external_pause_event"):
             try:
-                def _do_pause():
-                    agent.state.paused = True
-                    agent._external_pause_event.clear()
-                loop.call_soon_threadsafe(_do_pause)
+                agent.state.paused = True
+                agent._external_pause_event.clear()
                 log.info("agent_paused", session_id=getattr(agent, "session_id", ""))
             except Exception as exc:
                 log.warning("agent_pause_failed", error=str(exc))
 
 
 def _resume_active_agent() -> None:
-    """Resume the active browser-use Agent (resumes executing steps).
-
-    Thread-safe: uses call_soon_threadsafe to modify the agent's asyncio.Event
-    from the API thread while the agent runs on a separate ProactorEventLoop.
-    """
-    for loop, agent in _active_sessions:
+    """Resume the active browser-use Agent (resumes executing steps)."""
+    for agent in _active_sessions:
         if hasattr(agent, "resume") and hasattr(agent, "_external_pause_event"):
             try:
-                def _do_resume():
-                    agent.state.paused = False
-                    agent._external_pause_event.set()
-                loop.call_soon_threadsafe(_do_resume)
+                agent.state.paused = False
+                agent._external_pause_event.set()
                 log.info("agent_resumed", session_id=getattr(agent, "session_id", ""))
             except Exception as exc:
                 log.warning("agent_resume_failed", error=str(exc))
@@ -230,7 +215,7 @@ def _resume_active_agent() -> None:
 
 def get_active_cdp_url() -> str:
     """Return the CDP websocket URL of the currently active browser, if any."""
-    for _loop, agent in _active_sessions:
+    for agent in _active_sessions:
         sess = getattr(agent, "browser_session", None)
         if sess is not None:
             cdp = getattr(sess, "cdp_url", "") or ""
@@ -241,7 +226,7 @@ def get_active_cdp_url() -> str:
 
 def get_active_browser_session() -> Any:
     """Return the active BrowserSession object, or None."""
-    for _loop, agent in _active_sessions:
+    for agent in _active_sessions:
         sess = getattr(agent, "browser_session", None)
         if sess is not None:
             return sess
@@ -262,28 +247,25 @@ async def get_active_page() -> Any:
 async def stop_all_active_browsers():
     """Halt any active browser-use Agent sessions immediately."""
     log.info("stopping_all_active_browsers", count=len(_active_sessions))
-    for loop, agent in list(_active_sessions):
+    for agent in list(_active_sessions):
         try:
             if hasattr(agent, "stop"):
                 agent.stop()
             if hasattr(agent, "browser_session") and agent.browser_session:
-                async def _close_session():
-                    try:
-                        await agent.browser_session.close()
-                    except Exception:
-                        pass
-                asyncio.run_coroutine_threadsafe(_close_session(), loop)
+                try:
+                    await agent.browser_session.close()
+                except Exception:
+                    pass
             elif hasattr(agent, "browser") and agent.browser:
-                async def _close():
-                    try:
-                        await agent.browser.close()
-                    except Exception:
-                        pass
-                asyncio.run_coroutine_threadsafe(_close(), loop)
+                try:
+                    await agent.browser.close()
+                except Exception:
+                    pass
         except Exception as exc:
             log.warning("error_triggering_browser_close", error=str(exc))
     _active_sessions.clear()
     _paused_sessions.clear()
+
 
 
 def save_paused_session(job_id: str, reason: str, url: str = "") -> None:
@@ -459,6 +441,10 @@ async def run(state: dict) -> dict:
         qa_lines = []
         if qa_memory.get("expected_salary"):
             qa_lines.append(f"  • Expected/Preferred Salary: {qa_memory['expected_salary']}")
+        if qa_memory.get("current_ctc"):
+            qa_lines.append(f"  • Current CTC: {qa_memory['current_ctc']}")
+        if qa_memory.get("expected_ctc"):
+            qa_lines.append(f"  • Expected CTC: {qa_memory['expected_ctc']}")
         if qa_memory.get("notice_period"):
             qa_lines.append(f"  • Notice Period: {qa_memory['notice_period']}")
         if qa_memory.get("work_authorization"):
@@ -509,7 +495,7 @@ CRITICAL TOKEN SAVING & SPEED RULE:
 Keep your thinking extremely brief and short (1 concise sentence max). Do NOT write long explanations or reasoning. Execute actions directly to minimize token usage and complete the task fast!
 
 Instructions:
-1. Fill in all required fields with the candidate information above. Use the Q&A answers for dropdown/select/radio questions about salary, notice period, work authorization, etc.
+1. Fill in all required fields with the candidate information above. Use the Q&A answers for dropdown/select/radio/input questions about salary, CTC, notice period, work authorization, etc. Do NOT fill in Current CTC or Expected CTC unless the application form explicitly asks for current salary, expected salary, current CTC, or expected CTC. If a generic "salary" is asked, prioritize expected salary / expected CTC.
 2. For education and work experience fields, use the detailed history provided above.
 3. If there is a resume upload field, call the tool `Upload candidate resume file (PDF/CV) to application form input`.
 4. If you encounter a login page, STOP and report "LOGIN_REQUIRED".
@@ -517,7 +503,8 @@ Instructions:
 6. If you see an OTP/MFA prompt, STOP and report "MFA_REQUIRED".
 7. If the form is too complex to fill automatically, STOP and report "TOO_COMPLEX".
 8. After filling, click the Submit/Apply button.
-9. Report the final status: SUCCESS or the reason for stopping."""
+9. Report the final status: SUCCESS or the reason for stopping.
+10. Work Authorization Rule: If the job is located inside India (the candidate's home country), auto-fill work authorization questions as "Yes" (authorized to work, does not require sponsorship). If the job is remote or located in a foreign country (outside India), carefully evaluate the question: if they ask about authorization/sponsorship to work in that foreign country (e.g. US/Europe), answer accurately based on the candidate's profile (usually "Yes" if applying as a remote contractor, or "Requires sponsorship/No authorization" if relocation to that foreign country is required)."""
 
 
         from vellum.api.ws import manager as ws_manager
@@ -567,10 +554,7 @@ Instructions:
             agent_kwargs["browser_profile"] = _build_stealth_profile(settings)
         agent = Agent(**agent_kwargs)
 
-        # Run browser agent in a dedicated thread with ProactorEventLoop.
-        main_loop = asyncio.get_running_loop()
-
-        # Cross-thread takeover gate. While cleared, the URL streamer pauses
+        # Takeover gate. While cleared, the URL streamer pauses
         # broadcasting (the user is manually controlling the real Chrome window).
         # Set by default (broadcasting active); cleared on user "take over",
         # re-set on "resume".
@@ -578,70 +562,62 @@ Instructions:
         _takeover_gate.set()
         register_takeover_gate(job_id, _takeover_gate)
 
-        def _run_agent_in_proactor_loop():
-            import concurrent.futures
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            _active_sessions.append((loop, agent))
+        _active_sessions.append(agent)
 
-            async def url_status_streamer(agent_instance):
-                """Lightweight streamer: broadcasts current URL + page title only.
+        async def url_status_streamer(agent_instance):
+            """Lightweight streamer: broadcasts current URL + page title only.
 
-                No screenshots. The real browser window stays visible on the
-                user's desktop; the UI shows the live URL + activity feed and
-                the user clicks to take over the actual window when needed.
-                """
-                await asyncio.sleep(3.0)
-                while True:
-                    try:
-                        session = getattr(agent_instance, "browser_session", None)
-                        if session:
-                            page = await session.get_current_page()
-                            if page and not page.is_closed():
-                                url = page.url
-                                try:
-                                    title = await page.title()
-                                except Exception:
-                                    title = ""
-                                event_data = {
-                                    "agent": "browser_agent",
-                                    "event_type": "browser_stream_frame",
-                                    "job_id": job_id,
-                                    "data": {
-                                        "url": url,
-                                        "title": title,
-                                        "cdp_url": getattr(session, "cdp_url", "") or "",
-                                    }
-                                }
-                                ws_manager.broadcast_threadsafe(event_data, main_loop)
-                    except asyncio.CancelledError:
-                        break
-                    except Exception:
-                        pass
+            No screenshots. The real browser window stays visible on the
+            user's desktop; the UI shows the live URL + activity feed and
+            the user clicks to take over the actual window when needed.
+            """
+            await asyncio.sleep(3.0)
+            while True:
+                try:
+                    session = getattr(agent_instance, "browser_session", None)
+                    if session:
+                        try:
+                            url = await session.get_current_page_url()
+                        except Exception:
+                            url = ""
+                        try:
+                            title = await session.get_current_page_title()
+                        except Exception:
+                            title = ""
+                        event_data = {
+                            "agent": "browser_agent",
+                            "event_type": "browser_stream_frame",
+                            "job_id": job_id,
+                            "data": {
+                                "url": url,
+                                "title": title,
+                                "cdp_url": getattr(session, "cdp_url", "") or "",
+                            }
+                        }
+                        await ws_manager.broadcast(event_data)
+                except asyncio.CancelledError:
+                    break
+                except Exception:
+                    pass
 
-                    # Pause here if the user has taken over the browser window.
-                    await _takeover_gate.wait()
-                    await asyncio.sleep(1.0)
+                # Pause here if the user has taken over the browser window.
+                await _takeover_gate.wait()
+                await asyncio.sleep(1.0)
 
-            streamer_task = loop.create_task(url_status_streamer(agent))
-            try:
-                return loop.run_until_complete(
-                    asyncio.wait_for(agent.run(), timeout=180)
-                )
-            finally:
-                streamer_task.cancel()
-                if (loop, agent) in _active_sessions:
-                    _active_sessions.remove((loop, agent))
-                loop.close()
-
+        streamer_task = asyncio.create_task(url_status_streamer(agent))
         try:
-            history = await main_loop.run_in_executor(
-                None, _run_agent_in_proactor_loop
-            )
+            history = await asyncio.wait_for(agent.run(), timeout=180)
             final_result = history.final_result() if hasattr(history, 'final_result') else str(history)
         except asyncio.TimeoutError:
             final_result = "TIMEOUT"
         finally:
+            streamer_task.cancel()
+            try:
+                await streamer_task
+            except asyncio.CancelledError:
+                pass
+            if agent in _active_sessions:
+                _active_sessions.remove(agent)
             _takeover_gates.pop(job_id, None)
 
         # --- Analyse result for HITL needs ---

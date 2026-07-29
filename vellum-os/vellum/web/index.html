@@ -178,8 +178,22 @@
             </div>
           </div>
 
+        </aside>
+        
+        <!-- Bento Workspace Column (Width: 72%) -->
+        <main class="bento-col bento-workspace-col">
+          
+          <!-- Futuristic Welcome & Dashboard Header Card -->
+          <section class="bento-card welcome-matrix-card glass">
+            <div class="welcome-card-content">
+              <span class="welcome-top-pill">✦ v2026.4 Core Node</span>
+              <h1>Autonomous Career <span class="accent-glow-text">Agent Intelligence</span></h1>
+              <p>Tailor resumes, validate fit scores, and orchestrate headless browser applications dynamically.</p>
+            </div>
+          </section>
+
           <!-- Agent Telemetry & Activity Feed Card -->
-          <div class="bento-card agent-terminal-card glass">
+          <div class="bento-card agent-terminal-card glass" style="margin-bottom: 14px;">
             <div class="card-title-header flex-title-header">
               <div class="terminal-status-block">
                 <span id="sidebar-progress-dot" class="status-pulse-dot"></span>
@@ -219,19 +233,6 @@
               <div class="mini-log-item log-info"><span class="log-time">00:00:00</span> <span class="log-agent-tag system">SYSTEM</span> Ready for candidate resume upload.</div>
             </div>
           </div>
-        </aside>
-        
-        <!-- Bento Workspace Column (Width: 72%) -->
-        <main class="bento-col bento-workspace-col">
-          
-          <!-- Futuristic Welcome & Dashboard Header Card -->
-          <section class="bento-card welcome-matrix-card glass">
-            <div class="welcome-card-content">
-              <span class="welcome-top-pill">✦ v2026.4 Core Node</span>
-              <h1>Autonomous Career <span class="accent-glow-text">Agent Intelligence</span></h1>
-              <p>Tailor resumes, validate fit scores, and orchestrate headless browser applications dynamically.</p>
-            </div>
-          </section>
 
           <!-- Automated Search Board Bento Card -->
           <section class="bento-card search-dashboard-card glass">
@@ -517,6 +518,14 @@
                       <input type="text" id="qa-salary" placeholder="e.g. 15 LPA, $120,000/yr, Negotiable">
                     </div>
                     <div class="glow-form-group">
+                      <label for="qa-current-ctc">Current CTC</label>
+                      <input type="text" id="qa-current-ctc" placeholder="e.g. 12 LPA, $100,000/yr">
+                    </div>
+                    <div class="glow-form-group">
+                      <label for="qa-expected-ctc">Expected CTC</label>
+                      <input type="text" id="qa-expected-ctc" placeholder="e.g. 18 LPA, $150,000/yr">
+                    </div>
+                    <div class="glow-form-group">
                       <label for="qa-notice">Notice Period</label>
                       <input type="text" id="qa-notice" placeholder="e.g. Immediately, 30 days, 60 days">
                     </div>
@@ -556,10 +565,6 @@
                         <option value="No">No</option>
                         <option value="Depends">Depends on location</option>
                       </select>
-                    </div>
-                    <div class="glow-form-group full-width">
-                      <label for="qa-yoe">Total Years of Experience</label>
-                      <input type="text" id="qa-yoe" placeholder="e.g. 3, 5+, Fresher">
                     </div>
                   </div>
                 </div>

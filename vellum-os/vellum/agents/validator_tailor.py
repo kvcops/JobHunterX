@@ -29,6 +29,7 @@ CRITICAL MATCHING RULES (enforce strictly):
 2. **Experience Match**: The candidate has "{candidate_experience}". If the JD requires a level far beyond the candidate (e.g., Staff/Principal for a Junior, or Intern for 5+ yrs experience), set match_score below 0.25.
 3. **Skills Match**: Evaluate overlap between candidate skills and JD requirements. Weight heavily.
 4. **Role Alignment**: Ensure the job role aligns with the candidate's target role and technical background.
+5. **Salary/CTC Match**: The candidate's expected CTC is "{expected_ctc}" and current CTC is "{current_ctc}". Only if the job description explicitly mentions budget, salary range, or compensation: if the job's compensation range is significantly below the candidate's expected CTC, set match_score below 0.25. Otherwise, do not penalize or restrict the score based on CTC if the job does not explicitly state compensation details.
 
 Return a JSON object with this exact structure:
 {{
@@ -56,6 +57,7 @@ CRITICAL ATS & TRUTHFULNESS RULES:
 3. STRICT TRUTHFULNESS: Do NOT invent fake experience, unearned titles, or fake metric numbers not backed by candidate's profile.
 4. ABSOLUTELY DO NOT add any technologies, tools, frameworks, or programming languages that are NOT in the candidate's skill list below. If the JD mentions a skill the candidate doesn't have, DO NOT add it.
 5. Write in active, powerful third-person tone (no "I", "my", or "our").
+6. ABSOLUTELY FORBIDDEN: Do NOT include candidate's Current CTC, Expected CTC, or any salary/compensation details in the professional executive summary.
 
 Candidate Details:
 Name: {name}
@@ -82,6 +84,7 @@ CRITICAL ATS & IMPACT RULES:
 4. STRICT TRUTHFULNESS: You MUST NOT invent fake companies, fake projects, or fake tools outside the candidate's real skill list. Preserve any real metrics from original bullets.
 5. ABSOLUTELY FORBIDDEN: Adding any technology, framework, tool, or programming language not explicitly in the candidate's skill list above. If the JD mentions React but candidate doesn't know React, do NOT mention React.
 6. Order Preservation: Return a JSON array of strings — transformed bullets matching the exact count of original bullets.
+7. ABSOLUTELY FORBIDDEN: Do NOT include candidate's Current CTC, Expected CTC, or any salary/compensation details in any of the bullet points.
 
 Role: {role_title} at {company_name}
 Original Bullets:
@@ -268,6 +271,10 @@ async def run(state: dict) -> dict:
     target_location = job.get("search_location", "") or profile.get("location", "")
     candidate_experience = profile.get("relevant_experience", "N/A")
 
+    qa_memory = profile.get("qa_memory", {})
+    current_ctc = qa_memory.get("current_ctc") or "Not specified"
+    expected_ctc = qa_memory.get("expected_ctc") or qa_memory.get("expected_salary") or "Not specified"
+
     profile_summary = f"""Name: {profile.get('name', '')}
 Email: {profile.get('email', '')}
 Phone: {profile.get('phone', '')}
@@ -279,6 +286,8 @@ Relevant Experience Level: {candidate_experience}
 Languages: {', '.join(profile.get('languages', [])) if isinstance(profile.get('languages'), list) else profile.get('languages', '')}
 Skills: {', '.join(profile.get('skills', []))}
 Professional Summary: {profile.get('summary', '')}
+Current CTC: {current_ctc}
+Expected CTC: {expected_ctc}
 
 Detailed Work Experience:
 {chr(10).join(exp_details)}
@@ -295,6 +304,8 @@ Education:
                 jd_text=jd_text[:3000],
                 target_location=target_location,
                 candidate_experience=candidate_experience,
+                current_ctc=current_ctc,
+                expected_ctc=expected_ctc,
             ),
         },
     ]

@@ -1178,12 +1178,13 @@ function renderProfileEditor() {
   // Populate Q&A Memory fields
   const qa = currentProfile.qa_memory || {};
   if (document.getElementById("qa-salary")) document.getElementById("qa-salary").value = qa.expected_salary || "";
+  if (document.getElementById("qa-current-ctc")) document.getElementById("qa-current-ctc").value = qa.current_ctc || "";
+  if (document.getElementById("qa-expected-ctc")) document.getElementById("qa-expected-ctc").value = qa.expected_ctc || "";
   if (document.getElementById("qa-notice")) document.getElementById("qa-notice").value = qa.notice_period || "";
   if (document.getElementById("qa-work-auth")) document.getElementById("qa-work-auth").value = qa.work_authorization || "";
   if (document.getElementById("qa-sponsorship")) document.getElementById("qa-sponsorship").value = qa.requires_sponsorship || "";
   if (document.getElementById("qa-work-mode")) document.getElementById("qa-work-mode").value = qa.preferred_work_mode || "";
   if (document.getElementById("qa-relocate")) document.getElementById("qa-relocate").value = qa.willing_to_relocate || "";
-  if (document.getElementById("qa-yoe")) document.getElementById("qa-yoe").value = qa.years_of_experience || "";
 
   
   // Initialize scoped lists
@@ -1488,12 +1489,13 @@ async function saveProfileChanges() {
     achievements: currentProfile.achievements || [],
     qa_memory: {
       expected_salary: document.getElementById("qa-salary") ? document.getElementById("qa-salary").value.trim() : ((currentProfile.qa_memory || {}).expected_salary || ""),
+      current_ctc: document.getElementById("qa-current-ctc") ? document.getElementById("qa-current-ctc").value.trim() : ((currentProfile.qa_memory || {}).current_ctc || ""),
+      expected_ctc: document.getElementById("qa-expected-ctc") ? document.getElementById("qa-expected-ctc").value.trim() : ((currentProfile.qa_memory || {}).expected_ctc || ""),
       notice_period: document.getElementById("qa-notice") ? document.getElementById("qa-notice").value.trim() : ((currentProfile.qa_memory || {}).notice_period || ""),
       work_authorization: document.getElementById("qa-work-auth") ? document.getElementById("qa-work-auth").value.trim() : ((currentProfile.qa_memory || {}).work_authorization || ""),
       requires_sponsorship: document.getElementById("qa-sponsorship") ? document.getElementById("qa-sponsorship").value.trim() : ((currentProfile.qa_memory || {}).requires_sponsorship || ""),
       preferred_work_mode: document.getElementById("qa-work-mode") ? document.getElementById("qa-work-mode").value.trim() : ((currentProfile.qa_memory || {}).preferred_work_mode || ""),
       willing_to_relocate: document.getElementById("qa-relocate") ? document.getElementById("qa-relocate").value.trim() : ((currentProfile.qa_memory || {}).willing_to_relocate || ""),
-      years_of_experience: document.getElementById("qa-yoe") ? document.getElementById("qa-yoe").value.trim() : ((currentProfile.qa_memory || {}).years_of_experience || ""),
       custom_answers: (currentProfile.qa_memory || {}).custom_answers || {}
     }
   };
