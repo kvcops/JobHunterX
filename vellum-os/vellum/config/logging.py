@@ -116,6 +116,23 @@ def setup_logging(log_level: str = "INFO", json_output: bool = False) -> None:
     except ImportError:
         pass
 
+    # Suppress LiteLLM Gemini deprecation warnings about temperature/top_p/top_k
+    # These are cosmetic — the params still work but LiteLLM logs noisy warnings
+    import warnings as _warnings
+    _warnings.filterwarnings(
+        "ignore",
+        message=".*temperature.*top_p.*top_k.*continue to function.*",
+        category=DeprecationWarning,
+        module="litellm",
+    )
+    _warnings.filterwarnings(
+        "ignore",
+        message=".*DeprecationWarning.*temperature.*",
+        category=DeprecationWarning,
+    )
+    # Broadly suppress DeprecationWarnings from litellm vertex module
+    _warnings.filterwarnings("ignore", category=DeprecationWarning, module="litellm.*")
+
     noisy_loggers = (
         "LiteLLM", "LiteLLM Router", "LiteLLM Proxy",
         "httpx", "httpcore", "curl_cffi", "ddgs",

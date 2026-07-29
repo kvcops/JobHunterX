@@ -410,8 +410,9 @@ async def run(state: dict) -> dict:
             except Exception as exc:
                 return ActionResult(error=f"Upload execution error: {str(exc)}")
 
-        # Use our LiteLLM router — forced to gemini-3.1-flash-lite per spec
-        llm = ChatLiteLLM(model="gemini/gemini-3.1-flash-lite")
+        # Use our LiteLLM router — gemma-4-31b-it avoids Gemini 3+ deprecation warnings
+        # and supports temperature/top_p/top_k natively
+        llm = ChatLiteLLM(model="gemini/gemma-4-31b-it")
 
         # Build comprehensive candidate credential memory for the task
         # --- Education History ---

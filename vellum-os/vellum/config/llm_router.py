@@ -91,6 +91,25 @@ _PROVIDER_MIN_DELAY: Dict[str, float] = {
 # Track last request timestamp per provider for rate limiting
 _provider_last_request: Dict[str, float] = {}
 
+# ---------------------------------------------------------------------------
+# Provider health tracking — auto-failover on rate limits
+# ---------------------------------------------------------------------------
+
+# Cooldown (seconds) after a 429 before retrying that provider.
+_PROVIDER_COOLDOWN: Dict[str, float] = {
+    "gemini": 60.0,
+    "groq": 30.0,
+    "mistral": 15.0,
+    "default": 30.0,
+}
+
+# When a provider was last rate-limited (monotonic timestamp).
+_provider_rate_limited_until: Dict[str, float] = {}
+
+# Rolling error counts for diagnostics.
+_provider_error_counts: Dict[str, int] = {}
+_provider_success_counts: Dict[str, int] = {}
+
 
 def _get_semaphore(model: str) -> asyncio.Semaphore:
     """Get or create a concurrency semaphore for the model's provider."""
@@ -122,6 +141,39 @@ def _get_provider_key(model: str) -> str:
     elif model.startswith("mistral/"):
         return "mistral"
     return "default"
+
+
+def _is_provider_available(model: str) -> bool:
+    """Check whether a model's provider is currently available (not in cooldown)."""
+    provider = _get_provider_key(model)
+    now = time.monotonic()
+    until = _provider_rate_limited_until.get(provider, 0.0)
+    if now < until:
+        return False
+    return True
+
+
+def _record_rate_limit(model: str) -> None:
+    """Mark a provider as rate-limited with a cooldown period."""
+    import time as _time
+    provider = _get_provider_key(model)
+    cooldown = _PROVIDER_COOLDOWN.get(provider, 30.0)
+    _provider_rate_limited_until[provider] = _time.monotonic() + cooldown
+    _provider_error_counts[provider] = _provider_error_counts.get(provider, 0) + 1
+    log.warning(
+        "provider_rate_limited",
+        provider=provider,
+        cooldown_s=cooldown,
+        total_rate_limits=_provider_error_counts.get(provider, 0),
+    )
+
+
+def _record_provider_success(model: str) -> None:
+    """Record a successful call for a provider (resets error streak)."""
+    provider = _get_provider_key(model)
+    _provider_success_counts[provider] = _provider_success_counts.get(provider, 0) + 1
+    # Clear any stale cooldown on success
+    _provider_rate_limited_until.pop(provider, None)
 
 
 async def _enforce_rate_limit(model: str) -> None:
@@ -218,10 +270,19 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
         await _enforce_rate_limit(model)
 
         try:
-            return await litellm.acompletion(**params)
+            result = await litellm.acompletion(**params)
+            _record_provider_success(model)
+            return result
         except Exception as exc:
             err_str = str(exc).lower()
-            if "rate limit" in err_str or "429" in err_str or "too many requests" in err_str or isinstance(exc, (litellm.RateLimitError, litellm.ServiceUnavailableError)):
+            is_rate_limit = (
+                "rate limit" in err_str
+                or "429" in err_str
+                or "too many requests" in err_str
+                or isinstance(exc, (litellm.RateLimitError, litellm.ServiceUnavailableError))
+            )
+            if is_rate_limit:
+                _record_rate_limit(model)
                 match = re.search(r"try again in ([0-9]+(?:\.[0-9]+)?)s", str(exc), re.I)
                 delay = float(match.group(1)) if match else min(3.0 * (attempt + 1), 30.0)
                 if attempt == max_attempts - 1:
@@ -353,6 +414,9 @@ async def call_llm_with_fallback(
 ) -> Dict[str, Any]:
     """Try models in a fallback chain until one succeeds.
 
+    Automatically skips providers that are currently rate-limited (in cooldown)
+    so subsequent calls fail over immediately without wasting time on retries.
+
     Args:
         chain_name: Key in FALLBACK_CHAINS (e.g., "fast", "reasoning", "tailoring").
         messages: Chat messages.
@@ -375,6 +439,13 @@ async def call_llm_with_fallback(
         if model.startswith("groq/") and not settings.groq_api_key:
             continue
         if model.startswith("mistral/") and not settings.mistral_api_key:
+            continue
+
+        # Skip providers currently in rate-limit cooldown
+        if not _is_provider_available(model):
+            provider = _get_provider_key(model)
+            remaining = max(0, _provider_rate_limited_until.get(provider, 0) - time.monotonic())
+            log.info("llm_fallback_skip_cooldown", model=model, provider=provider, cooldown_remaining_s=round(remaining, 1))
             continue
 
         try:
