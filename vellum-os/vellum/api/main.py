@@ -80,8 +80,18 @@ async def lifespan(app: FastAPI):
     settings.cache_full_path
     settings.screenshots_full_path
 
+    # Start screencast manager task
+    screencast_mgr_task = asyncio.create_task(_screencast_manager())
+
     log.info("vellum_os_ready", host=settings.host, port=settings.port)
     yield
+    
+    # Clean up screencast manager on shutdown
+    screencast_mgr_task.cancel()
+    try:
+        await screencast_mgr_task
+    except asyncio.CancelledError:
+        pass
     log.info("shutting_down")
 
 
@@ -175,6 +185,46 @@ async def _screencast_broadcaster(page: Any):
         _browser_screencast_running = False
 
 
+async def _screencast_manager():
+    """Periodically check for the active page and start screencasting if needed."""
+    global _browser_screencast_task, _browser_screencast_running
+    from vellum.agents import browser_agent as ba
+    
+    last_session = None
+    while True:
+        try:
+            if _browser_ws_clients:
+                sess = ba.get_active_browser_session()
+                if sess:
+                    try:
+                        page = await sess.get_current_page()
+                    except Exception:
+                        page = None
+                    
+                    if page and not page.is_closed():
+                        if sess != last_session or not _browser_screencast_running:
+                            _stop_screencast()
+                            last_session = sess
+                            _browser_screencast_task = asyncio.create_task(_screencast_broadcaster(page))
+                    else:
+                        if _browser_screencast_running:
+                            _stop_screencast()
+                            last_session = None
+                else:
+                    if _browser_screencast_running:
+                        _stop_screencast()
+                    last_session = None
+            else:
+                if _browser_screencast_running:
+                    _stop_screencast()
+                last_session = None
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            log.warning("screencast_manager_error", error=str(exc))
+        await asyncio.sleep(0.5)
+
+
 @app.websocket("/ws/browser")
 async def browser_websocket(websocket: WebSocket):
     """CDP live-stream WebSocket: streams browser frames + receives input events."""
@@ -182,26 +232,20 @@ async def browser_websocket(websocket: WebSocket):
     _browser_ws_clients.append(websocket)
     log.info("browser_ws_client_connected", total=len(_browser_ws_clients))
 
-    # If we have an active page, start screencast if not already running
-    global _browser_screencast_task
-    page = None
-    try:
-        from vellum.agents import browser_agent as ba
-        page = await ba.get_active_page()
-    except Exception:
-        pass
-
-    if page and not _browser_screencast_running:
-        _browser_screencast_task = asyncio.create_task(_screencast_broadcaster(page))
-
     try:
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
 
-            # Handle input events from the client
-            if page and not page.is_closed():
-                await _forward_input_event(page, msg)
+            # Handle input events by dynamically getting the active page
+            try:
+                from vellum.agents import browser_agent as ba
+                current_page = await ba.get_active_page()
+            except Exception:
+                current_page = None
+
+            if current_page and not current_page.is_closed():
+                await _forward_input_event(current_page, msg)
     except WebSocketDisconnect:
         pass
     except Exception as exc:

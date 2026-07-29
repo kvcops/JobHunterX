@@ -188,7 +188,7 @@ def _matches_location_strict(title: str, jd_text: str, target_location: str) -> 
         return True
 
     # 6. Very short / empty JD -> unknown, keep permissive.
-    if not jd_text or len(jd_text) < 50:
+    if not jd_text or len(jd_text) < 15:
         return True
 
     # 7. Another Indian city in the title but not ours -> still in India, accept.

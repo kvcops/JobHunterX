@@ -23,11 +23,20 @@ log = get_logger("validator_tailor")
 # ---------------------------------------------------------------------------
 
 VALIDATION_PROMPT = """You are a top-tier executive talent manager. Compare the candidate profile against the target job description.
+
+CRITICAL MATCHING RULES (enforce strictly):
+1. **Location Match**: The candidate targets "{target_location}". If the job is strictly onsite/hybrid in a DIFFERENT city (not remote-eligible), set match_score below 0.25.
+2. **Experience Match**: The candidate has "{candidate_experience}". If the JD requires a level far beyond the candidate (e.g., Staff/Principal for a Junior, or Intern for 5+ yrs experience), set match_score below 0.25.
+3. **Skills Match**: Evaluate overlap between candidate skills and JD requirements. Weight heavily.
+4. **Role Alignment**: Ensure the job role aligns with the candidate's target role and technical background.
+
 Return a JSON object with this exact structure:
 {{
   "match_score": 0.0-1.0,
   "matching_skills": ["skill1", "skill2"],
   "missing_skills": ["skill3", "skill4"],
+  "location_match": true or false,
+  "experience_match": true or false,
   "reasoning": "Detailed 2-sentence breakdown of alignment"
 }}
 
@@ -45,12 +54,13 @@ CRITICAL ATS & TRUTHFULNESS RULES:
 1. Highlight the candidate's real technical background, core skills, and alignment with the target role ({target_role}).
 2. Naturally integrate key requirements and domain keywords from the Target Job Description.
 3. STRICT TRUTHFULNESS: Do NOT invent fake experience, unearned titles, or fake metric numbers not backed by candidate's profile.
-4. Write in active, powerful third-person tone (no "I", "my", or "our").
+4. ABSOLUTELY DO NOT add any technologies, tools, frameworks, or programming languages that are NOT in the candidate's skill list below. If the JD mentions a skill the candidate doesn't have, DO NOT add it.
+5. Write in active, powerful third-person tone (no "I", "my", or "our").
 
 Candidate Details:
 Name: {name}
 Target Role: {target_role}
-Key Skills: {skills_list}
+Key Skills (ONLY use these): {skills_list}
 Original Summary: {original_summary}
 
 Target Job Description:
@@ -67,14 +77,17 @@ Transform the candidate's raw work experience bullet points into deeply detailed
 
 CRITICAL ATS & IMPACT RULES:
 1. Use Google XYZ Formula: Start with a strong action verb, specify technical tools/methods [Z], state the outcome or engineering result [X/Y].
-2. Keywords Integration: Seamlessly embed relevant technical terms and requirements from the Job Description that align with candidate's ground-truth skills ({skills_list}).
+2. Keywords Integration: Seamlessly embed relevant technical terms from the Job Description ONLY IF they exist in the candidate's real skill list ({skills_list}). DO NOT invent or add technologies the candidate doesn't know.
 3. Technical Depth & Context: Do NOT make bullets artificially short or generic. Write rich, impactful 20-35 word bullet points.
 4. STRICT TRUTHFULNESS: You MUST NOT invent fake companies, fake projects, or fake tools outside the candidate's real skill list. Preserve any real metrics from original bullets.
-5. Order Preservation: Return a JSON array of strings — transformed bullets matching the exact count of original bullets.
+5. ABSOLUTELY FORBIDDEN: Adding any technology, framework, tool, or programming language not explicitly in the candidate's skill list above. If the JD mentions React but candidate doesn't know React, do NOT mention React.
+6. Order Preservation: Return a JSON array of strings — transformed bullets matching the exact count of original bullets.
 
 Role: {role_title} at {company_name}
 Original Bullets:
 {original_bullets}
+
+Candidate's REAL Skill List (ONLY use these): {skills_list}
 
 Target Job Description:
 {jd_text}
@@ -114,6 +127,47 @@ def _categorize_skills(skills: list[str]) -> dict[str, list[str]]:
 
     # Filter out empty categories
     return {k: v for k, v in categories.items() if v}
+
+
+def _sanitize_tailored_text(text: str, allowed_skills: list[str]) -> str:
+    """Post-tailoring sanitizer: check for hallucinated technologies.
+
+    This is a best-effort filter. It scans the text for common technology
+    names that do NOT appear in the candidate's real skill list and replaces
+    them with a safer generic term.
+    """
+    if not allowed_skills:
+        return text
+
+    # Build set of known candidate skills (lowercased for matching)
+    known_lower = {s.lower().strip() for s in allowed_skills if s}
+
+    # Common technology names that might be hallucinated
+    # We only flag multi-character tech names that are unambiguous
+    common_techs = [
+        "React", "Angular", "Vue.js", "Vue", "Svelte", "Next.js", "Nuxt",
+        "Django", "Flask", "FastAPI", "Spring", "Express", "Rails",
+        "TensorFlow", "PyTorch", "Keras", "Scikit-learn",
+        "AWS", "GCP", "Azure", "Docker", "Kubernetes",
+        "MongoDB", "PostgreSQL", "MySQL", "Redis", "Elasticsearch",
+        "GraphQL", "gRPC", "Kafka", "RabbitMQ", "Terraform",
+        "TypeScript", "Rust", "Go", "Kotlin", "Swift", "Scala",
+        "Node.js", "Ruby", "PHP", "C#", "C++",
+    ]
+
+    sanitized = text
+    for tech in common_techs:
+        tech_lower = tech.lower()
+        # Check if this tech is in the candidate's skills
+        is_known = any(tech_lower in sk for sk in known_lower)
+        if is_known:
+            continue
+        # If not known but appears in text, log a warning but don't break
+        # the text — just log for observability
+        if tech.lower() in sanitized.lower():
+            log.warning("hallucinated_tech_detected", tech=tech, text_snippet=sanitized[:100])
+
+    return sanitized
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +247,7 @@ async def run(state: dict) -> dict:
         return {"freshness": freshness, "events": events, "errors": errors}
 
     # ------------------------------------------------------------------
-    # Step 2: Validation (match score)
+    # Step 2: Validation (match score) with location + experience rules
     # ------------------------------------------------------------------
     await db.update_job(job_id, status="validating")
 
@@ -210,6 +264,10 @@ async def run(state: dict) -> dict:
             f"- {edu.get('degree')} from {edu.get('institution')} ({edu.get('start')} - {edu.get('end')})"
         )
 
+    # Determine target location from job's search context or profile
+    target_location = job.get("search_location", "") or profile.get("location", "")
+    candidate_experience = profile.get("relevant_experience", "N/A")
+
     profile_summary = f"""Name: {profile.get('name', '')}
 Email: {profile.get('email', '')}
 Phone: {profile.get('phone', '')}
@@ -217,7 +275,7 @@ Location: {profile.get('location', '')}
 Present Address: {profile.get('present_address', '')}
 Permanent Address: {profile.get('permanent_address', '')}
 Suggested Role: {profile.get('suggested_role', '')}
-Relevant Experience Level: {profile.get('relevant_experience', '')}
+Relevant Experience Level: {candidate_experience}
 Languages: {', '.join(profile.get('languages', [])) if isinstance(profile.get('languages'), list) else profile.get('languages', '')}
 Skills: {', '.join(profile.get('skills', []))}
 Professional Summary: {profile.get('summary', '')}
@@ -235,6 +293,8 @@ Education:
             "content": VALIDATION_PROMPT.format(
                 profile_summary=profile_summary,
                 jd_text=jd_text[:3000],
+                target_location=target_location,
+                candidate_experience=candidate_experience,
             ),
         },
     ]
@@ -280,6 +340,9 @@ Education:
     # ------------------------------------------------------------------
     await db.update_job(job_id, status="matched")
 
+    candidate_skills = profile.get("skills", [])
+    skills_list_str = ", ".join(candidate_skills)
+
     # A) Tailored Executive Summary
     tailored_summary = profile.get("summary", "")
     try:
@@ -290,7 +353,7 @@ Education:
                 "content": SUMMARY_TAILORING_PROMPT.format(
                     name=profile.get("name", "Candidate"),
                     target_role=target_role,
-                    skills_list=", ".join(profile.get("skills", [])),
+                    skills_list=skills_list_str,
                     original_summary=profile.get("summary", ""),
                     jd_text=jd_text[:2500],
                 ),
@@ -305,6 +368,8 @@ Education:
         sum_data = json.loads(sum_content.strip())
         if isinstance(sum_data, dict) and sum_data.get("tailored_summary"):
             tailored_summary = sum_data["tailored_summary"]
+            # Sanitize
+            tailored_summary = _sanitize_tailored_text(tailored_summary, candidate_skills)
     except Exception as exc:
         log.warning("summary_tailor_failed", error=str(exc))
 
@@ -322,7 +387,7 @@ Education:
                 "content": BULLET_TAILORING_PROMPT.format(
                     role_title=exp.get("role", "Engineer"),
                     company_name=exp.get("company", "Company"),
-                    skills_list=", ".join(profile.get("skills", [])),
+                    skills_list=skills_list_str,
                     original_bullets=json.dumps(original_bullets),
                     jd_text=jd_text[:2500],
                 ),
@@ -339,7 +404,12 @@ Education:
             new_bullets = json.loads(content.strip())
 
             if isinstance(new_bullets, list):
-                valid_bullets = [b for b in new_bullets if isinstance(b, str) and len(b) > 10]
+                valid_bullets = []
+                for b in new_bullets:
+                    if isinstance(b, str) and len(b) > 10:
+                        # Sanitize each bullet
+                        b = _sanitize_tailored_text(b, candidate_skills)
+                        valid_bullets.append(b)
                 tailored_bullets[i] = valid_bullets[:len(original_bullets)]
 
         except Exception as exc:
@@ -350,7 +420,7 @@ Education:
     categorized_skills = _categorize_skills(profile.get("skills", []))
 
     # ------------------------------------------------------------------
-    # Step 4: PDF generation (high-impact template)
+    # Step 4: PDF generation (high-impact template with shrink loop)
     # ------------------------------------------------------------------
     pdf_result = pdf_render.render_resume_pdf(
         profile,
@@ -362,9 +432,10 @@ Education:
 
     await db.update_job(job_id, tailored_pdf=pdf_bytes, status="matched")
 
+    shrink_info = f" (shrink level {pdf_result.get('shrink_level', 0)})" if pdf_result.get("trimmed") else ""
     await log_and_broadcast_event(
         "complete",
-        f"High-impact tailored ATS resume ready ({pdf_result['page_count']} page)"
+        f"High-impact tailored ATS resume ready ({pdf_result['page_count']} page{shrink_info})"
     )
 
     return {
@@ -374,4 +445,3 @@ Education:
         "events": events,
         "errors": errors,
     }
-

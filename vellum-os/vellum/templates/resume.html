@@ -3,32 +3,35 @@
 <head>
 <meta charset="utf-8">
 <style>
-  @page { size: A4; margin: 8mm 10mm; }
+  @page { size: A4; margin: {{ margin_y|default('8mm') }} {{ margin_x|default('10mm') }}; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 9pt;
+    font-size: {{ font_size_body|default('9pt') }};
     color: #1e293b;
-    line-height: 1.35;
+    line-height: {{ line_height|default('1.32') }};
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    /* Prevent content from overflowing the page */
+    overflow: hidden;
+    max-height: 100vh;
   }
 
   /* Header */
-  .header { margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid #0f172a; }
+  .header { margin-bottom: {{ margin_section|default('7px') }}; padding-bottom: 5px; border-bottom: 2px solid #0f172a; }
   .name {
-    font-size: 20pt;
+    font-size: {{ font_size_name|default('20pt') }};
     font-weight: 800;
     color: #0f172a;
     letter-spacing: -0.5px;
     text-transform: uppercase;
-    margin: 0 0 3px 0;
+    margin: 0 0 2px 0;
   }
   .contact-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 12px;
-    font-size: 8.5pt;
+    gap: 3px 10px;
+    font-size: {{ font_size_small|default('8.5pt') }};
     color: #475569;
     font-weight: 500;
   }
@@ -36,65 +39,55 @@
   .contact-row .sep { color: #cbd5e1; }
 
   /* Section */
-  .section { margin-bottom: 7px; }
+  .section { margin-bottom: {{ margin_section|default('7px') }}; }
   .section-title {
-    font-size: 9.5pt;
+    font-size: {{ font_size_section|default('9.5pt') }};
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.8px;
     color: #0f172a;
     border-bottom: 1px solid #cbd5e1;
     padding-bottom: 2px;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
   }
 
   /* Summary */
-  .summary { font-size: 9pt; color: #334155; text-align: justify; line-height: 1.4; }
+  .summary { font-size: {{ font_size_body|default('9pt') }}; color: #334155; text-align: justify; line-height: 1.35; }
 
   /* Skills — inline chips */
-  .skills-wrap { display: flex; flex-wrap: wrap; gap: 4px 8px; }
-  .skill-group { font-size: 8.8pt; }
+  .skills-wrap { display: flex; flex-wrap: wrap; gap: 3px 6px; }
+  .skill-group { font-size: {{ font_size_skill|default('8.8pt') }}; }
   .skill-label { font-weight: 700; color: #0f172a; }
   .skill-items { color: #334155; }
-  .skill-chip {
-    display: inline-block;
-    background: #f1f5f9;
-    border: 1px solid #e2e8f0;
-    border-radius: 3px;
-    padding: 1px 5px;
-    font-size: 8.2pt;
-    color: #334155;
-    margin: 1px 2px;
-  }
 
   /* Experience */
-  .exp-block { margin-bottom: 6px; }
+  .exp-block { margin-bottom: {{ margin_exp|default('5px') }}; }
   .exp-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1px; }
-  .exp-role { font-weight: 700; font-size: 9.5pt; color: #0f172a; }
+  .exp-role { font-weight: 700; font-size: {{ font_size_section|default('9.5pt') }}; color: #0f172a; }
   .exp-company { color: #1e40af; font-weight: 600; }
-  .exp-date { font-size: 8.5pt; font-weight: 600; color: #64748b; white-space: nowrap; }
-  ul.bullets { margin: 2px 0 0 14px; padding: 0; }
-  ul.bullets li { margin-bottom: 1.5px; color: #1e293b; font-size: 8.8pt; text-align: justify; }
+  .exp-date { font-size: {{ font_size_small|default('8.5pt') }}; font-weight: 600; color: #64748b; white-space: nowrap; }
+  ul.bullets { margin: 1px 0 0 14px; padding: 0; }
+  ul.bullets li { margin-bottom: {{ margin_bullet|default('1px') }}; color: #1e293b; font-size: {{ font_size_bullet|default('8.8pt') }}; text-align: justify; }
 
   /* Projects */
-  .proj-block { margin-bottom: 4px; }
+  .proj-block { margin-bottom: 3px; }
   .proj-header { display: flex; justify-content: space-between; align-items: baseline; }
-  .proj-title { font-weight: 700; font-size: 9pt; color: #0f172a; }
+  .proj-title { font-weight: 700; font-size: {{ font_size_body|default('9pt') }}; color: #0f172a; }
   .proj-link { font-size: 8pt; color: #1e40af; text-decoration: none; }
   .proj-tech { font-size: 8pt; color: #6366f1; font-weight: 500; margin-bottom: 1px; }
-  .proj-desc { font-size: 8.5pt; color: #334155; }
+  .proj-desc { font-size: {{ font_size_small|default('8.5pt') }}; color: #334155; }
 
   /* Education */
-  .edu-block { margin-bottom: 4px; }
+  .edu-block { margin-bottom: 3px; }
   .edu-header { display: flex; justify-content: space-between; align-items: baseline; }
-  .edu-degree { font-weight: 700; font-size: 9pt; color: #0f172a; }
+  .edu-degree { font-weight: 700; font-size: {{ font_size_body|default('9pt') }}; color: #0f172a; }
   .edu-institution { color: #1e40af; font-weight: 600; }
-  .edu-date { font-size: 8.5pt; font-weight: 600; color: #64748b; }
-  .edu-details { font-size: 8.5pt; color: #475569; }
+  .edu-date { font-size: {{ font_size_small|default('8.5pt') }}; font-weight: 600; color: #64748b; }
+  .edu-details { font-size: {{ font_size_small|default('8.5pt') }}; color: #475569; }
 
   /* Achievements */
   .achievements-list { margin: 0 0 0 14px; padding: 0; }
-  .achievements-list li { margin-bottom: 1.5px; font-size: 8.8pt; color: #1e293b; }
+  .achievements-list li { margin-bottom: 1px; font-size: {{ font_size_bullet|default('8.8pt') }}; color: #1e293b; }
 </style>
 </head>
 <body>
@@ -170,7 +163,7 @@
     </div>
     {% if exp.bullets %}
     <ul class="bullets">
-      {% for b in exp.bullets %}<li>{{ b }}</li>{% endfor %}
+      {% for b in exp.bullets %}{% if loop.index <= max_bullets_per_exp %}<li>{{ b }}</li>{% endif %}{% endfor %}
     </ul>
     {% endif %}
   </div>
@@ -182,7 +175,7 @@
 {% if projects %}
 <div class="section">
   <div class="section-title">Projects</div>
-  {% for proj in projects %}
+  {% for proj in projects %}{% if loop.index <= max_projects %}
   <div class="proj-block">
     <div class="proj-header">
       <span class="proj-title">{{ proj.title }}</span>
@@ -191,7 +184,7 @@
     {% if proj.technologies %}<div class="proj-tech">{{ proj.technologies | join(' · ') }}</div>{% endif %}
     {% if proj.description %}<div class="proj-desc">{{ proj.description }}</div>{% endif %}
   </div>
-  {% endfor %}
+  {% endif %}{% endfor %}
 </div>
 {% endif %}
 
@@ -199,7 +192,7 @@
 {% if education %}
 <div class="section">
   <div class="section-title">Education</div>
-  {% for ed in education %}
+  {% for ed in education %}{% if loop.index <= max_education %}
   <div class="edu-block">
     <div class="edu-header">
       <div>
@@ -211,7 +204,7 @@
     {% if ed.grade %}<div class="edu-details">Grade: {{ ed.grade }}</div>{% endif %}
     {% if ed.details %}<div class="edu-details">{{ ed.details }}</div>{% endif %}
   </div>
-  {% endfor %}
+  {% endif %}{% endfor %}
 </div>
 {% endif %}
 
@@ -220,8 +213,8 @@
 <div class="section">
   <div class="section-title">Achievements & Competitions</div>
   <ul class="achievements-list">
-    {% for comp in competitions %}<li>{{ comp }}</li>{% endfor %}
-    {% for ach in achievements %}<li>{{ ach }}</li>{% endfor %}
+    {% for comp in competitions %}{% if loop.index <= max_achievements %}<li>{{ comp }}</li>{% endif %}{% endfor %}
+    {% for ach in achievements %}{% if loop.index <= max_achievements %}<li>{{ ach }}</li>{% endif %}{% endfor %}
   </ul>
 </div>
 {% endif %}

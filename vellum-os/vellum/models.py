@@ -66,6 +66,18 @@ class Project(BaseModel):
     technologies: list[str] = Field(default_factory=list)
 
 
+class QAMemory(BaseModel):
+    """Pre-filled answers for common application questionnaire fields."""
+    expected_salary: Optional[str] = ""
+    notice_period: Optional[str] = ""
+    work_authorization: Optional[str] = ""  # e.g. "Yes", "No", "Citizen"
+    requires_sponsorship: Optional[str] = ""  # e.g. "Yes", "No"
+    preferred_work_mode: Optional[str] = ""  # e.g. "Remote", "Hybrid", "Onsite"
+    willing_to_relocate: Optional[str] = ""
+    years_of_experience: Optional[str] = ""
+    custom_answers: dict[str, str] = Field(default_factory=dict)
+
+
 class CandidateProfile(BaseModel):
     """Ground truth from resume extraction.  `skills` is never modified."""
     name: Optional[str] = ""
@@ -87,7 +99,7 @@ class CandidateProfile(BaseModel):
     projects: list[Project] = Field(default_factory=list)
     competitions: list[str] = Field(default_factory=list)
     achievements: list[str] = Field(default_factory=list)
-
+    qa_memory: QAMemory = Field(default_factory=QAMemory)
 
 
 

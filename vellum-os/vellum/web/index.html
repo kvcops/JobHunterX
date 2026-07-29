@@ -502,6 +502,68 @@
                   <button type="button" id="add-proj-btn" class="glow-action-dashed-btn">+ Add Project</button>
                 </div>
 
+                <!-- Application Q&A Memory Card -->
+                <div class="editor-section-card glass">
+                  <div class="card-section-title">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span>Application Q&A Memory</span>
+                  </div>
+                  <p class="qa-memory-desc" style="font-size:0.78rem; color:var(--text-secondary); margin: -2px 0 10px 0; line-height:1.4;">
+                    Pre-fill common job application questions. The browser agent will use these answers when filling forms automatically.
+                  </p>
+                  <div class="glow-form-grid">
+                    <div class="glow-form-group">
+                      <label for="qa-salary">Expected / Preferred Salary</label>
+                      <input type="text" id="qa-salary" placeholder="e.g. 15 LPA, $120,000/yr, Negotiable">
+                    </div>
+                    <div class="glow-form-group">
+                      <label for="qa-notice">Notice Period</label>
+                      <input type="text" id="qa-notice" placeholder="e.g. Immediately, 30 days, 60 days">
+                    </div>
+                    <div class="glow-form-group">
+                      <label for="qa-work-auth">Authorized to Work</label>
+                      <select id="qa-work-auth">
+                        <option value="">Select...</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                        <option value="Citizen">Citizen</option>
+                        <option value="PR">Permanent Resident</option>
+                      </select>
+                    </div>
+                    <div class="glow-form-group">
+                      <label for="qa-sponsorship">Require Visa Sponsorship</label>
+                      <select id="qa-sponsorship">
+                        <option value="">Select...</option>
+                        <option value="No">No</option>
+                        <option value="Yes">Yes</option>
+                      </select>
+                    </div>
+                    <div class="glow-form-group">
+                      <label for="qa-work-mode">Preferred Work Mode</label>
+                      <select id="qa-work-mode">
+                        <option value="">Select...</option>
+                        <option value="Remote">Remote</option>
+                        <option value="Hybrid">Hybrid</option>
+                        <option value="Onsite">Onsite</option>
+                        <option value="Any">Any / Flexible</option>
+                      </select>
+                    </div>
+                    <div class="glow-form-group">
+                      <label for="qa-relocate">Willing to Relocate</label>
+                      <select id="qa-relocate">
+                        <option value="">Select...</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                        <option value="Depends">Depends on location</option>
+                      </select>
+                    </div>
+                    <div class="glow-form-group full-width">
+                      <label for="qa-yoe">Total Years of Experience</label>
+                      <input type="text" id="qa-yoe" placeholder="e.g. 3, 5+, Fresher">
+                    </div>
+                  </div>
+                </div>
+
                 <!-- Save Action Footer -->
                 <div class="profile-editor-actions-bar">
                   <button type="button" id="save-profile-btn" class="glow-profile-save-btn">

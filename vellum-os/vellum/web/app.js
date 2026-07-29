@@ -559,6 +559,8 @@ function renderJobs() {
         <button class="card-action-btn view-jd-btn" onclick="openJobDetailsModal('${job.id}')">📄 View Job & JD</button>
         <span class="job-status-indicator ${job.status}">${job.status.replace('_', ' ')}</span>
         ${job.status === 'matched' || job.status === 'applied' ? `<button class="card-action-btn" onclick="downloadResume('${job.id}')">Download CV</button>` : ''}
+        ${job.status !== 'skipped' && job.status !== 'applied' && job.status !== 'applying' ? `<button class="card-action-btn apply-btn" onclick="applyToJob(event, '${job.id}')">🚀 Apply</button>` : ''}
+        ${job.status === 'applying' ? `<span class="card-action-btn applying-indicator">⏳ Applying...</span>` : ''}
         ${job.status === 'needs_attention' ? `<button class="card-action-btn" onclick="triggerHitlResume('${job.id}')">Review & Solve</button>` : ''}
       </div>
     `;
@@ -1173,6 +1175,16 @@ function renderProfileEditor() {
   }
   document.getElementById("prof-summary").value = currentProfile.summary || "";
 
+  // Populate Q&A Memory fields
+  const qa = currentProfile.qa_memory || {};
+  if (document.getElementById("qa-salary")) document.getElementById("qa-salary").value = qa.expected_salary || "";
+  if (document.getElementById("qa-notice")) document.getElementById("qa-notice").value = qa.notice_period || "";
+  if (document.getElementById("qa-work-auth")) document.getElementById("qa-work-auth").value = qa.work_authorization || "";
+  if (document.getElementById("qa-sponsorship")) document.getElementById("qa-sponsorship").value = qa.requires_sponsorship || "";
+  if (document.getElementById("qa-work-mode")) document.getElementById("qa-work-mode").value = qa.preferred_work_mode || "";
+  if (document.getElementById("qa-relocate")) document.getElementById("qa-relocate").value = qa.willing_to_relocate || "";
+  if (document.getElementById("qa-yoe")) document.getElementById("qa-yoe").value = qa.years_of_experience || "";
+
   
   // Initialize scoped lists
   if (editedSkills.length === 0 && currentProfile.skills) {
@@ -1473,7 +1485,17 @@ async function saveProfileChanges() {
     education: editedEducation,
     projects: editedProjects,
     competitions: currentProfile.competitions || [],
-    achievements: currentProfile.achievements || []
+    achievements: currentProfile.achievements || [],
+    qa_memory: {
+      expected_salary: document.getElementById("qa-salary") ? document.getElementById("qa-salary").value.trim() : ((currentProfile.qa_memory || {}).expected_salary || ""),
+      notice_period: document.getElementById("qa-notice") ? document.getElementById("qa-notice").value.trim() : ((currentProfile.qa_memory || {}).notice_period || ""),
+      work_authorization: document.getElementById("qa-work-auth") ? document.getElementById("qa-work-auth").value.trim() : ((currentProfile.qa_memory || {}).work_authorization || ""),
+      requires_sponsorship: document.getElementById("qa-sponsorship") ? document.getElementById("qa-sponsorship").value.trim() : ((currentProfile.qa_memory || {}).requires_sponsorship || ""),
+      preferred_work_mode: document.getElementById("qa-work-mode") ? document.getElementById("qa-work-mode").value.trim() : ((currentProfile.qa_memory || {}).preferred_work_mode || ""),
+      willing_to_relocate: document.getElementById("qa-relocate") ? document.getElementById("qa-relocate").value.trim() : ((currentProfile.qa_memory || {}).willing_to_relocate || ""),
+      years_of_experience: document.getElementById("qa-yoe") ? document.getElementById("qa-yoe").value.trim() : ((currentProfile.qa_memory || {}).years_of_experience || ""),
+      custom_answers: (currentProfile.qa_memory || {}).custom_answers || {}
+    }
   };
 
   
@@ -1497,6 +1519,36 @@ async function saveProfileChanges() {
   } catch (err) {
     console.error("Save profile error", err);
     logEvent("error", "Failed to save profile changes.");
+  }
+}
+
+async function applyToJob(event, jobId) {
+  event.stopPropagation();
+  const btn = event.target;
+  btn.disabled = true;
+  btn.innerText = "⏳ Starting...";
+  btn.classList.add("applying-indicator");
+
+  try {
+    const res = await fetch(`${API_BASE}/jobs/${jobId}/apply`, {
+      method: "POST",
+    });
+    if (res.ok) {
+      logEvent("system", `Application pipeline launched for job ${jobId.slice(0, 8)}...`);
+      btn.innerText = "⏳ Applying...";
+      // Update the job's local status
+      const job = jobs.find(j => j.id === jobId);
+      if (job) job.status = "applying";
+      renderJobs();
+    } else {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (err) {
+    console.error("Apply error", err);
+    logEvent("error", `Failed to launch application: ${err.message}`);
+    btn.innerText = "🚀 Apply";
+    btn.disabled = false;
+    btn.classList.remove("applying-indicator");
   }
 }
 

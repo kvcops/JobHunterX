@@ -845,6 +845,10 @@ input[type="number"]:focus, textarea:focus, select:focus {
 .card-action-btn:hover, .view-jd-btn:hover, .premium-btn:hover { border-color: var(--primary-border); color: var(--primary); background: var(--primary-soft); }
 .premium-btn { background: var(--gradient-primary); color: #fff; border: none; }
 .premium-btn:hover { color: #fff; filter: brightness(1.08); }
+.apply-btn { background: var(--gradient-primary); color: #fff !important; border: none !important; cursor: pointer; }
+.apply-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.applying-indicator { background: var(--amber-soft); color: var(--amber) !important; border: 1px solid var(--amber) !important; animation: pulse-apply 1.5s ease-in-out infinite; cursor: default; }
+@keyframes pulse-apply { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
 /* Job status indicators */
 .job-status-indicator { font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 8px; border-radius: var(--radius-sm); }

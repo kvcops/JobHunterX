@@ -264,6 +264,38 @@ async def get_job(job_id: str):
     return {"job": job}
 
 
+@router.post("/jobs/{job_id}/apply")
+async def apply_single_job(job_id: str):
+    """Launch the browser agent pipeline independently for a single job.
+
+    Used when the user clicks 'Apply' on an individual job card.
+    Runs the full validate → tailor → apply → outreach pipeline.
+    """
+    from vellum.agents.graph import run_single_job_apply
+
+    job = await db.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    async def _run():
+        try:
+            result = await run_single_job_apply(job_id)
+            log.info("single_job_apply_complete", job_id=job_id, result_keys=list(result.keys()) if isinstance(result, dict) else str(result))
+        except Exception as exc:
+            log.error("single_job_apply_error", job_id=job_id, error=str(exc))
+            await ws_manager.broadcast({
+                "agent": "system",
+                "event_type": "error",
+                "job_id": job_id,
+                "message": f"Apply error: {str(exc)[:200]}",
+            })
+
+    # Run in background so the HTTP response returns immediately
+    asyncio.create_task(_run())
+
+    return {"status": "started", "job_id": job_id, "message": "Application pipeline launched."}
+
+
 @router.get("/jobs/{job_id}/resume-pdf")
 async def download_resume_pdf(job_id: str):
     """Download the tailored resume PDF for a job, named after candidate + company."""

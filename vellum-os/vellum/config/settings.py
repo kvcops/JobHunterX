@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
-    browser_use_headless: bool = False  # headed mode evades far more Cloudflare checks
+    browser_use_headless: bool = True   # headless mode, streamed to frontend canvas
+    browser_use_headless_original: bool = False # fallback reference
     browser_use_cloud: bool = False     # set True + BROWSER_USE_API_KEY in .env to use stealth cloud browsers
 
 

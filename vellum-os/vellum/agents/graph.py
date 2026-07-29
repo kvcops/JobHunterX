@@ -150,6 +150,7 @@ async def run_job_pipeline(
     profile: dict,
     run_id: str = "",
     event_callback=None,
+    search_location: str = "",
 ) -> dict:
     """Run the per-job pipeline (validate → apply → outreach).
 
@@ -158,12 +159,22 @@ async def run_job_pipeline(
         profile: CandidateProfile dict.
         run_id: Unique run identifier.
         event_callback: Async callable for streaming events.
+        search_location: The location the user searched for (for matching).
 
     Returns pipeline result dict.
     """
     pipeline = get_job_pipeline()
     job_id = job.get("id", str(uuid.uuid4()))
     thread_id = f"job-{job_id}"
+
+    # Always refresh the profile from DB to get the latest edits
+    fresh_profile = await db.get_latest_profile()
+    if fresh_profile:
+        profile = fresh_profile
+
+    # Tag job with search location for validator matching
+    if search_location:
+        job["search_location"] = search_location
 
     initial_state: JobPipelineState = {
         "job": job,
@@ -276,7 +287,10 @@ async def run_full_search(
     async def process_job(job_dict):
         nonlocal completed_jobs
         async with semaphore:
-            res = await run_job_pipeline(job_dict, profile, run_id, event_callback)
+            res = await run_job_pipeline(
+                job_dict, profile, run_id, event_callback,
+                search_location=location,
+            )
             completed_jobs += 1
             percentage = 80 + int((completed_jobs / total_jobs) * 20)
             
@@ -308,3 +322,35 @@ async def run_full_search(
         "jobs_processed": success_count,
         "jobs_errored": error_count,
     }
+
+
+async def run_single_job_apply(
+    job_id: str,
+    event_callback=None,
+) -> dict:
+    """Run the per-job pipeline independently for a single job.
+
+    Used when the user clicks 'Apply' on an individual job card.
+    Fetches the job and latest profile from DB.
+    """
+    job = await db.get_job(job_id)
+    if not job:
+        return {"error": f"Job {job_id} not found"}
+
+    profile = await db.get_latest_profile()
+    if not profile:
+        return {"error": "No candidate profile found. Upload a resume first."}
+
+    from vellum.api.ws import manager as ws_manager
+
+    async def _event_cb(event: dict):
+        await ws_manager.broadcast(event)
+        if event_callback:
+            await event_callback(event)
+
+    run_id = str(uuid.uuid4())
+    result = await run_job_pipeline(
+        job, profile, run_id, _event_cb,
+        search_location=job.get("search_location", ""),
+    )
+    return result

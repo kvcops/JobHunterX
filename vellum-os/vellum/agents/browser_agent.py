@@ -136,6 +136,11 @@ def _build_stealth_profile(settings: Settings) -> Any:
 
 _active_sessions: list[tuple[asyncio.AbstractEventLoop, Any]] = []
 
+# Registry of paused browser sessions. When the agent hits CAPTCHA/login/MFA,
+# the session is moved here instead of being destroyed, keeping the browser
+# window alive for user intervention. Keyed by job_id.
+_paused_sessions: dict[str, dict] = {}
+
 # Registry of takeover gates keyed by job_id. Allows the API layer to pause/
 # resume the URL streamer (and signal the agent to yield) when the user takes
 # over the live browser window. Each value is a thread-safe asyncio.Event
@@ -278,6 +283,31 @@ async def stop_all_active_browsers():
         except Exception as exc:
             log.warning("error_triggering_browser_close", error=str(exc))
     _active_sessions.clear()
+    _paused_sessions.clear()
+
+
+def save_paused_session(job_id: str, reason: str, url: str = "") -> None:
+    """Save a browser session as paused when CAPTCHA/login/MFA is detected.
+    
+    The session stays alive — the browser window remains open for the user
+    to manually intervene. The agent stops executing steps.
+    """
+    _paused_sessions[job_id] = {
+        "reason": reason,
+        "url": url,
+        "status": "paused",
+    }
+    log.info("session_paused", job_id=job_id, reason=reason)
+
+
+def get_paused_sessions() -> dict[str, dict]:
+    """Return all currently paused browser sessions."""
+    return dict(_paused_sessions)
+
+
+def clear_paused_session(job_id: str) -> None:
+    """Remove a paused session entry after the user resolves it."""
+    _paused_sessions.pop(job_id, None)
 
 
 async def run(state: dict) -> dict:
@@ -401,35 +431,93 @@ async def run(state: dict) -> dict:
         # Use our LiteLLM router — forced to gemini-3.1-flash-lite per spec
         llm = ChatLiteLLM(model="gemini/gemini-3.1-flash-lite")
 
+        # Build comprehensive candidate credential memory for the task
+        # --- Education History ---
+        edu_lines = []
+        for ed in profile.get("education", []):
+            grade_str = f", Grade: {ed.get('grade')}" if ed.get("grade") else ""
+            details_str = f", {ed.get('details')}" if ed.get("details") else ""
+            edu_lines.append(
+                f"  • {ed.get('degree', '')} from {ed.get('institution', '')} ({ed.get('start', '')} – {ed.get('end', '')}){grade_str}{details_str}"
+            )
+        edu_block = "\n".join(edu_lines) if edu_lines else "  (Not provided)"
+
+        # --- Work Experience History ---
+        exp_lines = []
+        for exp in profile.get("experience", []):
+            bullets = exp.get("bullets", [])
+            bullet_str = ""
+            if bullets:
+                bullet_str = "\n" + "\n".join(f"    - {b}" for b in bullets[:4])
+            exp_lines.append(
+                f"  • {exp.get('role', '')} at {exp.get('company', '')} ({exp.get('start', '')} – {exp.get('end', '')}){bullet_str}"
+            )
+        exp_block = "\n".join(exp_lines) if exp_lines else "  (Not provided)"
+
+        # --- Application Q&A Memory ---
+        qa_memory = profile.get("qa_memory", {})
+        qa_lines = []
+        if qa_memory.get("expected_salary"):
+            qa_lines.append(f"  • Expected/Preferred Salary: {qa_memory['expected_salary']}")
+        if qa_memory.get("notice_period"):
+            qa_lines.append(f"  • Notice Period: {qa_memory['notice_period']}")
+        if qa_memory.get("work_authorization"):
+            qa_lines.append(f"  • Authorized to work in target country: {qa_memory['work_authorization']}")
+        if qa_memory.get("requires_sponsorship"):
+            qa_lines.append(f"  • Requires visa sponsorship: {qa_memory['requires_sponsorship']}")
+        if qa_memory.get("preferred_work_mode"):
+            qa_lines.append(f"  • Preferred Work Mode: {qa_memory['preferred_work_mode']}")
+        if qa_memory.get("custom_answers"):
+            for k, v in qa_memory["custom_answers"].items():
+                qa_lines.append(f"  • {k}: {v}")
+        qa_block = "\n".join(qa_lines) if qa_lines else "  (No pre-filled answers)"
+
+        # --- Skills (full list) ---
+        all_skills = profile.get("skills", [])
+        skills_str = ", ".join(all_skills[:25]) if isinstance(all_skills, list) else str(all_skills)
+
         # Build the task description for the browser agent
         task = f"""Navigate to {apply_url} and fill out the job application form.
 
-Candidate Information:
-- Name: {profile.get('name', '')}
-- Email: {profile.get('email', '')}
-- Phone: {profile.get('phone', '')}
-- Location: {profile.get('location', '')}
+=== CANDIDATE PERSONAL INFORMATION ===
+- Full Name: {profile.get('name', '')}
+- Email Address: {profile.get('email', '')}
+- Phone Number: {profile.get('phone', '')}
+- Location (City, Country): {profile.get('location', '')}
 - Present Address: {profile.get('present_address', '')}
 - Permanent Address: {profile.get('permanent_address', '')}
 - Languages Known: {', '.join(profile.get('languages', [])) if isinstance(profile.get('languages'), list) else profile.get('languages', '')}
-- Key Skills: {', '.join(profile.get('skills', [])[:15]) if isinstance(profile.get('skills'), list) else profile.get('skills', '')}
-- LinkedIn: {profile.get('linkedin', '')}
-- GitHub: {profile.get('github', '')}
-- Portfolio: {profile.get('portfolio', '')}
+- LinkedIn URL: {profile.get('linkedin', '')}
+- GitHub URL: {profile.get('github', '')}
+- Portfolio / Website: {profile.get('portfolio', '')}
 - Professional Summary: {profile.get('summary', '')}
+- Relevant Experience: {profile.get('relevant_experience', '')}
+
+=== TECHNICAL SKILLS ===
+{skills_str}
+
+=== EDUCATION HISTORY ===
+{edu_block}
+
+=== WORK EXPERIENCE ===
+{exp_block}
+
+=== APPLICATION Q&A ANSWERS (use these for questionnaire fields) ===
+{qa_block}
 
 CRITICAL TOKEN SAVING & SPEED RULE:
 Keep your thinking extremely brief and short (1 concise sentence max). Do NOT write long explanations or reasoning. Execute actions directly to minimize token usage and complete the task fast!
 
 Instructions:
-1. Fill in all required fields with the candidate information above.
-2. If there is a resume upload field, call the tool `Upload candidate resume file (PDF/CV) to application form input`.
-3. If you encounter a login page, STOP and report "LOGIN_REQUIRED".
-4. If you encounter a CAPTCHA, STOP and report "CAPTCHA_DETECTED".
-5. If you see an OTP/MFA prompt, STOP and report "MFA_REQUIRED".
-6. If the form is too complex to fill automatically, STOP and report "TOO_COMPLEX".
-7. After filling, click the Submit/Apply button.
-8. Report the final status: SUCCESS or the reason for stopping."""
+1. Fill in all required fields with the candidate information above. Use the Q&A answers for dropdown/select/radio questions about salary, notice period, work authorization, etc.
+2. For education and work experience fields, use the detailed history provided above.
+3. If there is a resume upload field, call the tool `Upload candidate resume file (PDF/CV) to application form input`.
+4. If you encounter a login page, STOP and report "LOGIN_REQUIRED".
+5. If you encounter a CAPTCHA, STOP and report "CAPTCHA_DETECTED".
+6. If you see an OTP/MFA prompt, STOP and report "MFA_REQUIRED".
+7. If the form is too complex to fill automatically, STOP and report "TOO_COMPLEX".
+8. After filling, click the Submit/Apply button.
+9. Report the final status: SUCCESS or the reason for stopping."""
 
 
         from vellum.api.ws import manager as ws_manager
@@ -587,8 +675,9 @@ Instructions:
                 "errors": errors,
             }
         else:
-            # HITL needed — use LangGraph interrupt
+            # HITL needed — save session as paused and interrupt
             await db.update_job(job_id, status="needs_attention")
+            save_paused_session(job_id, reason=hitl_type.value, url=apply_url)
 
             hitl_message = {
                 HITLType.LOGIN: "Login required — please sign in manually, then click Resume.",
@@ -617,6 +706,7 @@ Instructions:
             })
 
             # User responded — check action
+            clear_paused_session(job_id)
             action = human_response if isinstance(human_response, str) else human_response.get("action", "skip")
 
             if action == "skip":
