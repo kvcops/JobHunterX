@@ -10,7 +10,6 @@ let currentProfile = null;
 let jobs = [];
 let outreachDrafts = [];
 let tokenUsage = {};
-let hitlActiveJobId = null;
 let activeOutreachId = null;
 
 // WS Configuration
@@ -30,6 +29,32 @@ document.addEventListener("DOMContentLoaded", () => {
   connectWebSocket();
   loadInitialData();
 });
+
+// ---------------------------------------------------------------------------
+// Toast Notifications
+// ---------------------------------------------------------------------------
+function showToast(message, type = "success") {
+  const existing = document.querySelector(".toast-notification");
+  if (existing) existing.remove();
+
+  const toast = document.createElement("div");
+  toast.className = `toast-notification toast-${type}`;
+  toast.innerHTML = `
+    <div class="toast-icon">
+      ${type === "success"
+        ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+      }
+    </div>
+    <span class="toast-message">${message}</span>
+  `;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("toast-show"));
+  setTimeout(() => {
+    toast.classList.remove("toast-show");
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
 
 // ---------------------------------------------------------------------------
 // Setup Event Listeners
@@ -63,7 +88,10 @@ function setupEventListeners() {
   });
 
   // Start Search Button
-  document.getElementById("start-search-btn").addEventListener("click", startSearch);
+  const startSearchBtn = document.getElementById("start-search-btn");
+  if (startSearchBtn) {
+    startSearchBtn.addEventListener("click", startSearch);
+  }
 
   // Global Action Buttons (Reset System & Save Profile)
   const resetBtn = document.getElementById("reset-system-btn");
@@ -86,7 +114,6 @@ function setupEventListeners() {
     if (e.key === "Escape") {
       closeResetModal();
       if (typeof closeOutreachModal === "function") closeOutreachModal();
-      if (typeof closeHitlModal === "function") closeHitlModal();
     }
   });
 }
@@ -125,6 +152,11 @@ function switchTab(tabName) {
   document.querySelectorAll(".tab-view").forEach(view => view.classList.remove("active"));
   const activeView = document.getElementById(`view-${tabName}`);
   if (activeView) activeView.classList.add("active");
+
+  // Render intervention cards when switching to intervention tab
+  if (tabName === "intervention") {
+    renderInterventionCards();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +308,30 @@ async function loadInitialData() {
         document.getElementById("start-search-btn").removeAttribute("disabled");
       }
     }
+
+    // Load pending intervention sessions
+    try {
+      const intvRes = await fetch(`${API_BASE}/interventions`);
+      if (intvRes.ok) {
+        const intvData = await intvRes.json();
+        const sessions = intvData.interventions || [];
+        sessions.forEach(s => {
+          interventionSessions.push({
+            job_id: s.job_id,
+            type: s.hitl_type,
+            url: s.url,
+            company: s.company || "",
+            role: s.role || "",
+            timestamp: s.created_at,
+            db_id: s.id,
+          });
+        });
+        renderInterventionCards();
+      }
+    } catch (intvErr) {
+      // Silently fail — intervention tab works via WebSocket events
+    }
+
   } catch (err) {
     console.error("Error loading initial dashboard data", err);
     logEvent("system", "Failed to contact local API server.");
@@ -366,7 +422,7 @@ async function startSearch() {
   const location = document.getElementById("target-location").value.trim();
   const role = document.getElementById("target-role").value.trim();
   const limitInput = document.getElementById("target-analysis-limit");
-  const limit = limitInput ? parseInt(limitInput.value, 10) || 50 : 50;
+  const limit = limitInput ? parseInt(limitInput.value, 10) || 25 : 25;
 
   if (!location) return;
 
@@ -491,15 +547,140 @@ function handleSocketMessage(msg) {
     handleBrowserStreamFrame(msg.data);
   }
 
-  // Handle HITL Request Event
+  // Handle HITL Request Event (redirect to intervention tab)
   if (msg.event_type === "hitl_request") {
-    showHitlModal(msg.job_id, msg.data.type, msg.message, msg.data.url);
+    // Already handled by intervention_needed event
+  }
+
+  // Handle Intervention Needed Event (non-blocking HITL)
+  if (msg.event_type === "intervention_needed") {
+    addInterventionCard(msg.data);
   }
 
   // Reload data for job/outreach updates
   if (msg.event_type === "discovery" || msg.event_type === "complete") {
     loadInitialData();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Intervention Tab
+// ---------------------------------------------------------------------------
+const interventionSessions = [];
+
+function addInterventionCard(data) {
+  interventionSessions.push({
+    job_id: data.job_id,
+    type: data.type,
+    url: data.url,
+    company: data.company || "",
+    role: data.role || "",
+    timestamp: new Date().toISOString(),
+    screenshot: data.screenshot || null,
+    db_id: data.db_id,
+  });
+  renderInterventionCards();
+  // Auto-switch to intervention tab
+  switchTab("intervention");
+}
+
+function renderInterventionCards() {
+  const container = document.getElementById("intervention-cards-container");
+  if (!container) return;
+
+  if (interventionSessions.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state-view">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <h3>No pending interventions</h3>
+        <p>When the browser agent encounters a login, CAPTCHA, or OTP it can't solve, the session will appear here for you to continue manually.</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = interventionSessions.map((s, idx) => {
+    const time = new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const typeLabel = {
+      login: "Login Required",
+      captcha: "CAPTCHA",
+      mfa: "MFA / OTP",
+      manual_form: "Complex Form",
+      too_complex: "Too Complex",
+    }[s.type] || s.type;
+
+    const screenshotHtml = s.screenshot
+      ? `<div class="intervention-card-screenshot"><img src="${API_BASE}/screenshots/${s.job_id}?t=${Date.now()}" alt="Browser state" onerror="this.parentElement.style.display='none'"></div>`
+      : '';
+
+    return `
+      <div class="intervention-card" data-job-id="${s.job_id}">
+        <div class="intervention-card-header">
+          <div class="intervention-card-type">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            ${typeLabel}
+          </div>
+          <span class="intervention-card-timestamp">${time}</span>
+        </div>
+        <div class="intervention-card-title">${s.role || "Application"}</div>
+        <div class="intervention-card-company">${s.company}</div>
+        ${screenshotHtml}
+        <div class="intervention-card-url">${s.url || ""}</div>
+        <div class="intervention-card-actions">
+          <button class="intervention-card-btn continue-btn" onclick="continueIntervention(${idx})">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            Open Browser
+          </button>
+          <button class="intervention-card-btn resolve-btn" onclick="resolveIntervention(${idx})">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Resolve
+          </button>
+          <button class="intervention-card-btn skip-btn" onclick="skipIntervention(${idx})">
+            Skip
+          </button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function continueIntervention(idx) {
+  const session = interventionSessions[idx];
+  if (!session) return;
+  // Open a new window to the browser URL using the persistent profile
+  window.open(session.url, "_blank");
+}
+
+async function resolveIntervention(idx) {
+  const session = interventionSessions[idx];
+  if (!session) return;
+  if (session.db_id) {
+    try {
+      await fetch(`${API_BASE}/interventions/${session.db_id}/resolve?status=resolved`, {
+        method: "POST",
+      });
+    } catch (e) {
+      console.error("Failed to resolve intervention:", e);
+    }
+  }
+  interventionSessions.splice(idx, 1);
+  renderInterventionCards();
+}
+
+async function skipIntervention(idx) {
+  const session = interventionSessions[idx];
+  if (!session) return;
+  if (session.db_id) {
+    try {
+      await fetch(`${API_BASE}/interventions/${session.db_id}/resolve?status=skipped`, {
+        method: "POST",
+      });
+    } catch (e) {
+      console.error("Failed to skip intervention:", e);
+    }
+  }
+  interventionSessions.splice(idx, 1);
+  renderInterventionCards();
 }
 
 // ---------------------------------------------------------------------------
@@ -522,46 +703,91 @@ function renderJobs() {
   }
 
   let appliedCount = 0;
+  let matchedCount = 0;
+  let needsAttentionCount = 0;
   container.innerHTML = "";
 
   jobs.forEach(job => {
     if (job.status === "applied" || job.status === "applied_manual") appliedCount++;
+    if (job.status === "matched") matchedCount++;
+    if (job.status === "needs_attention") needsAttentionCount++;
 
     const card = document.createElement("div");
-    card.className = "job-card job-card-enhanced clickable-card";
 
-    // Build badges for scoring
-    const confidenceScore = job.discovery_confidence || 0;
     const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
-    const confClass = confidenceScore > 0.7 ? "conf-high" : confidenceScore > 0.4 ? "conf-med" : "conf-low";
-    const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
-
-    const snippetText = job.jd_text ? job.jd_text.slice(0, 140) + "..." : "";
+    const snippetText = job.jd_text ? job.jd_text.slice(0, 130) + "..." : "";
     const applyUrl = job.apply_url || job.career_page_url || "#";
 
+    // Extract matching skills
+    const userSkills = (currentProfile && currentProfile.skills) ? currentProfile.skills : [];
+    let matchingSkills = [];
+    if (job.jd_text && userSkills.length > 0) {
+      const jdLower = job.jd_text.toLowerCase();
+      matchingSkills = userSkills.filter(skill => jdLower.includes(skill.toLowerCase())).slice(0, 3);
+    }
+    const matchingSkillsHtml = matchingSkills.map(skill => 
+      `<span class="premium-tech-tag"><span class="tag-dot"></span>${escapeHtml(skill)}</span>`
+    ).join("");
+
+    // Clean up source label so it never overflows
+    let rawSource = job.source || 'ATS';
+    let sourceLabel = rawSource.replace(/_/g, ' ');
+    if (sourceLabel.toUpperCase().includes('INDEXED')) sourceLabel = 'Indexed';
+    else if (sourceLabel.toUpperCase().includes('DIRECT ATS')) sourceLabel = 'Direct ATS';
+    else if (sourceLabel.length > 14) sourceLabel = sourceLabel.slice(0, 12) + '..';
+
+    // Status Pill text and class
+    const statusText = {
+      matched: "Matched",
+      applying: "Applying",
+      applied: "Applied",
+      needs_attention: "Attention",
+      failed: "Failed",
+      skipped: "Skipped"
+    }[job.status] || "Discovered";
+
+    const statusPillClass = {
+      matched: "pill-matched",
+      applying: "pill-applying",
+      applied: "pill-applied",
+      needs_attention: "pill-attention",
+      failed: "pill-failed"
+    }[job.status] || "pill-discovered";
+
+    card.className = "clean-job-card clickable-card";
     card.innerHTML = `
-      <div class="card-header" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
-        <div>
-          <div class="company-title">${escapeHtml(job.company)}</div>
-          <div class="role-title">${escapeHtml(job.role || "Software Engineering Role")}</div>
+      <div class="clean-card-header">
+        <div class="clean-header-titles" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
+          <div class="clean-company">${escapeHtml(job.company)}</div>
+          <div class="clean-role">${escapeHtml(job.role || "Software Engineering Role")}</div>
+          ${job.location ? `<div class="clean-location">📍 ${escapeHtml(job.location)}</div>` : ''}
+        </div>
+        <div class="clean-header-pills">
+          <span class="clean-match-pill">${(matchScore * 100).toFixed(0)}% Match</span>
+          <span class="clean-status-pill ${statusPillClass}">${statusText}</span>
         </div>
       </div>
-      <div class="badge-row" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
-        <span class="conf-badge ${confClass}">Source: ${escapeHtml(job.source || 'ATS')}</span>
-        <span class="conf-badge ${matchClass}">Match: ${(matchScore * 100).toFixed(0)}%</span>
-      </div>
-      ${snippetText ? `<div class="job-jd-snippet" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">${escapeHtml(snippetText)} <span class="jd-read-more-link">View Full JD & Details →</span></div>` : ''}
-      <div class="job-meta-footer">
-        <span class="job-location-badge">📍 ${escapeHtml(job.location || 'India / Remote')}</span>
-        <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="apply-link-badge">Direct Link ↗</a>
-      </div>
-      <div class="card-footer" style="margin-top: 8px;">
-        <button class="card-action-btn view-jd-btn" onclick="openJobDetailsModal('${job.id}')">📄 View Job & JD</button>
-        <span class="job-status-indicator ${job.status}">${job.status.replace('_', ' ')}</span>
-        ${job.status === 'matched' || job.status === 'applied' ? `<button class="card-action-btn" onclick="downloadResume('${job.id}')">Download CV</button>` : ''}
-        ${job.status !== 'skipped' && job.status !== 'applied' && job.status !== 'applying' ? `<button class="card-action-btn apply-btn" onclick="applyToJob(event, '${job.id}')">🚀 Apply</button>` : ''}
-        ${job.status === 'applying' ? `<span class="card-action-btn applying-indicator">⏳ Applying...</span>` : ''}
-        ${job.status === 'needs_attention' ? `<button class="card-action-btn" onclick="triggerHitlResume('${job.id}')">Review & Solve</button>` : ''}
+
+      ${snippetText ? `
+      <div class="clean-snippet" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
+        ${escapeHtml(snippetText)}
+      </div>` : ''}
+
+      ${matchingSkillsHtml ? `
+      <div class="clean-skills-row">
+        ${matchingSkillsHtml}
+      </div>` : ''}
+
+      <div class="clean-card-footer">
+        <span class="clean-source-tag">${escapeHtml(sourceLabel)}</span>
+        <div class="clean-footer-actions">
+          <button class="clean-btn sec" onclick="openJobDetailsModal('${job.id}')">Details</button>
+          <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="clean-btn icon-link" title="Open Application Link">↗</a>
+          ${job.status === 'matched' || job.status === 'applied' ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
+          ${job.status !== 'skipped' && job.status !== 'applied' && job.status !== 'applying' && job.status !== 'needs_attention' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Apply</button>` : ''}
+          ${job.status === 'applying' ? `<span class="clean-btn applying">Applying...</span>` : ''}
+          ${job.status === 'needs_attention' ? `<button class="clean-btn warn" onclick="triggerHitlResume('${job.id}')">Solve Block</button>` : ''}
+        </div>
       </div>
     `;
     container.appendChild(card);
@@ -569,6 +795,10 @@ function renderJobs() {
 
   document.getElementById("stat-discovered").innerText = jobs.length;
   document.getElementById("stat-applied").innerText = appliedCount;
+  const matchedEl = document.getElementById("stat-matched");
+  if (matchedEl) matchedEl.innerText = matchedCount;
+  const attentionEl = document.getElementById("stat-needs-attention");
+  if (attentionEl) attentionEl.innerText = needsAttentionCount;
 }
 
 function renderResumes() {
@@ -590,26 +820,28 @@ function renderResumes() {
   container.innerHTML = "";
   matchedJobs.forEach(job => {
     const card = document.createElement("div");
-    card.className = "job-card job-card-enhanced clickable-card";
+    card.className = "clean-job-card clickable-card";
 
     const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
-    const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
+    const matchPercent = (matchScore * 100).toFixed(0);
 
     card.innerHTML = `
-      <div class="card-header" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
-        <div>
-          <div class="company-title">${escapeHtml(job.company)}</div>
-          <div class="role-title">${escapeHtml(job.role || "Software Role")}</div>
+      <div class="clean-card-header" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
+        <div class="clean-header-titles">
+          <div class="clean-company">${escapeHtml(job.company)}</div>
+          <div class="clean-role">${escapeHtml(job.role || "Software Role")}</div>
+        </div>
+        <div class="clean-header-pills">
+          <span class="clean-match-pill">${matchPercent}% Match</span>
+          <span class="clean-status-pill pill-applied">ATS Tailored</span>
         </div>
       </div>
-      <div class="badge-row" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
-        <span class="conf-badge ${matchClass}">Match: ${(matchScore * 100).toFixed(0)}%</span>
-        <span class="conf-badge conf-high">ATS Resume Tailored</span>
-      </div>
-      <div class="card-footer">
-        <button class="card-action-btn view-jd-btn" onclick="openJobDetailsModal('${job.id}')">📄 View Job & JD</button>
-        <span class="job-status-indicator ${job.status}">${job.status.replace('_', ' ')}</span>
-        <button class="card-action-btn" onclick="downloadResume('${job.id}')">📥 Download PDF CV</button>
+      <div class="clean-card-footer">
+        <span class="clean-source-tag">${(job.status || "discovered").replace('_', ' ')}</span>
+        <div class="clean-footer-actions">
+          <button class="clean-btn sec" onclick="openJobDetailsModal('${job.id}')">View JD</button>
+          <button class="clean-btn prim" onclick="downloadResume('${job.id}')">Download CV</button>
+        </div>
       </div>
     `;
     container.appendChild(card);
@@ -743,7 +975,12 @@ function renderOutreach() {
   container.innerHTML = "";
   outreachDrafts.forEach(draft => {
     const card = document.createElement("div");
-    card.className = "outreach-card premium-glass-card";
+    
+    // Status styles without gradients
+    const statusClass = {
+      drafted: "outreach-draft",
+      sent: "outreach-sent"
+    }[draft.status] || "";
 
     const score = draft.confidence || 0;
     const confClass = score > 0.7 ? "conf-high" : score > 0.4 ? "conf-med" : "conf-low";
@@ -753,38 +990,44 @@ function renderOutreach() {
     const emailStatusLabel = draft.email_guesses && draft.email_guesses.length > 0 && draft.email_guesses[0].mx_valid ? "MX Verified" : "MX Checked";
     const emailStatusClass = draft.email_guesses && draft.email_guesses.length > 0 && draft.email_guesses[0].mx_valid ? "email-verified" : "email-unverified";
 
+    // Standard professional avatar background
+    const avatarBackground = "var(--bg-secondary)";
+
+    card.className = `outreach-card-premium ${statusClass}`;
     card.innerHTML = `
-      <div class="outreach-card-header">
-        <div class="company-avatar">${initial}</div>
-        <div class="company-info-block">
-          <div class="company-title">${escapeHtml(draft.company)}</div>
-          <div class="role-title">${escapeHtml(draft.contact_name)}</div>
-          <div class="contact-role-badge">${escapeHtml(draft.contact_role)}</div>
+      <div class="outreach-premium-header">
+        <div class="outreach-avatar" style="background: ${avatarBackground}">${initial}</div>
+        <div class="outreach-info">
+          <div class="outreach-company">${escapeHtml(draft.company)}</div>
+          <div class="outreach-contact-row">
+            <span class="outreach-contact-name">${escapeHtml(draft.contact_name)}</span>
+            <span class="outreach-role-tag">${escapeHtml(draft.contact_role)}</span>
+          </div>
         </div>
       </div>
-      
-      <div class="outreach-details-body">
-        <div class="detail-row">
-          <span class="detail-label">Recipient:</span>
-          <span class="detail-value ${emailStatusClass}">${escapeHtml(bestEmail)}</span>
+
+      <div class="outreach-email-bar">
+        <div class="email-icon">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
         </div>
-        ${draft.subject ? `
-        <div class="detail-row">
-          <span class="detail-label">Subject:</span>
-          <span class="detail-value subject-value">${escapeHtml(draft.subject)}</span>
-        </div>` : ''}
+        <div class="email-value-text ${emailStatusClass}">${escapeHtml(bestEmail)}</div>
+        <span class="mx-pill ${emailStatusClass}">${emailStatusLabel}</span>
       </div>
 
-      <div class="badge-row">
-        <span class="conf-badge ${confClass}">Confidence: ${(score * 100).toFixed(0)}%</span>
-        <span class="conf-badge mx-badge ${emailStatusClass}">${emailStatusLabel}</span>
+      <!-- Mini email mockup card -->
+      <div class="outreach-email-preview">
+        <div class="preview-subject"><strong>Subj:</strong> ${escapeHtml(draft.subject || 'Pitching Candidate Fit')}</div>
+        <div class="preview-body">${escapeHtml(draft.body ? draft.body.slice(0, 110) + "..." : "Generating pitch details...")}</div>
       </div>
 
-      <div class="card-footer">
-        <span class="outreach-status-badge ${draft.status}">${escapeHtml(draft.status)}</span>
-        <button class="card-action-btn premium-btn" onclick="openOutreachComposer('${draft.id}')">
-          <span>Compose & Send</span>
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      <div class="outreach-card-footer">
+        <div class="footer-left">
+          <span class="conf-badge ${confClass}">Fit confidence: ${(score * 100).toFixed(0)}%</span>
+          <span class="outreach-status-pill ${draft.status}">${escapeHtml(draft.status)}</span>
+        </div>
+        <button class="outreach-send-btn-premium" onclick="openOutreachComposer('${draft.id}')">
+          <span>Review Pitch</span>
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
       </div>
     `;
@@ -917,52 +1160,13 @@ function clearLogs() {
 }
 
 // ---------------------------------------------------------------------------
-// HITL Interaction Overlay
+// HITL Intervention - now handled via intervention tab cards
 // ---------------------------------------------------------------------------
-function showHitlModal(jobId, type, message, url) {
-  hitlActiveJobId = jobId;
-  document.getElementById("hitl-message").innerText = message;
-  
-  const hitlUrlEl = document.getElementById("hitl-url");
-  if (hitlUrlEl) hitlUrlEl.href = url || "#";
-
-  const hitlTabBtn = document.getElementById("hitl-open-tab-btn");
-  if (hitlTabBtn) hitlTabBtn.href = url || "#";
-  
-  // Try loading screenshot dynamically
-  document.getElementById("hitl-screenshot").src = `${API_BASE}/screenshots/${jobId}/last.png?t=${Date.now()}`;
-  document.getElementById("hitl-modal").classList.remove("hidden");
-}
-
-function closeHitlModal() {
-  document.getElementById("hitl-modal").classList.add("hidden");
-  hitlActiveJobId = null;
-}
-
-async function submitHitlResponse(action) {
-  if (!hitlActiveJobId) return;
-
-  try {
-    const res = await fetch(`${API_BASE}/resume-agent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        job_id: hitlActiveJobId,
-        action: action
-      })
-    });
-    
-    closeHitlModal();
-    loadInitialData();
-  } catch (err) {
-    console.error("Failed to resume agent state", err);
-  }
-}
-
 function triggerHitlResume(jobId) {
   const job = jobs.find(j => j.id === jobId);
   if (job) {
-    showHitlModal(job.id, "manual_form", "Needs attention — please verify details or complete form steps manually.", job.apply_url || job.career_page_url);
+    const url = job.apply_url || job.career_page_url;
+    if (url) window.open(url, "_blank");
   }
 }
 
@@ -1107,6 +1311,20 @@ async function triggerGmailWebHandoff() {
 // ---------------------------------------------------------------------------
 function downloadResume(jobId) {
   window.open(`${API_BASE}/jobs/${jobId}/resume-pdf`, "_blank");
+}
+
+function formatJobStatus(status) {
+  const labels = {
+    discovered: "Discovered",
+    matched: "Matched",
+    applying: "Applying",
+    applied: "Applied",
+    applied_manual: "Applied (Manual)",
+    needs_attention: "Needs Attention",
+    failed: "Failed",
+    skipped: "Skipped",
+  };
+  return labels[status] || status.replace(/_/g, " ");
 }
 
 function escapeHtml(str) {
@@ -1514,7 +1732,7 @@ async function saveProfileChanges() {
       logEvent("system", "Candidate profile details saved successfully.");
       currentProfile = updatedProfile;
       renderProfileCard();
-      alert("Profile changes saved successfully!");
+      showToast("Profile saved successfully!", "success");
     } else {
       throw new Error("Save request failed");
     }

@@ -112,6 +112,18 @@ CREATE TRIGGER IF NOT EXISTS jobs_au AFTER UPDATE ON jobs BEGIN
     INSERT INTO jobs_fts(rowid, company, role, jd_text)
     VALUES (new.rowid, new.company, new.role, new.jd_text);
 END;
+
+CREATE TABLE IF NOT EXISTS intervention_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      TEXT NOT NULL,
+    hitl_type   TEXT NOT NULL,
+    url         TEXT,
+    company     TEXT,
+    role        TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    resolved_at TEXT
+);
 """
 
 # ---------------------------------------------------------------------------
@@ -384,6 +396,57 @@ async def clear_database() -> None:
         await db.execute("DELETE FROM agent_runs")
         await db.execute("DELETE FROM applied_urls")
         await db.execute("DELETE FROM profiles")
+        await db.execute("DELETE FROM intervention_sessions")
         # Clean FTS virtual table
         await db.execute("DELETE FROM jobs_fts")
+        await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Intervention Sessions
+# ---------------------------------------------------------------------------
+
+async def create_intervention_session(
+    job_id: str,
+    hitl_type: str,
+    url: str,
+    company: str = "",
+    role: str = "",
+) -> int:
+    """Insert a new intervention session and return its id."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """INSERT INTO intervention_sessions
+               (job_id, hitl_type, url, company, role, status, created_at)
+               VALUES (?, ?, ?, ?, ?, 'pending', ?)""",
+            (job_id, hitl_type, url, company, role, _now_iso()),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_pending_interventions() -> list[dict]:
+    """Return all pending intervention sessions."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT id, job_id, hitl_type, url, company, role, status, created_at
+               FROM intervention_sessions
+               WHERE status = 'pending'
+               ORDER BY created_at DESC"""
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def resolve_intervention(session_id: int, status: str = "resolved") -> None:
+    """Mark an intervention session as resolved."""
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            """UPDATE intervention_sessions
+               SET status = ?, resolved_at = ?
+               WHERE id = ?""",
+            (status, _now_iso(), session_id),
+        )
         await db.commit()

@@ -60,6 +60,11 @@
             <svg class="dock-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
             <span>Live Viewport</span>
           </button>
+
+          <button class="dock-tab-btn" id="tab-intervention" onclick="switchTab('intervention')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>Intervention</span>
+          </button>
         </nav>
       </div>
 
@@ -128,6 +133,51 @@
             </div>
           </div>
 
+          <!-- Search Parameters Card -->
+          <div class="bento-card search-dashboard-card glass">
+            <div class="card-title-header">
+              <svg class="card-title-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>Search Parameters</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Target Location</label>
+              <input type="hidden" id="target-location" value="hyderabad">
+              <div id="custom-location-trigger" class="custom-location-trigger">
+                <span id="custom-location-selected-text">Hyderabad</span>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+              <div id="custom-location-popover" class="custom-location-popover hidden">
+                <input type="text" id="custom-location-search-input" class="custom-location-search" placeholder="Search city..." autocomplete="off">
+                <div id="custom-location-options-list" class="custom-location-options"></div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Target Role (Optional)</label>
+              <input type="text" id="target-role" class="form-input" placeholder="e.g. Software Engineer">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Analysis Limit</label>
+              <select id="target-analysis-limit" class="form-input">
+                <option value="10">10 jobs</option>
+                <option value="25" selected>25 jobs</option>
+                <option value="35">35 jobs</option>
+                <option value="50">50 jobs</option>
+                <option value="75">75 jobs</option>
+                <option value="100">100 jobs</option>
+                <option value="150">150 jobs</option>
+                <option value="200">200 jobs</option>
+              </select>
+            </div>
+          </div>
+
+          <button id="start-search-btn" class="glow-search-jobs-btn" disabled>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Start Job Discovery</span>
+          </button>
+
           <!-- Telemetry Matrix Card -->
           <div class="bento-card telemetry-matrix-card glass">
             <div class="card-title-header">
@@ -182,122 +232,7 @@
         
         <!-- Bento Workspace Column (Width: 72%) -->
         <main class="bento-col bento-workspace-col">
-          
-          <!-- Futuristic Welcome & Dashboard Header Card -->
-          <section class="bento-card welcome-matrix-card glass">
-            <div class="welcome-card-content">
-              <span class="welcome-top-pill">✦ v2026.4 Core Node</span>
-              <h1>Autonomous Career <span class="accent-glow-text">Agent Intelligence</span></h1>
-              <p>Tailor resumes, validate fit scores, and orchestrate headless browser applications dynamically.</p>
-            </div>
-          </section>
 
-          <!-- Agent Telemetry & Activity Feed Card -->
-          <div class="bento-card agent-terminal-card glass" style="margin-bottom: 14px;">
-            <div class="card-title-header flex-title-header">
-              <div class="terminal-status-block">
-                <span id="sidebar-progress-dot" class="status-pulse-dot"></span>
-                <span id="sidebar-progress-status" class="terminal-status-title">System Standby</span>
-              </div>
-              <span id="terminal-phase-pill" class="terminal-phase-tag">Phase 0/4</span>
-            </div>
-            
-            <div class="terminal-bar-container">
-              <div id="sidebar-progress-bar" class="terminal-progress-bar" style="width: 0%;"></div>
-            </div>
-
-            <!-- Visual Pipeline Stepper -->
-            <div class="pipeline-stepper-row">
-              <div class="stepper-node active" id="step-node-discovery" title="Phase 1: Multi-Source Job Discovery">
-                <span class="stepper-dot"></span>
-                <span class="stepper-label">Find</span>
-              </div>
-              <div class="stepper-line"></div>
-              <div class="stepper-node" id="step-node-eval" title="Phase 2: Job Evaluator Fit Analysis">
-                <span class="stepper-dot"></span>
-                <span class="stepper-label">Fit</span>
-              </div>
-              <div class="stepper-line"></div>
-              <div class="stepper-node" id="step-node-tailor" title="Phase 3: ATS Resume Tailoring">
-                <span class="stepper-dot"></span>
-                <span class="stepper-label">Tailor</span>
-              </div>
-              <div class="stepper-line"></div>
-              <div class="stepper-node" id="step-node-apply" title="Phase 4: Chromium Auto-Apply & Outreach">
-                <span class="stepper-dot"></span>
-                <span class="stepper-label">Apply</span>
-              </div>
-            </div>
-            
-            <div id="progress-mini-logs" class="terminal-logs-screen">
-              <div class="mini-log-item log-info"><span class="log-time">00:00:00</span> <span class="log-agent-tag system">SYSTEM</span> Ready for candidate resume upload.</div>
-            </div>
-          </div>
-
-          <!-- Automated Search Board Bento Card -->
-          <section class="bento-card search-dashboard-card glass">
-            <div class="card-title-header">
-              <div class="header-icon-label">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <span>Automated Search Parameters</span>
-              </div>
-              <span class="board-badge">Realtime Crawler</span>
-            </div>
-
-            <div class="search-flex-inputs-container">
-              <!-- Custom Searchable Location Dropdown -->
-              <div class="glow-input-group custom-select-group">
-                <label for="target-location-search">Target Tech Hub / Location</label>
-                <div class="custom-select-wrapper" id="custom-location-wrapper">
-                  <div class="custom-select-trigger" id="custom-location-trigger">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                    <span id="custom-location-selected-text">Hyderabad (1000+ IT Companies)</span>
-                    <svg class="dropdown-chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                  </div>
-                  <!-- Hidden native input to preserve existing state access -->
-                  <input type="hidden" id="target-location" value="hyderabad">
-                  <!-- Custom Glassmorphic Options Popover -->
-                  <div class="custom-select-popover glass hidden" id="custom-location-popover">
-                    <div class="custom-select-search-box">
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                      <input type="text" id="custom-location-search-input" placeholder="Search tech hub city...">
-                    </div>
-                    <div class="custom-select-options-list" id="custom-location-options-list">
-                      <!-- Populated dynamically via JS -->
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="glow-input-group">
-                <label for="target-role">Target Job Title / Role</label>
-                <div class="glow-input-with-icon">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-                  <input type="text" id="target-role" value="Software Engineer" placeholder="e.g. Frontend Developer">
-                </div>
-              </div>
-
-              <!-- Dataset Analysis Limit Control -->
-              <div class="glow-input-group limit-input-group">
-                <label for="target-analysis-limit">Analysis Limit</label>
-                <div class="glow-input-with-icon">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                  <select id="target-analysis-limit" class="glow-select-input">
-                    <option value="50" selected>50 Companies (Recommended)</option>
-                    <option value="25">25 Companies (Fastest)</option>
-                    <option value="100">100 Companies (Deep Search)</option>
-                    <option value="250">250 Companies (Ultra Search)</option>
-                  </select>
-                </div>
-              </div>
-              
-              <button id="start-search-btn" class="glow-search-jobs-btn" disabled>
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span>Launch Search Node</span>
-              </button>
-            </div>
-          </section>
-          
           <!-- Holographic Viewports Container -->
           <div class="viewport-contents-wrapper">
             
@@ -333,6 +268,28 @@
                   <button class="filter-pill" onclick="filterJobs('applying')">Applying</button>
                   <button class="filter-pill" onclick="filterJobs('applied')">Applied</button>
                   <button class="filter-pill" onclick="filterJobs('needs_attention')">Attention</button>
+                </div>
+              </div>
+
+              <div class="jobs-stats-bar">
+                <div class="jobs-stat-item">
+                  <span class="jobs-stat-count" id="stat-discovered">0</span>
+                  <span class="jobs-stat-label">Discovered</span>
+                </div>
+                <div class="jobs-stat-divider"></div>
+                <div class="jobs-stat-item">
+                  <span class="jobs-stat-count" id="stat-applied">0</span>
+                  <span class="jobs-stat-label">Applied</span>
+                </div>
+                <div class="jobs-stat-divider"></div>
+                <div class="jobs-stat-item">
+                  <span class="jobs-stat-count" id="stat-matched">0</span>
+                  <span class="jobs-stat-label">Matched</span>
+                </div>
+                <div class="jobs-stat-divider"></div>
+                <div class="jobs-stat-item">
+                  <span class="jobs-stat-count" id="stat-needs-attention">0</span>
+                  <span class="jobs-stat-label">Needs Attention</span>
                 </div>
               </div>
               
@@ -687,6 +644,26 @@
                 </div>
               </div>
             </div>
+
+            <!-- Viewport View: User Intervention Queue -->
+            <div id="view-intervention" class="tab-view">
+              <div class="viewport-section-header flex-header">
+                <div>
+                  <h2>User Intervention Queue</h2>
+                  <p class="viewport-section-sub">Browser sessions that need your manual help — login, CAPTCHA, OTP, or complex forms. Click "Continue" to pick up exactly where the agent stopped.</p>
+                </div>
+              </div>
+
+              <div id="intervention-cards-container" class="bento-cards-grid">
+                <div class="empty-state-view">
+                  <div class="empty-state-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  </div>
+                  <h3>No pending interventions</h3>
+                  <p>When the browser agent encounters a login, CAPTCHA, or OTP it can't solve, the session will appear here for you to continue manually.</p>
+                </div>
+              </div>
+            </div>
           </div>
           
           <!-- Bottom Features Info Bento Grid -->
@@ -727,32 +704,6 @@
   </div>
   
   <!-- Modals & Overlays -->
-  <!-- HITL Intervention Modal -->
-  <div id="hitl-modal" class="modal-overlay hidden">
-    <div class="modal-container glass">
-      <div class="modal-header">
-        <h3><span class="alert-pulse">●</span> Human Intervention Required</h3>
-        <button class="close-modal-btn" onclick="closeHitlModal()">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p id="hitl-message">The browser agent requires manual input (CAPTCHA, OTP, or login verification).</p>
-        <div class="hitl-iframe-container">
-          <img id="hitl-screenshot" src="" alt="Browser screenshot" class="hitl-screenshot">
-        </div>
-        <div class="hitl-details-banner">
-          <span>🔗 Application Link:</span>
-          <a id="hitl-url" href="#" target="_blank" rel="noopener noreferrer" class="hitl-tab-link">Open Application Page in New Tab ↗</a>
-        </div>
-      </div>
-      <div class="modal-actions space-between">
-        <button class="cta-btn secondary" onclick="submitHitlResponse('skip')">Skip Job</button>
-        <div class="modal-right-actions">
-          <a id="hitl-open-tab-btn" href="#" target="_blank" rel="noopener noreferrer" class="cta-btn outline">🔗 Open in New Tab</a>
-          <button class="cta-btn primary" onclick="submitHitlResponse('done')">✓ Resume Automation</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
   <!-- Direct Outreach composer modal -->
   <div id="outreach-modal" class="modal-overlay hidden">

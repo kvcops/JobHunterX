@@ -441,3 +441,32 @@ async def update_profile(profile_data: dict):
         "message": f"Profile updated: {profile_data.get('name', 'Candidate')}",
     })
     return {"status": "ok", "profile_id": profile_id, "profile": profile_data}
+
+
+# ---------------------------------------------------------------------------
+# Intervention Sessions
+# ---------------------------------------------------------------------------
+
+@router.get("/interventions")
+async def get_interventions():
+    """Get all pending intervention sessions."""
+    sessions = await db.get_pending_interventions()
+    return {"interventions": sessions}
+
+
+@router.post("/interventions/{session_id}/resolve")
+async def resolve_intervention(session_id: int, status: str = "resolved"):
+    """Mark an intervention session as resolved."""
+    await db.resolve_intervention(session_id, status)
+    return {"status": "ok"}
+
+
+@router.get("/screenshots/{job_id}")
+async def get_screenshot(job_id: str):
+    """Serve a browser screenshot for a given job ID."""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    screenshot_path = Path(f"./data/screenshots/{job_id}.png")
+    if screenshot_path.exists():
+        return FileResponse(str(screenshot_path), media_type="image/png")
+    raise HTTPException(status_code=404, detail="Screenshot not found")

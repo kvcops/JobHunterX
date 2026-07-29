@@ -410,9 +410,199 @@ async def run(state: dict) -> dict:
             except Exception as exc:
                 return ActionResult(error=f"Upload execution error: {str(exc)}")
 
+        @controller.action("Select a dropdown/select option by clicking the option with matching text")
+        async def select_dropdown_option(browser_session, index: int, text: str) -> ActionResult:
+            """Select an option from a dropdown menu.
+
+            Handles:
+              - Native <select> elements
+              - Custom dropdowns (React Select, Material UI, Chakra UI)
+              - ARIA combobox/listbox menus
+              - Click-to-open dropdown panels
+
+            Strategy:
+              1. If it's a native <select>, use select_option(label=text).
+              2. For custom dropdowns, click to open, then click the matching option.
+              3. For ARIA combobox, type to filter then click the match.
+            """
+            try:
+                page = await browser_session.get_current_page()
+                element = await page.query_selector(f"[data-index='{index}']")
+                if not element:
+                    element = await page.query_selector(f":nth-child({index})")
+                if not element:
+                    return ActionResult(error=f"Element with index {index} not found")
+
+                tag = await element.evaluate("el => el.tagName.toLowerCase()")
+                role = await element.evaluate("el => el.getAttribute('role') || ''")
+
+                # Strategy 1: Native <select> element
+                if tag == "select":
+                    await element.select_option(label=text)
+                    return ActionResult(extracted_content=f"Selected '{text}' from native <select> dropdown")
+
+                # Strategy 2: ARIA combobox — type to filter, then click
+                if role == "combobox" or await element.evaluate("el => el.getAttribute('aria-autocomplete') || ''"):
+                    await element.click()
+                    await page.keyboard.type(text, delay=50)
+                    await page.wait_for_timeout(500)
+                    # Click the matching option in the popup
+                    option = page.locator(f"[role='option']:has-text('{text}'), [role='menuitem']:has-text('{text}'), li:has-text('{text}')").first
+                    if await option.count() > 0:
+                        await option.click()
+                        return ActionResult(extracted_content=f"Selected '{text}' from combobox autocomplete")
+                    # Fallback: press Enter
+                    await page.keyboard.press("Enter")
+                    return ActionResult(extracted_content=f"Typed '{text}' in combobox and pressed Enter")
+
+                # Strategy 3: Custom dropdown — click to open, then click option
+                await element.click()
+                await page.wait_for_timeout(300)
+                option = page.locator(f"[role='option']:has-text('{text}'), [role='menuitem']:has-text('{text}'), li:has-text('{text}'), div:has-text('{text}')").first
+                if await option.count() > 0:
+                    await option.click()
+                    return ActionResult(extracted_content=f"Selected '{text}' from custom dropdown")
+
+                return ActionResult(error=f"Could not find option '{text}' in dropdown at index {index}")
+            except Exception as exc:
+                return ActionResult(error=f"Dropdown selection error: {str(exc)}")
+
+        @controller.action("Fill a date input field with a specific date")
+        async def fill_date_field(browser_session, index: int, date_value: str) -> ActionResult:
+            """Fill a date input field, handling multiple date picker formats.
+
+            Supports:
+              - HTML5 <input type="date"> — type ISO date directly
+              - jQuery/Bootstrap datepickers — click input, type date, press Escape
+              - Material UI / React date pickers — click, type, confirm
+              - Custom calendar widgets — navigate year/month, click day cell
+
+            Args:
+                index: Element index from the page state
+                date_value: Date in ISO format (YYYY-MM-DD) or US format (MM/DD/YYYY)
+            """
+            try:
+                page = await browser_session.get_current_page()
+                element = await page.query_selector(f"[data-index='{index}']")
+                if not element:
+                    return ActionResult(error=f"Date element with index {index} not found")
+
+                input_type = await element.evaluate("el => el.type || el.getAttribute('type') || ''")
+                placeholder = await element.evaluate("el => el.placeholder || ''")
+                tag = await element.evaluate("el => el.tagName.toLowerCase()")
+
+                # Determine the format to use
+                if "yyyy" in placeholder.lower() or "mm/dd" in placeholder.lower():
+                    # Parse ISO date and format as MM/DD/YYYY
+                    parts = date_value.split("-")
+                    if len(parts) == 3:
+                        formatted = f"{parts[1]}/{parts[2]}/{parts[0]}"
+                    else:
+                        formatted = date_value
+                else:
+                    formatted = date_value
+
+                # Strategy 1: HTML5 date input
+                if input_type == "date" or tag == "input":
+                    await element.click()
+                    await element.evaluate("el => el.value = ''")
+                    await page.keyboard.type(formatted, delay=30)
+                    await page.keyboard.press("Tab")
+                    return ActionResult(extracted_content=f"Filled date field with '{formatted}'")
+
+                # Strategy 2: Click to open picker, then type
+                await element.click()
+                await page.wait_for_timeout(500)
+                await page.keyboard.type(formatted, delay=30)
+                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(300)
+
+                return ActionResult(extracted_content=f"Filled date field with '{formatted}'")
+            except Exception as exc:
+                return ActionResult(error=f"Date field error: {str(exc)}")
+
+        @controller.action("Read verification code from email and return it")
+        async def get_email_otp(email_address: str, sender_filter: str = "", timeout_seconds: int = 30) -> ActionResult:
+            """Retrieve an OTP/verification code from the candidate's email inbox.
+
+            Uses IMAP to poll for new emails matching the sender filter,
+            extracts the 4-8 digit code, and returns it.
+
+            Args:
+                email_address: The email address to check
+                sender_filter: Optional sender email/domain to filter by
+                timeout_seconds: How long to wait for the OTP email
+            """
+            import imaplib
+            import re
+            import time as _time
+
+            try:
+                settings = get_settings()
+                imap_host = "imap.gmail.com"
+                email_pass = getattr(settings, "email_app_password", None)
+
+                if not email_pass:
+                    return ActionResult(error="Email app password not configured. Set EMAIL_APP_PASSWORD in .env")
+
+                otp_pattern = re.compile(r'(?<!\d)(\d{4,8})(?!\d)')
+                deadline = _time.time() + timeout_seconds
+
+                while _time.time() < deadline:
+                    try:
+                        with imaplib.IMAP4_SSL(imap_host) as conn:
+                            conn.login(email_address, email_pass)
+                            conn.select("INBOX")
+
+                            criteria = ['UNSEEN']
+                            if sender_filter:
+                                criteria.append(f'FROM "{sender_filter}"')
+                            search_str = '(' + ' '.join(criteria) + ')'
+                            _, msg_ids = conn.search(None, search_str)
+
+                            if msg_ids[0]:
+                                latest_id = msg_ids[0].split()[-1]
+                                _, data = conn.fetch(latest_id, '(RFC822)')
+                                msg = email.message_from_bytes(data[0][1])
+
+                                body = ""
+                                if msg.is_multipart():
+                                    for part in msg.walk():
+                                        if part.get_content_type() == "text/plain":
+                                            payload = part.get_payload(decode=True)
+                                            if payload:
+                                                body = payload.decode(errors="ignore")
+                                            break
+                                else:
+                                    payload = msg.get_payload(decode=True)
+                                    if payload:
+                                        body = payload.decode(errors="ignore")
+
+                                match = otp_pattern.search(body)
+                                if match:
+                                    return ActionResult(extracted_content=f"OTP_CODE:{match.group(1)}")
+                    except Exception:
+                        pass
+                    _time.sleep(2)
+
+                return ActionResult(error=f"OTP not received within {timeout_seconds}s")
+            except Exception as exc:
+                return ActionResult(error=f"Email OTP error: {str(exc)}")
+
         # Use our LiteLLM router — gemma-4-31b-it avoids Gemini 3+ deprecation warnings
         # and supports temperature/top_p/top_k natively
-        llm = ChatLiteLLM(model="gemini/gemma-4-31b-it")
+        from vellum.config.settings import get_settings
+        _settings = get_settings()
+
+        _fallback_models = []
+        if _settings.groq_api_key:
+            _fallback_models.append("groq/openai/gpt-oss-20b")
+        if _settings.mistral_api_key:
+            _fallback_models.append("mistral/mistral-large-2512")
+        if _settings.google_api_key:
+            _fallback_models.append("gemini/gemini-3.1-flash-lite")
+
+        llm = ChatLiteLLM(model="gemini/gemma-4-31b-it", fallbacks=_fallback_models if _fallback_models else None)
 
         # Build comprehensive candidate credential memory for the task
         # --- Education History ---
@@ -495,17 +685,49 @@ async def run(state: dict) -> dict:
 CRITICAL TOKEN SAVING & SPEED RULE:
 Keep your thinking extremely brief and short (1 concise sentence max). Do NOT write long explanations or reasoning. Execute actions directly to minimize token usage and complete the task fast!
 
-Instructions:
-1. Fill in all required fields with the candidate information above. Use the Q&A answers for dropdown/select/radio/input questions about salary, CTC, notice period, work authorization, etc. Do NOT fill in Current CTC or Expected CTC unless the application form explicitly asks for current salary, expected salary, current CTC, or expected CTC. If a generic "salary" is asked, prioritize expected salary / expected CTC.
-2. For education and work experience fields, use the detailed history provided above.
-3. If there is a resume upload field, call the tool `Upload candidate resume file (PDF/CV) to application form input`.
+=== FORM FILLING RULES ===
+
+BASIC RULES:
+1. Fill in all required fields with the candidate information above.
+2. Use the Q&A answers for dropdown/select/radio/input questions about salary, CTC, notice period, work authorization, etc.
+3. Do NOT fill in Current CTC or Expected CTC unless the application form explicitly asks.
+4. If a generic "salary" is asked, prioritize expected salary / expected CTC.
+5. For education and work experience fields, use the detailed history provided above.
+6. If there is a resume upload field, call the tool `Upload candidate resume file (PDF/CV) to application form input`.
+7. After filling, click the Submit/Apply button.
+8. Report the final status: SUCCESS or the reason for stopping.
+
+DROPDOWN / SELECT FIELD RULES:
+- For native <select> elements: Use the built-in `dropdown_options` action to see available options, then `select_dropdown` to pick the best match.
+- For custom dropdowns (React Select, Material UI, etc.): Click the dropdown to open it, then click the matching option text.
+- For combobox/autocomplete fields: Type the value slowly (50ms delay per character), wait 500ms for suggestions to appear, then click the matching suggestion.
+- ALWAYS use the `dropdown_options` action first to see what options are available before trying to select.
+- If an option says "Other" and the form has a text field next to it, select "Other" and type the specific value.
+- For "Years of Experience" dropdowns, pick the option that matches the candidate's total experience.
+- For "Salary" / "Expected CTC" dropdowns, use the Q&A answers provided above.
+
+DATE / CALENDAR FIELD RULES:
+- For <input type="date"> fields: Type the date directly in MM/DD/YYYY or YYYY-MM-DD format (check the placeholder for the expected format).
+- For datepicker calendar widgets: Click the input to open the calendar, then navigate to the correct month/year and click the day.
+- For education dates: Use the start/end dates from the education history above.
+- For work experience dates: Use the start/end dates from the work experience above.
+- If a date field has a calendar popup, try clicking the input first, then type the date directly — most modern datepickers accept typed input.
+- Format dates as MM/DD/YYYY unless the field clearly shows a different format.
+
+RADIO BUTTON / CHECKBOX RULES:
+- For "Yes/No" questions about work authorization, visa sponsorship, etc., use the Work Authorization Rule below.
+- For gender/ethnicity questions, these are usually optional — skip unless required.
+- For "How did you hear about us?" dropdowns, select "LinkedIn" or "Job Board" if available.
+
+WORK AUTHORIZATION RULE:
+- If the job is located inside India (the candidate's home country), auto-fill work authorization as "Yes" (authorized, no sponsorship needed).
+- If the job is remote or outside India: if they ask about authorization to work in that country, answer based on the candidate's profile (usually "Requires sponsorship" for foreign countries).
+
+ERROR DETECTION — STOP AND REPORT:
 4. If you encounter a login page, STOP and report "LOGIN_REQUIRED".
 5. If you encounter a CAPTCHA, STOP and report "CAPTCHA_DETECTED".
 6. If you see an OTP/MFA prompt, STOP and report "MFA_REQUIRED".
-7. If the form is too complex to fill automatically, STOP and report "TOO_COMPLEX".
-8. After filling, click the Submit/Apply button.
-9. Report the final status: SUCCESS or the reason for stopping.
-10. Work Authorization Rule: If the job is located inside India (the candidate's home country), auto-fill work authorization questions as "Yes" (authorized to work, does not require sponsorship). If the job is remote or located in a foreign country (outside India), carefully evaluate the question: if they ask about authorization/sponsorship to work in that foreign country (e.g. US/Europe), answer accurately based on the candidate's profile (usually "Yes" if applying as a remote contractor, or "Requires sponsorship/No authorization" if relocation to that foreign country is required)."""
+7. If the form is too complex to fill automatically, STOP and report "TOO_COMPLEX"."""
 
 
         from vellum.api.ws import manager as ws_manager
@@ -652,17 +874,66 @@ Instructions:
                 "errors": errors,
             }
         else:
-            # HITL needed — save session as paused and interrupt
+            # HITL needed — save session as intervention card (non-blocking)
             await db.update_job(job_id, status="needs_attention")
             save_paused_session(job_id, reason=hitl_type.value, url=apply_url)
 
+            # Create intervention session in DB
+            db_id = None
+            try:
+                db_id = await db.create_intervention_session(
+                    job_id=job_id,
+                    hitl_type=hitl_type.value,
+                    url=apply_url,
+                    company=job.get("company", ""),
+                    role=job.get("role", ""),
+                )
+            except Exception as db_exc:
+                log.warning("failed_to_create_db_intervention_session", error=str(db_exc))
+
+            # Capture screenshot of current browser state
+            screenshot_path = None
+            try:
+                screenshot_dir = Path("./data/screenshots")
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                screenshot_path = str(screenshot_dir / f"{job_id}.png")
+                # Try to get screenshot from agent's browser session
+                if hasattr(agent, 'browser_session') and agent.browser_session:
+                    page = await agent.browser_session.get_current_page()
+                    if page and not page.is_closed():
+                        await page.screenshot(path=screenshot_path, full_page=False)
+                elif _active_browser_page and not _active_browser_page.is_closed():
+                    await _active_browser_page.screenshot(path=screenshot_path, full_page=False)
+                else:
+                    screenshot_path = None
+            except Exception as ss_exc:
+                log.warning("screenshot_capture_failed", error=str(ss_exc))
+                screenshot_path = None
+
             hitl_message = {
-                HITLType.LOGIN: "Login required — please sign in manually, then click Resume.",
-                HITLType.CAPTCHA: "CAPTCHA detected — please solve it, then click Resume.",
-                HITLType.MFA: "MFA/OTP required — please complete verification, then click Resume.",
+                HITLType.LOGIN: "Login required — please sign in manually, then click Continue.",
+                HITLType.CAPTCHA: "CAPTCHA detected — please solve it, then click Continue.",
+                HITLType.MFA: "MFA/OTP required — please complete verification, then click Continue.",
                 HITLType.MANUAL_FORM: "Complex form detected — please fill remaining fields manually.",
                 HITLType.TOO_COMPLEX: "Application too complex for automation. Please apply manually.",
             }.get(hitl_type, "Manual intervention needed.")
+
+            # Broadcast intervention event to frontend (shows as card in Intervention tab)
+            await ws_manager.broadcast({
+                "agent": "browser_agent",
+                "event_type": "intervention_needed",
+                "job_id": job_id,
+                "message": hitl_message,
+                "data": {
+                    "type": hitl_type.value,
+                    "url": apply_url,
+                    "company": job.get("company", ""),
+                    "role": job.get("role", ""),
+                    "job_id": job_id,
+                    "screenshot": screenshot_path,
+                    "db_id": db_id,
+                },
+            })
 
             events.append(AgentEvent(
                 agent="browser_agent",
@@ -672,47 +943,11 @@ Instructions:
                 data={"type": hitl_type.value, "url": apply_url},
             ).model_dump(mode="json"))
 
-            # Interrupt for human input
-            from langgraph.types import interrupt
-
-            human_response = interrupt({
-                "type": hitl_type.value,
-                "job_id": job_id,
-                "url": apply_url,
-                "message": hitl_message,
-            })
-
-            # User responded — check action
-            clear_paused_session(job_id)
-            action = human_response if isinstance(human_response, str) else human_response.get("action", "skip")
-
-            if action == "skip":
-                await db.update_job(job_id, status="skipped")
-                events.append(AgentEvent(
-                    agent="browser_agent",
-                    event_type="progress",
-                    job_id=job_id,
-                    message="User skipped this application",
-                ).model_dump(mode="json"))
-                return {
-                    "browser_result": {"status": "skipped"},
-                    "events": events,
-                    "errors": errors,
-                }
-            else:
-                # User completed the manual step — mark as applied
-                await db.update_job(job_id, status="applied")
-                events.append(AgentEvent(
-                    agent="browser_agent",
-                    event_type="complete",
-                    job_id=job_id,
-                    message="Application completed (with manual assistance)",
-                ).model_dump(mode="json"))
-                return {
-                    "browser_result": {"status": "applied_manual"},
-                    "events": events,
-                    "errors": errors,
-                }
+            return {
+                "browser_result": {"status": "needs_attention", "reason": hitl_type.value},
+                "events": events,
+                "errors": errors,
+            }
 
     except ImportError as exc:
         error_msg = f"browser-use not available: {exc}. Install with: pip install browser-use"
@@ -728,9 +963,6 @@ Instructions:
         return {"browser_result": {"status": "error"}, "events": events, "errors": errors}
 
     except Exception as exc:
-        # DO NOT swallow or catch LangGraph Interrupt exceptions
-        if exc.__class__.__name__ == "Interrupt" or "Interrupt" in str(type(exc)):
-            raise exc
         log.error("browser_agent_error", job_id=job_id, error=str(exc))
         errors.append(str(exc))
         await db.update_job(job_id, status="failed")
