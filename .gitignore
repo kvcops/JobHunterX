@@ -178,6 +178,7 @@ coverage/
 # Local Notes
 # =========================
 idea.md
+plan.md
 .agent
 vellum-os/data
 opencode.json
