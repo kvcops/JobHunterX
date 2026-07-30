@@ -2,11 +2,11 @@
 Vellum OS — India-Native Career Search Agent (Agent A)
 
 Multi-source Indian startup & tech hiring discovery:
-  - Primary: Direct company career page scraping (career_scraper)
-  - Secondary: Public ATS APIs (Greenhouse, Lever, Ashby, Freshteam, Zoho)
+  - Primary: Web search via DuckDuckGo (free, no API key)
+  - Secondary: Public ATS APIs (Greenhouse, Lever, Ashby)
   - Tertiary: VC Portfolio boards (Getro-powered)
 
-NO search engine dependency. All discovery is direct and structured.
+All discovery is direct and structured. No paid APIs.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import re
 
 from vellum.config.logging import get_logger
 from vellum.config import database as db
-from vellum.tools import ats_api
+from vellum.tools import ats_api, web_search_scraper
 from vellum.models import JobListing, AgentEvent
 from vellum.api.ws import manager as ws_manager
 
@@ -183,18 +183,17 @@ def _matches_location_strict(title: str, jd_text: str, target_location: str) -> 
 async def run(state: dict) -> dict:
     """Agent A: Multi-source Indian tech hiring discovery.
     
-    Uses career_scraper for direct company career page discovery.
+    Uses web search (DuckDuckGo) for job discovery.
     Falls back to ATS API hub and VC portfolio boards.
     
-    Input state: {"location": str, "profile": dict, "role": str}
+    Input state: {"location": str, "profile": dict, "role": str, "limit": int}
     Output: adds to state["discovered_jobs"] and state["events"]
     """
-    from vellum.agents import career_scraper
-
     location = state.get("location", "Bengaluru")
     profile = state.get("profile", {})
     limit = state.get("limit") or MAX_TOTAL_JOBS
     role = state.get("role") or "software engineer"
+    company = state.get("company", "")  # Optional: focus on specific company
     jobs: list[dict] = []
     events: list[dict] = []
     errors: list[str] = []
@@ -208,24 +207,57 @@ async def run(state: dict) -> dict:
         ).model_dump(mode="json")
         await ws_manager.broadcast(event_dict)
 
-    await broadcast_progress(5, f"Starting discovery for {role} in {location}...")
+    await broadcast_progress(5, f"Searching for {role} jobs in {location}...")
 
-    # --- Primary: Career Page Scraper ---
+    # --- Primary: Web Search (DuckDuckGo) ---
     try:
-        scraper_result = await career_scraper.run({
-            "location": location,
-            "profile": profile,
-            "role": role,
-            "limit": limit,
-        })
-        jobs.extend(scraper_result.get("discovered_jobs", []))
-        events.extend(scraper_result.get("events", []))
-        errors.extend(scraper_result.get("errors", []))
+        search_limit = min(limit, 50)  # Respect rate limits
+        web_jobs = await web_search_scraper.search_and_enrich(
+            role=role,
+            location=location,
+            company=company,
+            max_results=search_limit,
+            enrich_top=15,  # Enrich top 15 with full page details
+        )
+        
+        # Process and filter jobs
+        for job in web_jobs:
+            if len(jobs) >= limit:
+                break
+            
+            title = job.get("title", "")
+            if not title:
+                continue
+            
+            # Filter by role relevance
+            if not _is_relevant_role(title, role):
+                continue
+            
+            # Filter by location
+            if not _matches_location_strict(title, job.get("snippet", ""), location):
+                continue
+            
+            # Clean company name
+            company_name = _clean_company_name(job.get("company", ""))
+            if not company_name:
+                # Try to extract from title
+                company_name = _clean_company_name(title.split(" - ")[-1] if " - " in title else "")
+            
+            jobs.append({
+                "company": company_name or "Unknown",
+                "title": title[:160],
+                "career_page_url": job.get("apply_url", ""),
+                "apply_url": job.get("apply_url", ""),
+                "jd_text": job.get("snippet", "")[:20000],
+                "source": job.get("source", "web_search"),
+                "confidence": 0.85,
+            })
+        
+        await broadcast_progress(60, f"Web search complete: Found {len(jobs)} relevant jobs.")
+    
     except Exception as exc:
-        log.warning("career_scraper_error", error=str(exc))
-        errors.append(f"Career scraper error: {str(exc)[:200]}")
-
-    await broadcast_progress(85, f"Career page discovery complete: Found {len(jobs)} jobs.")
+        log.warning("web_search_error", error=str(exc))
+        errors.append(f"Web search error: {str(exc)[:200]}")
 
     # --- Secondary: VC Portfolio Boards (Getro) ---
     if len(jobs) < limit:
@@ -237,6 +269,8 @@ async def run(state: dict) -> dict:
             for vc_domain, vc_name in vc_boards:
                 vc_jobs = await ats_api.fetch_getro_vc_jobs(vc_domain=vc_domain, vc_name=vc_name)
                 for v_item in vc_jobs:
+                    if len(jobs) >= limit:
+                        break
                     if not _is_relevant_role(v_item["title"], role):
                         continue
                     if not _matches_location_strict(v_item["title"], v_item.get("jd_text", ""), location):
@@ -255,26 +289,35 @@ async def run(state: dict) -> dict:
 
     await broadcast_progress(90, f"Total discovered: {len(jobs)} jobs.")
 
-    # Store any VC jobs that weren't already stored by career_scraper
+    # Store jobs in database
     for item in jobs[:limit]:
-        if not item.get("id"):
-            try:
-                job = JobListing(
-                    company=item["company"],
-                    role=item["title"],
-                    career_page_url=item.get("career_page_url", ""),
-                    apply_url=item.get("apply_url", ""),
-                    jd_text=item.get("jd_text", ""),
-                    source=item.get("source", "geo_search"),
-                    discovery_confidence=item.get("confidence", 0.9),
-                )
-                job_dict = job.model_dump(mode="json")
-                job_id = await db.insert_job(job_dict)
-                if job_id:
-                    job_dict["id"] = job_id
-                    item["id"] = job_id
-            except Exception as exc:
-                log.warning("job_insertion_failed", company=item.get("company"), error=str(exc))
+        try:
+            job = JobListing(
+                company=item["company"],
+                role=item["title"],
+                career_page_url=item.get("career_page_url", ""),
+                apply_url=item.get("apply_url", ""),
+                jd_text=item.get("jd_text", ""),
+                source=item.get("source", "geo_search"),
+                discovery_confidence=item.get("confidence", 0.9),
+            )
+            job_dict = job.model_dump(mode="json")
+            job_id = await db.insert_job(job_dict)
+            if job_id:
+                job_dict["id"] = job_id
+                item["id"] = job_id
+                
+                event_dict = AgentEvent(
+                    agent="geo_search",
+                    event_type="discovery",
+                    job_id=job_id,
+                    message=f"Discovered: {item['company']} — {item['title'][:80]}",
+                    confidence=item.get("confidence", 0.9),
+                ).model_dump(mode="json")
+                events.append(event_dict)
+                await ws_manager.broadcast(event_dict)
+        except Exception as exc:
+            log.warning("job_insertion_failed", company=item.get("company"), error=str(exc))
 
     await broadcast_progress(100, f"Discovery complete! Found {len(jobs)} relevant jobs.")
 
