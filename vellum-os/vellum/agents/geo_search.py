@@ -2,12 +2,11 @@
 Vellum OS — India-Native Career Search Agent (Agent A)
 
 Multi-source Indian startup & tech hiring discovery:
-  - Channel 0: Direct Startup ATS APIs (Greenhouse, Lever, Ashby, Freshteam, Zoho Recruit)
-  - Channel 0.5: Getro-Powered Indian VC Portfolio Boards (Blume, Peak XV)
-  - Channel 1: Indian Tech Community Job Feeds (Hasjob RSS)
-  - Channel 2: Search-Engine Indexed Indian Startup Portals (Wellfound / Instahyre)
-  - Channel 3: Direct High-Precision ATS Search
-  - Channel 4: Unadvertised Social Hiring Post Miner (LinkedIn / X Email Dorks)
+  - Primary: Direct company career page scraping (career_scraper)
+  - Secondary: Public ATS APIs (Greenhouse, Lever, Ashby, Freshteam, Zoho)
+  - Tertiary: VC Portfolio boards (Getro-powered)
+
+NO search engine dependency. All discovery is direct and structured.
 """
 
 from __future__ import annotations
@@ -16,14 +15,13 @@ import re
 
 from vellum.config.logging import get_logger
 from vellum.config import database as db
-from vellum.tools import search, scrape, ats_api
+from vellum.tools import ats_api
 from vellum.models import JobListing, AgentEvent
 from vellum.api.ws import manager as ws_manager
-from vellum.agents import job_evaluator
 
 log = get_logger("geo_search")
 
-MAX_TOTAL_JOBS = 50
+MAX_TOTAL_JOBS = 80
 
 
 def _normalise_city(location: str) -> str:
@@ -124,8 +122,7 @@ INDIAN_CITIES = {
 }
 
 
-# Foreign country / region tokens. If any appears in the location string we
-# treat the job as NOT open to India candidates, even when it is tagged remote.
+# Foreign country / region tokens.
 FOREIGN_LOCATION_TOKENS = [
     "usa", "u.s.", "u.s.a", "united states", "us-", "san francisco", "new york",
     "seattle", "austin", "boston", "chicago", "mountain view", "palo alto",
@@ -149,49 +146,33 @@ FOREIGN_LOCATION_TOKENS = [
 
 
 def _matches_location_strict(title: str, jd_text: str, target_location: str) -> bool:
-    """Strict location matching that rejects foreign-based jobs.
-
-    A job passes only if it is:
-      - explicitly in/near the target Indian city, OR
-      - tagged remote/worldwide with no foreign country qualifier, OR
-      - explicitly India-based.
-
-    A "Remote - San Francisco" or a Berlin-based job is rejected even if the
-    JD body happens to contain the word "india" or "remote".
-    """
+    """Strict location matching that rejects foreign-based jobs."""
     if not target_location:
         return True
     target_lower = target_location.lower().strip()
-    loc_line = (title + " " + jd_text[:300]).lower()  # location is usually in title/first lines
+    loc_line = (title + " " + jd_text[:300]).lower()
 
-    # 1. Hard reject: any foreign country/region token in the location line.
     for tok in FOREIGN_LOCATION_TOKENS:
         if tok in loc_line:
             return False
 
-    # 2. Genuinely worldwide remote (open to anyone, incl. India).
     if any(t in loc_line for t in ["worldwide", "anywhere", "global", "work from anywhere"]):
         return True
 
-    # 3. Generic remote / WFH with no foreign qualifier -> India-eligible.
     if "remote" in loc_line or "work from home" in loc_line or "pan india" in loc_line:
         return True
 
-    # 4. Explicit India mention.
     if "india" in loc_line:
         return True
 
-    # 5. Target city match.
     target_key = _normalise_city(target_lower)
     target_synonyms = INDIAN_CITIES.get(target_key, [target_key])
     if any(syn in loc_line for syn in target_synonyms):
         return True
 
-    # 6. Very short / empty JD -> unknown, keep permissive.
     if not jd_text or len(jd_text) < 15:
         return True
 
-    # 7. Another Indian city in the title but not ours -> still in India, accept.
     for city_synonyms in INDIAN_CITIES.values():
         if any(syn in title.lower() for syn in city_synonyms):
             return True
@@ -201,17 +182,22 @@ def _matches_location_strict(title: str, jd_text: str, target_location: str) -> 
 
 async def run(state: dict) -> dict:
     """Agent A: Multi-source Indian tech hiring discovery.
-
+    
+    Uses career_scraper for direct company career page discovery.
+    Falls back to ATS API hub and VC portfolio boards.
+    
     Input state: {"location": str, "profile": dict, "role": str}
     Output: adds to state["discovered_jobs"] and state["events"]
     """
+    from vellum.agents import career_scraper
+
     location = state.get("location", "Bengaluru")
     profile = state.get("profile", {})
     limit = state.get("limit") or MAX_TOTAL_JOBS
+    role = state.get("role") or "software engineer"
     jobs: list[dict] = []
     events: list[dict] = []
     errors: list[str] = []
-    role = state.get("role") or "software engineer"
 
     async def broadcast_progress(percentage: int, message: str):
         event_dict = AgentEvent(
@@ -224,184 +210,73 @@ async def run(state: dict) -> dict:
 
     await broadcast_progress(5, f"Starting discovery for {role} in {location}...")
 
-    raw_candidates = []
-
-    # --- Channel 0: Direct Startup ATS APIs (Greenhouse, Lever, Ashby, Freshteam, Zoho) ---
+    # --- Primary: Career Page Scraper ---
     try:
-        hub_jobs = await ats_api.fetch_hub_ats_jobs(location=location, role=role, max_jobs=30)
-        for h_item in hub_jobs:
-            job_loc = h_item.get("location", "")
-            jd_text = h_item.get("jd_text", "")
-            if not _matches_location_strict(h_item["title"], f"{job_loc} {jd_text}", location):
-                continue
-            raw_candidates.append({
-                "company": h_item["company"],
-                "title": h_item["title"][:160],
-                "career_page_url": h_item["career_page_url"],
-                "apply_url": h_item["apply_url"],
-                "jd_text": h_item["jd_text"][:20000],
-                "source": f"ats_hub_{h_item['ats_source']}",
-                "confidence": h_item["confidence"],
-            })
+        scraper_result = await career_scraper.run({
+            "location": location,
+            "profile": profile,
+            "role": role,
+            "limit": limit,
+        })
+        jobs.extend(scraper_result.get("discovered_jobs", []))
+        events.extend(scraper_result.get("events", []))
+        errors.extend(scraper_result.get("errors", []))
     except Exception as exc:
-        log.warning("hub_ats_scanner_error", error=str(exc))
+        log.warning("career_scraper_error", error=str(exc))
+        errors.append(f"Career scraper error: {str(exc)[:200]}")
 
-    await broadcast_progress(25, f"Direct ATS Scan complete: Found {len(raw_candidates)} potential jobs.")
+    await broadcast_progress(85, f"Career page discovery complete: Found {len(jobs)} jobs.")
 
-    # --- Channel 0.5: Getro VC Portfolio Boards (Blume, Peak XV) ---
-    try:
-        vc_boards = [
-            ("blume.vc", "Blume Ventures"),
-            ("peakxv.com", "Peak XV Partners"),
-        ]
-        vc_count = 0
-        for vc_domain, vc_name in vc_boards:
-            vc_jobs = await ats_api.fetch_getro_vc_jobs(vc_domain=vc_domain, vc_name=vc_name)
-            for v_item in vc_jobs:
-                if not _is_relevant_role(v_item["title"], role):
-                    continue
-                raw_candidates.append({
-                    "company": v_item["company"],
-                    "title": v_item["title"][:160],
-                    "career_page_url": v_item["career_page_url"],
-                    "apply_url": v_item["apply_url"],
-                    "jd_text": v_item["jd_text"][:20000],
-                    "source": f"vc_getro_{vc_domain}",
-                    "confidence": v_item["confidence"],
-                })
-                vc_count += 1
-    except Exception as exc:
-        log.warning("vc_board_discovery_error", error=str(exc))
-
-    await broadcast_progress(40, f"VC Boards complete: Added {vc_count} potential jobs.")
-
-    # --- Channel 1: Hasjob Tech Feed (hasjob.co) ---
-    try:
-        hasjob_items = await search.fetch_hasjob_jobs(max_results=8)
-        hj_count = 0
-        for hj in hasjob_items:
-            if not _is_relevant_role(hj["title"], role):
-                continue
-            raw_candidates.append({
-                "company": hj["company"],
-                "title": hj["title"][:160],
-                "career_page_url": hj["career_page_url"],
-                "apply_url": hj["apply_url"],
-                "jd_text": hj["jd_text"][:20000],
-                "source": "hasjob",
-                "confidence": hj["confidence"],
-            })
-            hj_count += 1
-    except Exception as exc:
-        log.warning("hasjob_discovery_error", error=str(exc))
-
-    await broadcast_progress(50, f"Hasjob RSS complete: Added {hj_count} potential jobs.")
-
-    # --- Channel 2: Search-Indexed Indian Startup Portals (Wellfound / Instahyre) ---
-    try:
-        portal_items = await search.search_wellfound_instahyre_jobs(role=role, location=location, max_results=8)
-        portal_count = 0
-        for p_item in portal_items:
-            if not _is_relevant_role(p_item["title"], role):
-                continue
-            raw_candidates.append({
-                "company": p_item["company"],
-                "title": p_item["title"][:160],
-                "career_page_url": p_item["url"],
-                "apply_url": p_item["url"],
-                "jd_text": p_item["snippet"][:20000],
-                "source": "search_indexed_portals",
-                "confidence": p_item["score"],
-            })
-            portal_count += 1
-    except Exception as exc:
-        log.warning("portal_discovery_error", error=str(exc))
-
-    await broadcast_progress(60, f"Startup Portals complete: Added {portal_count} potential jobs.")
-
-    # --- Channel 3: Direct High-Precision ATS Search ---
-    try:
-        ats_search_items = await search.search_direct_ats_jobs(role=role, location=location, max_results=15)
-        ats_search_count = 0
-        for a_item in ats_search_items:
-            if not _is_relevant_role(a_item["title"], role):
-                continue
-            raw_candidates.append({
-                "company": a_item["company"],
-                "title": a_item["title"][:160],
-                "career_page_url": a_item["url"],
-                "apply_url": a_item["url"],
-                "jd_text": a_item.get("snippet", "")[:20000],
-                "source": "direct_ats_search",
-                "confidence": a_item.get("score", 0.88),
-            })
-            ats_search_count += 1
-    except Exception as exc:
-        log.warning("direct_ats_search_error", error=str(exc))
-
-    await broadcast_progress(70, f"Direct ATS Search complete: Added {ats_search_count} potential jobs.")
-
-    # --- Channel 4: Unadvertised Social Hiring Posts (LinkedIn/X Email Posts) ---
-    try:
-        social_posts = await search.search_unadvertised_social_posts(role=role, location=location, max_results=5)
-        for post in social_posts:
-            if post.get("contact_email"):
-                draft = {
-                    "company": post.get("company", "Indian Tech Startup"),
-                    "contact_name": "Hiring Manager",
-                    "contact_role": "Hiring Lead",
-                    "email_guesses": [{"address": post["contact_email"], "pattern": "direct_social", "mx_valid": post.get("is_mx_verified")}],
-                    "subject": f"Application for {role} role at {post.get('company', 'your company')}",
-                    "body": f"Hi,\n\nI saw your post regarding the {role} position in {location}. Attached is my CV.\n\nBest regards,\n{profile.get('name', 'Candidate')}",
-                    "mailto_uri": f"mailto:{post['contact_email']}?subject=Application%20for%20{role}%20Role",
-                    "confidence": 0.85,
-                    "status": "drafted",
-                }
-                await db.insert_outreach(draft)
-    except Exception as exc:
-        log.warning("social_post_miner_error", error=str(exc))
-
-    await broadcast_progress(75, f"Social Post Miner complete ({len(raw_candidates)} total candidates). Evaluating candidate fit...")
-
-    # --- Phase 1.5: Job Evaluator Filtering Agent ---
-    try:
-        filtered_candidates = await job_evaluator.filter_jobs(raw_candidates, profile, role)
-    except Exception as exc:
-        log.error("job_evaluator_error", error=str(exc))
-        filtered_candidates = raw_candidates
-
-    # Only process up to requested limit
-    for item in filtered_candidates[:limit]:
+    # --- Secondary: VC Portfolio Boards (Getro) ---
+    if len(jobs) < limit:
         try:
-            job = JobListing(
-                company=item["company"],
-                role=item["title"],
-                career_page_url=item["career_page_url"],
-                apply_url=item["apply_url"],
-                jd_text=item["jd_text"],
-                source=item["source"],
-                discovery_confidence=item["confidence"],
-            )
-            job_dict = job.model_dump(mode="json")
-            job_id = await db.insert_job(job_dict)
-            if job_id:
-                job_dict["id"] = job_id
-                jobs.append(job_dict)
-                
-                # Create and append/broadcast discovery event
-                event_dict = AgentEvent(
-                    agent="geo_search",
-                    event_type="discovery",
-                    job_id=job_id,
-                    message=f"Discovered (Evaluated Fit): {item['company']} - {item['title'][:80]}",
-                    confidence=item["confidence"],
-                ).model_dump(mode="json")
-                events.append(event_dict)
-                await ws_manager.broadcast(event_dict)
+            vc_boards = [
+                ("blume.vc", "Blume Ventures"),
+                ("peakxv.com", "Peak XV Partners"),
+            ]
+            for vc_domain, vc_name in vc_boards:
+                vc_jobs = await ats_api.fetch_getro_vc_jobs(vc_domain=vc_domain, vc_name=vc_name)
+                for v_item in vc_jobs:
+                    if not _is_relevant_role(v_item["title"], role):
+                        continue
+                    if not _matches_location_strict(v_item["title"], v_item.get("jd_text", ""), location):
+                        continue
+                    jobs.append({
+                        "company": v_item["company"],
+                        "title": v_item["title"][:160],
+                        "career_page_url": v_item["career_page_url"],
+                        "apply_url": v_item["apply_url"],
+                        "jd_text": v_item["jd_text"][:20000],
+                        "source": f"vc_getro_{vc_domain}",
+                        "confidence": v_item["confidence"],
+                    })
         except Exception as exc:
-            log.warning("job_insertion_failed", company=item.get("company"), error=str(exc))
+            log.warning("vc_board_discovery_error", error=str(exc))
 
-    await broadcast_progress(80, f"Discovery complete! Found {len(jobs)} relevant, candidate-matched jobs.")
+    await broadcast_progress(90, f"Total discovered: {len(jobs)} jobs.")
+
+    # Store any VC jobs that weren't already stored by career_scraper
+    for item in jobs[:limit]:
+        if not item.get("id"):
+            try:
+                job = JobListing(
+                    company=item["company"],
+                    role=item["title"],
+                    career_page_url=item.get("career_page_url", ""),
+                    apply_url=item.get("apply_url", ""),
+                    jd_text=item.get("jd_text", ""),
+                    source=item.get("source", "geo_search"),
+                    discovery_confidence=item.get("confidence", 0.9),
+                )
+                job_dict = job.model_dump(mode="json")
+                job_id = await db.insert_job(job_dict)
+                if job_id:
+                    job_dict["id"] = job_id
+                    item["id"] = job_id
+            except Exception as exc:
+                log.warning("job_insertion_failed", company=item.get("company"), error=str(exc))
+
+    await broadcast_progress(100, f"Discovery complete! Found {len(jobs)} relevant jobs.")
 
     log.info("geo_search_complete", total_discovered=len(jobs))
     return {

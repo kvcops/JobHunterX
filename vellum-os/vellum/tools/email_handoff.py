@@ -99,9 +99,10 @@ async def check_mx_record(domain: str) -> Optional[bool]:
 
 
 async def enrich_with_mx(permutations: list[dict]) -> list[dict]:
-    """Add MX validation to email permutations.
+    """Add MX + SMTP validation to email permutations.
 
     All emails for the same domain share one MX check.
+    Top candidates get SMTP verification.
     """
     if not permutations:
         return permutations
@@ -125,7 +126,137 @@ async def enrich_with_mx(permutations: list[dict]) -> list[dict]:
             domain = addr.split("@")[1]
             p["mx_valid"] = mx_results.get(domain)
 
+    # SMTP verify top 3 candidates (if MX valid)
+    top_candidates = [p for p in permutations if p.get("mx_valid") is True][:3]
+    if top_candidates:
+        verified = await verify_emails_with_smtp(top_candidates)
+        # Update the original list with SMTP results
+        verified_map = {v["address"]: v for v in verified}
+        for i, p in enumerate(permutations):
+            if p["address"] in verified_map:
+                permutations[i] = verified_map[p["address"]]
+
     return permutations
+
+
+# ---------------------------------------------------------------------------
+# SMTP Email Verification (deeper than MX check)
+# ---------------------------------------------------------------------------
+
+async def verify_email_smtp(email: str, timeout: int = 10) -> bool:
+    """Verify if an email exists via SMTP handshake (no email sent).
+
+    Opens a TCP connection to the mail server, runs HELO → MAIL FROM → RCPT TO,
+    reads the response code, then QUIT. Never sends DATA.
+
+    Returns True if the server responds with 250 (mailbox exists).
+    """
+    import asyncio
+    import smtplib
+    import dns.resolver
+
+    if not email or "@" not in email:
+        return False
+
+    domain = email.split("@")[1]
+
+    def _verify():
+        # Step 1: Get MX record
+        try:
+            mx_records = dns.resolver.resolve(domain, "MX")
+            mx_host = str(mx_records[0].exchange).rstrip(".")
+        except Exception:
+            return False
+
+        # Step 2: SMTP handshake
+        try:
+            with smtplib.SMTP(mx_host, 25, timeout=timeout) as smtp:
+                smtp.helo("verify.local")
+                smtp.mail("verify@verify.local")
+                code, _ = smtp.rcpt(email)
+                return code == 250
+        except Exception:
+            return False
+
+    return await asyncio.to_thread(_verify)
+
+
+async def detect_catch_all(domain: str) -> bool:
+    """Detect if a domain is catch-all (accepts any email).
+
+    Tests with a random non-existent address. If the server accepts it,
+    the domain is catch-all and SMTP verification is unreliable.
+    """
+    import asyncio
+    import smtplib
+    import dns.resolver
+    import random
+    import string
+
+    def _check():
+        # Generate random non-existent email
+        random_email = "".join(random.choices(string.ascii_lowercase, k=12))
+        test_email = f"{random_email}@{domain}"
+
+        try:
+            mx_records = dns.resolver.resolve(domain, "MX")
+            mx_host = str(mx_records[0].exchange).rstrip(".")
+        except Exception:
+            return False
+
+        try:
+            with smtplib.SMTP(mx_host, 25, timeout=10) as smtp:
+                smtp.helo("verify.local")
+                smtp.mail("verify@verify.local")
+                code, _ = smtp.rcpt(test_email)
+                return code == 250  # If accepts random, it's catch-all
+        except Exception:
+            return False
+
+    return await asyncio.to_thread(_check)
+
+
+async def verify_emails_with_smtp(emails: list[dict]) -> list[dict]:
+    """Verify a list of email guesses using SMTP, marking catch-all domains."""
+    if not emails:
+        return emails
+
+    # Group by domain for catch-all detection
+    domains = set()
+    for e in emails:
+        addr = e.get("address", "")
+        if "@" in addr:
+            domains.add(addr.split("@")[1])
+
+    # Detect catch-all domains
+    catch_all_domains = set()
+    for domain in domains:
+        if await detect_catch_all(domain):
+            catch_all_domains.add(domain)
+
+    # Verify each email
+    for e in emails:
+        addr = e.get("address", "")
+        if "@" not in addr:
+            continue
+
+        domain = addr.split("@")[1]
+
+        if domain in catch_all_domains:
+            e["smtp_valid"] = None
+            e["catch_all"] = True
+            e["confidence"] = max(0.1, e.get("confidence", 0) - 0.2)
+        else:
+            valid = await verify_email_smtp(addr)
+            e["smtp_valid"] = valid
+            e["catch_all"] = False
+            if valid:
+                e["confidence"] = min(1.0, e.get("confidence", 0) + 0.3)
+
+    # Sort by confidence (best first)
+    emails.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+
+    return emails
 
 
 # ---------------------------------------------------------------------------

@@ -395,15 +395,16 @@ async def run_full_search(
     limit: int = 50,
     event_callback=None,
 ) -> dict:
-    """Run the complete flow: discovery → batch scoring → per-job pipelines.
+    """Run the complete discovery flow: scrape → filter → score → display.
 
+    This ONLY discovers and scores jobs. It does NOT run per-job pipelines
+    (validate/apply/outreach). Those run only when the user clicks Apply.
+    
     Batch scores 10 jobs at a time for efficiency.
-    Processes jobs concurrently with a semaphore limit.
     """
     run_id = str(uuid.uuid4())
-    settings = get_settings()
 
-    # Phase 1: Discovery
+    # Phase 1: Discovery (career pages + ATS APIs)
     log.info("starting_discovery", location=location, role=role, limit=limit, run_id=run_id)
     if event_callback:
         await event_callback({
@@ -422,9 +423,9 @@ async def run_full_search(
                 "event_type": "complete",
                 "message": "No jobs discovered.",
             })
-        return {"run_id": run_id, "jobs_processed": 0}
+        return {"run_id": run_id, "jobs_discovered": 0}
 
-    # Phase 1.5: Batch match scoring (10 jobs at a time)
+    # Phase 2: Batch match scoring (10 jobs at a time)
     from vellum.api.ws import manager as ws_manager
 
     if event_callback:
@@ -462,7 +463,7 @@ async def run_full_search(
                         pass
 
             # Broadcast batch progress
-            pct = min(80, int(((i + len(batch)) / len(discovered_jobs)) * 80))
+            pct = min(90, int(((i + len(batch)) / len(discovered_jobs)) * 90))
             await ws_manager.broadcast({
                 "agent": "graph",
                 "event_type": "search_progress",
@@ -476,48 +477,18 @@ async def run_full_search(
         if i + batch_size < len(discovered_jobs):
             await asyncio.sleep(1.0)
 
-    # Phase 2: Per-job pipelines (concurrent, limited)
-    semaphore = asyncio.Semaphore(settings.max_job_pipelines)
-    completed_jobs = 0
-    total_jobs = len(discovered_jobs)
-
-    async def process_job(job_dict):
-        nonlocal completed_jobs
-        async with semaphore:
-            res = await run_job_pipeline(
-                job_dict, profile, run_id, event_callback,
-                search_location=location,
-            )
-            completed_jobs += 1
-            percentage = 80 + int((completed_jobs / total_jobs) * 20)
-            
-            # Broadcast search progress to UI
-            await ws_manager.broadcast({
-                "agent": "graph",
-                "event_type": "search_progress",
-                "message": f"Processed job {completed_jobs}/{total_jobs}: {job_dict.get('company')} - {job_dict.get('role', '')[:40]}",
-                "data": {"percentage": percentage, "processed": completed_jobs, "total": total_jobs}
-            })
-            return res
-
-    tasks = [process_job(job) for job in discovered_jobs]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    success_count = sum(1 for r in results if isinstance(r, dict) and not r.get("errors"))
-    error_count = sum(1 for r in results if isinstance(r, Exception) or (isinstance(r, dict) and r.get("errors")))
-
+    # Phase 3: Done — jobs are in DB, user reviews in Applications tab
+    # Per-job pipelines (validate/apply/outreach) only run when user clicks Apply
     if event_callback:
         await event_callback({
             "agent": "graph",
             "event_type": "complete",
-            "message": f"Search complete. {len(discovered_jobs)} discovered, {success_count} processed, {error_count} errors.",
+            "message": f"Discovery complete! {len(discovered_jobs)} jobs found and scored. Review in Applications tab and click Apply to proceed.",
         })
 
     return {
         "run_id": run_id,
         "jobs_discovered": len(discovered_jobs),
-        "jobs_processed": success_count,
-        "jobs_errored": error_count,
     }
 
 

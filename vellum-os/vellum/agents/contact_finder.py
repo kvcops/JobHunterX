@@ -21,6 +21,138 @@ from vellum.models import AgentEvent
 
 log = get_logger("contact_finder")
 
+
+async def scrape_contact_page_emails(domain: str) -> list[dict]:
+    """Scrape company contact/about pages for email addresses."""
+    from vellum.tools import career_urls, scrape
+
+    if not domain:
+        return []
+
+    urls = career_urls.get_contact_urls_for_domain(domain)
+    all_emails = []
+
+    for url in urls:
+        try:
+            page = await scrape.fetch_page(url)
+            html = page.get("html", "")
+            if not html:
+                continue
+
+            emails = re.findall(
+                r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+                html
+            )
+            clean_emails = [
+                e for e in emails
+                if not e.endswith(('.png', '.jpg', '.gif', '.mp4', '.svg'))
+                and not e.startswith(('noreply', 'no-reply', 'donotreply'))
+            ]
+
+            for email in clean_emails:
+                all_emails.append({
+                    "address": email,
+                    "pattern": "contact_page",
+                    "confidence": 0.6,
+                    "source_url": url,
+                })
+        except Exception:
+            continue
+
+    return all_emails[:10]
+
+
+async def google_dork_for_emails(company: str, domain: str) -> list[dict]:
+    """Use Google dorks to find company email addresses."""
+
+    queries = [
+        f'"@" + "{domain}" site:linkedin.com',
+        f'"{company}" "email" "recruiter"',
+        f'site:{domain} "contact" OR "email"',
+    ]
+
+    all_emails = []
+    seen = set()
+
+    for query in queries:
+        try:
+            results = await search.search_multi_engine(query, max_results=3)
+            for r in results:
+                body = r.get("body", "") + " " + r.get("title", "")
+                emails = re.findall(
+                    r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+                    body
+                )
+                for email in emails:
+                    if email not in seen and not email.endswith(('.png', '.jpg', '.gif')):
+                        seen.add(email)
+                        all_emails.append({
+                            "address": email,
+                            "pattern": "google_dork",
+                            "confidence": 0.5,
+                            "source_url": r.get("href", ""),
+                        })
+        except Exception:
+            continue
+
+    return all_emails[:5]
+
+
+async def extract_github_emails(company_slug: str) -> list[dict]:
+    """Extract emails from GitHub organization member commits."""
+    import httpx
+
+    if not company_slug:
+        return []
+
+    org_name = company_slug.replace("-", "").replace("_", "")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            repos_resp = await client.get(
+                f"https://api.github.com/orgs/{org_name}/repos?sort=updated&per_page=3"
+            )
+            if repos_resp.status_code != 200:
+                return []
+
+            repos = repos_resp.json()
+            emails = []
+            seen = set()
+
+            for repo in repos:
+                commits_resp = await client.get(
+                    f"https://api.github.com/repos/{org_name}/{repo['name']}/commits?per_page=3"
+                )
+                if commits_resp.status_code != 200:
+                    continue
+
+                commits = commits_resp.json()
+                for commit in commits:
+                    author = commit.get("commit", {}).get("author", {})
+                    email = author.get("email", "")
+                    name = author.get("name", "")
+
+                    if (email
+                        and email not in seen
+                        and "noreply" not in email
+                        and "github.com" not in email):
+                        seen.add(email)
+                        emails.append({
+                            "address": email,
+                            "pattern": "github_commit",
+                            "confidence": 0.4,
+                            "name": name,
+                            "source_url": f"https://github.com/{org_name}",
+                        })
+
+                if len(emails) >= 5:
+                    break
+
+            return emails
+    except Exception:
+        return []
+
+
 CONTACT_EXTRACTION_PROMPT = """You are analyzing web search results to find real hiring contacts at a company.
 
 Company: {company}
@@ -206,12 +338,20 @@ async def run(state: dict) -> dict:
     contact_result["company_domain"] = domain
 
     # ------------------------------------------------------------------
-    # Step 4: Generate email permutations for found contacts
+    # Step 4: Multi-method email finding waterfall
     # ------------------------------------------------------------------
     contacts = contact_result.get("contacts", [])
     email_guesses_all = []
 
-    if contacts:
+    # Method 1: ATS page email (already checked in step 1)
+
+    # Method 2: Contact page scraping
+    if domain:
+        contact_emails = await scrape_contact_page_emails(domain)
+        email_guesses_all.extend(contact_emails)
+
+    # Method 3: Email permutation for found contacts
+    if contacts and not email_guesses_all:
         best_contact = contacts[0]
         name_parts = best_contact["name"].split()
         first_name = name_parts[0] if name_parts else ""
@@ -220,17 +360,15 @@ async def run(state: dict) -> dict:
         if domain and first_name and first_name.lower() not in ["hiring", "recruiting", "team"]:
             email_guesses_all = email_handoff.generate_email_permutations(first_name, last_name, domain)
 
-        await log_and_broadcast_event(
-            "progress",
-            f"Found: {best_contact['name']} ({best_contact['role']}) — confidence {best_contact.get('confidence', 0):.0%}",
-            confidence=best_contact.get("confidence", 0)
-        )
-    else:
-        await log_and_broadcast_event(
-            "progress",
-            f"No reliable contacts found for {company}. Please find contacts manually.",
-            data={"manual_lookup_needed": True}
-        )
+    # Method 4: Google dorking
+    if not email_guesses_all:
+        dork_emails = await google_dork_for_emails(company, domain)
+        email_guesses_all.extend(dork_emails)
+
+    # Method 5: GitHub commit emails
+    if not email_guesses_all:
+        gh_emails = await extract_github_emails(company)
+        email_guesses_all.extend(gh_emails)
 
     # Add generic fallback emails
     if domain:
@@ -253,6 +391,25 @@ async def run(state: dict) -> dict:
 
         # MX validation
         email_guesses_all = await email_handoff.enrich_with_mx(email_guesses_all)
+
+        # SMTP verification for top guesses
+        if hasattr(email_handoff, "smtp_verify"):
+            email_guesses_all = await email_handoff.smtp_verify(email_guesses_all)
+
+    # Log contacts found
+    if contacts:
+        best_contact = contacts[0]
+        await log_and_broadcast_event(
+            "progress",
+            f"Found: {best_contact['name']} ({best_contact['role']}) — confidence {best_contact.get('confidence', 0):.0%}",
+            confidence=best_contact.get("confidence", 0)
+        )
+    else:
+        await log_and_broadcast_event(
+            "progress",
+            f"No reliable contacts found for {company}. Please find contacts manually.",
+            data={"manual_lookup_needed": True}
+        )
 
     contact_result["email_guesses"] = email_guesses_all
 

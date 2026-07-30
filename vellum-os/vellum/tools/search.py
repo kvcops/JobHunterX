@@ -1,9 +1,9 @@
 """
-Vellum OS — Search Tool (ddgs 7.x — replaces broken googlesearch-python)
+Vellum OS — Search Tool
 
-Multi-source search with URL scoring for career-page discovery,
-direct ATS job search, and role-priority contact search.
-All stdout/stderr from ddgs internal engines is completely silenced.
+Contact search and utility functions for the Vellum OS job agent.
+Job discovery has been moved to career_scraper.py (direct career page scraping).
+This module retains contact search, email finding, and utility functions.
 """
 
 from __future__ import annotations
@@ -109,103 +109,6 @@ async def fetch_hasjob_jobs(max_results: int = 15) -> list[dict]:
         return []
 
 
-async def search_wellfound_instahyre_jobs(role: str, location: str, max_results: int = 10) -> list[dict]:
-    """Search for public search-indexed job pages on Wellfound India & Instahyre."""
-    queries = [
-        f'"{role}" "{location}" site:wellfound.com/company',
-        f'"{role}" "{location}" site:instahyre.com/jobs-at',
-    ]
-    found = []
-    seen_urls = set()
-
-    for q in queries:
-        results = await search_multi_engine(q, max_results=5)
-        for r in results:
-            url = r.get("href") or r.get("link", "")
-            if not url or url in seen_urls:
-                continue
-            seen_urls.add(url)
-            title = r.get("title", "")
-            snippet = r.get("body", "")
-
-            # Extract company name from title
-            comp = title.split(" - ")[0].split(" | ")[0].replace("Jobs at", "").strip()
-
-            found.append({
-                "url": url,
-                "title": title,
-                "company": comp or "Indian Startup",
-                "snippet": snippet,
-                "score": 0.85,
-                "source": "search_indexed_portals",
-            })
-            if len(found) >= max_results:
-                break
-        if len(found) >= max_results:
-            break
-    log.info("search_indexed_portals_complete", count=len(found))
-    return found
-
-
-async def search_unadvertised_social_posts(
-    role: str = "Software Engineer",
-    location: str = "Bengaluru",
-    max_results: int = 10,
-) -> list[dict]:
-    """Mine unadvertised social hiring posts for direct email applications."""
-    queries = [
-        f'site:linkedin.com/posts "hiring" "{role}" "{location}" "send resume to"',
-        f'site:linkedin.com/posts "hiring" "{role}" "{location}" "email your CV"',
-        f'site:linkedin.com/posts "hiring" "{role}" "{location}" "email me at"',
-        f'site:x.com "{role}" "{location}" "hiring" "email"',
-    ]
-
-    found_posts = []
-    seen_urls = set()
-
-    for q in queries:
-        results = await search_multi_engine(q, max_results=5)
-        for r in results:
-            url = r.get("href") or r.get("link", "")
-            if not url or url in seen_urls:
-                continue
-            seen_urls.add(url)
-
-            body = r.get("body", "")
-            title = r.get("title", "")
-            combined_text = f"{title} {body}"
-
-            emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", combined_text)
-            clean_emails = [e for e in emails if not e.endswith(".png") and not e.endswith(".jpg")]
-
-            valid_email = ""
-            for email in clean_emails:
-                if await verify_email_mx(email):
-                    valid_email = email
-                    break
-
-            company = title.split(" - ")[0].split(" | ")[0].strip()
-
-            found_posts.append({
-                "url": url,
-                "title": title,
-                "snippet": body[:300],
-                "company": company[:60],
-                "contact_email": valid_email or (clean_emails[0] if clean_emails else ""),
-                "is_mx_verified": bool(valid_email),
-                "low_competition": True,
-                "source": "social_post_miner",
-            })
-
-            if len(found_posts) >= max_results:
-                break
-
-        if len(found_posts) >= max_results:
-            break
-
-    log.info("social_post_miner_complete", found=len(found_posts))
-    return found_posts
-
 CAREER_PATH_PATTERNS = re.compile(
     r"/(careers?|jobs?|openings?|positions?|apply|join-us|work-with-us|vacancies)",
     re.IGNORECASE,
@@ -217,7 +120,7 @@ NOISE_PATTERNS = re.compile(
 
 
 def score_career_url(url: str, company_name: str = "") -> float:
-    """Score a URL for career-page relevance. Higher = better. Range ~0.0–1.0."""
+    """Score a URL for career-page relevance. Higher = better. Range ~0.0-1.0."""
     parsed = urlparse(url)
     domain = parsed.netloc.lower().replace("www.", "")
     path = parsed.path.lower()
@@ -247,114 +150,7 @@ def score_career_url(url: str, company_name: str = "") -> float:
 
 
 # ---------------------------------------------------------------------------
-# Career-page search
-# ---------------------------------------------------------------------------
-
-async def search_career_pages(company_name: str, max_results: int = 8) -> list[dict]:
-    """Search for a company's career page using DuckDuckGo."""
-    import asyncio
-    from ddgs import DDGS
-
-    query = f"{company_name} careers jobs apply"
-
-    def _search():
-        with silence_stdout_stderr():
-            try:
-                with DDGS() as ddgs:
-                    return list(ddgs.text(query, max_results=max_results))
-            except Exception:
-                return []
-
-    raw_results = await asyncio.to_thread(_search)
-    scored = []
-    for r in raw_results:
-        url = r.get("href") or r.get("link", "")
-        if not url:
-            continue
-        s = score_career_url(url, company_name)
-        scored.append({
-            "url": url,
-            "title": r.get("title", ""),
-            "body": r.get("body", ""),
-            "score": round(s, 3),
-            "source": "ddgs",
-        })
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    log.info(
-        "career_page_search",
-        company=company_name,
-        results=len(scored),
-        top_score=scored[0]["score"] if scored else 0,
-    )
-    return scored
-
-
-async def search_direct_ats_jobs(role: str, location: str, max_results: int = 15) -> list[dict]:
-    """Search for direct job listings on known ATS platforms (Greenhouse, Lever, Ashby, Workable, SmartRecruiters)."""
-    import asyncio
-    from ddgs import DDGS
-
-    queries = [
-        f'"{role}" "{location}" site:boards.greenhouse.io',
-        f'"{role}" "{location}" site:jobs.lever.co',
-        f'"{role}" "{location}" site:jobs.ashbyhq.com',
-        f'"{role}" India site:boards.greenhouse.io',
-        f'"{role}" India site:jobs.lever.co',
-        f'"{role}" "{location}" site:apply.workable.com',
-        f'"{role}" "{location}" site:jobs.smartrecruiters.com',
-    ]
-
-    def _search(q):
-        with silence_stdout_stderr():
-            try:
-                with DDGS() as ddgs:
-                    return list(ddgs.text(q, max_results=5))
-            except Exception:
-                return []
-
-    raw_results = []
-    for q in queries:
-        res = await asyncio.to_thread(_search, q)
-        raw_results.extend(res)
-        if len(raw_results) >= max_results * 2:
-            break
-
-    parsed = []
-    seen_urls = set()
-    for r in raw_results:
-        url = r.get("href") or r.get("link", "")
-        title = r.get("title", "")
-        if not url or url in seen_urls:
-            continue
-        seen_urls.add(url)
-
-        domain_match = re.search(r"(?:boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|jobs\.smartrecruiters\.com)/([^/]+)", url)
-        if domain_match:
-            slug = domain_match.group(1).replace("-", " ").strip()
-            if slug and slug.lower() not in ["jobs", "careers", "apply", "search", "postings"]:
-                company = slug.title()
-            else:
-                company = "Tech Startup"
-        else:
-            company = "Tech Startup"
-
-        clean_title = re.sub(r"(?i)\s*(careers?|jobs?|greenhouse|lever|ashby|hiring).*", "", title).strip()
-        parsed.append({
-            "url": url,
-            "title": clean_title or title,
-            "company": company,
-            "snippet": r.get("body", ""),
-            "score": 0.88,
-        })
-    log.info("direct_ats_search_success", role=role, location=location, count=len(parsed))
-    return parsed[:max_results]
-
-
-
-
-# ---------------------------------------------------------------------------
-# Contact search (role-priority)
+# Contact search (role-priority) — still uses DDGS for finding people
 # ---------------------------------------------------------------------------
 
 CONTACT_ROLES = [
@@ -489,6 +285,70 @@ Return valid JSON only. No markdown formatting or commentary."""
 
 
 # ---------------------------------------------------------------------------
+# Social post mining for direct email applications
+# ---------------------------------------------------------------------------
+
+async def search_unadvertised_social_posts(
+    role: str = "Software Engineer",
+    location: str = "Bengaluru",
+    max_results: int = 10,
+) -> list[dict]:
+    """Mine unadvertised social hiring posts for direct email applications."""
+    queries = [
+        f'site:linkedin.com/posts "hiring" "{role}" "{location}" "send resume to"',
+        f'site:linkedin.com/posts "hiring" "{role}" "{location}" "email your CV"',
+        f'site:linkedin.com/posts "hiring" "{role}" "{location}" "email me at"',
+        f'site:x.com "{role}" "{location}" "hiring" "email"',
+    ]
+
+    found_posts = []
+    seen_urls = set()
+
+    for q in queries:
+        results = await search_multi_engine(q, max_results=5)
+        for r in results:
+            url = r.get("href") or r.get("link", "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            body = r.get("body", "")
+            title = r.get("title", "")
+            combined_text = f"{title} {body}"
+
+            emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", combined_text)
+            clean_emails = [e for e in emails if not e.endswith(".png") and not e.endswith(".jpg")]
+
+            valid_email = ""
+            for email in clean_emails:
+                if await verify_email_mx(email):
+                    valid_email = email
+                    break
+
+            company = title.split(" - ")[0].split(" | ")[0].strip()
+
+            found_posts.append({
+                "url": url,
+                "title": title,
+                "snippet": body[:300],
+                "company": company[:60],
+                "contact_email": valid_email or (clean_emails[0] if clean_emails else ""),
+                "is_mx_verified": bool(valid_email),
+                "low_competition": True,
+                "source": "social_post_miner",
+            })
+
+            if len(found_posts) >= max_results:
+                break
+
+        if len(found_posts) >= max_results:
+            break
+
+    log.info("social_post_miner_complete", found=len(found_posts))
+    return found_posts
+
+
+# ---------------------------------------------------------------------------
 # Multi-Engine Search Aggregator & Email MX Verification
 # ---------------------------------------------------------------------------
 
@@ -544,4 +404,3 @@ async def search_multi_engine(query: str, max_results: int = 10) -> list[dict]:
     except Exception as exc:
         log.error("multi_engine_fallback_failed", error=str(exc))
         return []
-

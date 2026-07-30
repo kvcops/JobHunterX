@@ -18,6 +18,66 @@ from vellum.config import database as db
 
 log = get_logger("job_evaluator")
 
+# ---------------------------------------------------------------------------
+# Experience extraction helpers
+# ---------------------------------------------------------------------------
+
+_LEVEL_MAP = {
+    "intern": 0,
+    "junior": 1,
+    "mid-level": 3,
+    "senior": 5,
+    "lead": 7,
+    "principal": 10,
+}
+
+
+def extract_experience_from_jd(jd_text: str) -> float | None:
+    """Parse a minimum experience requirement (in years) from JD text.
+
+    Patterns handled:
+      - "X-Y years" or "X to Y years" → returns X
+      - "X+ years" → returns X
+      - "minimum X years" → returns X
+      - Level keywords (intern/junior/mid-level/senior/lead/principal)
+    """
+    if not jd_text:
+        return None
+
+    text = jd_text.lower()
+
+    # "X-Y years" or "X to Y years"
+    m = re.search(r"(\d+)[\s]*[-–to]+\s*(\d+)\s*years?", text)
+    if m:
+        return float(m.group(1))
+
+    # "X+ years"
+    m = re.search(r"(\d+)\+?\s*years?", text)
+    if m:
+        return float(m.group(1))
+
+    # "minimum X years"
+    m = re.search(r"minimum\s+(\d+)\s*years?", text)
+    if m:
+        return float(m.group(1))
+
+    # Level keywords
+    for level, years in _LEVEL_MAP.items():
+        if re.search(rf"\b{level}\b", text):
+            return float(years)
+
+    return None
+
+
+def is_experience_match(required_exp: float | None, user_experience: float) -> bool:
+    """Return True if the user has enough experience for the role.
+
+    Permissive when required_exp is unknown.
+    """
+    if required_exp is None:
+        return True
+    return required_exp <= user_experience
+
 
 def _heuristic_match_score(job: dict, profile: dict, target_role: str) -> float:
     """Compute a fast 0-1 match score from skill overlap + role alignment.
@@ -137,6 +197,18 @@ async def filter_jobs(jobs: list[dict], profile: dict, target_role: str) -> list
     target_role_lower = target_role.lower()
     role_tokens = [t for t in target_role_lower.split() if len(t) > 2]
 
+    # Extract user experience from profile
+    user_experience = None
+    exp_str = profile.get("relevant_experience", "")
+    if exp_str:
+        try:
+            import re as _re
+            match = _re.search(r"(\d+)", str(exp_str))
+            if match:
+                user_experience = float(match.group(1))
+        except (AttributeError, ValueError):
+            pass
+
     heuristic_passed = []
     for job in jobs:
         title = job.get("title", "").lower()
@@ -144,6 +216,17 @@ async def filter_jobs(jobs: list[dict], profile: dict, target_role: str) -> list
         if any(bad in title for bad in ["sales", "marketing", "telecaller", "customer care", "accountant", "receptionist", "driver"]):
             if not any(token in title for token in role_tokens):
                 continue
+
+        # Experience matching
+        jd_text = job.get("jd_text", "")
+        required_exp = extract_experience_from_jd(jd_text)
+        job["experience_required"] = required_exp
+        if user_experience is not None:
+            matched = is_experience_match(required_exp, user_experience)
+            job["experience_matched"] = matched
+            if not matched:
+                continue  # Skip jobs requiring more experience
+
         # Assign / persist a heuristic match score immediately.
         score = _heuristic_match_score(job, profile, target_role)
         job["match_score"] = score
