@@ -6,12 +6,13 @@ Initialises database, logging, and serves the API + WebSocket + static frontend.
 
 from __future__ import annotations
 
-# Windows: Force ProactorEventLoop for subprocess/Playwright compatibility.
-# Must be set before ANY asyncio usage (including imports that trigger it).
+# Windows: Set ProactorEventLoop policy by default
 import sys
 import asyncio
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+
 
 # Silence legacy langchain_community deprecation warnings on startup
 import warnings
@@ -141,21 +142,67 @@ _browser_screencast_task: asyncio.Task | None = None
 _browser_screencast_running = False
 
 
+async def _safe_call(obj: Any, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Safely execute a function or coroutine on the object's owning event loop across threads."""
+    obj_loop = None
+    try:
+        client = getattr(obj, "_client", None)
+        if client is not None:
+            loop = getattr(client, "_loop", None)
+            if loop is not None and loop.is_running():
+                obj_loop = loop
+    except Exception:
+        pass
+    if obj_loop is None:
+        try:
+            loop = getattr(obj, "_loop", None)
+            if loop is not None and loop.is_running():
+                obj_loop = loop
+        except Exception:
+            pass
+
+    current_loop = asyncio.get_running_loop()
+    if obj_loop is None or obj_loop is current_loop:
+        res = fn(*args, **kwargs) if callable(fn) else fn
+        if asyncio.iscoroutine(res):
+            return await res
+        return res
+
+    async def _runner():
+        coro = fn(*args, **kwargs) if callable(fn) else fn
+        if asyncio.iscoroutine(coro):
+            return await coro
+        return coro
+
+    fut = asyncio.run_coroutine_threadsafe(_runner(), obj_loop)
+    return await asyncio.wrap_future(fut)
+
+
+
 async def _is_page_usable(page: Any) -> bool:
     """Check whether a Playwright page is still attached and usable."""
     if page is None:
         return False
     try:
         closed = getattr(page, "is_closed", None)
-        if callable(closed) and closed():
-            return False
+        if callable(closed):
+            try:
+                if closed():
+                    return False
+            except Exception:
+                return False
     except Exception:
         return False
     try:
         client = getattr(page, "_client", None)
         if client is not None:
-            disconnected = getattr(client, "_disconnected", False)
-            if disconnected:
+            if getattr(client, "_disconnected", False):
+                return False
+            connection = getattr(client, "_connection", None)
+            if connection is not None and (
+                getattr(connection, "_closed", False)
+                or getattr(connection, "_disconnected", False)
+            ):
                 return False
     except Exception:
         return False
@@ -190,16 +237,17 @@ async def _screencast_broadcaster(page: Any):
                 else:
                     consecutive_failures += 1
                     if consecutive_failures >= max_recovery_attempts:
-                        log.warning("screencast_recovery_failed", attempts=consecutive_failures)
+                        log.debug("screencast_ended", msg="No usable page available, ending screencast")
                         break
                     await asyncio.sleep(0.3)
                     continue
 
             # Use a short timeout to detect browser hang early instead of
-            # waiting for the default 60s CDP timeout
+            # waiting for the default 60s CDP timeout.
+            # Use _safe_call with a lambda so the screenshot call itself is evaluated on current_page's owning loop.
             try:
                 b64_data = await asyncio.wait_for(
-                    current_page.screenshot(format="jpeg", quality=40),
+                    _safe_call(current_page, lambda: current_page.screenshot(format="jpeg", quality=40)),
                     timeout=8.0,
                 )
             except asyncio.TimeoutError:
@@ -238,13 +286,20 @@ async def _screencast_broadcaster(page: Any):
         except Exception as exc:
             consecutive_failures += 1
             err_str = str(exc).lower()
-            # CDP detached / page closed / browser hung — try recovery
-            is_detached = (
-                "not attached" in err_str
-                or "-32000" in err_str
+            # Clean session shutdown / CDP detached / page closed — try recovery or exit gracefully
+            is_stopped = (
+                "client is not started" in err_str
+                or "browser has been closed" in err_str
+                or "context has been closed" in err_str
                 or "target closed" in err_str
                 or "session closed" in err_str
                 or "connection closed" in err_str
+                or "event loop is closed" in err_str
+            )
+            is_detached = (
+                is_stopped
+                or "not attached" in err_str
+                or "-32000" in err_str
                 or "execution context was destroyed" in err_str
                 or "did not respond within" in err_str
                 or "unresponsive" in err_str
@@ -259,6 +314,9 @@ async def _screencast_broadcaster(page: Any):
                     consecutive_failures = 0
                     log.info("screencast_page_recovered_after_error")
                     continue
+                elif is_stopped:
+                    log.debug("screencast_session_stopped", msg="Browser session closed cleanly")
+                    break
             log.warning("screencast_frame_error", error=str(exc)[:200])
             if consecutive_failures >= max_recovery_attempts:
                 break
@@ -281,7 +339,7 @@ async def _try_recover_page(old_page: Any) -> Any:
         if sess is None:
             return None
         try:
-            page = await sess.get_current_page()
+            page = await _safe_call(sess, lambda: sess.get_current_page())
             if page and await _is_page_usable(page) and page is not old_page:
                 return page
         except Exception:
@@ -320,7 +378,7 @@ async def _screencast_manager():
                 sess = ba.get_active_browser_session()
                 if sess:
                     try:
-                        page = await sess.get_current_page()
+                        page = await _safe_call(sess, lambda: sess.get_current_page())
                     except Exception:
                         page = None
 
@@ -422,23 +480,23 @@ async def _forward_input_event(page: Any, msg: dict):
             button = msg.get("button", 0)
             pw_button = "left" if button == 0 else "right" if button == 2 else "middle"
 
-            mouse = await page.mouse
+            mouse = page.mouse
             if action == "click":
-                await mouse.click(x, y, button=pw_button)
+                await _safe_call(page, lambda: mouse.click(x, y, button=pw_button))
             elif action == "down":
-                await mouse.down(button=pw_button)
+                await _safe_call(page, lambda: mouse.down(button=pw_button))
             elif action == "up":
-                await mouse.up(button=pw_button)
+                await _safe_call(page, lambda: mouse.up(button=pw_button))
             elif action == "move":
-                await mouse.move(x, y)
+                await _safe_call(page, lambda: mouse.move(x, y))
             elif action == "dblclick":
-                await mouse.click(x, y, button=pw_button, click_count=2)
+                await _safe_call(page, lambda: mouse.click(x, y, button=pw_button, click_count=2))
 
         elif event_type == "wheel":
             delta_x = msg.get("deltaX", 0)
             delta_y = msg.get("deltaY", 0)
-            mouse = await page.mouse
-            await mouse.scroll(delta_x=delta_x, delta_y=delta_y)
+            mouse = page.mouse
+            await _safe_call(page, lambda: mouse.scroll(delta_x=delta_x, delta_y=delta_y))
 
         elif event_type == "keyboard":
             action = msg.get("action")
@@ -446,21 +504,20 @@ async def _forward_input_event(page: Any, msg: dict):
             code = msg.get("code", "")
             text = msg.get("text", "")
 
-            # Use Playwright's high-level keyboard API (resilient to detachment)
-            keyboard = await page.keyboard
+            keyboard = page.keyboard
             if action == "keyDown":
-                await keyboard.down(key)
+                await _safe_call(page, lambda: keyboard.down(key))
                 if text:
-                    await keyboard.insert_text(text)
+                    await _safe_call(page, lambda: keyboard.insert_text(text))
             elif action == "keyUp":
-                await keyboard.up(key)
+                await _safe_call(page, lambda: keyboard.up(key))
 
         elif event_type == "scroll":
             x = msg.get("x", 0)
             y = msg.get("y", 0)
             delta_y = msg.get("deltaY", 0)
-            mouse = await page.mouse
-            await mouse.scroll(x=x, y=y, delta_y=delta_y)
+            mouse = page.mouse
+            await _safe_call(page, lambda: mouse.scroll(x=x, y=y, delta_y=delta_y))
 
     except Exception as exc:
         log.warning("input_forward_error", error=str(exc), type=event_type)

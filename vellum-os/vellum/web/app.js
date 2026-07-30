@@ -937,8 +937,20 @@ function renderResumes() {
 }
 
 // ---------------------------------------------------------------------------
-// Job & Job Description (JD) Details Modal Viewer
-// ---------------------------------------------------------------------------
+function formatSourceText(src) {
+  if (!src) return "Indexed Web";
+  const s = src.toLowerCase();
+  if (s.includes("instahyre")) return "Instahyre";
+  if (s.includes("linkedin")) return "LinkedIn";
+  if (s.includes("naukri")) return "Naukri";
+  if (s.includes("indeed")) return "Indeed";
+  if (s.includes("wellfound") || s.includes("angel")) return "Wellfound";
+  if (s.includes("greenhouse")) return "Greenhouse";
+  if (s.includes("lever")) return "Lever";
+  let cleaned = src.replace(/^search_indexed_/, "").replace(/^portal_/, "").replace(/_/g, " ").trim();
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
 function openJobDetailsModal(jobId) {
   const job = jobs.find(j => j.id === jobId);
   if (!job) return;
@@ -946,14 +958,14 @@ function openJobDetailsModal(jobId) {
   document.getElementById("jd-modal-company").innerText = job.company || "Company Name";
   document.getElementById("jd-modal-role-pill").innerText = job.role || "Software Engineering Role";
   document.getElementById("jd-modal-location").innerText = job.location || "India / Remote";
-  document.getElementById("jd-modal-source").innerText = job.source || "ATS Discovery";
+  document.getElementById("jd-modal-source").innerText = formatSourceText(job.source);
 
   const matchPercent = getMatchScorePercent(job);
   const matchClass = matchPercent >= 70 ? "conf-high" : matchPercent >= 40 ? "conf-med" : "conf-low";
   const matchBadge = document.getElementById("jd-modal-match-score");
   if (matchBadge) {
     matchBadge.className = `jd-meta-val conf-badge ${matchClass}`;
-    matchBadge.innerText = `${matchPercent}% Fit Match`;
+    matchBadge.innerText = `${matchPercent}% Match`;
   }
 
   const statusBadge = document.getElementById("jd-modal-status");

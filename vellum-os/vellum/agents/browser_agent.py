@@ -10,8 +10,14 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import sys
 from pathlib import Path
 from typing import Any
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+
 
 from vellum.config.logging import get_logger
 from vellum.config import database as db
@@ -279,7 +285,23 @@ async def get_active_page() -> Any:
     if sess is None:
         return None
     try:
-        return await sess.get_current_page()
+        sess_loop = None
+        try:
+            browser = getattr(sess, "browser", None)
+            client = getattr(browser, "_client", None) if browser else None
+            if client:
+                loop = getattr(client, "_loop", None)
+                if loop and loop.is_running():
+                    sess_loop = loop
+        except Exception:
+            pass
+
+        current_loop = asyncio.get_running_loop()
+        if sess_loop is None or sess_loop is current_loop:
+            return await sess.get_current_page()
+
+        fut = asyncio.run_coroutine_threadsafe(sess.get_current_page(), sess_loop)
+        return await asyncio.wrap_future(fut)
     except Exception:
         return None
 
@@ -337,9 +359,40 @@ async def run(state: dict) -> dict:
 
     Input state: {"job": dict, "profile": dict, "tailored_pdf": bytes}
     Output: updates with browser_result, hitl_request (if needed), events
-
-    Uses LangGraph interrupt() for HITL pauses.
     """
+    loop = asyncio.get_running_loop()
+    # On Windows, if the main server loop is a SelectorEventLoop (e.g., when Uvicorn
+    # runs with --reload), create_subprocess_exec raises NotImplementedError.
+    # Run browser-use in a dedicated ProactorEventLoop thread in that case.
+    if sys.platform == "win32" and not isinstance(loop, asyncio.ProactorEventLoop):
+        log.info("running_browser_agent_in_proactor_thread", active_loop=type(loop).__name__)
+        return await _run_in_proactor_thread(state)
+    return await _run_impl(state)
+
+
+async def _run_in_proactor_thread(state: dict) -> dict:
+    """Run browser agent in a dedicated ProactorEventLoop thread."""
+    main_loop = asyncio.get_running_loop()
+
+    def _worker():
+        proactor_loop = asyncio.WindowsProactorEventLoopPolicy().new_event_loop()
+        asyncio.set_event_loop(proactor_loop)
+        try:
+            return proactor_loop.run_until_complete(_run_impl(state))
+        finally:
+            try:
+                pending = asyncio.all_tasks(proactor_loop)
+                if pending:
+                    proactor_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
+            proactor_loop.close()
+
+    return await main_loop.run_in_executor(None, _worker)
+
+
+async def _run_impl(state: dict) -> dict:
+    """Core implementation of browser agent execution."""
     job = state.get("job", {})
     profile = state.get("profile", {})
     tailored_pdf = state.get("tailored_pdf")
