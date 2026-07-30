@@ -46,6 +46,7 @@ class ResumeAgentRequest(BaseModel):
 
 _current_profile: dict | None = None
 _search_task: asyncio.Task | None = None
+_pipeline_mode: str = "automatic"  # "automatic" or "manual"
 
 
 # ---------------------------------------------------------------------------
@@ -247,9 +248,28 @@ async def resume_agent(request: ResumeAgentRequest):
 async def list_jobs(status: str = "", limit: int = 100):
     """List discovered jobs with optional status filter."""
     jobs = await db.get_jobs(status=status or None, limit=limit)
-    # Don't send PDF blob in list response
+    # Don't send PDF blob in list response; parse validation_json
     for j in jobs:
         j.pop("tailored_pdf", None)
+        # Fix match_score NA: ensure it's always a number
+        if j.get("match_score") is None:
+            # Try to extract from validation_json
+            vj = j.get("validation_json")
+            if vj and isinstance(vj, str):
+                try:
+                    v = json.loads(vj)
+                    j["match_score"] = v.get("match_score", 0.0)
+                    j["validation"] = v
+                except (json.JSONDecodeError, TypeError):
+                    j["match_score"] = 0.0
+            else:
+                j["match_score"] = 0.0
+        # Parse validation_json into dict for frontend
+        if "validation_json" in j and isinstance(j["validation_json"], str):
+            try:
+                j["validation"] = json.loads(j["validation_json"])
+            except (json.JSONDecodeError, TypeError):
+                j["validation"] = None
     return {"jobs": jobs}
 
 
@@ -261,6 +281,23 @@ async def get_job(job_id: str):
         raise HTTPException(404, "Job not found")
     # Don't send binary PDF in JSON
     job.pop("tailored_pdf", None)
+    # Fix match_score NA
+    if job.get("match_score") is None:
+        vj = job.get("validation_json")
+        if vj and isinstance(vj, str):
+            try:
+                v = json.loads(vj)
+                job["match_score"] = v.get("match_score", 0.0)
+                job["validation"] = v
+            except (json.JSONDecodeError, TypeError):
+                job["match_score"] = 0.0
+        else:
+            job["match_score"] = 0.0
+    if "validation_json" in job and isinstance(job["validation_json"], str):
+        try:
+            job["validation"] = json.loads(job["validation_json"])
+        except (json.JSONDecodeError, TypeError):
+            job["validation"] = None
     return {"job": job}
 
 
@@ -394,7 +431,29 @@ async def get_status():
         "job_counts": status_counts,
         "total_jobs": len(jobs),
         "token_usage": token_usage,
+        "pipeline_mode": _pipeline_mode,
     }
+
+
+@router.api_route("/pipeline-mode", methods=["GET", "POST"])
+async def pipeline_mode_endpoint(mode: str | None = None):
+    """Get or set the pipeline execution mode ('automatic' or 'manual')."""
+    global _pipeline_mode
+    if mode:
+        target_mode = mode.lower()
+        if target_mode in ("automatic", "manual"):
+            _pipeline_mode = target_mode
+            await ws_manager.broadcast({
+                "agent": "system",
+                "event_type": "pipeline_mode_changed",
+                "message": f"Pipeline mode set to: {target_mode}",
+                "data": {"mode": target_mode},
+            })
+            return {"status": "ok", "mode": _pipeline_mode}
+        else:
+            raise HTTPException(400, "Mode must be 'automatic' or 'manual'")
+    return {"mode": _pipeline_mode}
+
 
 
 @router.post("/reset")

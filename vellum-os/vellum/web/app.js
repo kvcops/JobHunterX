@@ -24,6 +24,29 @@ let jobs = [];
 let outreachDrafts = [];
 let tokenUsage = {};
 let activeOutreachId = null;
+let pipelineMode = "automatic";
+
+// Match score percentage helper (prevents NA / NaN)
+function getMatchScorePercent(job) {
+  if (!job) return 0;
+  let score = job.match_score;
+  if (score === undefined || score === null) {
+    if (job.validation && typeof job.validation === "object") {
+      score = job.validation.match_score;
+    }
+  }
+  if (typeof score === "string") {
+    score = parseFloat(score);
+  }
+  if (isNaN(score) || score === null || score === undefined) {
+    return 0;
+  }
+  if (score > 1) {
+    return Math.min(100, Math.round(score));
+  }
+  return Math.round(score * 100);
+}
+
 
 // WS Configuration
 let wsReconnectDelay = 1000;
@@ -302,6 +325,10 @@ async function loadInitialData() {
     const statusData = await statusRes.json();
     updateStatusIndicator(statusData.status);
     updateTokenTelemetry(statusData.token_usage);
+    if (statusData.pipeline_mode) {
+      pipelineMode = statusData.pipeline_mode;
+      updatePipelineModeUI(pipelineMode);
+    }
 
     // Load existing jobs
     const jobsRes = await fetch(`${API_BASE}/jobs`);
@@ -561,6 +588,12 @@ function handleSocketMessage(msg) {
     handleSystemReset();
   }
 
+  // Handle pipeline mode changes
+  if (msg.event_type === "pipeline_mode_changed" && msg.data && msg.data.mode) {
+    pipelineMode = msg.data.mode;
+    updatePipelineModeUI(pipelineMode);
+  }
+
   // Handle browser agent automation steps
   if (msg.event_type === "browser_step") {
     handleBrowserStep(msg.data);
@@ -609,6 +642,13 @@ function addInterventionCard(data) {
 }
 
 function renderInterventionCards() {
+  const intvBadge = document.getElementById("tab-count-intervention");
+  if (intvBadge) {
+    intvBadge.innerText = interventionSessions.length;
+    if (interventionSessions.length > 0) intvBadge.classList.add("warning");
+    else intvBadge.classList.remove("warning");
+  }
+
   const container = document.getElementById("intervention-cards-container");
   if (!container) return;
 
@@ -734,8 +774,7 @@ function renderJobs() {
     if (job.status === "needs_attention") needsAttentionCount++;
 
     const card = document.createElement("div");
-
-    const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
+    const matchPercent = getMatchScorePercent(job);
     const snippetText = job.jd_text ? job.jd_text.slice(0, 130) + "..." : "";
     const applyUrl = job.apply_url || job.career_page_url || "#";
 
@@ -788,7 +827,7 @@ function renderJobs() {
           ${job.location ? `<div class="clean-location">📍 ${escapeHtml(job.location)}</div>` : ''}
         </div>
         <div class="clean-header-pills">
-          <span class="clean-match-pill">${(matchScore * 100).toFixed(0)}% Match</span>
+          <span class="clean-match-pill">${matchPercent}% Match</span>
           <span class="clean-status-pill ${statusPillClass}">${statusText}</span>
         </div>
       </div>
@@ -834,6 +873,13 @@ function updateJobsStatCounters(discovered, applied, matched, needsAttention) {
   setText("stat-applied-bar", applied);
   setText("stat-matched", matched);
   setText("stat-needs-attention", needsAttention);
+
+  const atsBadge = document.getElementById("tab-count-ats");
+  if (atsBadge) {
+    atsBadge.innerText = discovered;
+    if (discovered > 0) atsBadge.classList.add("has-items");
+    else atsBadge.classList.remove("has-items");
+  }
 }
 
 function renderResumes() {
@@ -841,6 +887,13 @@ function renderResumes() {
   if (!container) return;
 
   const matchedJobs = jobs.filter(j => j.status === 'matched' || j.status === 'applied' || j.status === 'applying' || j.status === 'needs_attention');
+
+  const cvBadge = document.getElementById("tab-count-resumes");
+  if (cvBadge) {
+    cvBadge.innerText = matchedJobs.length;
+    if (matchedJobs.length > 0) cvBadge.classList.add("has-items");
+    else cvBadge.classList.remove("has-items");
+  }
 
   if (matchedJobs.length === 0) {
     container.innerHTML = `
@@ -858,8 +911,7 @@ function renderResumes() {
     card.className = "clean-job-card clickable-card";
     card.dataset.status = job.status || "discovered";
 
-    const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
-    const matchPercent = (matchScore * 100).toFixed(0);
+    const matchPercent = getMatchScorePercent(job);
 
     card.innerHTML = `
       <div class="clean-card-header" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
@@ -896,12 +948,12 @@ function openJobDetailsModal(jobId) {
   document.getElementById("jd-modal-location").innerText = job.location || "India / Remote";
   document.getElementById("jd-modal-source").innerText = job.source || "ATS Discovery";
 
-  const matchScore = job.match_score || (job.validation ? job.validation.match_score : 0);
-  const matchClass = matchScore > 0.7 ? "conf-high" : matchScore > 0.4 ? "conf-med" : "conf-low";
+  const matchPercent = getMatchScorePercent(job);
+  const matchClass = matchPercent >= 70 ? "conf-high" : matchPercent >= 40 ? "conf-med" : "conf-low";
   const matchBadge = document.getElementById("jd-modal-match-score");
   if (matchBadge) {
     matchBadge.className = `jd-meta-val conf-badge ${matchClass}`;
-    matchBadge.innerText = `${(matchScore * 100).toFixed(0)}% Fit Match`;
+    matchBadge.innerText = `${matchPercent}% Fit Match`;
   }
 
   const statusBadge = document.getElementById("jd-modal-status");
@@ -1065,6 +1117,13 @@ function renderOutreach() {
 
   const outreachStat = document.getElementById("stat-outreach");
   if (outreachStat) outreachStat.innerText = outreachDrafts.length;
+
+  const outreachBadge = document.getElementById("tab-count-outreach");
+  if (outreachBadge) {
+    outreachBadge.innerText = outreachDrafts.length;
+    if (outreachDrafts.length > 0) outreachBadge.classList.add("has-items");
+    else outreachBadge.classList.remove("has-items");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,6 +1153,64 @@ function updateTokenTelemetry(tokenMap) {
   }
   document.getElementById("stat-tokens").innerText = total.toLocaleString();
 }
+
+function togglePipelineMode() {
+  const nextMode = (pipelineMode === "automatic") ? "manual" : "automatic";
+  setPipelineMode(nextMode);
+}
+
+async function setPipelineMode(mode) {
+  try {
+    const res = await fetch(`${API_BASE}/pipeline-mode?mode=${encodeURIComponent(mode)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: mode })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      pipelineMode = data.mode;
+      updatePipelineModeUI(pipelineMode);
+      showToast(`Pipeline mode set to: ${pipelineMode.toUpperCase()}`, "success");
+    }
+  } catch (err) {
+    console.error("Failed to set pipeline mode", err);
+  }
+}
+
+function updatePipelineModeUI(mode) {
+  const autoBtn = document.getElementById("mode-btn-automatic");
+  const manualBtn = document.getElementById("mode-btn-manual");
+  if (autoBtn && manualBtn) {
+    if (mode === "manual") {
+      autoBtn.classList.remove("active");
+      manualBtn.classList.add("active");
+    } else {
+      manualBtn.classList.remove("active");
+      autoBtn.classList.add("active");
+    }
+  }
+
+  const toggleBtn = document.getElementById("header-mode-toggle-btn");
+  const modeText = document.getElementById("header-mode-text");
+  const pulseDot = document.getElementById("mode-pulse-dot");
+
+  if (toggleBtn && modeText && pulseDot) {
+    if (mode === "manual") {
+      toggleBtn.className = "compact-mode-pill manual";
+      toggleBtn.title = "Execution Mode: Manual (triggers apply per job). Click to switch to Automatic.";
+      modeText.innerText = "Manual Mode";
+      pulseDot.className = "mode-pulse-dot manual";
+    } else {
+      toggleBtn.className = "compact-mode-pill auto";
+      toggleBtn.title = "Execution Mode: Automatic (runs end-to-end). Click to switch to Manual.";
+      modeText.innerText = "Auto Mode";
+      pulseDot.className = "mode-pulse-dot automatic";
+    }
+  }
+}
+
+
+
 
 function updatePipelinePhase(agent, msgLower) {
   const phasePill = document.getElementById("terminal-phase-pill");
@@ -1423,8 +1540,11 @@ function renderProfileEditor() {
   if (document.getElementById("prof-portfolio")) document.getElementById("prof-portfolio").value = currentProfile.portfolio || "";
   document.getElementById("prof-location").value = currentProfile.location || "";
   if (document.getElementById("prof-present-address")) document.getElementById("prof-present-address").value = currentProfile.present_address || "";
-  if (document.getElementById("prof-permanent-address")) document.getElementById("prof-permanent-address").value = currentProfile.permanent_address || "";
   if (document.getElementById("prof-suggested-role")) document.getElementById("prof-suggested-role").value = currentProfile.suggested_role || "";
+  const targetRoleInput = document.getElementById("target-role");
+  if (targetRoleInput && currentProfile.suggested_role) {
+    targetRoleInput.value = currentProfile.suggested_role;
+  }
   if (document.getElementById("prof-relevant-experience")) document.getElementById("prof-relevant-experience").value = currentProfile.relevant_experience || "";
   if (document.getElementById("prof-languages")) {
     const langs = Array.isArray(currentProfile.languages) ? currentProfile.languages.join(", ") : (currentProfile.languages || "");
@@ -1734,7 +1854,7 @@ async function saveProfileChanges() {
     location: document.getElementById("prof-location").value.trim(),
     present_address: document.getElementById("prof-present-address") ? document.getElementById("prof-present-address").value.trim() : (currentProfile.present_address || ""),
     permanent_address: document.getElementById("prof-permanent-address") ? document.getElementById("prof-permanent-address").value.trim() : (currentProfile.permanent_address || ""),
-    suggested_role: document.getElementById("prof-suggested-role") ? document.getElementById("prof-suggested-role").value.trim() : (currentProfile.suggested_role || ""),
+    suggested_role: document.getElementById("target-role") ? document.getElementById("target-role").value.trim() : (currentProfile.suggested_role || ""),
     relevant_experience: document.getElementById("prof-relevant-experience") ? document.getElementById("prof-relevant-experience").value.trim() : (currentProfile.relevant_experience || ""),
     languages: document.getElementById("prof-languages") ? document.getElementById("prof-languages").value.split(",").map(l => l.trim()).filter(l => l) : (currentProfile.languages || []),
     summary: document.getElementById("prof-summary").value.trim(),

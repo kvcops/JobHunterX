@@ -1,16 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="12 12 76 72" width="100%" height="100%" fill="none">
   <defs>
-    <linearGradient id="fav-accent" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#3B82F6" />
-      <stop offset="100%" stop-color="#EC4899" />
+    <linearGradient id="vellum-grad-1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
     </linearGradient>
-    <linearGradient id="fav-primary" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0F111A" />
-      <stop offset="100%" stop-color="#1E2235" />
+    <linearGradient id="vellum-grad-2" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
     </linearGradient>
+    <filter id="vellum-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
   </defs>
-  <!-- Overlapping V logo shape for tiny resolutions -->
-  <path d="M 12 14 Q 8 14 8 22 Q 8 30 24 38 Q 20 30 20 24 Q 20 20 16 14 Z" fill="url(#fav-primary)" />
-  <path d="M 36 14 Q 40 14 40 22 Q 40 30 24 38 Q 28 30 28 24 Q 28 20 32 14 Z" fill="url(#fav-accent)" />
-  <circle cx="24" cy="38" r="2.5" fill="#3B82F6" />
+
+  <path d="M 18,22 L 45,78 C 47,82 53,82 55,78 L 82,22 C 84,18 79,14 75,17 L 50,46 L 25,17 C 21,14 16,18 18,22 Z" 
+        fill="url(#vellum-grad-1)" 
+        filter="url(#vellum-glow)"/>
+  
+  <path d="M 30,22 L 50,56 L 70,22 C 72,18 67,14 63,17 L 50,36 L 37,17 C 33,14 28,18 30,22 Z" 
+        fill="url(#vellum-grad-2)"/>
+
+  <circle cx="50" cy="46" r="5" fill="#ffffff" filter="url(#vellum-glow)"/>
+  <circle cx="50" cy="46" r="2.5" fill="#3b82f6"/>
+  <circle cx="50" cy="18" r="2" fill="#06b6d4"/>
+  <circle cx="27" cy="65" r="2" fill="#8b5cf6"/>
+  <circle cx="73" cy="65" r="2" fill="#ec4899"/>
 </svg>

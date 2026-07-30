@@ -481,13 +481,15 @@ def main():
     import uvicorn
 
     settings = get_settings()
+    is_reload = "--reload" in sys.argv
     uvicorn.run(
         "vellum.api.main:app",
         host=settings.host,
         port=settings.port,
-        reload=False if sys.platform == "win32" else True,
+        reload=is_reload if is_reload else (False if sys.platform == "win32" else True),
         log_level=settings.log_level.lower(),
     )
+
 
 
 if __name__ == "__main__":
