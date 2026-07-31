@@ -307,7 +307,7 @@ graph TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/KarriVamsiKrishna/Vellum-OS.git
+git clone https://github.com/kvcops/Vellum-OS.git
 cd Vellum-OS/vellum-os
 
 # Create virtual environment (don't be that person who installs globally)
@@ -730,7 +730,7 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 </p>
 
 <p align="center">
-  <strong>Built with ❤️ (and excessive amounts of coffee) by <a href="https://github.com/KarriVamsiKrishna">Karri Vamsi Krishna</a></strong><br>
+  <strong>Built with ❤️ (and excessive amounts of coffee) by <a href="https://github.com/kvcops">Karri Vamsi Krishna</a></strong><br>
   <em>Making job hunting in India autonomous, one application at a time.</em> 🚀<br>
   <em>No recruiters were harmed in the making of this project.</em>
 </p>
