@@ -242,7 +242,11 @@ async def get_latest_profile() -> Optional[dict]:
 
 
 async def insert_job(job_data: dict) -> str:
-    """Insert a discovered job. Returns job id. Skips duplicates via url hash."""
+    """Insert a discovered job. Returns job id.
+
+    If a job with the same apply_url already exists, updates its data
+    and returns the existing id (instead of creating a duplicate).
+    """
     import hashlib
 
     job_id = job_data.get("id") or _new_id()
@@ -251,14 +255,29 @@ async def insert_job(job_data: dict) -> str:
 
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
-        # Duplicate check
+        # Check for existing job with same URL
         if url_hash:
             cursor = await db.execute(
-                "SELECT 1 FROM jobs WHERE apply_url_hash = ?", (url_hash,)
+                "SELECT id FROM jobs WHERE apply_url_hash = ?", (url_hash,)
             )
-            if await cursor.fetchone():
-                log.info("duplicate_job_skipped", url=apply_url)
-                return ""
+            row = await cursor.fetchone()
+            if row:
+                existing_id = row["id"]
+                # Update existing job with fresh data instead of returning stale data
+                await db.execute(
+                    """UPDATE jobs SET company = ?, role = ?, jd_text = ?, 
+                       source = ?, updated_at = ? WHERE id = ?""",
+                    (
+                        job_data.get("company", ""),
+                        job_data.get("role"),
+                        job_data.get("jd_text"),
+                        job_data.get("source"),
+                        _now_iso(),
+                        existing_id,
+                    ),
+                )
+                await db.commit()
+                return existing_id
 
         await db.execute(
             """INSERT INTO jobs
@@ -458,16 +477,27 @@ async def get_token_usage_summary() -> dict:
 
 
 async def clear_database() -> None:
-    """Clear all records from all tables."""
+    """Nuclear reset: destroy ALL tables and FTS indexes, rebuild from scratch.
+
+    FTS5 creates hidden internal tables (jobs_fts_data, jobs_fts_idx,
+    jobs_fts_docsize, jobs_fts_config). Both DROP VIRTUAL TABLE and
+    VACUUM are required to fully eliminate FTS ghost data.
+    """
     async with aiosqlite.connect(_db_path) as db:
-        await db.execute("DELETE FROM outreach_drafts")
-        await db.execute("DELETE FROM jobs")
-        await db.execute("DELETE FROM agent_runs")
-        await db.execute("DELETE FROM applied_urls")
-        await db.execute("DELETE FROM profiles")
-        await db.execute("DELETE FROM intervention_sessions")
-        # Clean FTS virtual table
-        await db.execute("DELETE FROM jobs_fts")
+        await db.execute("DROP TABLE IF EXISTS outreach_drafts")
+        await db.execute("DROP TABLE IF EXISTS agent_runs")
+        await db.execute("DROP TABLE IF EXISTS applied_urls")
+        await db.execute("DROP TABLE IF EXISTS intervention_sessions")
+        # Drop FTS virtual table - SQLite auto-drops internal _data, _idx,
+        # _docsize, _config helper tables too
+        await db.execute("DROP TABLE IF EXISTS jobs_fts")
+        await db.execute("DROP TABLE IF EXISTS jobs")
+        await db.execute("DROP TABLE IF EXISTS profiles")
+        # Rebuild schema fresh
+        await db.executescript(_SCHEMA_SQL)
+        # VACUUM compacts the file and reclaims all pages from dropped
+        # tables including any FTS ghost data lingering in WAL
+        await db.execute("VACUUM")
         await db.commit()
 
 

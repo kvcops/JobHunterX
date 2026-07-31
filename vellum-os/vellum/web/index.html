@@ -313,6 +313,7 @@
                   <button class="filter-pill" onclick="filterJobs('applying')">Applying</button>
                   <button class="filter-pill" onclick="filterJobs('applied')">Applied</button>
                   <button class="filter-pill" onclick="filterJobs('needs_attention')">Attention</button>
+                  <button class="filter-pill" onclick="filterJobs('low_score')" style="color: #f87171;">Low Score</button>
                   <button class="filter-pill clear-all-btn" onclick="clearAllJobs()" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.3); margin-left: 8px;" title="Clear all jobs in queue">🗑️ Clear All</button>
                 </div>
               </div>
@@ -324,18 +325,23 @@
                 </div>
                 <div class="jobs-stat-divider"></div>
                 <div class="jobs-stat-item">
-                  <span class="jobs-stat-count" id="stat-applied-bar">0</span>
-                  <span class="jobs-stat-label">Applied</span>
-                </div>
-                <div class="jobs-stat-divider"></div>
-                <div class="jobs-stat-item">
                   <span class="jobs-stat-count" id="stat-matched">0</span>
                   <span class="jobs-stat-label">Matched</span>
                 </div>
                 <div class="jobs-stat-divider"></div>
                 <div class="jobs-stat-item">
+                  <span class="jobs-stat-count" id="stat-applied-bar">0</span>
+                  <span class="jobs-stat-label">Applied</span>
+                </div>
+                <div class="jobs-stat-divider"></div>
+                <div class="jobs-stat-item">
                   <span class="jobs-stat-count" id="stat-needs-attention">0</span>
-                  <span class="jobs-stat-label">Needs Attention</span>
+                  <span class="jobs-stat-label">Attention</span>
+                </div>
+                <div class="jobs-stat-divider"></div>
+                <div class="jobs-stat-item">
+                  <span class="jobs-stat-count" id="stat-low-score" style="color: #f87171;">0</span>
+                  <span class="jobs-stat-label">Low Score</span>
                 </div>
               </div>
 

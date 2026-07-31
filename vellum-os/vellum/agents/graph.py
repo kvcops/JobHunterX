@@ -450,134 +450,159 @@ async def run_full_search(
     limit: int = 50,
     event_callback=None,
 ) -> dict:
-    """Run the complete discovery flow: scrape → filter → score → display.
+    """Run the complete discovery flow: discover → verify → LLM validate → display.
 
-    This ONLY discovers and scores jobs. It does NOT run per-job pipelines
-    (validate/apply/outreach). Those run only when the user clicks Apply.
-    
-    Batch scores 10 jobs at a time for efficiency.
+    Uses Gemma 4 for deep job validation with experience-first filtering.
+    Enforces company diversity and minimum relevance threshold.
+    Loops discovery until enough quality jobs are found.
     """
     run_id = str(uuid.uuid4())
-
-    # Phase 1: Discovery (career pages + ATS APIs)
-    log.info("starting_discovery", location=location, role=role, limit=limit, run_id=run_id)
-    if event_callback:
-        await event_callback({
-            "agent": "graph",
-            "event_type": "progress",
-            "message": f"Starting discovery for {location} (role: {role or 'software engineer'}, limit: {limit})...",
-        })
-
-    discovered_jobs = await run_discovery(location, profile, role, limit, event_callback)
-    log.info("discovery_complete", job_count=len(discovered_jobs), run_id=run_id)
-
-    if not discovered_jobs:
-        if event_callback:
-            await event_callback({
-                "agent": "graph",
-                "event_type": "complete",
-                "message": "No jobs discovered.",
-            })
-        return {"run_id": run_id, "jobs_discovered": 0}
-
-    # Phase 2: Verify active URLs & Batch match scoring (10 jobs at a time)
     from vellum.api.ws import manager as ws_manager
-    from vellum.tools.url_verifier import filter_active_jobs
+    from vellum.agents.job_llm_validator import validate_and_filter_jobs, MIN_RELEVANCE_SCORE
 
-    discovered_jobs = await filter_active_jobs(discovered_jobs)
-    if not discovered_jobs:
+    effective_role = role or profile.get("suggested_role", "Software Engineer")
+    all_discovered: list[dict] = []
+    final_validated: list[dict] = []
+    seen_urls: set[str] = set()
+    company_count: dict[str, int] = {}  # Track diversity across rounds
+    discovery_round = 0
+    MAX_ROUNDS = 4  # Maximum discovery attempts to avoid infinite loops
+
+    while len(final_validated) < limit and discovery_round < MAX_ROUNDS:
+        discovery_round += 1
+        round_limit = limit * 2  # Discover extra to account for filtering
+
         if event_callback:
             await event_callback({
                 "agent": "graph",
-                "event_type": "complete",
-                "message": "No active jobs verified.",
+                "event_type": "progress",
+                "message": f"Discovery round {discovery_round}: searching for {effective_role} in {location}...",
             })
-        return {"run_id": run_id, "jobs_discovered": 0}
 
-    if event_callback:
-        await event_callback({
-            "agent": "graph",
-            "event_type": "progress",
-            "message": f"Batch scoring {len(discovered_jobs)} verified active jobs...",
-        })
+        log.info("discovery_round", round=discovery_round, target=limit, found_so_far=len(final_validated))
 
-    # Use the user-specified role for scoring, falling back to profile's suggested role
-    effective_role = role or profile.get("suggested_role", "Software Engineer")
-
-    batch_size = 10
-    for i in range(0, len(discovered_jobs), batch_size):
-        batch = discovered_jobs[i:i + batch_size]
-        batch_num = (i // batch_size) + 1
-        total_batches = (len(discovered_jobs) + batch_size - 1) // batch_size
-
-        log.info("batch_scoring", batch=batch_num, total=total_batches, jobs_in_batch=len(batch))
-
+        # Phase 1: Discovery
         try:
-            scores = await batch_score_jobs(batch, profile, location, target_role=effective_role)
-            from vellum.utils.job_cleaner import clean_job_title_and_company
-
-            for job, score_data in zip(batch, scores):
-                if not isinstance(score_data, dict):
-                    score_data = {}
-                match_score = score_data.get("match_score", 0.5)
-                job["match_score"] = match_score
-
-                # Extract & clean company & role
-                raw_co = score_data.get("company_name") or job.get("company", "")
-                raw_ro = score_data.get("job_role") or job.get("title") or job.get("role", "")
-                clean_co, clean_ro = clean_job_title_and_company(
-                    raw_title=raw_ro,
-                    raw_company=raw_co,
-                    snippet=job.get("jd_text", ""),
-                    apply_url=job.get("apply_url", ""),
-                )
-
-                job["company"] = clean_co
-                job["role"] = clean_ro
-                job["title"] = clean_ro
-
-                # Persist score + cleaned company & role to DB immediately
-                job_id = job.get("id", "")
-                if job_id:
-                    validation_json = json.dumps(score_data)
-                    try:
-                        await db.update_job(
-                            job_id,
-                            company=clean_co,
-                            role=clean_ro,
-                            match_score=match_score,
-                            validation_json=validation_json,
-                        )
-                    except Exception:
-                        pass
-
-            # Broadcast batch progress
-            pct = min(90, int(((i + len(batch)) / len(discovered_jobs)) * 90))
-            await ws_manager.broadcast({
-                "agent": "graph",
-                "event_type": "search_progress",
-                "message": f"Batch scored {min(i + batch_size, len(discovered_jobs))}/{len(discovered_jobs)} jobs",
-                "data": {"percentage": pct, "processed": min(i + batch_size, len(discovered_jobs)), "total": len(discovered_jobs)}
-            })
+            raw_jobs = await run_discovery(location, profile, role, round_limit, event_callback)
         except Exception as exc:
-            log.error("batch_scoring_error", batch=batch_num, error=str(exc))
+            log.error("discovery_error", round=discovery_round, error=str(exc))
+            break
 
-        # Small delay between batches
-        if i + batch_size < len(discovered_jobs):
-            await asyncio.sleep(1.0)
+        # Deduplicate against previously seen URLs
+        new_jobs = []
+        for job in raw_jobs:
+            url = job.get("apply_url", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                new_jobs.append(job)
 
-    # Phase 3: Done — jobs are in DB, user reviews in Applications tab
-    # Per-job pipelines (validate/apply/outreach) only run when user clicks Apply
+        if not new_jobs:
+            if event_callback:
+                await event_callback({
+                    "agent": "graph",
+                    "event_type": "progress",
+                    "message": f"Round {discovery_round}: no new jobs found. Expanding search...",
+                })
+            # Try web search with broader terms for next round
+            continue
+
+        all_discovered.extend(new_jobs)
+
+        # Phase 2: Jobs from geo_search are already URL-verified and stored in DB.
+        # No second filter_active_jobs call needed — it would kill valid jobs.
+        verified_jobs = new_jobs
+
+        if not verified_jobs:
+            continue
+
+        # Phase 3: LLM Validation with Gemma 4
+        # Pass existing company_count to enforce diversity across rounds
+        if event_callback:
+            await event_callback({
+                "agent": "graph",
+                "event_type": "progress",
+                "message": f"Running LLM validation on {len(verified_jobs)} verified jobs...",
+            })
+
+        validation_result = await validate_and_filter_jobs(
+            jobs=verified_jobs,
+            profile=profile,
+            target_role=effective_role,
+            target_count=limit,
+            location=location,
+            event_callback=event_callback,
+        )
+
+        round_validated = validation_result.get("validated", [])
+        round_low_score = validation_result.get("low_score", [])
+
+        # Store ALL jobs in DB — validated get "matched", low_score get "discovered"
+        for job in round_validated:
+            company_key = (job.get("company") or "").lower().strip()
+            current = company_count.get(company_key, 0)
+            if current < 2 and len(final_validated) < limit:
+                company_count[company_key] = current + 1
+                job["status"] = "matched"
+                final_validated.append(job)
+            else:
+                job["status"] = "discovered"
+
+        for job in round_low_score:
+            job["status"] = "discovered"  # Low score jobs go to "Low Score" filter
+
+        # Persist ALL jobs to DB in one pass (both validated and low score)
+        all_round_jobs = round_validated + round_low_score
+        for job in all_round_jobs:
+            job_id = job.get("id", "")
+            if job_id:
+                try:
+                    await db.update_job(
+                        job_id,
+                        company=job.get("company", ""),
+                        role=job.get("role", ""),
+                        match_score=job.get("match_score", 0),
+                        validation_json=job.get("validation_json", ""),
+                        status=job.get("status", "discovered"),
+                    )
+                except Exception:
+                    pass
+
+        if event_callback:
+            await event_callback({
+                "agent": "graph",
+                "event_type": "progress",
+                "message": f"Round {discovery_round}: {len(round_validated)} validated, {len(round_low_score)} low score. Total: {len(final_validated)}/{limit}.",
+            })
+
+    # Final sort by match score
+    final_validated.sort(key=lambda j: j.get("match_score", 0), reverse=True)
+    final_validated = final_validated[:limit]
+
+    # Broadcast completion
     if event_callback:
+        msg = (
+            f"Discovery complete! {len(final_validated)} relevant jobs found "
+            f"across {len(company_count)} companies. "
+            f"All jobs scored above {MIN_RELEVANCE_SCORE}% relevance. "
+            f"Review in Applications tab."
+        )
         await event_callback({
             "agent": "graph",
             "event_type": "complete",
-            "message": f"Discovery complete! {len(discovered_jobs)} jobs found and scored. Review in Applications tab and click Apply to proceed.",
+            "message": msg,
         })
+
+    log.info(
+        "full_search_complete",
+        total_discovered=len(all_discovered),
+        final_validated=len(final_validated),
+        unique_companies=len(company_count),
+        rounds=discovery_round,
+    )
 
     return {
         "run_id": run_id,
-        "jobs_discovered": len(discovered_jobs),
+        "jobs_discovered": len(final_validated),
     }
 
 

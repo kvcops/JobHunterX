@@ -537,7 +537,7 @@ function connectWebSocket() {
 
 function handleSocketMessage(msg) {
   // Handle search progress events
-  if (msg.event_type === "search_progress") {
+  if (msg.event_type === "search_progress" || msg.event_type === "validation_progress") {
     const pct = msg.data ? msg.data.percentage : 0;
     const bar = document.getElementById("sidebar-progress-bar");
     if (bar) bar.style.width = `${pct}%`;
@@ -760,34 +760,48 @@ function renderJobs() {
         <h3>No job listings in queue</h3>
         <p>Upload your resume PDF and click "Start Job Discovery" to surface opportunities.</p>
       </div>`;
-    updateJobsStatCounters(0, 0, 0, 0);
+    updateJobsStatCounters(0, 0, 0, 0, 0);
     return;
   }
 
   let appliedCount = 0;
   let matchedCount = 0;
   let needsAttentionCount = 0;
+  let lowScoreCount = 0;
   container.innerHTML = "";
 
   jobs.forEach(job => {
     if (job.status === "applied" || job.status === "applied_manual") appliedCount++;
     if (job.status === "matched") matchedCount++;
     if (job.status === "needs_attention") needsAttentionCount++;
+    if (job.status === "discovered") lowScoreCount++;
 
     const card = document.createElement("div");
     const matchPercent = getMatchScorePercent(job);
-    const snippetText = job.jd_text ? stripHtml(job.jd_text).slice(0, 130).trim() + "..." : "";
     const applyUrl = job.apply_url || job.career_page_url || "#";
 
-    // Extract matching skills
-    const userSkills = (currentProfile && currentProfile.skills) ? currentProfile.skills : [];
+    // Use LLM-generated summary if available, fallback to raw JD snippet
+    const snippetText = job.one_line_summary
+      || (job.jd_text ? stripHtml(job.jd_text).slice(0, 130).trim() + "..." : "");
+
+    // Use LLM-validated skills if available, fallback to naive substring match
     let matchingSkills = [];
-    if (job.jd_text && userSkills.length > 0) {
-      const jdLower = job.jd_text.toLowerCase();
-      matchingSkills = userSkills.filter(skill => jdLower.includes(skill.toLowerCase())).slice(0, 3);
+    let missingSkills = [];
+    if (job.skills_matched && job.skills_matched.length > 0) {
+      matchingSkills = job.skills_matched.slice(0, 4);
+      missingSkills = (job.skills_missing || []).slice(0, 2);
+    } else {
+      const userSkills = (currentProfile && currentProfile.skills) ? currentProfile.skills : [];
+      if (job.jd_text && userSkills.length > 0) {
+        const jdLower = job.jd_text.toLowerCase();
+        matchingSkills = userSkills.filter(skill => jdLower.includes(skill.toLowerCase())).slice(0, 4);
+      }
     }
     const matchingSkillsHtml = matchingSkills.map(skill =>
       `<span class="premium-tech-tag"><span class="tag-dot"></span>${escapeHtml(skill)}</span>`
+    ).join("");
+    const missingSkillsHtml = missingSkills.map(skill =>
+      `<span class="premium-tech-tag" style="opacity:0.5;"><span class="tag-dot" style="background:#f87171;"></span>${escapeHtml(skill)}</span>`
     ).join("");
 
     // Clean up source label so it never overflows
@@ -840,7 +854,7 @@ function renderJobs() {
 
       ${matchingSkillsHtml ? `
       <div class="clean-skills-row">
-        ${matchingSkillsHtml}
+        ${matchingSkillsHtml}${missingSkillsHtml}
       </div>` : ''}
 
       <div class="clean-card-footer">
@@ -861,12 +875,12 @@ function renderJobs() {
     container.appendChild(card);
   });
 
-  updateJobsStatCounters(jobs.length, appliedCount, matchedCount, needsAttentionCount);
+  updateJobsStatCounters(jobs.length, appliedCount, matchedCount, needsAttentionCount, lowScoreCount);
 }
 
 // Updates both the sidebar telemetry counters and the ATS tab's own header
 // bar (which has separate IDs to avoid duplicate-ID collisions).
-function updateJobsStatCounters(discovered, applied, matched, needsAttention) {
+function updateJobsStatCounters(discovered, applied, matched, needsAttention, lowScore) {
   const setText = (id, val) => {
     const el = document.getElementById(id);
     if (el) el.innerText = val;
@@ -877,6 +891,7 @@ function updateJobsStatCounters(discovered, applied, matched, needsAttention) {
   setText("stat-applied-bar", applied);
   setText("stat-matched", matched);
   setText("stat-needs-attention", needsAttention);
+  setText("stat-low-score", lowScore || 0);
 
   const atsBadge = document.getElementById("tab-count-ats");
   if (atsBadge) {
@@ -985,20 +1000,33 @@ function openJobDetailsModal(jobId) {
   const reasoningEl = document.getElementById("jd-modal-reasoning");
 
   if (expEl) {
-    const candidateExp = currentProfile ? (currentProfile.relevant_experience || "N/A") : "N/A";
-    const reqExp = v.required_experience || "Extracted from JD";
-    const variance = v.experience_variance || `Candidate: ${candidateExp} vs Required: ${reqExp}`;
-    expEl.innerHTML = `<strong>Experience Alignment:</strong> ${escapeHtml(variance)}`;
+    // Use LLM experience verdict if available, fallback to old format
+    const expVerdict = job.experience_verdict || v.experience_verdict;
+    if (expVerdict) {
+      expEl.innerHTML = `<strong>Experience:</strong> ${escapeHtml(expVerdict)}`;
+    } else {
+      const candidateExp = currentProfile ? (currentProfile.relevant_experience || "N/A") : "N/A";
+      const reqExp = v.required_experience || "Extracted from JD";
+      expEl.innerHTML = `<strong>Experience:</strong> Candidate: ${escapeHtml(candidateExp)} vs Required: ${escapeHtml(reqExp)}`;
+    }
   }
 
   if (skillsEl) {
-    const matching = (v.matching_skills || []).join(", ") || "None specified";
-    const missing = (v.missing_skills || []).join(", ") || "None missing";
-    skillsEl.innerHTML = `<strong>Matching Skills:</strong> <span style="color:#4ade80;">${escapeHtml(matching)}</span> | <strong>Skills Gap:</strong> <span style="color:#f87171;">${escapeHtml(missing)}</span>`;
+    // Use LLM skills if available, fallback to old format
+    const matched = (job.skills_matched || v.matching_skills || []).join(", ") || "None specified";
+    const missing = (job.skills_missing || v.missing_skills || []).join(", ") || "None missing";
+    const needed = (job.skills_needed || []).join(", ");
+    let html = `<strong>Matched:</strong> <span style="color:#4ade80;">${escapeHtml(matched)}</span>`;
+    html += ` | <strong>Missing:</strong> <span style="color:#f87171;">${escapeHtml(missing)}</span>`;
+    if (needed) {
+      html += `<br><strong>Skills Required:</strong> ${escapeHtml(needed)}`;
+    }
+    skillsEl.innerHTML = html;
   }
 
   if (reasoningEl) {
-    reasoningEl.innerText = v.reasoning ? `"${v.reasoning}"` : "Evaluation completed.";
+    const summary = job.one_line_summary || v.reasoning || "";
+    reasoningEl.innerText = summary ? `"${summary}"` : "Evaluation completed.";
   }
 
   const applyUrl = job.apply_url || job.career_page_url || "#";
@@ -1542,13 +1570,23 @@ function filterJobs(status, triggerEl) {
   }
 
   const cards = document.querySelectorAll("#jobs-container .clean-job-card");
+  let visibleCount = 0;
+  
   cards.forEach(card => {
     const cardStatus = card.dataset.status || "discovered";
-    if (status === "all" || cardStatus === status) {
-      card.style.display = "flex";
-    } else {
-      card.style.display = "none";
+
+    let show = true;
+    if (status === "low_score") {
+      // Low Score tab: only show unvalidated / low-score jobs
+      show = cardStatus === "discovered";
+    } else if (status !== "all") {
+      // Other tabs: exact match
+      show = cardStatus === status;
     }
+    // "all" shows everything
+
+    card.style.display = show ? "flex" : "none";
+    if (show) visibleCount++;
   });
 }
 

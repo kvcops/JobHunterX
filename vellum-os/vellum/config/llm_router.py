@@ -66,12 +66,11 @@ FALLBACK_CHAINS: Dict[str, List[str]] = {
     "extraction": [
         "gemini/gemini-3.1-flash-lite",
         "groq/openai/gpt-oss-120b",
-        "gemini/gemma-4-31b-it",
     ],
     "browser": [
-        "gemini/gemma-4-31b-it",
         "gemini/gemini-3.1-flash-lite",
         "groq/openai/gpt-oss-20b",
+        "mistral/mistral-large-2512",
     ],
 }
 

@@ -458,7 +458,9 @@ async def run(state: dict) -> dict:
 
     await broadcast_progress(90, f"Total verified active jobs in {location}: {len(jobs)}.")
 
-    # Store jobs in database
+    # Store jobs in database — NO WebSocket events here.
+    # Jobs only appear in UI AFTER LLM validation in graph.py.
+    stored_count = 0
     for item in jobs[:limit]:
         try:
             job = JobListing(
@@ -475,16 +477,7 @@ async def run(state: dict) -> dict:
             if job_id:
                 job_dict["id"] = job_id
                 item["id"] = job_id
-                
-                event_dict = AgentEvent(
-                    agent="geo_search",
-                    event_type="discovery",
-                    job_id=job_id,
-                    message=f"Discovered: {item['company']} — {item['title'][:80]}",
-                    confidence=item.get("confidence", 0.9),
-                ).model_dump(mode="json")
-                events.append(event_dict)
-                await ws_manager.broadcast(event_dict)
+                stored_count += 1
         except Exception as exc:
             log.warning("job_insertion_failed", company=item.get("company"), error=str(exc))
 
