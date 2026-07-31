@@ -227,5 +227,6 @@ class JobPipelineState(TypedDict, total=False):
     outreach_draft: dict
     hitl_request: dict
     browser_result: dict
+    force_apply: bool
     errors: Annotated[list[str], operator.add]
     events: Annotated[list[dict], operator.add]

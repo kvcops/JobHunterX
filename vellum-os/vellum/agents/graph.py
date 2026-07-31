@@ -28,6 +28,7 @@ from vellum.config.logging import get_logger
 from vellum.config import database as db
 from vellum.config.settings import get_settings
 from vellum.models import DiscoveryState, JobPipelineState
+from vellum.utils.json_helper import parse_llm_json
 
 log = get_logger("graph")
 
@@ -70,7 +71,9 @@ def build_validate_only_pipeline():
 # ---------------------------------------------------------------------------
 
 def _should_apply(state: JobPipelineState) -> str:
-    """Route after validation: apply if matched, skip otherwise."""
+    """Route after validation: apply if matched or if user explicitly requested apply."""
+    if state.get("force_apply", False):
+        return "apply"
     validation = state.get("validation", {})
     match_score = validation.get("match_score", 0)
     if match_score >= 0.3:
@@ -188,14 +191,14 @@ async def run_discovery(location: str, profile: dict, role: str | None = None, l
 # Batch Match Scoring — score 10 jobs at a time
 # ---------------------------------------------------------------------------
 
-BATCH_MATCH_SCORING_PROMPT = """You are a top-tier executive talent manager. Compare the candidate profile against multiple job descriptions and assign a match score (0.0-1.0) for each.
+BATCH_MATCH_SCORING_PROMPT = """You are a top-tier executive talent manager. Compare the candidate profile against multiple job descriptions, extract the clean Company Name and clean Job Role, and assign a match score (0.0-1.0) for each.
 
-CRITICAL MATCHING RULES:
-1. Location Match: The candidate targets "{target_location}". Strict onsite in a different city = lower score.
-2. Experience Match: Candidate has "{candidate_experience}". Mismatched seniority = low score.
-3. Skills Match: Weight overlap between candidate skills and JD requirements heavily.
-4. Role Alignment: Job role must align with candidate's target role.
-5. CTC: Only penalize if the JD explicitly states compensation below candidate's expected CTC "{expected_ctc}".
+CRITICAL MATCHING & EXTRACTION RULES:
+1. **Company Extraction**: Extract the real hiring company name (e.g. "GHX", "IQEQ", "ElevenLabs", "CreateAxis Solutions", "Incepteo", "Yuno"). Do NOT use job portals like "Bayt.com", "Weekday", "Greenhouse", "Lever", or "Unknown".
+2. **Job Role Extraction**: Extract the clean specific job title (e.g. "Senior AI Engineer", "Digital & AI Solutions Engineer"). Do NOT use page headers like "ATTACH RESUME/CV" or full sentences.
+3. **Location Match**: The candidate targets "{target_location}". Strict onsite in a different city = lower score.
+4. **Experience Match**: Candidate has "{candidate_experience}". Mismatched seniority = low score.
+5. **Skills Match**: Weight overlap between candidate skills and JD requirements heavily.
 
 Candidate Profile:
 Name: {name}
@@ -209,11 +212,61 @@ Jobs to score:
 
 Return a JSON array of objects, one per job in order:
 [
-  {{"job_index": 0, "match_score": 0.75, "matching_skills": ["Python", "FastAPI"], "missing_skills": ["React"], "reasoning": "Strong backend match"}},
-  ...
+  {{
+    "job_index": 0,
+    "company_name": "Clean Company Name",
+    "job_role": "Clean Job Title",
+    "match_score": 0.75,
+    "matching_skills": ["Python", "FastAPI"],
+    "missing_skills": ["React"],
+    "required_experience": "e.g. 5+ years",
+    "experience_variance": "Candidate: X yrs vs Required: Y yrs",
+    "reasoning": "Strong backend match"
+  }}
 ]
 
-Return valid JSON array only. No markdown commentary."""
+Return valid JSON array only. Do NOT include unescaped quotes or line breaks inside string values."""
+
+
+def _fallback_score_single_job(job: dict, profile: dict, location: str = "") -> dict:
+    """Intelligently score a job deterministically if LLM batch scoring fails or returns empty."""
+    co = job.get("company", "")
+    ro = job.get("role") or job.get("title", "")
+    jd_text = (job.get("jd_text") or "").lower()
+
+    cand_skills = [s.lower().strip() for s in profile.get("skills", []) if s]
+    cand_role = (profile.get("suggested_role") or "Software Engineer").lower()
+    cand_exp = profile.get("relevant_experience", "N/A")
+
+    # 1. Skill Overlap
+    matching = []
+    missing = []
+    for sk in cand_skills:
+        if len(sk) > 1 and sk in jd_text:
+            matching.append(sk.title())
+        elif len(sk) > 1:
+            missing.append(sk.title())
+
+    match_ratio = len(matching) / max(1, len(cand_skills))
+
+    # 2. Role Title Relevance
+    role_match = 0.5
+    if any(term in ro.lower() for term in cand_role.split() if len(term) > 2):
+        role_match = 0.9
+
+    # 3. Calculated Score (Range 0.25 to 0.95)
+    calc_score = round(min(0.95, max(0.25, (match_ratio * 0.55) + (role_match * 0.35) + 0.1)), 2)
+
+    return {
+        "company_name": co or "Tech Company",
+        "job_role": ro or "Software Engineer",
+        "match_score": calc_score,
+        "matching_skills": matching[:8],
+        "missing_skills": missing[:5],
+        "required_experience": "Extracted from JD",
+        "experience_variance": f"Candidate: {cand_exp} vs Job Requirements",
+        "reasoning": f"Calculated fit score of {int(calc_score*100)}% based on {len(matching)} matching technical skills ({', '.join(matching[:3]) or 'Core competencies'})."
+    }
 
 
 async def batch_score_jobs(jobs: list[dict], profile: dict, location: str = "") -> list[dict]:
@@ -264,25 +317,21 @@ async def batch_score_jobs(jobs: list[dict], profile: dict, location: str = "") 
 
     try:
         result = await call_llm_with_fallback("reasoning", messages)
-        content = result["content"]
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-        scores = json.loads(content.strip())
+        scores = parse_llm_json(result.get("content", ""), default=[])
 
-        if isinstance(scores, list) and len(scores) == len(jobs):
-            return scores
-        elif isinstance(scores, list) and len(scores) > 0:
-            # Pad or truncate to match job count
-            while len(scores) < len(jobs):
-                scores.append({"match_score": 0.5, "matching_skills": [], "missing_skills": [], "reasoning": "Default"})
-            return scores[:len(jobs)]
+        if isinstance(scores, list) and len(scores) > 0:
+            final_scores = []
+            for idx, job in enumerate(jobs):
+                if idx < len(scores) and isinstance(scores[idx], dict) and scores[idx].get("match_score") is not None:
+                    final_scores.append(scores[idx])
+                else:
+                    final_scores.append(_fallback_score_single_job(job, profile, location))
+            return final_scores
     except Exception as exc:
         log.warning("batch_score_failed", error=str(exc))
 
-    # Fallback: return default scores
-    return [{"match_score": 0.5, "matching_skills": [], "missing_skills": [], "reasoning": "Batch scoring unavailable"} for _ in jobs]
+    # Fallback: compute intelligent deterministic scores for each job
+    return [_fallback_score_single_job(j, profile, location) for j in jobs]
 
 
 async def run_job_pipeline(
@@ -292,6 +341,7 @@ async def run_job_pipeline(
     event_callback=None,
     search_location: str = "",
     validate_only: bool = True,
+    force_apply: bool = False,
 ) -> dict:
     """Run the per-job pipeline.
 
@@ -303,6 +353,7 @@ async def run_job_pipeline(
         search_location: The location the user searched for (for matching).
         validate_only: If True (default), only validate/tailor. If False,
                        run full pipeline (validate → apply → outreach).
+        force_apply: If True, bypass match threshold and apply directly.
 
     Returns pipeline result dict.
     """
@@ -325,6 +376,7 @@ async def run_job_pipeline(
     initial_state: JobPipelineState = {
         "job": job,
         "profile": profile,
+        "force_apply": force_apply or (not validate_only),
         "errors": [],
         "events": [],
     }
@@ -425,14 +477,25 @@ async def run_full_search(
             })
         return {"run_id": run_id, "jobs_discovered": 0}
 
-    # Phase 2: Batch match scoring (10 jobs at a time)
+    # Phase 2: Verify active URLs & Batch match scoring (10 jobs at a time)
     from vellum.api.ws import manager as ws_manager
+    from vellum.tools.url_verifier import filter_active_jobs
+
+    discovered_jobs = await filter_active_jobs(discovered_jobs)
+    if not discovered_jobs:
+        if event_callback:
+            await event_callback({
+                "agent": "graph",
+                "event_type": "complete",
+                "message": "No active jobs verified.",
+            })
+        return {"run_id": run_id, "jobs_discovered": 0}
 
     if event_callback:
         await event_callback({
             "agent": "graph",
             "event_type": "progress",
-            "message": f"Batch scoring {len(discovered_jobs)} jobs (10 at a time)...",
+            "message": f"Batch scoring {len(discovered_jobs)} verified active jobs...",
         })
 
     batch_size = 10
@@ -445,17 +508,37 @@ async def run_full_search(
 
         try:
             scores = await batch_score_jobs(batch, profile, location)
+            from vellum.utils.job_cleaner import clean_job_title_and_company
+
             for job, score_data in zip(batch, scores):
-                match_score = score_data.get("match_score", 0.5) if isinstance(score_data, dict) else 0.5
+                if not isinstance(score_data, dict):
+                    score_data = {}
+                match_score = score_data.get("match_score", 0.5)
                 job["match_score"] = match_score
 
-                # Persist score to DB immediately
+                # Extract & clean company & role
+                raw_co = score_data.get("company_name") or job.get("company", "")
+                raw_ro = score_data.get("job_role") or job.get("title") or job.get("role", "")
+                clean_co, clean_ro = clean_job_title_and_company(
+                    raw_title=raw_ro,
+                    raw_company=raw_co,
+                    snippet=job.get("jd_text", ""),
+                    apply_url=job.get("apply_url", ""),
+                )
+
+                job["company"] = clean_co
+                job["role"] = clean_ro
+                job["title"] = clean_ro
+
+                # Persist score + cleaned company & role to DB immediately
                 job_id = job.get("id", "")
                 if job_id:
-                    validation_json = json.dumps(score_data) if isinstance(score_data, dict) else "{}"
+                    validation_json = json.dumps(score_data)
                     try:
                         await db.update_job(
                             job_id,
+                            company=clean_co,
+                            role=clean_ro,
                             match_score=match_score,
                             validation_json=validation_json,
                         )

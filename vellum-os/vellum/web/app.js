@@ -365,6 +365,7 @@ async function loadInitialData() {
       if (intvRes.ok) {
         const intvData = await intvRes.json();
         const sessions = intvData.interventions || [];
+        interventionSessions.length = 0;
         sessions.forEach(s => {
           interventionSessions.push({
             job_id: s.job_id,
@@ -615,7 +616,7 @@ function handleSocketMessage(msg) {
   }
 
   // Reload data for job/outreach updates
-  if (msg.event_type === "discovery" || msg.event_type === "complete") {
+  if (msg.event_type === "discovery" || msg.event_type === "complete" || msg.event_type === "job_deleted" || msg.event_type === "jobs_cleared") {
     loadInitialData();
   }
 }
@@ -847,10 +848,13 @@ function renderJobs() {
         <div class="clean-footer-actions">
           <button class="clean-btn sec" onclick="openJobDetailsModal('${job.id}')">Details</button>
           <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="clean-btn icon-link" title="Open Application Link">↗</a>
-          ${job.status === 'matched' || job.status === 'applied' ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
-          ${job.status !== 'skipped' && job.status !== 'applied' && job.status !== 'applying' && job.status !== 'needs_attention' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Apply</button>` : ''}
+          ${job.status === 'matched' || job.status === 'applied' || job.tailored_pdf ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
           ${job.status === 'applying' ? `<span class="clean-btn applying">Applying...</span>` : ''}
-          ${job.status === 'needs_attention' ? `<button class="clean-btn warn" onclick="triggerHitlResume('${job.id}')">Solve Block</button>` : ''}
+          ${job.status === 'applied' ? `<span class="clean-btn applied" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); font-size: 0.78rem; padding: 3px 8px; border-radius: 4px;">Applied ✓</span>` : ''}
+          ${job.status === 'needs_attention' ? `<button class="clean-btn warn" onclick="triggerHitlResume('${job.id}')">Solve Block</button><button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
+          ${job.status === 'failed' || job.status === 'skipped' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
+          ${job.status === 'discovered' || job.status === 'matched' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Apply</button>` : ''}
+          <button class="clean-btn del-btn" onclick="deleteSingleJob(event, '${job.id}')" title="Delete job posting" style="color: #f87171; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); font-size: 0.78rem; padding: 3px 8px; cursor: pointer;">🗑️</button>
         </div>
       </div>
     `;
@@ -972,6 +976,29 @@ function openJobDetailsModal(jobId) {
   if (statusBadge) {
     statusBadge.className = `jd-meta-val job-status-indicator ${job.status}`;
     statusBadge.innerText = (job.status || "discovered").replace('_', ' ');
+  }
+
+  // Render Candidate vs Job Alignment Summary
+  const v = job.validation || {};
+  const expEl = document.getElementById("jd-modal-exp-comparison");
+  const skillsEl = document.getElementById("jd-modal-skills-comparison");
+  const reasoningEl = document.getElementById("jd-modal-reasoning");
+
+  if (expEl) {
+    const candidateExp = currentProfile ? (currentProfile.relevant_experience || "N/A") : "N/A";
+    const reqExp = v.required_experience || "Extracted from JD";
+    const variance = v.experience_variance || `Candidate: ${candidateExp} vs Required: ${reqExp}`;
+    expEl.innerHTML = `<strong>Experience Alignment:</strong> ${escapeHtml(variance)}`;
+  }
+
+  if (skillsEl) {
+    const matching = (v.matching_skills || []).join(", ") || "None specified";
+    const missing = (v.missing_skills || []).join(", ") || "None missing";
+    skillsEl.innerHTML = `<strong>Matching Skills:</strong> <span style="color:#4ade80;">${escapeHtml(matching)}</span> | <strong>Skills Gap:</strong> <span style="color:#f87171;">${escapeHtml(missing)}</span>`;
+  }
+
+  if (reasoningEl) {
+    reasoningEl.innerText = v.reasoning ? `"${v.reasoning}"` : "Evaluation completed.";
   }
 
   const applyUrl = job.apply_url || job.career_page_url || "#";
@@ -1941,6 +1968,244 @@ async function applyToJob(event, jobId) {
     btn.disabled = false;
     btn.classList.remove("applying-indicator");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Toast Notification Engine
+// ---------------------------------------------------------------------------
+function showToast(message, type = "info") {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  const icon = type === "success" ? "✓" : type === "clear" ? "🗑️" : type === "error" ? "⚠️" : "ℹ️";
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <div class="toast-icon">${icon}</div>
+    <div class="toast-message">${escapeHtml(message)}</div>
+  `;
+
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add("visible");
+  });
+
+  setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 400);
+  }, 3500);
+}
+
+// ---------------------------------------------------------------------------
+// Canvas Particle Dustbin Disintegration Engine
+// ---------------------------------------------------------------------------
+function animateDustbinDisintegration(targetCards, onComplete) {
+  if (!targetCards || targetCards.length === 0) {
+    if (onComplete) onComplete();
+    return;
+  }
+
+  const canvas = document.getElementById("particle-disintegration-canvas");
+  const widget = document.getElementById("dustbin-animation-widget");
+  if (!canvas || !widget) {
+    if (onComplete) onComplete();
+    return;
+  }
+
+  // Set high-DPI canvas size
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  const ctx = canvas.getContext("2d");
+
+  // Destination point: Open mouth of the dustbin can
+  const destX = window.innerWidth - 100;
+  const destY = window.innerHeight - 140;
+
+  // Step 1: Slide up dustbin widget & open lid dramatically
+  widget.classList.add("visible");
+  widget.classList.add("open-lid");
+
+  const particles = [];
+  const particleColors = [
+    "#ef4444", "#f87171", "#dc2626", "#f59e0b", "#fbbf24",
+    "#f43f5e", "#ec4899", "#a855f7", "#ffffff", "#38bdf8"
+  ];
+
+  targetCards.forEach(card => {
+    if (card && card.classList) card.classList.add("disintegrating-card");
+    const rect = card ? card.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight / 2, width: 300, height: 180 };
+    
+    // Density: ~200-350 particles per card for Thanos snap disintegrate
+    const cols = 25;
+    const rows = 12;
+    const cellW = rect.width / cols;
+    const cellH = rect.height / rows;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const startX = rect.left + c * cellW + Math.random() * cellW;
+        const startY = rect.top + r * cellH + Math.random() * cellH;
+
+        particles.push({
+          startX: startX,
+          startY: startY,
+          curX: startX,
+          curY: startY,
+          vx: (Math.random() - 0.5) * 8, // Explosive initial velocity
+          vy: (Math.random() - 0.5) * 8 - 3,
+          size: Math.random() * 4 + 2,
+          color: particleColors[Math.floor(Math.random() * particleColors.length)],
+          phase: 1, // Phase 1 = Explode dust, Phase 2 = Swirl to dustbin
+          progress: 0,
+          delay: (c / cols) * 0.25 + (r / rows) * 0.15, // Wave disintegration from top-left
+          speed: 0.015 + Math.random() * 0.02,
+          curve: (Math.random() - 0.5) * 160,
+        });
+      }
+    }
+  });
+
+  let startTime = null;
+  const totalDuration = 1800; // 1.8s total epic sequence
+
+  function drawFrame(timestamp) {
+    if (!startTime) startTime = timestamp;
+    const elapsed = timestamp - startTime;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    let activeCount = 0;
+
+    particles.forEach(p => {
+      // Delay before particle breaks off
+      if (elapsed < p.delay * 1000) {
+        activeCount++;
+        return;
+      }
+
+      p.progress += p.speed;
+      if (p.progress >= 1) return;
+
+      activeCount++;
+      const t = p.progress;
+
+      // Phase 1 (0 to 0.3): Burst outward in dust cloud
+      if (t < 0.25) {
+        const burstT = t / 0.25;
+        p.curX = p.startX + p.vx * burstT * 12;
+        p.curY = p.startY + p.vy * burstT * 12;
+      } else {
+        // Phase 2 (0.25 to 1.0): Accelerate into Dustbin Vortex
+        const flightT = (t - 0.25) / 0.75;
+        const burstX = p.startX + p.vx * 12;
+        const burstY = p.startY + p.vy * 12;
+
+        const controlX = (burstX + destX) / 2 + p.curve;
+        const controlY = Math.min(burstY, destY) - 150;
+
+        p.curX = (1 - flightT) * (1 - flightT) * burstX + 2 * (1 - flightT) * flightT * controlX + flightT * flightT * destX;
+        p.curY = (1 - flightT) * (1 - flightT) * burstY + 2 * (1 - flightT) * flightT * controlY + flightT * flightT * destY;
+      }
+
+      const alpha = t > 0.85 ? (1 - t) / 0.15 : 1;
+
+      // Draw particle with glowing motion trail
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = p.color;
+
+      ctx.beginPath();
+      ctx.arc(p.curX, p.curY, p.size * (1 - t * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Dustbin pulse glow during particle suction
+    if (elapsed > 500 && elapsed < 1400) {
+      widget.classList.add("pulse-glow");
+    } else {
+      widget.classList.remove("pulse-glow");
+    }
+
+    if (elapsed < totalDuration && activeCount > 0) {
+      requestAnimationFrame(drawFrame);
+    } else {
+      // Step 3: Slam lid closed, clear canvas, pulse shockwave
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      widget.classList.remove("open-lid");
+      widget.classList.remove("pulse-glow");
+      widget.classList.add("lid-slam");
+
+      setTimeout(() => {
+        widget.classList.remove("visible");
+        widget.classList.remove("lid-slam");
+        if (onComplete) onComplete();
+      }, 550);
+    }
+  }
+
+  requestAnimationFrame(drawFrame);
+}
+
+async function deleteSingleJob(event, jobId) {
+  if (event) event.stopPropagation();
+  const cardBtn = event ? event.currentTarget : null;
+  const card = cardBtn ? cardBtn.closest(".clean-job-card") : null;
+  const cardsToAnimate = card ? [card] : [];
+
+  animateDustbinDisintegration(cardsToAnimate, async () => {
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${jobId}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        jobs = jobs.filter(j => j.id !== jobId);
+        await loadInitialData();
+        showToast("Job posting & associated CVs deleted", "success");
+      }
+    } catch (err) {
+      console.error("Delete job error", err);
+      showToast("Failed to delete job", "error");
+    }
+  });
+}
+
+function clearAllJobs() {
+  const modal = document.getElementById("clear-confirm-modal");
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closeClearModal() {
+  const modal = document.getElementById("clear-confirm-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function confirmClearAllJobs() {
+  closeClearModal();
+  const allCards = Array.from(document.querySelectorAll(".clean-job-card"));
+
+  animateDustbinDisintegration(allCards, async () => {
+    try {
+      const res = await fetch(`${API_BASE}/jobs/clear`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        jobs = [];
+        outreachDrafts = [];
+        interventionSessions.length = 0;
+        await loadInitialData();
+        showToast("All jobs, optimized CVs & outreach drafts cleared!", "clear");
+      }
+    } catch (err) {
+      console.error("Clear jobs error", err);
+      showToast("Failed to clear jobs", "error");
+    }
+  });
 }
 
 function resetSystemAction() {

@@ -313,6 +313,7 @@
                   <button class="filter-pill" onclick="filterJobs('applying')">Applying</button>
                   <button class="filter-pill" onclick="filterJobs('applied')">Applied</button>
                   <button class="filter-pill" onclick="filterJobs('needs_attention')">Attention</button>
+                  <button class="filter-pill clear-all-btn" onclick="clearAllJobs()" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.3); margin-left: 8px;" title="Clear all jobs in queue">🗑️ Clear All</button>
                 </div>
               </div>
 
@@ -810,6 +811,37 @@
     </div>
   </div>
 
+  <!-- Clear All Confirmation Modal -->
+  <div id="clear-confirm-modal" class="modal-overlay hidden" onclick="if(event.target === this) closeClearModal()">
+    <div class="modal-container glass clear-modal-card" style="max-width: 440px;">
+      <div class="corner top left"></div>
+      <div class="corner top right"></div>
+      <div class="corner bottom left"></div>
+      <div class="corner bottom right"></div>
+
+      <div class="modal-header">
+        <div class="modal-title-with-badge">
+          <h3 style="font-size: 1.1rem; color: #f87171;">🗑️ Clear All Job Applications</h3>
+        </div>
+        <button class="close-modal-btn" onclick="closeClearModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 12px 0;">
+        <p style="color: var(--text-muted, #94a3b8); line-height: 1.6; font-size: 0.92rem; margin-bottom: 12px;">
+          Are you sure you want to clear all discovered jobs from the queue?
+        </p>
+        <p style="color: #f87171; font-size: 0.84rem; font-weight: 600; background: rgba(239, 68, 68, 0.1); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.25);">
+          ⚠️ This will permanently delete all jobs, tailored CVs, and recruiter outreach drafts from your queue.
+        </p>
+      </div>
+      <div class="modal-actions" style="justify-content: flex-end; gap: 12px; margin-top: 16px;">
+        <button class="cta-btn secondary" onclick="closeClearModal()">Cancel</button>
+        <button id="confirm-clear-btn" class="cta-btn danger" onclick="confirmClearAllJobs()" style="background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border: none; font-weight: 600; padding: 8px 18px; border-radius: 8px; cursor: pointer;">
+          <span class="btn-text">Yes, Clear All Jobs</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="job-details-modal" class="modal-overlay hidden" onclick="if(event.target === this) closeJobDetailsModal()">
     <div class="modal-container glass jd-modal-container">
       <!-- Geometric Architectural Corner Notches -->
@@ -845,9 +877,16 @@
           </div>
         </div>
 
-        <div class="jd-section">
-          <h4 class="jd-section-heading">📄 Complete Job Description</h4>
-          <div id="jd-modal-body" class="jd-body-formatted">
+        <div id="jd-modal-validation-summary" class="jd-section" style="margin-top: 16px; margin-bottom: 16px; background: rgba(255,255,255,0.03); padding: 14px; border-radius: 8px; border: 1px solid var(--border); width: 100%;">
+          <h4 class="jd-section-heading" style="margin-bottom: 8px; font-size: 1rem;">📊 Candidate vs Job Alignment</h4>
+          <div id="jd-modal-exp-comparison" style="font-size: 0.88rem; color: var(--text); margin-bottom: 6px;"></div>
+          <div id="jd-modal-skills-comparison" style="font-size: 0.88rem; color: var(--text); margin-bottom: 6px;"></div>
+          <div id="jd-modal-reasoning" style="font-size: 0.84rem; color: var(--text-muted); font-style: italic;"></div>
+        </div>
+
+        <div class="jd-section" style="width: 100%;">
+          <h4 class="jd-section-heading" style="font-size: 1rem; margin-bottom: 8px;">📄 Complete Job Description</h4>
+          <div id="jd-modal-body" class="jd-body-formatted" style="max-height: 420px; overflow-y: auto; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem; line-height: 1.6;">
             <p>Loading job description...</p>
           </div>
         </div>
@@ -861,6 +900,48 @@
       </div>
     </div>
   </div>
+
+  <!-- Canvas for particle disintegration animation -->
+  <canvas id="particle-disintegration-canvas"></canvas>
+
+  <!-- Dustbin Widget Overlay for Card Deletion Animation -->
+  <div id="dustbin-animation-widget" class="dustbin-widget">
+    <div class="dustbin-portal-glow"></div>
+    <div class="dustbin-lid-wrapper">
+      <svg class="dustbin-lid-svg" viewBox="0 0 100 40" width="120" height="48">
+        <rect x="42" y="2" width="16" height="6" rx="3" fill="#f87171" />
+        <path d="M 6 36 L 16 12 C 18 8 22 6 27 6 L 73 6 C 78 6 82 8 84 12 L 94 36 Z" fill="url(#lidGradCyber)" stroke="#ef4444" stroke-width="2"/>
+        <line x1="20" y1="20" x2="80" y2="20" stroke="rgba(255,255,255,0.4)" stroke-width="2"/>
+        <defs>
+          <linearGradient id="lidGradCyber" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ef4444"/>
+            <stop offset="50%" stop-color="#dc2626"/>
+            <stop offset="100%" stop-color="#991b1b"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+    <div class="dustbin-can-wrapper">
+      <svg class="dustbin-can-svg" viewBox="0 0 100 100" width="120" height="120">
+        <path d="M 12 10 L 22 90 C 23 95 28 98 34 98 L 66 98 C 72 98 77 95 78 90 L 88 10 Z" fill="url(#canGradCyber)" stroke="#ef4444" stroke-width="2"/>
+        <line x1="32" y1="20" x2="35" y2="86" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round"/>
+        <line x1="50" y1="20" x2="50" y2="86" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round"/>
+        <line x1="68" y1="20" x2="65" y2="86" stroke="rgba(255,255,255,0.25)" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="50" cy="55" r="12" fill="#ef4444" opacity="0.85" class="dustbin-core-glow"/>
+        <defs>
+          <linearGradient id="canGradCyber" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#2a101b"/>
+            <stop offset="100%" stop-color="#0f0509"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div class="dustbin-vortex-beam"></div>
+      <div class="dustbin-glow-ring"></div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
 
   <script src="app.js?v=20260728_v3"></script>
 </body>

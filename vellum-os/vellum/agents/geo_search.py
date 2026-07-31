@@ -18,6 +18,7 @@ from vellum.config import database as db
 from vellum.tools import ats_api, web_search_scraper
 from vellum.models import JobListing, AgentEvent
 from vellum.api.ws import manager as ws_manager
+from vellum.utils.job_cleaner import clean_job_title_and_company
 
 log = get_logger("geo_search")
 
@@ -233,19 +234,21 @@ async def run(state: dict) -> dict:
             if not _is_relevant_role(title, role):
                 continue
             
-            # Filter by location
-            if not _matches_location_strict(title, job.get("snippet", ""), location):
+            # Lenient pre-verification check: reject only if clearly matching a foreign location
+            loc_line = (title + " " + job.get("snippet", "")).lower()
+            if any(tok in loc_line for tok in FOREIGN_LOCATION_TOKENS):
                 continue
-            
-            # Clean company name
-            company_name = _clean_company_name(job.get("company", ""))
-            if not company_name:
-                # Try to extract from title
-                company_name = _clean_company_name(title.split(" - ")[-1] if " - " in title else "")
-            
+            # Clean company & title
+            company_name, clean_title = clean_job_title_and_company(
+                raw_title=title,
+                raw_company=job.get("company", ""),
+                snippet=job.get("snippet", ""),
+                apply_url=job.get("apply_url", ""),
+            )
+
             jobs.append({
-                "company": company_name or "Unknown",
-                "title": title[:160],
+                "company": company_name,
+                "title": clean_title[:160],
                 "career_page_url": job.get("apply_url", ""),
                 "apply_url": job.get("apply_url", ""),
                 "jd_text": job.get("snippet", "")[:20000],
@@ -287,7 +290,17 @@ async def run(state: dict) -> dict:
         except Exception as exc:
             log.warning("vc_board_discovery_error", error=str(exc))
 
-    await broadcast_progress(90, f"Total discovered: {len(jobs)} jobs.")
+    await broadcast_progress(85, f"Verifying HTTP status and active posting pages for {len(jobs)} jobs...")
+    from vellum.tools.url_verifier import filter_active_jobs
+    jobs = await filter_active_jobs(jobs)
+
+    # Apply strict location filtering on verified jobs using full description
+    jobs = [
+        j for j in jobs
+        if _matches_location_strict(j.get("title", ""), j.get("jd_text", ""), location)
+    ]
+
+    await broadcast_progress(90, f"Total verified active jobs in {location}: {len(jobs)}.")
 
     # Store jobs in database
     for item in jobs[:limit]:

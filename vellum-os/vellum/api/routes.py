@@ -301,6 +301,34 @@ async def get_job(job_id: str):
     return {"job": job}
 
 
+@router.delete("/jobs/{job_id}")
+async def delete_job_endpoint(job_id: str):
+    """Delete a single job listing by ID."""
+    success = await db.delete_job(job_id)
+    if not success:
+        raise HTTPException(404, "Job not found or already deleted")
+    await ws_manager.broadcast({
+        "agent": "system",
+        "event_type": "job_deleted",
+        "job_id": job_id,
+        "message": f"Job {job_id[:8]} deleted.",
+    })
+    return {"status": "ok", "job_id": job_id}
+
+
+@router.post("/jobs/clear")
+@router.delete("/jobs")
+async def clear_jobs_endpoint(status: str = ""):
+    """Clear all jobs (or jobs matching optional status filter) from the database."""
+    count = await db.clear_jobs(status=status or None)
+    await ws_manager.broadcast({
+        "agent": "system",
+        "event_type": "jobs_cleared",
+        "message": f"Cleared {count} jobs.",
+    })
+    return {"status": "ok", "cleared_count": count}
+
+
 @router.post("/jobs/{job_id}/apply")
 async def apply_single_job(job_id: str):
     """Launch the browser agent pipeline independently for a single job.

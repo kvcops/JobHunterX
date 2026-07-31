@@ -15,6 +15,7 @@ from vellum.config.logging import get_logger
 from vellum.config import database as db
 from vellum.tools import scrape, pdf_render
 from vellum.models import AgentEvent
+from vellum.utils.json_helper import parse_llm_json
 
 log = get_logger("validator_tailor")
 
@@ -25,20 +26,25 @@ log = get_logger("validator_tailor")
 VALIDATION_PROMPT = """You are a top-tier executive talent manager. Compare the candidate profile against the target job description.
 
 CRITICAL MATCHING RULES (enforce strictly):
-1. **Location Match**: The candidate targets "{target_location}". If the job is strictly onsite/hybrid in a DIFFERENT city (not remote-eligible), set match_score below 0.25.
-2. **Experience Match**: The candidate has "{candidate_experience}". If the JD requires a level far beyond the candidate (e.g., Staff/Principal for a Junior, or Intern for 5+ yrs experience), set match_score below 0.25.
-3. **Skills Match**: Evaluate overlap between candidate skills and JD requirements. Weight heavily.
-4. **Role Alignment**: Ensure the job role aligns with the candidate's target role and technical background.
-5. **Salary/CTC Match**: The candidate's expected CTC is "{expected_ctc}" and current CTC is "{current_ctc}". Only if the job description explicitly mentions budget, salary range, or compensation: if the job's compensation range is significantly below the candidate's expected CTC, set match_score below 0.25. Otherwise, do not penalize or restrict the score based on CTC if the job does not explicitly state compensation details.
+1. **Company & Role**: Extract the exact clean Company Name and Job Title / Role from the JD.
+2. **Location Match**: The candidate targets "{target_location}". If the job is strictly onsite/hybrid in a DIFFERENT city (not remote-eligible), set match_score below 0.25.
+3. **Experience Match**: Candidate experience is "{candidate_experience}". Extract required experience from JD and compare strictly. If candidate exp varies significantly from JD required exp, detail the exact variance.
+4. **Skills Match**: Evaluate overlap between candidate skills and JD requirements. List matching skills and missing required skills explicitly.
+5. **Salary/CTC Match**: Expected CTC is "{expected_ctc}". Only penalize if JD explicitly specifies a salary below expected CTC.
 
-Return a JSON object with this exact structure:
+Return a valid JSON object only with this exact structure:
 {{
+  "company_name": "Clean Company Name",
+  "job_role": "Clean Job Title",
   "match_score": 0.0-1.0,
   "matching_skills": ["skill1", "skill2"],
   "missing_skills": ["skill3", "skill4"],
-  "location_match": true or false,
-  "experience_match": true or false,
-  "reasoning": "Detailed 2-sentence breakdown of alignment"
+  "required_experience": "e.g. 5+ years",
+  "candidate_experience": "{candidate_experience}",
+  "experience_variance": "Candidate: X yrs vs Required: Y yrs (Gap: Z yrs)",
+  "location_match": true,
+  "experience_match": true,
+  "reasoning": "Detailed 2-sentence explanation of alignment and where candidate vs job requirements vary."
 }}
 
 Candidate Profile:
@@ -47,7 +53,7 @@ Candidate Profile:
 Job Description:
 {jd_text}
 
-Return valid JSON only. No markdown commentary."""
+Return valid JSON object only. Do NOT include unescaped quotes or line breaks inside string values."""
 
 SUMMARY_TAILORING_PROMPT = """You are a world-class executive resume writer. Craft a high-impact, 2-3 sentence Professional Executive Summary for the candidate, tailored specifically to the target Job Description.
 
@@ -314,22 +320,24 @@ Education:
 
     try:
         result = await call_llm_with_fallback("reasoning", validation_messages)
-        content = result["content"]
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-        validation = json.loads(content.strip())
+        parsed = parse_llm_json(result.get("content", ""))
+        if isinstance(parsed, dict):
+            validation = parsed
         validation["confidence"] = min(1.0, validation.get("match_score", 0.0) + 0.2)
     except Exception as exc:
         errors.append(f"Validation error: {exc}")
         log.error("validation_error", job_id=job_id, error=str(exc))
 
-    await db.update_job(
-        job_id,
-        validation_json=json.dumps(validation),
-        match_score=validation.get("match_score", 0.0),
-    )
+    update_fields = {
+        "validation_json": json.dumps(validation),
+        "match_score": validation.get("match_score", 0.0),
+    }
+    if validation.get("company_name") and validation["company_name"] != "Clean Company Name":
+        update_fields["company"] = validation["company_name"]
+    if validation.get("job_role") and validation["job_role"] != "Clean Job Title":
+        update_fields["role"] = validation["job_role"]
+
+    await db.update_job(job_id, **update_fields)
 
     await log_and_broadcast_event(
         "progress",
@@ -338,7 +346,8 @@ Education:
         data=validation
     )
 
-    if validation.get("match_score", 0) < 0.3:
+    is_force_apply = state.get("force_apply", False)
+    if validation.get("match_score", 0) < 0.3 and not is_force_apply:
         await db.update_job(job_id, status="skipped")
         await log_and_broadcast_event(
             "progress",
@@ -371,12 +380,7 @@ Education:
             },
         ]
         sum_res = await call_llm_with_fallback("tailoring", sum_messages)
-        sum_content = sum_res["content"]
-        if "```json" in sum_content:
-            sum_content = sum_content.split("```json")[1].split("```")[0]
-        elif "```" in sum_content:
-            sum_content = sum_content.split("```")[1].split("```")[0]
-        sum_data = json.loads(sum_content.strip())
+        sum_data = parse_llm_json(sum_res.get("content", ""))
         if isinstance(sum_data, dict) and sum_data.get("tailored_summary"):
             tailored_summary = sum_data["tailored_summary"]
             # Sanitize
@@ -407,12 +411,7 @@ Education:
 
         try:
             result = await call_llm_with_fallback("tailoring", tailor_messages)
-            content = result["content"]
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0]
-            new_bullets = json.loads(content.strip())
+            new_bullets = parse_llm_json(result.get("content", ""))
 
             if isinstance(new_bullets, list):
                 valid_bullets = []

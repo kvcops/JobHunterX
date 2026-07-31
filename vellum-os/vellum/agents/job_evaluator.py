@@ -15,6 +15,7 @@ from typing import Any
 from vellum.config.llm_router import call_llm_with_fallback
 from vellum.config.logging import get_logger
 from vellum.config import database as db
+from vellum.utils.json_helper import parse_llm_json
 
 log = get_logger("job_evaluator")
 
@@ -166,13 +167,8 @@ async def evaluate_batch_jobs(jobs: list[dict], profile: dict, target_role: str)
 
     try:
         res = await call_llm_with_fallback("fast", messages)
-        content = res.get("content", "").strip()
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
+        results = parse_llm_json(res.get("content", ""), default=[])
 
-        results = json.loads(content.strip())
         if isinstance(results, list) and len(results) == len(jobs):
             return [bool(r) for r in results]
         elif isinstance(results, dict) and "results" in results:

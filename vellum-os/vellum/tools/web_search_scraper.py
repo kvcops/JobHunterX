@@ -115,20 +115,25 @@ def _build_search_queries(role: str, location: str, company: str = "") -> list[s
     """Build targeted search queries for job discovery."""
     queries = []
     
-    # Primary: specific role + location
-    queries.append(f'"{role}" jobs {location}')
-    queries.append(f'"{role}" hiring {location} apply now')
+    clean_role = role.replace('"', '').strip()
+    
+    # Primary: specific role + location (with and without quotes)
+    queries.append(f'{clean_role} jobs {location}')
+    queries.append(f'"{clean_role}" jobs {location}')
+    queries.append(f'"{clean_role}" hiring {location} apply now')
     
     # With company name if provided
     if company:
-        queries.append(f'"{company}" "{role}" jobs {location}')
+        queries.append(f'"{company}" {clean_role} jobs {location}')
         queries.append(f'"{company}" careers hiring {location}')
     
-    # ATS-specific queries (more likely to find real job pages)
-    queries.append(f'"{role}" {location} site:greenhouse.io OR site:lever.co OR site:ashbyhq.com')
+    # ATS-specific queries (queried separately for better engine response and no quote restrictions)
+    queries.append(f'{clean_role} {location} site:greenhouse.io')
+    queries.append(f'{clean_role} {location} site:lever.co')
+    queries.append(f'{clean_role} {location} site:ashbyhq.com')
     
     # Indian job boards
-    queries.append(f'"{role}" {location} site:hasjob.co')
+    queries.append(f'{clean_role} {location} site:hasjob.co')
     
     return queries
 
@@ -169,9 +174,9 @@ def _is_valid_job_url(url: str) -> bool:
     
     # Good signs: job-related paths or ATS domains
     good_patterns = [
-        "/jobs/", "/job/", "/careers/", "/positions/",
-        "/openings/", "/apply", "/posting/",
-        "boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com",
+        "/jobs", "/job", "/careers", "/positions",
+        "/openings", "/apply", "/posting",
+        "greenhouse.io", "lever.co", "ashbyhq.com",
         "myworkdayjobs.com", "smartrecruiters.com",
     ]
     for pattern in good_patterns:
@@ -500,6 +505,15 @@ async def enrich_job_from_page(job: dict) -> dict:
                 job["location"] = first.get("location", "")
                 job["snippet"] = first.get("snippet", "") or job.get("snippet", "")
                 job["source"] = f"enriched_{first.get('source', 'page')}"
+            else:
+                # Fallback: if no structured sub-jobs extracted, extract clean text of the page itself
+                soup = BeautifulSoup(res.text, "html.parser")
+                for tag in soup(["script", "style", "nav", "footer"]):
+                    tag.decompose()
+                page_text = soup.get_text(separator=" ", strip=True)
+                if len(page_text) > 100:
+                    job["snippet"] = page_text[:20000]
+                    job["source"] = "enriched_direct_page"
             
             return job
     
