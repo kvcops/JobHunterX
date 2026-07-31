@@ -776,7 +776,7 @@ function renderJobs() {
 
     const card = document.createElement("div");
     const matchPercent = getMatchScorePercent(job);
-    const snippetText = job.jd_text ? job.jd_text.slice(0, 130) + "..." : "";
+    const snippetText = job.jd_text ? stripHtml(job.jd_text).slice(0, 130).trim() + "..." : "";
     const applyUrl = job.apply_url || job.career_page_url || "#";
 
     // Extract matching skills
@@ -1521,6 +1521,13 @@ function formatJobStatus(status) {
 function escapeHtml(str) {
   if (!str) return "";
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function stripHtml(html) {
+  if (!html) return "";
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || "";
 }
 
 // Job status filter — reads the data-status attribute stamped onto each

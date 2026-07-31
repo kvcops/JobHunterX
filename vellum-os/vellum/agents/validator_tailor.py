@@ -332,10 +332,15 @@ Education:
         "validation_json": json.dumps(validation),
         "match_score": validation.get("match_score", 0.0),
     }
-    if validation.get("company_name") and validation["company_name"] != "Clean Company Name":
-        update_fields["company"] = validation["company_name"]
-    if validation.get("job_role") and validation["job_role"] != "Clean Job Title":
-        update_fields["role"] = validation["job_role"]
+    invalid_companies = {"clean company name", "not specified", "unknown", "n/a", "tech company", "hiring company", "company name", "none"}
+    extracted_co = validation.get("company_name", "").strip()
+    if extracted_co and extracted_co.lower() not in invalid_companies and len(extracted_co) > 1:
+        update_fields["company"] = extracted_co
+        
+    invalid_roles = {"clean job title", "not specified", "unknown", "n/a", "job title", "software engineer", "role", "none"}
+    extracted_role = validation.get("job_role", "").strip()
+    if extracted_role and extracted_role.lower() not in invalid_roles and len(extracted_role) > 1:
+        update_fields["role"] = extracted_role
 
     await db.update_job(job_id, **update_fields)
 

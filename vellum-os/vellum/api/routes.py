@@ -46,7 +46,8 @@ class ResumeAgentRequest(BaseModel):
 
 _current_profile: dict | None = None
 _search_task: asyncio.Task | None = None
-_pipeline_mode: str = "automatic"  # "automatic" or "manual"
+_apply_tasks: dict[str, asyncio.Task] = {}  # Track per-job apply tasks
+_pipeline_mode: str = "manual"  # "automatic" or "manual"
 
 
 # ---------------------------------------------------------------------------
@@ -114,17 +115,21 @@ async def start_search(request: StartSearchRequest):
     """Start the discovery + per-job pipeline flow."""
     global _search_task
 
-    if _current_profile is None:
-        # Try loading from DB
-        profile = await db.get_latest_profile()
-        if profile is None:
+    # Always fetch the latest profile from DB to avoid stale state
+    profile = await db.get_latest_profile()
+    if profile is None:
+        if _current_profile is not None:
+            profile = _current_profile
+        else:
             raise HTTPException(400, "No resume uploaded yet")
-    else:
-        profile = _current_profile
 
-    # Cancel any running search
+    # Cancel any running search and wait for it to finish
     if _search_task and not _search_task.done():
         _search_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(_search_task), timeout=2.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
     await stop_all_active_browsers()
 
     async def event_callback(event: dict):
@@ -162,6 +167,10 @@ async def stop_browser_endpoint():
     global _search_task
     if _search_task and not _search_task.done():
         _search_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(_search_task), timeout=2.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
     return {"status": "ok", "message": "Browser session stopped successfully."}
 
 
@@ -356,7 +365,10 @@ async def apply_single_job(job_id: str):
             })
 
     # Run in background so the HTTP response returns immediately
-    asyncio.create_task(_run())
+    task = asyncio.create_task(_run())
+    _apply_tasks[job_id] = task
+    # Clean up reference when done
+    task.add_done_callback(lambda _: _apply_tasks.pop(job_id, None))
 
     return {"status": "started", "job_id": job_id, "message": "Application pipeline launched."}
 
@@ -490,6 +502,10 @@ async def reset_system():
     global _search_task, _current_profile
     if _search_task and not _search_task.done():
         _search_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(_search_task), timeout=2.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
         _search_task = None
     
     # Clear active pipelines cache
@@ -510,8 +526,10 @@ async def reset_system():
 async def get_profile():
     """Get the current loaded profile details."""
     global _current_profile
-    if _current_profile is None:
-        _current_profile = await db.get_latest_profile()
+    # Always try DB first for fresh data, fall back to in-memory
+    profile = await db.get_latest_profile()
+    if profile is not None:
+        _current_profile = profile
     return {"profile": _current_profile}
 
 

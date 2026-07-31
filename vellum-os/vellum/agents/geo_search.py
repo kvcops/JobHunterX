@@ -11,6 +11,7 @@ All discovery is direct and structured. No paid APIs.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from vellum.config.logging import get_logger
@@ -97,7 +98,10 @@ def _clean_company_name(raw_name: str) -> str:
 
 
 def _is_relevant_role(role_title: str, target_role: str = "") -> bool:
-    """Check if job title is relevant."""
+    """Check if job title is relevant to the target role.
+
+    Now actively checks role overlap instead of only rejecting obviously wrong titles.
+    """
     title_lower = role_title.lower().strip()
     if not title_lower:
         return False
@@ -109,6 +113,38 @@ def _is_relevant_role(role_title: str, target_role: str = "") -> bool:
     for pat in NON_JOB_TITLE_PATTERNS:
         if re.search(pat, title_lower):
             return False
+
+    # Active role relevance check: at least one meaningful token from target_role
+    # must appear in the job title. This prevents "Data Analyst" from passing
+    # when the user searches for "Software Engineer".
+    if target_role:
+        target_tokens = [t.lower() for t in target_role.split() if len(t) > 2]
+        if target_tokens:
+            title_tokens = set(title_lower.split())
+            # Require at least one target token in title, OR a strong synonym match
+            ROLE_SYNONYMS = {
+                "engineer": {"developer", "sde", "swe", " programmer", "coder"},
+                "developer": {"engineer", "sde", "swe", "programmer"},
+                "software": {"full stack", "fullstack", "backend", "frontend", "front-end", "back-end"},
+                "frontend": {"front-end", "ui ", "react", "vue", "angular"},
+                "backend": {"back-end", "server-side", "api ", "rest"},
+                "full stack": {"fullstack", "full-stack", "software engineer", "web developer"},
+                "data scientist": {"ml engineer", "machine learning", "ai engineer", "data analyst"},
+                "machine learning": {"ml engineer", "ai engineer", "data scientist"},
+                "ai": {"ml", "machine learning", "artificial intelligence", "deep learning"},
+                "devops": {"sre", "platform engineer", "infrastructure", "cloud engineer"},
+                "product manager": {"product owner", "pm ", "program manager"},
+                "analyst": {"data analyst", "business analyst", "analytics"},
+            }
+            expanded_target = set(target_tokens)
+            for token in target_tokens:
+                for syn_key, syn_vals in ROLE_SYNONYMS.items():
+                    if token in syn_key or syn_key in token:
+                        expanded_target.update(syn_vals)
+
+            if not any(t in title_lower for t in expanded_target if len(t) > 2):
+                return False
+
     return True
 
 
@@ -174,11 +210,97 @@ def _matches_location_strict(title: str, jd_text: str, target_location: str) -> 
     if not jd_text or len(jd_text) < 15:
         return True
 
-    for city_synonyms in INDIAN_CITIES.values():
-        if any(syn in title.lower() for syn in city_synonyms):
-            return True
-
     return False
+
+
+async def discover_jobs_from_catalog(location: str, role: str, limit: int = 50) -> list[dict]:
+    """Directly query public ATS APIs for companies in the local TECH_HUB_STARTUPS catalog."""
+    from vellum.tools.ats_api import TECH_HUB_STARTUPS, fetch_greenhouse_jobs, fetch_lever_jobs, fetch_ashby_jobs
+    
+    loc_key = _normalise_city(location)
+    companies = TECH_HUB_STARTUPS.get(loc_key, [])
+    if not companies:
+        # Fallback to general pool of tech startups if location not in catalog
+        companies = TECH_HUB_STARTUPS.get("bengaluru", [])[:40] + TECH_HUB_STARTUPS.get("hyderabad", [])[:40]
+        
+    semaphore = asyncio.Semaphore(15)
+    discovered = []
+    seen_urls = set()
+    company_job_count = {}
+    MAX_PER_COMPANY = 3  # Cap jobs per company to avoid single-company dominance
+    
+    async def _check_company(company_slug: str):
+        async with semaphore:
+            if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
+                return
+
+            # Check Greenhouse
+            try:
+                gh_jobs = await fetch_greenhouse_jobs(company_slug)
+                for job in gh_jobs:
+                    if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
+                        break
+                    url = job.get("apply_url", "")
+                    if url and url in seen_urls:
+                        continue
+                    if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
+                        if url:
+                            seen_urls.add(url)
+                        discovered.append(job)
+                        company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
+            except Exception:
+                pass
+                
+            # Check Lever
+            try:
+                lever_jobs = await fetch_lever_jobs(company_slug)
+                for job in lever_jobs:
+                    if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
+                        break
+                    url = job.get("apply_url", "")
+                    if url and url in seen_urls:
+                        continue
+                    if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
+                        if url:
+                            seen_urls.add(url)
+                        discovered.append(job)
+                        company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
+            except Exception:
+                pass
+                
+            # Check Ashby
+            try:
+                ashby_jobs = await fetch_ashby_jobs(company_slug)
+                for job in ashby_jobs:
+                    if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
+                        break
+                    url = job.get("apply_url", "")
+                    if url and url in seen_urls:
+                        continue
+                    if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
+                        if url:
+                            seen_urls.add(url)
+                        discovered.append(job)
+                        company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
+            except Exception:
+                pass
+
+    tasks = [_check_company(c) for c in companies]
+    await asyncio.gather(*tasks)
+    
+    standardized = []
+    for item in discovered:
+        standardized.append({
+            "company": item["company"],
+            "title": item["title"][:160],
+            "career_page_url": item.get("career_page_url", ""),
+            "apply_url": item.get("apply_url", ""),
+            "jd_text": item.get("jd_text", "")[:20000],
+            "source": item.get("ats_source", "ats_catalog"),
+            "confidence": 0.95,
+        })
+        
+    return standardized
 
 
 async def run(state: dict) -> dict:
@@ -208,59 +330,88 @@ async def run(state: dict) -> dict:
         ).model_dump(mode="json")
         await ws_manager.broadcast(event_dict)
 
-    await broadcast_progress(5, f"Searching for {role} jobs in {location}...")
+    await broadcast_progress(5, f"Starting discovery for {role} in {location}...")
 
-    # --- Primary: Web Search (DuckDuckGo) ---
+    # Global deduplication across all sources
+    seen_urls = set()
+
+    # --- Phase 1: ATS Catalog Search ---
     try:
-        search_limit = min(limit, 50)  # Respect rate limits
-        web_jobs = await web_search_scraper.search_and_enrich(
-            role=role,
-            location=location,
-            company=company,
-            max_results=search_limit,
-            enrich_top=15,  # Enrich top 15 with full page details
-        )
-        
-        # Process and filter jobs
-        for job in web_jobs:
+        await broadcast_progress(10, f"Querying direct ATS endpoints for local {location} startups...")
+        catalog_jobs = await discover_jobs_from_catalog(location, role, limit)
+        for job in catalog_jobs:
             if len(jobs) >= limit:
                 break
-            
-            title = job.get("title", "")
-            if not title:
+            url = job.get("apply_url", "")
+            if url and url in seen_urls:
                 continue
-            
-            # Filter by role relevance
-            if not _is_relevant_role(title, role):
-                continue
-            
-            # Lenient pre-verification check: reject only if clearly matching a foreign location
-            loc_line = (title + " " + job.get("snippet", "")).lower()
-            if any(tok in loc_line for tok in FOREIGN_LOCATION_TOKENS):
-                continue
-            # Clean company & title
-            company_name, clean_title = clean_job_title_and_company(
-                raw_title=title,
-                raw_company=job.get("company", ""),
-                snippet=job.get("snippet", ""),
-                apply_url=job.get("apply_url", ""),
-            )
-
-            jobs.append({
-                "company": company_name,
-                "title": clean_title[:160],
-                "career_page_url": job.get("apply_url", ""),
-                "apply_url": job.get("apply_url", ""),
-                "jd_text": job.get("snippet", "")[:20000],
-                "source": job.get("source", "web_search"),
-                "confidence": 0.85,
-            })
-        
-        await broadcast_progress(60, f"Web search complete: Found {len(jobs)} relevant jobs.")
-    
+            if url:
+                seen_urls.add(url)
+            jobs.append(job)
+        await broadcast_progress(40, f"Catalog query complete: Found {len(jobs)} direct startup jobs.")
     except Exception as exc:
-        log.warning("web_search_error", error=str(exc))
-        errors.append(f"Web search error: {str(exc)[:200]}")
+        log.warning("catalog_discovery_error", error=str(exc))
+
+    # --- Phase 2: Web Search (DuckDuckGo) ---
+    if len(jobs) < limit:
+        try:
+            search_limit = min(limit - len(jobs), 50)  # Respect rate limits
+            await broadcast_progress(45, f"Searching web for additional {role} jobs...")
+            web_jobs = await web_search_scraper.search_and_enrich(
+                role=role,
+                location=location,
+                company=company,
+                max_results=search_limit,
+                enrich_top=15,  # Enrich top 15 with full page details
+                skills=profile.get("skills", []),
+            )
+            
+            # Process and filter jobs
+            for job in web_jobs:
+                if len(jobs) >= limit:
+                    break
+                
+                title = job.get("title", "")
+                if not title:
+                    continue
+                
+                # Filter by role relevance
+                if not _is_relevant_role(title, role):
+                    continue
+                
+                # Deduplicate by URL
+                url = job.get("apply_url", "")
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                
+                # Lenient pre-verification check: reject only if clearly matching a foreign location
+                loc_line = (title + " " + job.get("snippet", "")).lower()
+                if any(tok in loc_line for tok in FOREIGN_LOCATION_TOKENS):
+                    continue
+                # Clean company & title
+                company_name, clean_title = clean_job_title_and_company(
+                    raw_title=title,
+                    raw_company=job.get("company", ""),
+                    snippet=job.get("snippet", ""),
+                    apply_url=job.get("apply_url", ""),
+                )
+    
+                jobs.append({
+                    "company": company_name,
+                    "title": clean_title[:160],
+                    "career_page_url": job.get("apply_url", ""),
+                    "apply_url": job.get("apply_url", ""),
+                    "jd_text": job.get("snippet", "")[:20000],
+                    "source": job.get("source", "web_search"),
+                    "confidence": 0.85,
+                })
+            
+            await broadcast_progress(75, f"Web search complete. Total found so far: {len(jobs)}.")
+        except Exception as exc:
+            log.warning("web_search_error", error=str(exc))
+            errors.append(f"Web search error: {str(exc)[:200]}")
 
     # --- Secondary: VC Portfolio Boards (Getro) ---
     if len(jobs) < limit:
@@ -278,6 +429,11 @@ async def run(state: dict) -> dict:
                         continue
                     if not _matches_location_strict(v_item["title"], v_item.get("jd_text", ""), location):
                         continue
+                    url = v_item.get("apply_url", "")
+                    if url and url in seen_urls:
+                        continue
+                    if url:
+                        seen_urls.add(url)
                     jobs.append({
                         "company": v_item["company"],
                         "title": v_item["title"][:160],

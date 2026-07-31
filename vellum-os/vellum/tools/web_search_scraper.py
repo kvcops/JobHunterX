@@ -44,7 +44,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
 ]
 
-# Domains to skip (aggregators)
+# Domains to skip (aggregators, directories, spam sites)
 SKIP_DOMAINS = {
     "linkedin.com", "indeed.com", "glassdoor.com", "naukri.com",
     "monster.com", "internshala.com", "ambitionbox.com", "jooble.org",
@@ -52,6 +52,14 @@ SKIP_DOMAINS = {
     "adzuna.com", "jora.com", "foundit.in", "shine.com", "timesjobs.com",
     "cutshort.io", "instahyre.com", "hirect.in", "apna.co",
     "wellfound.com", "fresherworld.com", "payscale.com", "jobsora.com",
+    "placementindia.com", "beincareer.com", "onjob.io", "himalayas.app",
+    "jobspipe.dev", "jobgether.com", "bebee.com", "click.in", "workindia.in",
+    "fresherslive.com", "unstop.com", "glassdoor.co.in", "indeed.co.in",
+    "jooble.in", "grabjobs.co", "careerjet.in", "leverageedu.com",
+    "indgovtjobs.in", "sarkariresult.com", "freejobalert.com", "naukrirecruiter",
+    "monsterindia.com", "rekrute.com", "updazz.com", "jobrapido.com",
+    "safalta.com", "winitjobs.com", "adzuna.in", "jora.co.in", "glassdoor.sg",
+    "indeed.sg", "linkedin.sg", "hasjob.co",
 }
 
 
@@ -111,7 +119,7 @@ class RateLimiter:
 # DuckDuckGo Search
 # ---------------------------------------------------------------------------
 
-def _build_search_queries(role: str, location: str, company: str = "") -> list[str]:
+def _build_search_queries(role: str, location: str, company: str = "", skills: list[str] | None = None) -> list[str]:
     """Build targeted search queries for job discovery."""
     queries = []
     
@@ -126,6 +134,16 @@ def _build_search_queries(role: str, location: str, company: str = "") -> list[s
     if company:
         queries.append(f'"{company}" {clean_role} jobs {location}')
         queries.append(f'"{company}" careers hiring {location}')
+    
+    # Skill-based queries: use top 3 most specific skills for targeted search
+    if skills:
+        # Pick skills that are specific enough (len > 3, not generic terms)
+        specific_skills = [s for s in skills if len(s) > 3 and s.lower() not in {
+            "communication", "leadership", "teamwork", "problem solving",
+            " analytical", "management", "agile", "sql",
+        }][:3]
+        for skill in specific_skills:
+            queries.append(f'"{skill}" "{clean_role}" jobs {location}')
     
     # ATS-specific queries (queried separately for better engine response and no quote restrictions)
     queries.append(f'{clean_role} {location} site:greenhouse.io')
@@ -242,18 +260,81 @@ async def _search_duckduckgo(query: str, max_results: int = 10) -> list[dict]:
         return []
 
 
+async def filter_shady_and_aggregator_jobs_with_llm(results: list[dict], role: str, location: str) -> list[dict]:
+    """Use LLM to classify and filter out shady sites, third-party aggregators, and spam directories.
+    
+    Returns only high-quality direct career/job posting pages matching the target role and location.
+    """
+    from vellum.config.llm_router import call_llm_with_fallback
+    from vellum.utils.json_helper import parse_llm_json
+    
+    if not results:
+        return []
+        
+    prompt = f"""You are an elite job discovery assistant. Your goal is to review a list of web search results and select ONLY the high-quality, authentic, direct application pages (like Greenhouse, Lever, Ashby, Workday, or a company's direct career section).
+    
+    CRITICAL CLASSIFICATION RULES:
+    1. **Direct Application only**: Keep ONLY URLs that lead to direct application forms or official company job postings.
+    2. **Exclude Shady/Aggregators**: Strict reject for third-party directories, generic job aggregators, spam lists, blogs, walk-in summaries, or forums (e.g. PlacementIndia, BeInCareer, OnJob, Jobspipe, Jobgether, etc. - even if not explicitly in standard lists).
+    3. **Role & Location Check**: The target role is "{role}" and location is "{location}". Discard anything that doesn't align.
+    
+    List of results to classify:
+    """
+    
+    items = []
+    for idx, r in enumerate(results):
+        items.append(f"[{idx}] Title: {r.get('title')}\nURL: {r.get('apply_url')}\nSnippet: {r.get('snippet')}\n")
+        
+    prompt += "\n".join(items)
+    prompt += """
+    Return a JSON array of objects representing the index and classification:
+    [
+      {{
+        "index": 0,
+        "is_direct_job_page": true/false,
+        "company_name": "Name of the actual hiring company",
+        "reason": "Why this is classified as direct or rejected as aggregator/shady"
+      }}
+    ]
+    Return valid JSON array only. No markdown formatting or explanation outside JSON."""
+    
+    messages = [
+        {"role": "system", "content": "You are a professional recruiting coordinator."},
+        {"role": "user", "content": prompt}
+    ]
+    
+    try:
+        res = await call_llm_with_fallback("fast", messages)
+        classifications = parse_llm_json(res.get("content", ""), default=[])
+        
+        filtered = []
+        if isinstance(classifications, list):
+            class_map = {{item.get("index"): item for item in classifications if isinstance(item, dict) and "index" in item}}
+            for idx, r in enumerate(results):
+                info = class_map.get(idx)
+                if info and info.get("is_direct_job_page") is True:
+                    if info.get("company_name") and info["company_name"].lower() not in {"unknown", "not specified", "n/a", "company", "hiring company"}:
+                        r["company"] = info["company_name"]
+                    filtered.append(r)
+        return filtered
+    except Exception as exc:
+        log.warning("llm_filtering_failed", error=str(exc))
+        return results
+
+
 async def search_jobs_via_web(
     role: str,
     location: str,
     company: str = "",
     max_results: int = 30,
     rate_limiter: RateLimiter | None = None,
+    skills: list[str] | None = None,
 ) -> list[dict]:
     """Search for jobs using DuckDuckGo web search."""
     if rate_limiter is None:
         rate_limiter = RateLimiter()
     
-    queries = _build_search_queries(role, location, company)
+    queries = _build_search_queries(role, location, company, skills=skills)
     all_jobs = []
     seen_urls = set()
     
@@ -281,6 +362,9 @@ async def search_jobs_via_web(
                 all_jobs.append(job)
         
         rate_limiter.record_success()
+    
+    # Filter out shady/aggregator jobs using LLM
+    all_jobs = await filter_shady_and_aggregator_jobs_with_llm(all_jobs, role, location)
     
     log.info("web_search_complete", query=f"{role} in {location}", found=len(all_jobs))
     return all_jobs
@@ -531,6 +615,7 @@ async def search_and_enrich(
     company: str = "",
     max_results: int = 30,
     enrich_top: int = 10,
+    skills: list[str] | None = None,
 ) -> list[dict]:
     """Search for jobs using multiple sources and enrich top results.
     
@@ -544,6 +629,7 @@ async def search_and_enrich(
         company: Optional company name to focus on
         max_results: Total results to fetch (25-50)
         enrich_top: How many top results to fetch full details for
+        skills: Optional list of candidate skills for targeted search
     
     Returns:
         List of enriched job dicts
@@ -587,6 +673,7 @@ async def search_and_enrich(
             role, location, company,
             max_results=max_results - len(all_jobs),
             rate_limiter=rate_limiter,
+            skills=skills,
         )
         for job in web_jobs:
             url = job.get("apply_url", "")

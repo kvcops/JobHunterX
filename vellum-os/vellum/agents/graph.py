@@ -127,6 +127,7 @@ def build_job_pipeline():
 _discovery_graph = None
 _job_pipeline = None
 _validate_only_pipeline = None
+_graph_lock = asyncio.Lock()
 
 # Active pipeline references for HITL resume
 _active_pipelines: dict[str, dict] = {}
@@ -228,14 +229,15 @@ Return a JSON array of objects, one per job in order:
 Return valid JSON array only. Do NOT include unescaped quotes or line breaks inside string values."""
 
 
-def _fallback_score_single_job(job: dict, profile: dict, location: str = "") -> dict:
+def _fallback_score_single_job(job: dict, profile: dict, location: str = "", target_role: str = "") -> dict:
     """Intelligently score a job deterministically if LLM batch scoring fails or returns empty."""
     co = job.get("company", "")
     ro = job.get("role") or job.get("title", "")
     jd_text = (job.get("jd_text") or "").lower()
 
     cand_skills = [s.lower().strip() for s in profile.get("skills", []) if s]
-    cand_role = (profile.get("suggested_role") or "Software Engineer").lower()
+    # Use user-specified target role, fall back to suggested_role
+    cand_role = (target_role or profile.get("suggested_role") or "Software Engineer").lower()
     cand_exp = profile.get("relevant_experience", "N/A")
 
     # 1. Skill Overlap
@@ -269,7 +271,7 @@ def _fallback_score_single_job(job: dict, profile: dict, location: str = "") -> 
     }
 
 
-async def batch_score_jobs(jobs: list[dict], profile: dict, location: str = "") -> list[dict]:
+async def batch_score_jobs(jobs: list[dict], profile: dict, location: str = "", target_role: str = "") -> list[dict]:
     """Score up to 10 jobs in a single LLM call for efficiency.
     
     Returns list of dicts with match_score, matching_skills, missing_skills, reasoning.
@@ -280,7 +282,8 @@ async def batch_score_jobs(jobs: list[dict], profile: dict, location: str = "") 
         return []
 
     name = profile.get("name", "Candidate")
-    target_role = profile.get("suggested_role", "Software Engineer")
+    # Use the user-specified target role, falling back to suggested_role only if not provided
+    effective_role = target_role or profile.get("suggested_role", "Software Engineer")
     skills = ", ".join(profile.get("skills", [])[:20])
     candidate_experience = profile.get("relevant_experience", "N/A")
     summary = profile.get("summary", "")[:300]
@@ -304,7 +307,7 @@ async def batch_score_jobs(jobs: list[dict], profile: dict, location: str = "") 
             "role": "user",
             "content": BATCH_MATCH_SCORING_PROMPT.format(
                 name=name,
-                target_role=target_role,
+                target_role=effective_role,
                 skills=skills,
                 candidate_experience=candidate_experience,
                 summary=summary,
@@ -325,13 +328,13 @@ async def batch_score_jobs(jobs: list[dict], profile: dict, location: str = "") 
                 if idx < len(scores) and isinstance(scores[idx], dict) and scores[idx].get("match_score") is not None:
                     final_scores.append(scores[idx])
                 else:
-                    final_scores.append(_fallback_score_single_job(job, profile, location))
+                    final_scores.append(_fallback_score_single_job(job, profile, location, effective_role))
             return final_scores
     except Exception as exc:
         log.warning("batch_score_failed", error=str(exc))
 
     # Fallback: compute intelligent deterministic scores for each job
-    return [_fallback_score_single_job(j, profile, location) for j in jobs]
+    return [_fallback_score_single_job(j, profile, location, effective_role) for j in jobs]
 
 
 async def run_job_pipeline(
@@ -498,6 +501,9 @@ async def run_full_search(
             "message": f"Batch scoring {len(discovered_jobs)} verified active jobs...",
         })
 
+    # Use the user-specified role for scoring, falling back to profile's suggested role
+    effective_role = role or profile.get("suggested_role", "Software Engineer")
+
     batch_size = 10
     for i in range(0, len(discovered_jobs), batch_size):
         batch = discovered_jobs[i:i + batch_size]
@@ -507,7 +513,7 @@ async def run_full_search(
         log.info("batch_scoring", batch=batch_num, total=total_batches, jobs_in_batch=len(batch))
 
         try:
-            scores = await batch_score_jobs(batch, profile, location)
+            scores = await batch_score_jobs(batch, profile, location, target_role=effective_role)
             from vellum.utils.job_cleaner import clean_job_title_and_company
 
             for job, score_data in zip(batch, scores):

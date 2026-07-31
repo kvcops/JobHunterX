@@ -50,8 +50,8 @@ def clean_job_title_and_company(
     snippet_text = (snippet or "").strip()
     url_str = (apply_url or "").strip()
 
-    # Step 1: Clean raw company if it's a portal, "Unknown", or contains a role keyword
-    if company.lower() in ("unknown", "n/a", "none") or any(p in company.lower() for p in PORTAL_DOMAINS) or any(k in company.lower() for k in ROLE_KEYWORDS):
+    # Step 1: Clean raw company if it's a portal, "Unknown", placeholder, or contains a role keyword
+    if company.lower() in ("unknown", "n/a", "none", "not specified", "not-specified", "unspecified", "clean company name") or any(p in company.lower() for p in PORTAL_DOMAINS) or any(k in company.lower() for k in ROLE_KEYWORDS):
         company = ""
 
     # Step 2: Check snippet for explicit "Company Name: X" or "Company: X"

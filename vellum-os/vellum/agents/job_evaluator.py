@@ -97,13 +97,34 @@ def _heuristic_match_score(job: dict, profile: dict, target_role: str) -> float:
     matched = sum(1 for s in profile_skills if s and len(s) > 2 and s in haystack)
     skill_ratio = matched / len(profile_skills) if profile_skills else 0
 
-    # Role token overlap
+    # Role token overlap — weighted more heavily now
     role_tokens = [t.lower() for t in (target_role or "").split() if len(t) > 2]
     role_hits = sum(1 for t in role_tokens if t in haystack)
     role_ratio = (role_hits / len(role_tokens)) if role_tokens else 0.5
 
-    # Weighted blend; clamp to [0.1, 0.95]
-    score = 0.35 + 0.45 * skill_ratio + 0.20 * role_ratio
+    # Experience match bonus/penalty
+    exp_bonus = 0.0
+    qa_memory = profile.get("qa_memory", {})
+    if isinstance(qa_memory, dict):
+        yoe = qa_memory.get("years_of_experience", "")
+    else:
+        yoe = getattr(qa_memory, "years_of_experience", "") or ""
+    if yoe:
+        try:
+            user_yoe = float(re.search(r"(\d+)", str(yoe)).group(1))
+            jd_exp = extract_experience_from_jd(job.get("jd_text", ""))
+            if jd_exp is not None:
+                if user_yoe >= jd_exp:
+                    exp_bonus = 0.05  # Good match
+                elif user_yoe >= jd_exp * 0.7:
+                    exp_bonus = 0.0  # Close enough
+                else:
+                    exp_bonus = -0.1  # Underqualified
+        except (AttributeError, ValueError):
+            pass
+
+    # Weighted blend: role alignment now worth 35% (was 20%), skills 45%
+    score = 0.30 + 0.45 * skill_ratio + 0.25 * role_ratio + exp_bonus
     return max(0.10, min(0.95, round(score, 2)))
 
 BATCH_EVALUATION_PROMPT = """You are an expert AI Job Recruiter. Evaluate a batch of job listings against a candidate profile to determine which jobs are a good fit.
@@ -195,15 +216,47 @@ async def filter_jobs(jobs: list[dict], profile: dict, target_role: str) -> list
 
     # Extract user experience from profile
     user_experience = None
-    exp_str = profile.get("relevant_experience", "")
-    if exp_str:
+    
+    # First try qa_memory.years_of_experience (most reliable numeric field)
+    qa_memory = profile.get("qa_memory", {})
+    if isinstance(qa_memory, dict):
+        yoe = qa_memory.get("years_of_experience", "")
+    else:
+        yoe = getattr(qa_memory, "years_of_experience", "") or ""
+    if yoe:
         try:
-            import re as _re
-            match = _re.search(r"(\d+)", str(exp_str))
+            match = re.search(r"(\d+)", str(yoe))
             if match:
                 user_experience = float(match.group(1))
         except (AttributeError, ValueError):
             pass
+    
+    # Fallback: extract from relevant_experience text (e.g. "3+ Years in AI/ML")
+    if user_experience is None:
+        exp_str = profile.get("relevant_experience", "")
+        if exp_str:
+            try:
+                match = re.search(r"(\d+)", str(exp_str))
+                if match:
+                    user_experience = float(match.group(1))
+            except (AttributeError, ValueError):
+                pass
+    
+    # Fallback: calculate from experience entries
+    if user_experience is None:
+        experience_entries = profile.get("experience", [])
+        if experience_entries:
+            # Count unique companies as a rough experience proxy
+            companies = set()
+            for exp in experience_entries:
+                if isinstance(exp, dict):
+                    c = exp.get("company", "")
+                else:
+                    c = getattr(exp, "company", "")
+                if c:
+                    companies.add(c.lower().strip())
+            if companies:
+                user_experience = max(1.0, float(len(companies)))
 
     heuristic_passed = []
     for job in jobs:

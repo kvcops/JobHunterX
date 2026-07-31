@@ -377,11 +377,15 @@ async def insert_outreach(draft: dict) -> str:
 
 
 async def get_outreach_drafts(limit: int = 100) -> list[dict]:
-    """Return all outreach drafts."""
+    """Return active outreach drafts for existing jobs."""
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            "SELECT * FROM outreach_drafts ORDER BY created_at DESC LIMIT ?", (limit,)
+            """SELECT o.* FROM outreach_drafts o
+               JOIN jobs j ON o.job_id = j.id
+               WHERE o.status != 'discarded'
+               ORDER BY o.created_at DESC
+               LIMIT ?""", (limit,)
         )
         rows = await cursor.fetchall()
         result = []
