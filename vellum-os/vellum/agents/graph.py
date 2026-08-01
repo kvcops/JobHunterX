@@ -66,7 +66,7 @@ def build_validate_only_pipeline():
 
 
 # ---------------------------------------------------------------------------
-# Graph 2b: Full Apply Pipeline (user-triggered)
+# Graph 2b: Full Apply Pipeline (user-triggered, automatic mode)
 # Pipeline: resume/CV generation → contact search → cold email → browser apply
 # ---------------------------------------------------------------------------
 
@@ -79,6 +79,38 @@ def _should_apply(state: JobPipelineState) -> str:
     if match_score >= 0.3:
         return "apply"
     return "skip"
+
+
+def build_prep_pipeline():
+    """Build the per-job PREP pipeline (manual mode Apply button).
+
+    Sequence: validate/tailor → contact search → email draft → STOP.
+
+    In manual mode the user reviews contacts + the drafted outreach email
+    before submitting anything themselves — the browser apply step is NOT
+    run. Browser auto-submit only happens in automatic mode.
+    """
+    checkpointer = InMemorySaver()
+
+    graph = StateGraph(JobPipelineState)
+
+    graph.add_node("validate_tailor", validator_tailor.run)
+    graph.add_node("find_contacts", contact_finder.run)
+    graph.add_node("draft_email", email_drafter.run)
+
+    graph.set_entry_point("validate_tailor")
+    graph.add_conditional_edges(
+        "validate_tailor",
+        _should_apply,
+        {
+            "apply": "find_contacts",
+            "skip": END,
+        },
+    )
+    graph.add_edge("find_contacts", "draft_email")
+    graph.add_edge("draft_email", END)
+
+    return graph.compile(checkpointer=checkpointer)
 
 
 def build_job_pipeline():
@@ -126,6 +158,7 @@ def build_job_pipeline():
 # Module-level graph instances
 _discovery_graph = None
 _job_pipeline = None
+_prep_pipeline = None
 _validate_only_pipeline = None
 _graph_lock = asyncio.Lock()
 
@@ -145,6 +178,13 @@ def get_validate_only_pipeline():
     if _validate_only_pipeline is None:
         _validate_only_pipeline = build_validate_only_pipeline()
     return _validate_only_pipeline
+
+
+def get_prep_pipeline():
+    global _prep_pipeline
+    if _prep_pipeline is None:
+        _prep_pipeline = build_prep_pipeline()
+    return _prep_pipeline
 
 
 def get_job_pipeline():
@@ -345,6 +385,7 @@ async def run_job_pipeline(
     search_location: str = "",
     validate_only: bool = True,
     force_apply: bool = False,
+    include_browser: bool = True,
 ) -> dict:
     """Run the per-job pipeline.
 
@@ -355,15 +396,19 @@ async def run_job_pipeline(
         event_callback: Async callable for streaming events.
         search_location: The location the user searched for (for matching).
         validate_only: If True (default), only validate/tailor. If False,
-                       run full pipeline (validate → apply → outreach).
+                       run the apply pipeline.
         force_apply: If True, bypass match threshold and apply directly.
+        include_browser: When False (manual mode), the pipeline stops after
+                         contact search + email draft — no browser submit.
 
     Returns pipeline result dict.
     """
     if validate_only:
         pipeline = get_validate_only_pipeline()
-    else:
+    elif include_browser:
         pipeline = get_job_pipeline()
+    else:
+        pipeline = get_prep_pipeline()
     job_id = job.get("id", str(uuid.uuid4()))
     thread_id = f"job-{job_id}"
 
@@ -654,11 +699,13 @@ async def run_full_search(
 async def run_single_job_apply(
     job_id: str,
     event_callback=None,
+    include_browser: bool = True,
 ) -> dict:
     """Run the per-job pipeline independently for a single job.
 
     Used when the user clicks 'Apply' on an individual job card.
     Fetches the job and latest profile from DB.
+    include_browser=False (manual mode): stops after contacts + email draft.
     """
     job = await db.get_job(job_id)
     if not job:
@@ -679,6 +726,7 @@ async def run_single_job_apply(
     result = await run_job_pipeline(
         job, profile, run_id, _event_cb,
         search_location=job.get("search_location", ""),
-        validate_only=False,  # Full pipeline: validate → contact search → email → apply
+        validate_only=False,
+        include_browser=include_browser,
     )
     return result

@@ -44,6 +44,34 @@ class TestRoutesWiring:
         ).read_text(encoding="utf-8")
         assert "_pipeline_mode: str = \"manual\"" in routes_src
 
+    def test_apply_button_honors_mode(self):
+        """Apply button must skip the browser in manual mode and include it
+        in automatic mode (contacts + email draft always run)."""
+        routes_src = Path(
+            "vellum/api/routes.py"
+        ).read_text(encoding="utf-8")
+        assert "include_browser=(_pipeline_mode == \"automatic\")" in routes_src
+
+
+class TestPrepPipeline:
+    def test_run_single_job_apply_has_include_browser_param(self):
+        sig = inspect.signature(graph.run_single_job_apply)
+        assert "include_browser" in sig.parameters
+        assert sig.parameters["include_browser"].default is True
+
+    def test_run_job_pipeline_has_include_browser_param(self):
+        sig = inspect.signature(graph.run_job_pipeline)
+        assert "include_browser" in sig.parameters
+        assert sig.parameters["include_browser"].default is True
+
+    def test_prep_pipeline_has_no_browser_node(self):
+        """Manual-mode prep pipeline must stop after drafting the email."""
+        pipeline = graph.get_prep_pipeline()
+        node_names = set(pipeline.get_graph().nodes.keys())
+        assert "find_contacts" in node_names
+        assert "draft_email" in node_names
+        assert "browse_apply" not in node_names
+
 
 class TestEffectiveMaxJobs:
     def test_small_limit_floor(self):

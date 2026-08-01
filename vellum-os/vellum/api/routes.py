@@ -341,10 +341,12 @@ async def clear_jobs_endpoint(status: str = ""):
 
 @router.post("/jobs/{job_id}/apply")
 async def apply_single_job(job_id: str):
-    """Launch the browser agent pipeline independently for a single job.
+    """Run the per-job pipeline when the user clicks 'Apply' on a job card.
 
-    Used when the user clicks 'Apply' on an individual job card.
-    Runs the full validate → tailor → apply → outreach pipeline.
+    MANUAL mode (default): runs validate → contact search → email draft and
+    stops — the browser is never launched; the user reviews the draft and
+    submits themselves.
+    AUTOMATIC mode: additionally launches the browser agent to auto-submit.
     """
     from vellum.agents.graph import run_single_job_apply
 
@@ -354,7 +356,10 @@ async def apply_single_job(job_id: str):
 
     async def _run():
         try:
-            result = await run_single_job_apply(job_id)
+            result = await run_single_job_apply(
+                job_id,
+                include_browser=(_pipeline_mode == "automatic"),
+            )
             log.info("single_job_apply_complete", job_id=job_id, result_keys=list(result.keys()) if isinstance(result, dict) else str(result))
         except Exception as exc:
             log.error("single_job_apply_error", job_id=job_id, error=str(exc))
