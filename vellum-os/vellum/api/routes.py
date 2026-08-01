@@ -144,6 +144,7 @@ async def start_search(request: StartSearchRequest):
                 role=request.role,
                 limit=request.limit,
                 event_callback=event_callback,
+                auto_apply=(_pipeline_mode == "automatic"),
             )
             log.info("search_complete", result=result)
         except Exception as exc:

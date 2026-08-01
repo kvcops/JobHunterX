@@ -149,9 +149,15 @@ def _build_search_queries(role: str, location: str, company: str = "", skills: l
     queries.append(f'{clean_role} {location} site:greenhouse.io')
     queries.append(f'{clean_role} {location} site:lever.co')
     queries.append(f'{clean_role} {location} site:ashbyhq.com')
+    queries.append(f'{clean_role} {location} site:myworkdayjobs.com')
+    queries.append(f'{clean_role} {location} site:jobs.smartrecruiters.com')
+    queries.append(f'{clean_role} {location} site:freshteam.com')
     
     # Indian job boards
     queries.append(f'{clean_role} {location} site:hasjob.co')
+    
+    # Company-direct career page queries (skip aggregator portals)
+    queries.append(f'{clean_role} {location} careers apply')
     
     return queries
 
@@ -194,8 +200,11 @@ def _is_valid_job_url(url: str) -> bool:
     good_patterns = [
         "/jobs", "/job", "/careers", "/positions",
         "/openings", "/apply", "/posting",
+        "/position/", "/job/", "/open-positions", "/work-with-us",
+        "/join-us", "/vacancies", "/role/", "/career/",
         "greenhouse.io", "lever.co", "ashbyhq.com",
         "myworkdayjobs.com", "smartrecruiters.com",
+        "freshteam.com", "recruitee.com", "breezy.hr",
     ]
     for pattern in good_patterns:
         if pattern in path or pattern in domain:
@@ -246,18 +255,76 @@ def _extract_job_from_search_result(result: dict) -> dict | None:
 
 
 async def _search_duckduckgo(query: str, max_results: int = 10) -> list[dict]:
-    """Search DuckDuckGo via ddgs library."""
+    """Search DuckDuckGo via ddgs library, falling back to Bing HTML scraping."""
     from ddgs import DDGS
-    
+
     def _do_search():
         with DDGS() as ddgs:
             return list(ddgs.text(query, max_results=max_results))
-    
+
     try:
         return await asyncio.to_thread(_do_search)
     except Exception as exc:
         log.warning("ddgs_search_failed", error=str(exc)[:100])
+        return await _search_bing_html(query, max_results)
+
+
+async def _search_bing_html(query: str, max_results: int = 10) -> list[dict]:
+    """Fallback: scrape Bing HTML search results (no API key needed)."""
+    import urllib.parse
+
+    url = "https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&count=" + str(max_results)
+    headers = {**_get_random_headers(), "Referer": "https://www.bing.com/"}
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True, headers=headers) as client:
+            res = await client.get(url)
+            if res.status_code != 200:
+                return []
+            soup = BeautifulSoup(res.text, "html.parser")
+            results = []
+            for li in soup.select("li.b_algo")[:max_results]:
+                a = li.select_one("h2 a")
+                if not a:
+                    continue
+                href = a.get("href", "")
+                title = a.get_text(strip=True)
+                snippet_el = li.select_one(".b_caption p") or li.select_one("p")
+                snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                if href and title:
+                    results.append({
+                        "href": href,
+                        "title": title,
+                        "body": snippet,
+                    })
+            if results:
+                log.info("bing_fallback_success", query=query[:60], found=len(results))
+            return results
+    except Exception as exc:
+        log.warning("bing_fallback_failed", error=str(exc)[:100])
         return []
+
+
+def _build_classification_map(classifications: list) -> dict:
+    """Build {result_index: classification} from LLM output.
+
+    Extracted as a pure function so the LLM filter's core logic is
+    unit-testable. Returns an empty dict when the model output is unusable.
+    """
+    if not isinstance(classifications, list):
+        return {}
+    class_map = {}
+    for item in classifications:
+        if not isinstance(item, dict) or "index" not in item:
+            continue
+        idx = item.get("index")
+        if isinstance(idx, bool) or isinstance(idx, float):
+            continue
+        if isinstance(idx, str) and idx.lstrip("-").isdigit():
+            idx = int(idx)
+        elif not isinstance(idx, int):
+            continue
+        class_map[idx] = item
+    return class_map
 
 
 async def filter_shady_and_aggregator_jobs_with_llm(results: list[dict], role: str, location: str) -> list[dict]:
@@ -309,7 +376,7 @@ async def filter_shady_and_aggregator_jobs_with_llm(results: list[dict], role: s
         
         filtered = []
         if isinstance(classifications, list):
-            class_map = {{item.get("index"): item for item in classifications if isinstance(item, dict) and "index" in item}}
+            class_map = _build_classification_map(classifications)
             for idx, r in enumerate(results):
                 info = class_map.get(idx)
                 if info and info.get("is_direct_job_page") is True:
@@ -580,6 +647,15 @@ async def enrich_job_from_page(job: dict) -> dict:
             if res.status_code != 200:
                 return job
             
+            # Always extract clean readable page text (this IS the job page body)
+            soup = BeautifulSoup(res.text, "html.parser")
+            for tag in soup(["script", "style", "nav", "footer", "header", "form"]):
+                tag.decompose()
+            page_text = soup.get_text(separator=" ", strip=True)
+            if len(page_text) > 100:
+                job["jd_text"] = page_text[:20000]
+                job["snippet"] = page_text[:500]
+            
             page_jobs = _extract_jobs_from_page(res.text, url)
             
             if page_jobs:
@@ -587,17 +663,9 @@ async def enrich_job_from_page(job: dict) -> dict:
                 job["title"] = first.get("title") or job["title"]
                 job["company"] = first.get("company") or job.get("company", "")
                 job["location"] = first.get("location", "")
-                job["snippet"] = first.get("snippet", "") or job.get("snippet", "")
                 job["source"] = f"enriched_{first.get('source', 'page')}"
             else:
-                # Fallback: if no structured sub-jobs extracted, extract clean text of the page itself
-                soup = BeautifulSoup(res.text, "html.parser")
-                for tag in soup(["script", "style", "nav", "footer"]):
-                    tag.decompose()
-                page_text = soup.get_text(separator=" ", strip=True)
-                if len(page_text) > 100:
-                    job["snippet"] = page_text[:20000]
-                    job["source"] = "enriched_direct_page"
+                job["source"] = "enriched_direct_page"
             
             return job
     

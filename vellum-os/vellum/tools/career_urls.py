@@ -101,6 +101,8 @@ CAREER_URL_PATTERNS = [
 CONTACT_PAGE_PATTERNS = [
     "https://{domain}/contact",
     "https://{domain}/contact-us",
+    "https://{domain}/contact/",
+    "https://{domain}/contactus",
     "https://{domain}/get-in-touch",
     "https://{domain}/about",
     "https://{domain}/about/team",
@@ -110,6 +112,30 @@ CONTACT_PAGE_PATTERNS = [
     "https://{domain}/people",
     "https://{domain}/our-team",
     "https://{domain}/meet-the-team",
+    # .html static variants — common on SMB/Indian company sites
+    "https://{domain}/contact.html",
+    "https://{domain}/contact-us.html",
+    "https://{domain}/about.html",
+    "https://{domain}/team.html",
+    "https://{domain}/people.html",
+    "https://{domain}/about/team.html",
+    # Legal pages — statistically email-rich (privacy/legal contacts)
+    "https://{domain}/privacy",
+    "https://{domain}/privacy-policy",
+    "https://{domain}/terms",
+    "https://{domain}/terms-of-service",
+    "https://{domain}/imprint",
+    "https://{domain}/legal",
+    "https://{domain}/legal/contact",
+    # Press / media kit pages — publish real media-contact emails
+    "https://{domain}/press",
+    "https://{domain}/press-kit",
+    "https://{domain}/media",
+    "https://{domain}/media-kit",
+    "https://{domain}/newsroom",
+    "https://{domain}/news",
+    "https://{domain}/press-releases",
+    "https://{domain}/resources/press-kit",
 ]
 
 

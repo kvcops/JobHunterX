@@ -12,6 +12,7 @@ import json
 import re
 from urllib.parse import urlparse
 
+from vellum.agents.job_llm_validator import call_gemma
 from vellum.config.llm_router import call_llm_with_fallback
 from vellum.config.logging import get_logger
 from vellum.config import database as db
@@ -243,7 +244,7 @@ Education:
     subject = ""
     body = ""
     try:
-        result = await call_llm_with_fallback("reasoning", draft_messages)
+        result = await call_gemma(draft_messages, fallback_chain="reasoning", require_keys=["subject", "body"])
         content = result["content"]
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0]

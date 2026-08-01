@@ -21,7 +21,7 @@ import asyncio
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Optional
 
 from vellum.config.logging import get_logger
 from vellum.config import database as db
@@ -247,6 +247,60 @@ def _call_gemma_sync(prompt: str) -> dict:
 
     text = response.text if hasattr(response, "text") else str(response)
     return parse_llm_json(text, default={})
+
+
+def _messages_to_prompt(messages: list[dict]) -> str:
+    """Flatten chat messages into a single prompt for Gemma (not a chat API)."""
+    parts = []
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        parts.append(f"{role.upper()}: {content}")
+    return "\n\n".join(parts)
+
+
+async def call_gemma(
+    messages: list[dict],
+    fallback_chain: str = "fast",
+    require_keys: Optional[list[str]] = None,
+) -> dict:
+    """Call Gemma 4 (gemma-4-26b-a4b-it) via the google GenAI library.
+
+    Gemma is NOT routed through litellm (litellm returns 503 for Gemma
+    models), so we use the official google library directly with its own
+    rate limiter. Returns the same shape as call_llm_with_fallback
+    ({"content", "model", ...}) so callers are interchangeable.
+
+    Falls back to the standard router chain when Gemma errors, rate-limits
+    hard, or returns output missing required keys.
+    """
+    from vellum.config.llm_router import call_llm_with_fallback
+
+    prompt = _messages_to_prompt(messages)
+
+    try:
+        parsed = await asyncio.get_event_loop().run_in_executor(None, _call_gemma_sync, prompt)
+        if isinstance(parsed, dict) and parsed:
+            if require_keys and not all(k in parsed for k in require_keys):
+                log.warning(
+                    "gemma_missing_keys",
+                    missing=[k for k in require_keys if k not in parsed],
+                    fallback_chain=fallback_chain,
+                )
+            else:
+                log.info("gemma_call", model=GEMMA_MODEL, prompt_chars=len(prompt))
+                return {
+                    "content": json.dumps(parsed, ensure_ascii=False),
+                    "tokens_in": 0,
+                    "tokens_out": 0,
+                    "model": GEMMA_MODEL,
+                    "latency_ms": 0,
+                    "cache_hit": False,
+                }
+    except Exception as exc:
+        log.warning("gemma_call_failed", error=str(exc)[:200], fallback_chain=fallback_chain)
+
+    return await call_llm_with_fallback(fallback_chain, messages)
 
 
 # ---------------------------------------------------------------------------

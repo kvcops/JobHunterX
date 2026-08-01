@@ -25,6 +25,9 @@ let outreachDrafts = [];
 let tokenUsage = {};
 let activeOutreachId = null;
 let pipelineMode = "automatic";
+// Active ATS-queue filter; "matched" is the default high-score view so the
+// best jobs surface first. Re-applied after every render (see applyJobFilter).
+let activeJobFilter = "matched";
 
 // Match score percentage helper (prevents NA / NaN)
 function getMatchScorePercent(job) {
@@ -770,7 +773,15 @@ function renderJobs() {
   let lowScoreCount = 0;
   container.innerHTML = "";
 
-  jobs.forEach(job => {
+  // High-score first: jobs with a validated match score sort above
+  // unvalidated/discovered ones, so the best matches lead the queue.
+  const sortedJobs = [...jobs].sort((a, b) => {
+    const scoreDiff = getMatchScorePercent(b) - getMatchScorePercent(a);
+    if (scoreDiff !== 0) return scoreDiff;
+    return (a.company || "").localeCompare(b.company || "");
+  });
+
+  sortedJobs.forEach(job => {
     if (job.status === "applied" || job.status === "applied_manual") appliedCount++;
     if (job.status === "matched") matchedCount++;
     if (job.status === "needs_attention") needsAttentionCount++;
@@ -876,6 +887,10 @@ function renderJobs() {
   });
 
   updateJobsStatCounters(jobs.length, appliedCount, matchedCount, needsAttentionCount, lowScoreCount);
+
+  // Re-apply the user's active filter so newly rendered/streamed cards
+  // respect it (e.g. filter stuck on "Matched" while discovery streams in).
+  applyJobFilter();
 }
 
 // Updates both the sidebar telemetry counters and the ATS tab's own header
@@ -1561,33 +1576,41 @@ function stripHtml(html) {
 // Job status filter — reads the data-status attribute stamped onto each
 // card in renderJobs()/renderResumes() instead of relying on classes that
 // the redesigned card markup no longer has.
+// Accepts the clicked element explicitly (pass `this` from onclick) because
+// window.event is null in Firefox and under strict CSP.
 function filterJobs(status, triggerEl) {
+  activeJobFilter = status || "all";
   document.querySelectorAll(".filter-pill").forEach(btn => btn.classList.remove("active"));
   if (triggerEl) {
     triggerEl.classList.add("active");
-  } else if (window.event && window.event.target) {
-    window.event.target.classList.add("active");
   }
+  applyJobFilter();
+}
 
+// Applies activeJobFilter to every currently rendered card. Called after
+// pill clicks AND after every renderJobs()/renderResumes() so newly streamed
+// jobs respect the user's chosen filter instead of bypassing it.
+function applyJobFilter() {
   const cards = document.querySelectorAll("#jobs-container .clean-job-card");
   let visibleCount = 0;
-  
+
   cards.forEach(card => {
     const cardStatus = card.dataset.status || "discovered";
 
     let show = true;
-    if (status === "low_score") {
+    if (activeJobFilter === "low_score") {
       // Low Score tab: only show unvalidated / low-score jobs
       show = cardStatus === "discovered";
-    } else if (status !== "all") {
+    } else if (activeJobFilter && activeJobFilter !== "all") {
       // Other tabs: exact match
-      show = cardStatus === status;
+      show = cardStatus === activeJobFilter;
     }
     // "all" shows everything
 
     card.style.display = show ? "flex" : "none";
     if (show) visibleCount++;
   });
+  return visibleCount;
 }
 
 // ---------------------------------------------------------------------------

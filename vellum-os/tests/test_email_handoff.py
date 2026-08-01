@@ -1,5 +1,6 @@
 """Tests for email_handoff.py — email permutations, MX validation, SMTP verification."""
 
+import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -85,3 +86,92 @@ class TestCreateGmailComposeUrl:
         url = create_gmail_compose_url("hr@company.com", "Application", "Hello")
         assert "mail.google.com" in url
         assert "hr%40company.com" in url or "hr@company.com" in url
+
+
+class TestProviderRisk:
+    def test_gmail(self):
+        from vellum.tools.email_handoff import _provider_risk
+        assert _provider_risk("alt1.aspmx.l.google.com") == "gmail"
+
+    def test_m365(self):
+        from vellum.tools.email_handoff import _provider_risk
+        assert _provider_risk("acme-com.mail.protection.outlook.com") == "m365"
+
+    def test_zoho(self):
+        from vellum.tools.email_handoff import _provider_risk
+        assert _provider_risk("mx.zoho.in") == "zoho"
+
+    def test_unknown(self):
+        from vellum.tools.email_handoff import _provider_risk
+        assert _provider_risk("mail.acme.com") == "unknown"
+
+    def test_empties(self):
+        from vellum.tools.email_handoff import _provider_risk
+        assert _provider_risk(None) == "unknown"
+        assert _provider_risk("") == "unknown"
+
+
+class TestVerifyEmailsWithSmtp:
+    def _run(self, monkeypatch, mx_host, rcpt_codes):
+        """Monkeypatch MX resolution + RCPT responses, run verifier."""
+        import asyncio
+        from vellum.tools import email_handoff
+
+        code_iter = iter(rcpt_codes)
+
+        def fake_mx(domain):
+            return mx_host
+
+        def fake_rcpt(mx_host, rcpt, timeout):
+            return next(code_iter)
+
+        monkeypatch.setattr(email_handoff, "_get_mx_host", fake_mx)
+        monkeypatch.setattr(email_handoff, "_smtp_rcpt_check", fake_rcpt)
+        return email_handoff
+
+    def test_zoho_honest_550_marks_invalid(self, monkeypatch):
+        mod = self._run(monkeypatch, "mx.zoho.in", [550, 550])
+        emails = asyncio.run(mod.verify_emails_with_smtp(
+            [{"address": "priya@acme.com", "confidence": 0.6, "pattern": "site_crawl"}]
+        ))
+        assert emails[0]["smtp_valid"] is False
+        assert emails[0]["provider_risky"] is False
+        assert emails[0]["smtp_provider"] == "zoho"
+
+    def test_zoho_250_boosts_confidence(self, monkeypatch):
+        mod = self._run(monkeypatch, "mx.zoho.in", [550, 250])
+        emails = asyncio.run(mod.verify_emails_with_smtp(
+            [{"address": "priya@acme.com", "confidence": 0.6, "pattern": "site_crawl"}]
+        ))
+        assert emails[0]["smtp_valid"] is True
+        assert emails[0]["confidence"] == pytest.approx(0.9)
+
+    def test_gmail_250_unreliable(self, monkeypatch):
+        mod = self._run(monkeypatch, "alt1.aspmx.l.google.com", [550, 250])
+        emails = asyncio.run(mod.verify_emails_with_smtp(
+            [{"address": "priya@acme.com", "confidence": 0.6, "pattern": "site_crawl"}]
+        ))
+        assert emails[0]["smtp_valid"] is None
+        assert emails[0]["provider_risky"] is True
+        assert emails[0]["smtp_provider"] == "gmail"
+
+    def test_gmail_550_marks_invalid(self, monkeypatch):
+        mod = self._run(monkeypatch, "alt1.aspmx.l.google.com", [550, 550])
+        emails = asyncio.run(mod.verify_emails_with_smtp(
+            [{"address": "priya@acme.com", "confidence": 0.6, "pattern": "site_crawl"}]
+        ))
+        assert emails[0]["smtp_valid"] is False
+        assert emails[0]["provider_risky"] is True
+
+    def test_catch_all_detected(self, monkeypatch):
+        mod = self._run(monkeypatch, "mail.acme.com", [250, 250])
+        emails = asyncio.run(mod.verify_emails_with_smtp(
+            [{"address": "priya@acme.com", "confidence": 0.6, "pattern": "site_crawl"}]
+        ))
+        assert emails[0]["catch_all"] is True
+        assert emails[0]["smtp_valid"] is None
+        assert emails[0]["confidence"] == pytest.approx(0.4)
+
+    def test_empty_list(self, monkeypatch):
+        mod = self._run(monkeypatch, "mail.acme.com", [])
+        assert asyncio.run(mod.verify_emails_with_smtp([])) == []

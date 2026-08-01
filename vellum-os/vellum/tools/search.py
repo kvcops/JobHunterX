@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import sys
 import io
-import contextlib
 import re
+import threading
+from contextlib import contextmanager
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -20,16 +21,27 @@ from vellum.config.logging import get_logger
 log = get_logger("search")
 
 
-@contextlib.contextmanager
+_silence_lock = threading.Lock()
+
+
+@contextmanager
 def silence_stdout_stderr():
-    """Intercept and silence raw prints/logs emitted by ddgs or third-party engines."""
-    old_stdout, old_stderr = sys.stdout, sys.stderr
-    sys.stdout = io.StringIO()
-    sys.stderr = io.StringIO()
+    """Intercept and silence raw prints/logs emitted by ddgs or third-party engines.
+
+    THREAD-SAFE: sys.stdout/stderr are process-global, so concurrent callers
+    (parallel search_multi_engine batches) must save/restore atomically —
+    otherwise one thread's restore can permanently clobber stdout with
+    another thread's StringIO and every later log/print disappears.
+    """
+    with _silence_lock:
+        old_stdout, old_stderr = sys.stdout, sys.stderr
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
     try:
         yield
     finally:
-        sys.stdout, sys.stderr = old_stdout, old_stderr
+        with _silence_lock:
+            sys.stdout, sys.stderr = old_stdout, old_stderr
 
 
 # ---------------------------------------------------------------------------
@@ -374,33 +386,110 @@ async def verify_email_mx(email_address: str) -> bool:
     return await asyncio.to_thread(_check)
 
 
+_DDGS_BACKENDS = ["auto", "bing", "brave", "mojeek", "startpage"]
+
+# Public SearXNG instances with JSON output enabled (verified Aug 2026).
+# Fall back silently when any of them blocks JSON / disappears.
+_SEARX_INSTANCES = [
+    "https://search.kael.ink",
+    "https://searx.perennialte.ch",
+]
+
+
 async def search_multi_engine(query: str, max_results: int = 10) -> list[dict]:
-    """Multi-engine search aggregator (DDGS + fallback text search)."""
+    """Multi-engine search aggregator.
+
+    Tries in order:
+    1. ddgs metasearch (backends rotated on rate-limit/empty: auto, bing,
+       brave, mojeek, startpage) with jittered pacing.
+    2. Public SearXNG JSON instances (keyless).
+    3. html.duckduckgo.com POST fallback (decodes uddg= links).
+
+    Returns results as [{"title", "href", "body"}] (normalized from the
+    varied shapes ddgs/engines return).
+    """
     import asyncio
-    from ddgs import DDGS
+    import time
 
-    def _ddgs():
-        with silence_stdout_stderr():
-            try:
-                with DDGS() as ddgs:
-                    return list(ddgs.text(query, max_results=max_results))
-            except Exception:
-                return []
+    def _normalize(raw: dict) -> dict:
+        return {
+            "title": raw.get("title", ""),
+            "href": raw.get("href") or raw.get("url") or raw.get("link", ""),
+            "body": raw.get("body") or raw.get("content") or raw.get("snippet", ""),
+        }
 
-    results = await asyncio.to_thread(_ddgs)
-    if results:
-        return results
+    async def _try_ddgs_backend(backend: str) -> list[dict]:
+        from ddgs import DDGS
 
+        def _search():
+            with silence_stdout_stderr():
+                try:
+                    with DDGS() as ddgs:
+                        raw = list(ddgs.text(query, max_results=max_results, backend=backend))
+                        return [_normalize(r) for r in raw if isinstance(r, dict)]
+                except Exception:
+                    return []
+
+        return await asyncio.to_thread(_search)
+
+    # 1. ddgs backends in rotation — return on the FIRST backend that yields
+    #    results. A short jittered backoff (2-4s) only fires when a backend is
+    #    empty/blocked (the ddgs soft rate-limit signal), so normal queries
+    #    cost 1 backend round-trip instead of 5 × (search + 3-8s sleep).
+    for backend in _DDGS_BACKENDS[:3]:
+        results = await _try_ddgs_backend(backend)
+        if results:
+            return results[:max_results]
+        await asyncio.sleep(2 + (time.time() % 3))
+
+    # 2. Public SearXNG instances (JSON, no key)
+    import httpx
+
+    for base in _SEARX_INSTANCES:
+        try:
+            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                resp = await client.get(
+                    f"{base}/search",
+                    params={"q": query, "format": "json", "safesearch": "0"},
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                )
+                if resp.status_code != 200 or "application/json" not in resp.headers.get("content-type", ""):
+                    continue
+                data = resp.json()
+                searx_results = [_normalize(r) for r in data.get("results", [])]
+                if searx_results:
+                    return searx_results[:max_results]
+        except Exception:
+            continue
+
+    # 3. html.duckduckgo.com POST fallback (no vqd handshake needed)
     try:
-        from vellum.tools import scrape
-        search_url = f"html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
-        page = await scrape.fetch_page(f"https://{search_url}")
-        html = page.get("html", "")
-        links = re.findall(r'<a class="result__url" href="([^"]+)">(.*?)</a>', html)
+        import base64
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": query, "b": "", "kl": "us-en"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+            )
+        links = re.findall(r'<a class="result__url" href="([^"]+)">(.*?)</a>', resp.text)
         fallback_results = []
         for url, text in links[:max_results]:
-            fallback_results.append({"href": url, "title": text, "body": ""})
-        return fallback_results
+            # DDG wraps links in uddg= base64 redirects
+            plain = url
+            if "uddg=" in url:
+                try:
+                    plain = base64.b64decode(url.split("uddg=")[1]).decode("utf-8")
+                except Exception:
+                    pass
+            fallback_results.append({"title": text, "href": plain, "body": ""})
+        if fallback_results:
+            return fallback_results
     except Exception as exc:
         log.error("multi_engine_fallback_failed", error=str(exc))
-        return []
+
+    return []

@@ -449,12 +449,16 @@ async def run_full_search(
     role: str | None = None,
     limit: int = 50,
     event_callback=None,
+    auto_apply: bool = False,
 ) -> dict:
     """Run the complete discovery flow: discover → verify → LLM validate → display.
 
     Uses Gemma 4 for deep job validation with experience-first filtering.
     Enforces company diversity and minimum relevance threshold.
     Loops discovery until enough quality jobs are found.
+
+    When auto_apply=True (automatic pipeline mode), matched jobs are also
+    pushed through the full apply pipeline (contact search → email → browser).
     """
     run_id = str(uuid.uuid4())
     from vellum.api.ws import manager as ws_manager
@@ -466,11 +470,12 @@ async def run_full_search(
     seen_urls: set[str] = set()
     company_count: dict[str, int] = {}  # Track diversity across rounds
     discovery_round = 0
-    MAX_ROUNDS = 4  # Maximum discovery attempts to avoid infinite loops
+    MAX_ROUNDS = 8  # Discovery attempts to reach the requested job count
+    APPLY_SEMAPHORE = 3  # Max concurrent auto-applications
 
     while len(final_validated) < limit and discovery_round < MAX_ROUNDS:
         discovery_round += 1
-        round_limit = limit * 2  # Discover extra to account for filtering
+        round_limit = min(limit * 2, 150)  # Discover extra to account for filtering
 
         if event_callback:
             await event_callback({
@@ -578,6 +583,40 @@ async def run_full_search(
     final_validated.sort(key=lambda j: j.get("match_score", 0), reverse=True)
     final_validated = final_validated[:limit]
 
+    # Automatic mode: push matched jobs through the full apply pipeline
+    auto_applied = 0
+    auto_failed = 0
+    if auto_apply and final_validated:
+        if event_callback:
+            await event_callback({
+                "agent": "graph",
+                "event_type": "progress",
+                "message": f"Automatic mode: applying to {len(final_validated)} matched jobs...",
+            })
+        semaphore = asyncio.Semaphore(APPLY_SEMAPHORE)
+
+        async def _auto_apply_one(job: dict) -> None:
+            nonlocal auto_applied, auto_failed
+            async with semaphore:
+                try:
+                    result = await run_job_pipeline(
+                        job,
+                        profile,
+                        run_id,
+                        event_callback,
+                        search_location=location,
+                        validate_only=False,  # Full pipeline: apply + outreach
+                    )
+                    if result.get("errors"):
+                        auto_failed += 1
+                    else:
+                        auto_applied += 1
+                except Exception as exc:
+                    log.warning("auto_apply_failed", job_id=job.get("id"), error=str(exc))
+                    auto_failed += 1
+
+        await asyncio.gather(*[_auto_apply_one(job) for job in final_validated])
+
     # Broadcast completion
     if event_callback:
         msg = (
@@ -586,6 +625,8 @@ async def run_full_search(
             f"All jobs scored above {MIN_RELEVANCE_SCORE}% relevance. "
             f"Review in Applications tab."
         )
+        if auto_apply:
+            msg += f" {auto_applied} applications launched (automatic mode)."
         await event_callback({
             "agent": "graph",
             "event_type": "complete",
@@ -598,11 +639,15 @@ async def run_full_search(
         final_validated=len(final_validated),
         unique_companies=len(company_count),
         rounds=discovery_round,
+        auto_applied=auto_applied,
+        auto_failed=auto_failed,
     )
 
     return {
         "run_id": run_id,
         "jobs_discovered": len(final_validated),
+        "auto_applied": auto_applied,
+        "auto_failed": auto_failed,
     }
 
 

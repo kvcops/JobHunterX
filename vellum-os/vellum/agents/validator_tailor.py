@@ -80,17 +80,17 @@ Return a JSON object:
 }}
 Return valid JSON only. No markdown."""
 
-BULLET_TAILORING_PROMPT = """You are an elite ATS Resume Optimization Specialist using the Google XYZ Formula (Accomplished [X] as measured by [Y] by doing [Z]).
-Transform the candidate's raw work experience bullet points into deeply detailed, high-impact, technical bullet points tailored to the target Job Description.
+BULLET_TAILORING_PROMPT = """You are an elite ATS Resume Optimization Specialist. Rewrite the candidate's raw work experience bullet points into high-impact, technical bullet points tailored to the target Job Description.
 
 CRITICAL ATS & IMPACT RULES:
-1. Use Google XYZ Formula: Start with a strong action verb, specify technical tools/methods [Z], state the outcome or engineering result [X/Y].
+1. Action-led bullets: Start with a strong action verb (Built, Designed, Led, Optimized, Automated, Architected, etc.), specify the technical tools/methods used, and describe the engineering outcome.
 2. Keywords Integration: Seamlessly embed relevant technical terms from the Job Description ONLY IF they exist in the candidate's real skill list ({skills_list}). DO NOT invent or add technologies the candidate doesn't know.
 3. Technical Depth & Context: Do NOT make bullets artificially short or generic. Write rich, impactful 20-35 word bullet points.
-4. STRICT TRUTHFULNESS: You MUST NOT invent fake companies, fake projects, or fake tools outside the candidate's real skill list. Preserve any real metrics from original bullets.
+4. STRICT TRUTHFULNESS — NO FABRICATED METRICS: You MUST NOT invent numbers, percentages, counts, revenue, users, or time savings. Never write "X%", "Y%", "increased X", "reduced Y by Z", "X+ users", or any placeholder letters as metrics. If the original bullet contains a REAL metric, preserve it exactly. If it has no metric, describe the work and impact qualitatively ("delivered", "enabled", "streamlined") without making up quantities.
 5. ABSOLUTELY FORBIDDEN: Adding any technology, framework, tool, or programming language not explicitly in the candidate's skill list above. If the JD mentions React but candidate doesn't know React, do NOT mention React.
 6. Order Preservation: Return a JSON array of strings — transformed bullets matching the exact count of original bullets.
 7. ABSOLUTELY FORBIDDEN: Do NOT include candidate's Current CTC, Expected CTC, or any salary/compensation details in any of the bullet points.
+8. FORBIDDEN OUTPUT: Never output the literal tokens "[X]", "[Y]", "[Z]", "X%", "Y%", "by doing Z", "measured by Y", "Accomplished X". Every bullet must read as a truthful, complete sentence with zero placeholder characters.
 
 Role: {role_title} at {company_name}
 Original Bullets:
@@ -177,6 +177,34 @@ def _sanitize_tailored_text(text: str, allowed_skills: list[str]) -> str:
             log.warning("hallucinated_tech_detected", tech=tech, text_snippet=sanitized[:100])
 
     return sanitized
+
+
+_PLACEHOLDER_METRIC_RE = re.compile(
+    r"(?i)(\[[XYZ]\])|"
+    r"(\b[XYZ][%]\b)|"
+    r"(measured by [XYZ])|"
+    r"(by doing [XYZ])|"
+    r"(Accomplished [XYZ])|"
+    r"(increased [XYZ][%]?)|"
+    r"(reduced [XYZ][%]? by [XYZ][%]?)|"
+    r"(improved [XYZ][%]?)"
+)
+
+
+def _sanitize_metric_placeholders(text: str) -> str:
+    """Strip Google-XYZ placeholder artifacts that some LLMs emit as
+    literal 'X%' / '[Y]' tokens instead of real metrics."""
+    cleaned = _PLACEHOLDER_METRIC_RE.sub("", text)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).replace(" .", ".").strip(" ,;")
+    return cleaned
+
+
+def _has_placeholder_artifact(text: str) -> bool:
+    """True if a bullet still contains literal XYZ placeholder tokens."""
+    return bool(
+        re.search(r"\[[XYZ]\]", text, re.I)
+        or re.search(r"(?<![A-Za-z])[XYZ](?=%|\b)", text)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -422,8 +450,18 @@ Education:
                 valid_bullets = []
                 for b in new_bullets:
                     if isinstance(b, str) and len(b) > 10:
-                        # Sanitize each bullet
+                        # Sanitize each bullet: strip hallucinated tech names
                         b = _sanitize_tailored_text(b, candidate_skills)
+                        # Strip XYZ placeholder-metric artifacts
+                        b = _sanitize_metric_placeholders(b)
+                        # Hard safety: drop bullets that still contain placeholders
+                        if _has_placeholder_artifact(b):
+                            log.warning(
+                                "bullet_placeholder_dropped",
+                                job_id=job_id,
+                                bullet=b[:80],
+                            )
+                            continue
                         valid_bullets.append(b)
                 tailored_bullets[i] = valid_bullets[:len(original_bullets)]
 

@@ -342,19 +342,54 @@ async def get_job(job_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
+async def _reconcile_fts(conn) -> None:
+    """Belt-and-braces FTS consistency check.
+
+    `jobs_fts` is an FTS5 EXTERNAL-CONTENT table (content='jobs') — direct
+    DELETE statements against it are illegal and corrupt the database, so
+    cleanup must go through the AFTER DELETE trigger. For legacy databases
+    created without triggers, reconcile by rebuilding the index from
+    content, which drops any phantom FTS rows safely.
+    """
+    cur = await conn.execute(
+        "SELECT (SELECT count(*) FROM jobs) AS n_jobs, (SELECT count(*) FROM jobs_fts) AS n_fts"
+    )
+    row = await cur.fetchone()
+    if row["n_jobs"] != row["n_fts"]:
+        await conn.execute("INSERT INTO jobs_fts(jobs_fts) VALUES('rebuild')")
+        log.warning(
+            "fts_reconciled",
+            n_jobs=row["n_jobs"],
+            n_fts=row["n_fts"],
+        )
+
+
 async def delete_job(job_id: str) -> bool:
-    """Delete a single job by id, along with its associated outreach drafts & interventions."""
+    """Delete a single job by id, along with its associated outreach drafts & interventions.
+
+    FTS index cleanup is handled by the AFTER DELETE trigger; for legacy
+    databases without triggers, `_reconcile_fts` rebuilds the index so
+    `jobs_fts` never retains ghost entries.
+    """
     async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
         await db.execute("DELETE FROM outreach_drafts WHERE job_id = ?", (job_id,))
         await db.execute("DELETE FROM intervention_sessions WHERE job_id = ?", (job_id,))
         cursor = await db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        await _reconcile_fts(db)
         await db.commit()
         return cursor.rowcount > 0
 
 
 async def clear_jobs(status: Optional[str] = None) -> int:
-    """Delete all jobs (or jobs with specified status) from database."""
+    """Delete all jobs (or jobs with specified status) from database.
+
+    FTS index cleanup is handled by the AFTER DELETE trigger; for legacy
+    databases without triggers, `_reconcile_fts` rebuilds the index so
+    `jobs_fts_data` never keeps stale rows.
+    """
     async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
         if status:
             await db.execute("DELETE FROM outreach_drafts WHERE job_id IN (SELECT id FROM jobs WHERE status = ?)", (status,))
             await db.execute("DELETE FROM intervention_sessions WHERE job_id IN (SELECT id FROM jobs WHERE status = ?)", (status,))
@@ -363,6 +398,7 @@ async def clear_jobs(status: Optional[str] = None) -> int:
             await db.execute("DELETE FROM outreach_drafts")
             await db.execute("DELETE FROM intervention_sessions")
             cursor = await db.execute("DELETE FROM jobs")
+        await _reconcile_fts(db)
         await db.commit()
         return cursor.rowcount
 

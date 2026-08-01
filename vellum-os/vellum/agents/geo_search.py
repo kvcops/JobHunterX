@@ -26,6 +26,15 @@ log = get_logger("geo_search")
 MAX_TOTAL_JOBS = 80
 
 
+def _effective_max_jobs(limit: int) -> int:
+    """Scale the hard cap with the requested limit so big targets can be met.
+
+    Rounds up to the next multiple of the requested limit (min 80, max 600).
+    """
+    target = max(int(limit), 10)
+    return max(80, min(600, target * 2))
+
+
 def _normalise_city(location: str) -> str:
     """Normalise city name for Indian tech hub lookup."""
     city = location.lower().strip()
@@ -315,6 +324,7 @@ async def run(state: dict) -> dict:
     location = state.get("location", "Bengaluru")
     profile = state.get("profile", {})
     limit = state.get("limit") or MAX_TOTAL_JOBS
+    hard_cap = _effective_max_jobs(limit)
     role = state.get("role") or "software engineer"
     company = state.get("company", "")  # Optional: focus on specific company
     jobs: list[dict] = []
@@ -352,23 +362,23 @@ async def run(state: dict) -> dict:
     except Exception as exc:
         log.warning("catalog_discovery_error", error=str(exc))
 
-    # --- Phase 2: Web Search (DuckDuckGo) ---
-    if len(jobs) < limit:
+    # --- Phase 2: Web Search (DuckDuckGo + Bing fallback) ---
+    if len(jobs) < hard_cap:
         try:
-            search_limit = min(limit - len(jobs), 50)  # Respect rate limits
+            search_limit = min(hard_cap - len(jobs), 50)  # Respect rate limits
             await broadcast_progress(45, f"Searching web for additional {role} jobs...")
             web_jobs = await web_search_scraper.search_and_enrich(
                 role=role,
                 location=location,
                 company=company,
                 max_results=search_limit,
-                enrich_top=15,  # Enrich top 15 with full page details
+                enrich_top=min(25, search_limit),  # Enrich with full page details
                 skills=profile.get("skills", []),
             )
             
             # Process and filter jobs
             for job in web_jobs:
-                if len(jobs) >= limit:
+                if len(jobs) >= hard_cap:
                     break
                 
                 title = job.get("title", "")
@@ -403,7 +413,7 @@ async def run(state: dict) -> dict:
                     "title": clean_title[:160],
                     "career_page_url": job.get("apply_url", ""),
                     "apply_url": job.get("apply_url", ""),
-                    "jd_text": job.get("snippet", "")[:20000],
+                    "jd_text": job.get("jd_text") or job.get("snippet", "") or "",
                     "source": job.get("source", "web_search"),
                     "confidence": 0.85,
                 })
@@ -414,7 +424,7 @@ async def run(state: dict) -> dict:
             errors.append(f"Web search error: {str(exc)[:200]}")
 
     # --- Secondary: VC Portfolio Boards (Getro) ---
-    if len(jobs) < limit:
+    if len(jobs) < hard_cap:
         try:
             vc_boards = [
                 ("blume.vc", "Blume Ventures"),
@@ -423,7 +433,7 @@ async def run(state: dict) -> dict:
             for vc_domain, vc_name in vc_boards:
                 vc_jobs = await ats_api.fetch_getro_vc_jobs(vc_domain=vc_domain, vc_name=vc_name)
                 for v_item in vc_jobs:
-                    if len(jobs) >= limit:
+                    if len(jobs) >= hard_cap:
                         break
                     if not _is_relevant_role(v_item["title"], role):
                         continue
@@ -445,6 +455,45 @@ async def run(state: dict) -> dict:
                     })
         except Exception as exc:
             log.warning("vc_board_discovery_error", error=str(exc))
+
+    # --- Tertiary: Direct career-page scraping of local startup catalog ---
+    if len(jobs) < hard_cap:
+        try:
+            await broadcast_progress(80, f"Directly scanning career pages of {location} startups for more roles...")
+            from vellum.agents.career_scraper import run as career_scrape_run
+            career_result = await career_scrape_run({
+                "location": location,
+                "profile": profile,
+                "role": role,
+                "limit": min(hard_cap - len(jobs), 60),
+            })
+            for c_job in career_result.get("discovered_jobs", []):
+                if len(jobs) >= hard_cap:
+                    break
+                url = c_job.get("apply_url") or c_job.get("career_page_url", "")
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                if not _is_relevant_role(c_job.get("title") or c_job.get("role", ""), role):
+                    continue
+                if not _matches_location_strict(
+                    c_job.get("title") or c_job.get("role", ""),
+                    c_job.get("jd_text", ""),
+                    location,
+                ):
+                    continue
+                jobs.append({
+                    "company": c_job.get("company", ""),
+                    "title": (c_job.get("title") or c_job.get("role", ""))[:160],
+                    "career_page_url": c_job.get("career_page_url", ""),
+                    "apply_url": c_job.get("apply_url", ""),
+                    "jd_text": c_job.get("jd_text", "")[:20000],
+                    "source": c_job.get("source", "career_page_scrape"),
+                    "confidence": c_job.get("confidence", 0.8),
+                })
+        except Exception as exc:
+            log.warning("career_page_discovery_error", error=str(exc))
 
     await broadcast_progress(85, f"Verifying HTTP status and active posting pages for {len(jobs)} jobs...")
     from vellum.tools.url_verifier import filter_active_jobs
