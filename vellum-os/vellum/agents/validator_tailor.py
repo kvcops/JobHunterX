@@ -278,7 +278,7 @@ async def run(state: dict) -> dict:
 
     if freshness.get("is_fresh") is False and freshness.get("confidence", 0) >= 0.7:
         await db.update_job(job_id, status="skipped")
-        await _broadcast_job_status(job_id, "skipped")
+        await _broadcast_job_status("skipped")
         await log_and_broadcast_event(
             "progress",
             f"Skipped — confirmed stale ({freshness.get('evidence')})",
@@ -288,7 +288,7 @@ async def run(state: dict) -> dict:
 
     if not jd_text:
         await db.update_job(job_id, status="skipped")
-        await _broadcast_job_status(job_id, "skipped")
+        await _broadcast_job_status("skipped")
         await log_and_broadcast_event(
             "progress",
             "Skipped — no JD text extracted"
@@ -299,7 +299,7 @@ async def run(state: dict) -> dict:
     # Step 2: Validation (match score) with location + experience rules
     # ------------------------------------------------------------------
     await db.update_job(job_id, status="validating")
-    await _broadcast_job_status(job_id, "validating")
+    await _broadcast_job_status("validating")
 
     # Generate full rich candidate profile context memory
     exp_details = []
@@ -395,7 +395,7 @@ Education:
     is_force_apply = state.get("force_apply", False)
     if validation.get("match_score", 0) < 0.3 and not is_force_apply:
         await db.update_job(job_id, status="skipped")
-        await _broadcast_job_status(job_id, "skipped")
+        await _broadcast_job_status("skipped")
         await log_and_broadcast_event(
             "progress",
             "Skipped — low match score"
@@ -408,7 +408,7 @@ Education:
     # Step 3: High-Impact Tailoring (Summary + Google XYZ Bullets)
     # ------------------------------------------------------------------
     await db.update_job(job_id, status=job_status)
-    await _broadcast_job_status(job_id, job_status)
+    await _broadcast_job_status(job_status)
 
     candidate_skills = profile.get("skills", [])
     skills_list_str = ", ".join(candidate_skills)
