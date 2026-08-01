@@ -324,8 +324,8 @@ async def scrape_company_email_pages(domain: str, max_pages: int = 12) -> list[d
                     return
                 page_emails = _extract_emails_from_html(html, url, "site_crawl")
                 emails.extend(page_emails)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("site_crawl_fetch_failed", url=url, error=str(exc)[:100])
 
     await asyncio.gather(*(_fetch_one(u) for u in urls[:max_pages]))
 
@@ -422,8 +422,8 @@ async def linkedin_guest_emails(company: str, linkedin_url: str = "") -> list[di
             )
             if resp.status_code == 200:
                 page_html = resp.text
-    except Exception:
-        pass
+    except Exception as exc:
+        log.debug("linkedin_company_page_failed", url=company_url, error=str(exc)[:100])
 
     if not page_html:
         try:
@@ -431,8 +431,8 @@ async def linkedin_guest_emails(company: str, linkedin_url: str = "") -> list[di
                 jina = await client.get(f"https://r.jina.ai/{company_url}")
                 if jina.status_code == 200:
                     page_html = jina.text
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("jina_markdown_fallback_failed", url=company_url, error=str(exc)[:100])
 
     if page_html:
         emails.extend(_extract_emails_from_html(page_html, company_url, "linkedin_about"))
@@ -494,8 +494,8 @@ async def linkedin_profile_emails(people: list[dict], max_profiles: int = 5) -> 
                     pe["name"] = person.get("name", "")
                     pe["linkedin_url"] = profile_url
                 emails.extend(page_emails)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("linkedin_profile_fetch_failed", url=profile_url, error=str(exc)[:100])
 
     await asyncio.gather(*(_fetch_profile(p) for p in targets))
 

@@ -9,6 +9,7 @@ search on job descriptions.
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -168,7 +169,7 @@ async def clean_existing_database_jobs() -> None:
                 try:
                     v_dict = json.loads(vj)
                 except Exception:
-                    pass
+                    log.warning("invalid_validation_json", job_id=job_id, exc_info=True)
 
             val_co = v_dict.get("company_name") if isinstance(v_dict, dict) else ""
             val_ro = v_dict.get("job_role") if isinstance(v_dict, dict) else ""
@@ -208,7 +209,8 @@ async def init_db() -> None:
 # ---------------------------------------------------------------------------
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    dt = datetime.now(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
 
 def _new_id() -> str:
@@ -241,6 +243,22 @@ async def get_latest_profile() -> Optional[dict]:
     return None
 
 
+async def _update_existing_job(db, job_id: str, job_data: dict) -> None:
+    """Refresh an existing job row with fresh discovered data."""
+    await db.execute(
+        """UPDATE jobs SET company = ?, role = ?, jd_text = ?, 
+           source = ?, updated_at = ? WHERE id = ?""",
+        (
+            job_data.get("company", ""),
+            job_data.get("role"),
+            job_data.get("jd_text"),
+            job_data.get("source"),
+            _now_iso(),
+            job_id,
+        ),
+    )
+
+
 async def insert_job(job_data: dict) -> str:
     """Insert a discovered job. Returns job id.
 
@@ -252,6 +270,8 @@ async def insert_job(job_data: dict) -> str:
     job_id = job_data.get("id") or _new_id()
     apply_url = job_data.get("apply_url") or job_data.get("career_page_url", "")
     url_hash = hashlib.sha256(apply_url.encode()).hexdigest() if apply_url else None
+    if not url_hash:
+        log.warning("job_insert_without_url", job_id=job_id, company=job_data.get("company", ""))
 
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
@@ -264,47 +284,57 @@ async def insert_job(job_data: dict) -> str:
             if row:
                 existing_id = row["id"]
                 # Update existing job with fresh data instead of returning stale data
-                await db.execute(
-                    """UPDATE jobs SET company = ?, role = ?, jd_text = ?, 
-                       source = ?, updated_at = ? WHERE id = ?""",
-                    (
-                        job_data.get("company", ""),
-                        job_data.get("role"),
-                        job_data.get("jd_text"),
-                        job_data.get("source"),
-                        _now_iso(),
-                        existing_id,
-                    ),
-                )
+                await _update_existing_job(db, existing_id, job_data)
                 await db.commit()
                 return existing_id
 
-        await db.execute(
-            """INSERT INTO jobs
-               (id, company, role, career_page_url, apply_url, apply_url_hash,
-                jd_text, source, discovery_confidence, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                job_id,
-                job_data.get("company", ""),
-                job_data.get("role"),
-                job_data.get("career_page_url"),
-                job_data.get("apply_url"),
-                url_hash,
-                job_data.get("jd_text"),
-                job_data.get("source"),
-                job_data.get("discovery_confidence", 0.0),
-                job_data.get("status", "discovered"),
-                _now_iso(),
-                _now_iso(),
-            ),
-        )
-        await db.commit()
+        try:
+            await db.execute(
+                """INSERT INTO jobs
+                   (id, company, role, career_page_url, apply_url, apply_url_hash,
+                    jd_text, source, discovery_confidence, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job_id,
+                    job_data.get("company", ""),
+                    job_data.get("role"),
+                    job_data.get("career_page_url"),
+                    apply_url,
+                    url_hash,
+                    job_data.get("jd_text"),
+                    job_data.get("source"),
+                    job_data.get("discovery_confidence", 0.0),
+                    job_data.get("status", "discovered"),
+                    _now_iso(),
+                    _now_iso(),
+                ),
+            )
+            await db.commit()
+        except sqlite3.IntegrityError:
+            # Race: another task inserted the same URL between our SELECT and INSERT.
+            if url_hash:
+                cursor = await db.execute(
+                    "SELECT id FROM jobs WHERE apply_url_hash = ?", (url_hash,)
+                )
+                row = await cursor.fetchone()
+                if row:
+                    await _update_existing_job(db, row["id"], job_data)
+                    await db.commit()
+                    return row["id"]
+            raise
     return job_id
+
+
+_JOB_UPDATEABLE_COLUMNS = frozenset({
+    "company", "role", "career_page_url", "apply_url", "apply_url_hash",
+    "jd_text", "source", "discovery_confidence", "freshness_json",
+    "validation_json", "match_score", "status", "tailored_pdf",
+})
 
 
 async def update_job(job_id: str, **fields: Any) -> None:
     """Update specific fields on a job row."""
+    fields = {k: v for k, v in fields.items() if k in _JOB_UPDATEABLE_COLUMNS}
     if not fields:
         return
     set_clause = ", ".join(f"{k} = ?" for k in fields)

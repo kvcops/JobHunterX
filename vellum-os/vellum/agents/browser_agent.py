@@ -402,11 +402,19 @@ async def _run_impl(state: dict) -> dict:
     errors: list[str] = []
 
     if not apply_url:
+        await db.update_job(job_id, status="skipped")
         events.append(AgentEvent(
             agent="browser_agent",
             event_type="error",
             job_id=job_id,
             message="No apply URL available",
+            data={"status": "skipped"},
+        ).model_dump(mode="json"))
+        events.append(AgentEvent(
+            agent="browser_agent",
+            event_type="job_status_changed",
+            job_id=job_id,
+            data={"status": "skipped"},
         ).model_dump(mode="json"))
         return {"browser_result": {"status": "no_url"}, "events": events, "errors": errors}
 
@@ -418,6 +426,12 @@ async def _run_impl(state: dict) -> dict:
     ).model_dump(mode="json"))
 
     await db.update_job(job_id, status="applying")
+    events.append(AgentEvent(
+        agent="browser_agent",
+        event_type="job_status_changed",
+        job_id=job_id,
+        data={"status": "applying"},
+    ).model_dump(mode="json"))
 
     settings = get_settings()
 
@@ -634,6 +648,7 @@ async def _run_impl(state: dict) -> dict:
                 sender_filter: Optional sender email/domain to filter by
                 timeout_seconds: How long to wait for the OTP email
             """
+            import email
             import imaplib
             import re
             import time as _time
@@ -1009,6 +1024,12 @@ ERROR DETECTION — STOP AND REPORT:
             await db.update_job(job_id, status="applied")
             events.append(AgentEvent(
                 agent="browser_agent",
+                event_type="job_status_changed",
+                job_id=job_id,
+                data={"status": "applied"},
+            ).model_dump(mode="json"))
+            events.append(AgentEvent(
+                agent="browser_agent",
                 event_type="complete",
                 job_id=job_id,
                 message="Application submitted successfully!",
@@ -1021,6 +1042,12 @@ ERROR DETECTION — STOP AND REPORT:
         else:
             # HITL needed — save session as intervention card (non-blocking)
             await db.update_job(job_id, status="needs_attention")
+            events.append(AgentEvent(
+                agent="browser_agent",
+                event_type="job_status_changed",
+                job_id=job_id,
+                data={"status": "needs_attention"},
+            ).model_dump(mode="json"))
             save_paused_session(job_id, reason=hitl_type.value, url=apply_url)
 
             # Create intervention session in DB
@@ -1047,8 +1074,8 @@ ERROR DETECTION — STOP AND REPORT:
                     page = await agent.browser_session.get_current_page()
                     if page and not page.is_closed():
                         await page.screenshot(path=screenshot_path, full_page=False)
-                elif _active_browser_page and not _active_browser_page.is_closed():
-                    await _active_browser_page.screenshot(path=screenshot_path, full_page=False)
+                    else:
+                        screenshot_path = None
                 else:
                     screenshot_path = None
             except Exception as ss_exc:
@@ -1101,6 +1128,12 @@ ERROR DETECTION — STOP AND REPORT:
         await db.update_job(job_id, status="failed")
         events.append(AgentEvent(
             agent="browser_agent",
+            event_type="job_status_changed",
+            job_id=job_id,
+            data={"status": "failed"},
+        ).model_dump(mode="json"))
+        events.append(AgentEvent(
+            agent="browser_agent",
             event_type="error",
             job_id=job_id,
             message=error_msg,
@@ -1111,6 +1144,12 @@ ERROR DETECTION — STOP AND REPORT:
         log.error("browser_agent_error", job_id=job_id, error=str(exc))
         errors.append(str(exc))
         await db.update_job(job_id, status="failed")
+        events.append(AgentEvent(
+            agent="browser_agent",
+            event_type="job_status_changed",
+            job_id=job_id,
+            data={"status": "failed"},
+        ).model_dump(mode="json"))
         events.append(AgentEvent(
             agent="browser_agent",
             event_type="error",

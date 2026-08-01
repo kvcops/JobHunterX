@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 
 from vellum.config.logging import get_logger
 from vellum.config import database as db
@@ -29,7 +30,8 @@ MAX_TOTAL_JOBS = 80
 def _effective_max_jobs(limit: int) -> int:
     """Scale the hard cap with the requested limit so big targets can be met.
 
-    Rounds up to the next multiple of the requested limit (min 80, max 600).
+    Scales the hard cap to 2x the requested limit, clamped to [80, 600] so
+    large targets can be met.
     """
     target = max(int(limit), 10)
     return max(80, min(600, target * 2))
@@ -96,7 +98,7 @@ def _clean_company_name(raw_name: str) -> str:
     if any(term in raw_lower for term in blacklisted_terms):
         return ""
 
-    name = re.sub(r"\s*[\-|–|—|\|].*", "", name).strip()
+    name = re.sub(r"\s*[-–—|].*", "", name).strip()
     name = re.sub(r"(?i)\s*(careers?|jobs?|hiring|tech companies|inc\.?|ltd\.?|llc|pvt).*", "", name).strip()
 
     words = name.split()
@@ -219,84 +221,124 @@ def _matches_location_strict(title: str, jd_text: str, target_location: str) -> 
     if not jd_text or len(jd_text) < 15:
         return True
 
-    return False
+    # Reject only when the text explicitly names another location.
+    # JDs that simply omit location info must NOT be rejected.
+    if re.search(r"\b(located in|located at|based in|based at|job in|position in)\b", loc_line):
+        return False
+
+    return True
+
+
+# Per-search ATS fetch cache: key (source, slug) -> (expiry_timestamp, jobs).
+# Lets repeat discovery rounds reuse results instead of re-grinding dead companies.
+_ats_fetch_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+_ATS_CACHE_TTL = 3600.0
 
 
 async def discover_jobs_from_catalog(location: str, role: str, limit: int = 50) -> list[dict]:
-    """Directly query public ATS APIs for companies in the local TECH_HUB_STARTUPS catalog."""
+    """Directly query public ATS APIs for companies in the local TECH_HUB_STARTUPS catalog.
+
+    Processes companies in small batches so the scan stops as soon as the
+    target job count is reached, instead of grinding through every company.
+    """
     from vellum.tools.ats_api import TECH_HUB_STARTUPS, fetch_greenhouse_jobs, fetch_lever_jobs, fetch_ashby_jobs
-    
+
     loc_key = _normalise_city(location)
     companies = TECH_HUB_STARTUPS.get(loc_key, [])
     if not companies:
         # Fallback to general pool of tech startups if location not in catalog
         companies = TECH_HUB_STARTUPS.get("bengaluru", [])[:40] + TECH_HUB_STARTUPS.get("hyderabad", [])[:40]
-        
+
     semaphore = asyncio.Semaphore(15)
     discovered = []
     seen_urls = set()
     company_job_count = {}
     MAX_PER_COMPANY = 3  # Cap jobs per company to avoid single-company dominance
-    
+    target = min(max(int(limit), 10) * 2, 150)  # Early exit once target jobs found
+    BATCH_SIZE = 40
+    MAX_COMPANIES_SCANNED = 300  # Safety cap: dead ATS endpoints must not stall discovery
+
+    async def _fetch_cached(source: str, slug: str, fetcher) -> list[dict]:
+        key = (source, slug.lower())
+        cached = _ats_fetch_cache.get(key)
+        if cached and cached[0] > time.time():
+            return cached[1]
+        try:
+            jobs = await fetcher(slug)
+        except Exception as exc:
+            log.warning("ats_catalog_fetch_failed", source=source, company=slug, error=str(exc)[:100])
+            jobs = []
+        _ats_fetch_cache[key] = (time.time() + _ATS_CACHE_TTL, jobs)
+        return jobs
+
     async def _check_company(company_slug: str):
+        if len(discovered) >= target:
+            return
         async with semaphore:
             if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
                 return
 
             # Check Greenhouse
-            try:
-                gh_jobs = await fetch_greenhouse_jobs(company_slug)
-                for job in gh_jobs:
-                    if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
-                        break
-                    url = job.get("apply_url", "")
-                    if url and url in seen_urls:
-                        continue
-                    if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
-                        if url:
-                            seen_urls.add(url)
-                        discovered.append(job)
-                        company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
-            except Exception:
-                pass
-                
-            # Check Lever
-            try:
-                lever_jobs = await fetch_lever_jobs(company_slug)
-                for job in lever_jobs:
-                    if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
-                        break
-                    url = job.get("apply_url", "")
-                    if url and url in seen_urls:
-                        continue
-                    if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
-                        if url:
-                            seen_urls.add(url)
-                        discovered.append(job)
-                        company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
-            except Exception:
-                pass
-                
-            # Check Ashby
-            try:
-                ashby_jobs = await fetch_ashby_jobs(company_slug)
-                for job in ashby_jobs:
-                    if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
-                        break
-                    url = job.get("apply_url", "")
-                    if url and url in seen_urls:
-                        continue
-                    if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
-                        if url:
-                            seen_urls.add(url)
-                        discovered.append(job)
-                        company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
-            except Exception:
-                pass
+            gh_jobs = await _fetch_cached("greenhouse", company_slug, fetch_greenhouse_jobs)
+            for job in gh_jobs:
+                if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
+                    break
+                url = job.get("apply_url", "")
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
+                    discovered.append(job)
+                    company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
 
-    tasks = [_check_company(c) for c in companies]
-    await asyncio.gather(*tasks)
-    
+            # Check Lever
+            lever_jobs = await _fetch_cached("lever", company_slug, fetch_lever_jobs)
+            for job in lever_jobs:
+                if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
+                    break
+                url = job.get("apply_url", "")
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
+                    discovered.append(job)
+                    company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
+
+            # Check Ashby
+            ashby_jobs = await _fetch_cached("ashby", company_slug, fetch_ashby_jobs)
+            for job in ashby_jobs:
+                if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
+                    break
+                url = job.get("apply_url", "")
+                if url and url in seen_urls:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                if _is_relevant_role(job["title"], role) and _matches_location_strict(job["title"], job.get("jd_text", ""), location):
+                    discovered.append(job)
+                    company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
+
+    total = min(len(companies), MAX_COMPANIES_SCANNED)
+    for start in range(0, total, BATCH_SIZE):
+        chunk = companies[start:start + BATCH_SIZE]
+        tasks = [_check_company(c) for c in chunk]
+        await asyncio.gather(*tasks)
+        checked = min(start + BATCH_SIZE, total)
+        if checked < total:
+            await ws_manager.broadcast(AgentEvent(
+                agent="geo_search",
+                event_type="search_progress",
+                message=f"ATS catalog scan: {checked}/{total} companies checked, {len(discovered)} jobs found...",
+                data={"percentage": min(35, 10 + int(25 * checked / max(total, 1)))},
+            ).model_dump(mode="json"))
+        if len(discovered) >= target:
+            break
+
+    if len(companies) > total:
+        log.info("ats_catalog_cap_reached", checked=total, total_companies=len(companies), found=len(discovered))
+
     standardized = []
     for item in discovered:
         standardized.append({

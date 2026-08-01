@@ -13,12 +13,15 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Project root (vellum-os/): settings.py lives at vellum-os/vellum/config/settings.py
+_BASE_DIR = Path(__file__).resolve().parents[2]
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables / .env file."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -38,9 +41,9 @@ class Settings(BaseSettings):
 
 
     # --- Storage Paths ---
-    db_path: str = "./data/vellum.db"
-    cache_dir: str = "./data/cache"
-    screenshots_dir: str = "./data/screenshots"
+    db_path: str = str(_BASE_DIR / "data" / "vellum.db")
+    cache_dir: str = str(_BASE_DIR / "data" / "cache")
+    screenshots_dir: str = str(_BASE_DIR / "data" / "screenshots")
 
     # --- Concurrency Limits (RPM-aware) ---
     gemini_concurrency: int = 3   # Gemini free: ~15 RPM, conservative

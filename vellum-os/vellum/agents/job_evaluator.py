@@ -282,7 +282,7 @@ async def filter_jobs(jobs: list[dict], profile: dict, target_role: str) -> list
         try:
             jid = job.get("id") or job.get("career_page_url")
             if jid:
-                asyncio.create_task(db.update_job(jid, match_score=score))
+                await db.update_job(jid, match_score=score)
         except Exception:
             pass
         heuristic_passed.append(job)

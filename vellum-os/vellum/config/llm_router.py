@@ -79,7 +79,7 @@ FALLBACK_CHAINS: Dict[str, List[str]] = {
 # Concurrency semaphores — per-provider
 # ---------------------------------------------------------------------------
 
-_semaphores: Dict[str, asyncio.Semaphore] = {}
+_semaphores: Dict[int, Dict[str, asyncio.Semaphore]] = {}
 
 # Minimum delay (seconds) between requests per provider to respect RPM limits.
 # Groq free: 30 RPM → 1 req per 2s minimum
@@ -131,9 +131,11 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
         key = "default"
         limit = 5
 
-    if key not in _semaphores:
-        _semaphores[key] = asyncio.Semaphore(limit)
-    return _semaphores[key]
+    loop_key = id(asyncio.get_running_loop())
+    sem_map = _semaphores.setdefault(loop_key, {})
+    if key not in sem_map:
+        sem_map[key] = asyncio.Semaphore(limit)
+    return sem_map[key]
 
 
 def _get_provider_key(model: str) -> str:
@@ -185,12 +187,11 @@ async def _enforce_rate_limit(model: str) -> None:
     import time as _time
     provider = _get_provider_key(model)
     min_delay = _PROVIDER_MIN_DELAY.get(provider, 1.0)
-    last = _provider_last_request.get(provider, 0.0)
     now = _time.monotonic()
-    wait = min_delay - (now - last)
-    if wait > 0:
-        await asyncio.sleep(wait)
-    _provider_last_request[provider] = _time.monotonic()
+    last = _provider_last_request.get(provider, 0.0)
+    target = max(now, last + min_delay)
+    _provider_last_request[provider] = target
+    await asyncio.sleep(max(0.0, target - _time.monotonic()))
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +352,8 @@ async def call_llm(
 
     # --- Semaphore + call ---
     sem = _get_semaphore(model)
-    t0 = time.monotonic()
     async with sem:
+        t0 = time.monotonic()
         response = await _raw_completion(params)
     latency_ms = (time.monotonic() - t0) * 1000
 
@@ -386,7 +387,7 @@ async def call_llm(
         if _db._db_path:
             import asyncio as _aio
             _log_coro = _db.log_agent_event(
-                run_id=_ck or "llm",
+                run_id=ck or "llm",
                 agent_name="llm_router",
                 event_type="llm_call",
                 tokens_in=tokens_in,
@@ -400,8 +401,8 @@ async def call_llm(
                 loop = None
             if loop and loop.is_running():
                 loop.create_task(_log_coro)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("llm_db_log_failed", error=str(exc), exc_info=True)
 
     # --- Cache store ---
     if use_cache and ck:

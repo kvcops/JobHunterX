@@ -130,6 +130,8 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             # Could handle client commands here in the future
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)
 
 

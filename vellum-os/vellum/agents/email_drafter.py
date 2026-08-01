@@ -176,7 +176,7 @@ Education:
 
     # Calculate overall confidence
     contact_conf = best_contact.get("confidence", 0)
-    email_conf = max((eg.get("confidence", 0) for eg in email_guesses), default=0)
+    email_conf = email_guesses[0].get("confidence", 0) if email_guesses else 0
     overall_conf = (contact_conf * 0.6 + email_conf * 0.4) if email_guesses else contact_conf * 0.4
 
     draft = OutreachDraft(

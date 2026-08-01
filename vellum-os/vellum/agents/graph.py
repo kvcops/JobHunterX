@@ -655,7 +655,11 @@ async def run_full_search(
                     if result.get("errors"):
                         auto_failed += 1
                     else:
-                        auto_applied += 1
+                        browser_status = result.get("browser_result", {}).get("status")
+                        if browser_status == "applied":
+                            auto_applied += 1
+                        else:
+                            auto_failed += 1
                 except Exception as exc:
                     log.warning("auto_apply_failed", job_id=job.get("id"), error=str(exc))
                     auto_failed += 1

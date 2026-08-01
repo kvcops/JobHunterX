@@ -459,7 +459,8 @@ async def search_multi_engine(query: str, max_results: int = 10) -> list[dict]:
                 searx_results = [_normalize(r) for r in data.get("results", [])]
                 if searx_results:
                     return searx_results[:max_results]
-        except Exception:
+        except Exception as exc:
+            log.debug("searx_instance_failed", base=base, error=str(exc)[:100])
             continue
 
     # 3. html.duckduckgo.com POST fallback (no vqd handshake needed)

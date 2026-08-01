@@ -238,6 +238,16 @@ async def run(state: dict) -> dict:
         events.append(evt)
         await ws_manager.broadcast(evt)
 
+    async def _broadcast_job_status(status: str):
+        evt = AgentEvent(
+            agent="validator_tailor",
+            event_type="job_status_changed",
+            job_id=job_id,
+            data={"status": status},
+        ).model_dump(mode="json")
+        events.append(evt)
+        await ws_manager.broadcast(evt)
+
     await log_and_broadcast_event(
         "progress",
         f"Validating: {job.get('company', '')} — {job.get('role', '')}"
@@ -268,6 +278,7 @@ async def run(state: dict) -> dict:
 
     if freshness.get("is_fresh") is False and freshness.get("confidence", 0) >= 0.7:
         await db.update_job(job_id, status="skipped")
+        await _broadcast_job_status(job_id, "skipped")
         await log_and_broadcast_event(
             "progress",
             f"Skipped — confirmed stale ({freshness.get('evidence')})",
@@ -277,6 +288,7 @@ async def run(state: dict) -> dict:
 
     if not jd_text:
         await db.update_job(job_id, status="skipped")
+        await _broadcast_job_status(job_id, "skipped")
         await log_and_broadcast_event(
             "progress",
             "Skipped — no JD text extracted"
@@ -287,6 +299,7 @@ async def run(state: dict) -> dict:
     # Step 2: Validation (match score) with location + experience rules
     # ------------------------------------------------------------------
     await db.update_job(job_id, status="validating")
+    await _broadcast_job_status(job_id, "validating")
 
     # Generate full rich candidate profile context memory
     exp_details = []
@@ -382,16 +395,20 @@ Education:
     is_force_apply = state.get("force_apply", False)
     if validation.get("match_score", 0) < 0.3 and not is_force_apply:
         await db.update_job(job_id, status="skipped")
+        await _broadcast_job_status(job_id, "skipped")
         await log_and_broadcast_event(
             "progress",
             "Skipped — low match score"
         )
         return {"freshness": freshness, "validation": validation, "events": events, "errors": errors}
 
+    job_status = "matched" if validation.get("match_score", 0) >= 0.3 else "force_applied"
+
     # ------------------------------------------------------------------
     # Step 3: High-Impact Tailoring (Summary + Google XYZ Bullets)
     # ------------------------------------------------------------------
-    await db.update_job(job_id, status="matched")
+    await db.update_job(job_id, status=job_status)
+    await _broadcast_job_status(job_id, job_status)
 
     candidate_skills = profile.get("skills", [])
     skills_list_str = ", ".join(candidate_skills)
@@ -483,7 +500,7 @@ Education:
     )
     pdf_bytes = pdf_result["pdf_bytes"]
 
-    await db.update_job(job_id, tailored_pdf=pdf_bytes, status="matched")
+    await db.update_job(job_id, tailored_pdf=pdf_bytes, status=job_status)
 
     shrink_info = f" (shrink level {pdf_result.get('shrink_level', 0)})" if pdf_result.get("trimmed") else ""
     await log_and_broadcast_event(

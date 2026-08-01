@@ -140,7 +140,7 @@ def _build_search_queries(role: str, location: str, company: str = "", skills: l
         # Pick skills that are specific enough (len > 3, not generic terms)
         specific_skills = [s for s in skills if len(s) > 3 and s.lower() not in {
             "communication", "leadership", "teamwork", "problem solving",
-            " analytical", "management", "agile", "sql",
+            "analytical", "management", "agile", "sql",
         }][:3]
         for skill in specific_skills:
             queries.append(f'"{skill}" "{clean_role}" jobs {location}')
@@ -669,7 +669,8 @@ async def enrich_job_from_page(job: dict) -> dict:
             
             return job
     
-    except Exception:
+    except Exception as exc:
+        log.warning("page_enrichment_failed", url=url, error=str(exc)[:100])
         return job
 
 

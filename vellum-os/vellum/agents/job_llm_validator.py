@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 import time
 from typing import Any, Optional
 
@@ -132,6 +133,7 @@ _gemini_last_call: float = 0.0
 _gemini_call_count: int = 0
 _gemini_token_count: int = 0
 _gemini_reset_time: float = 0.0
+_gemini_lock = threading.Lock()
 
 
 def _get_gemini_client():
@@ -148,21 +150,22 @@ def _enforce_gemini_rate_limit() -> None:
     """Enforce 30 RPM rate limit for Gemini/Gemma calls."""
     global _gemini_last_call, _gemini_call_count, _gemini_token_count, _gemini_reset_time
 
-    now = time.monotonic()
+    with _gemini_lock:
+        now = time.monotonic()
 
-    # Reset counters every 60 seconds
-    if now - _gemini_reset_time >= 60.0:
-        _gemini_call_count = 0
-        _gemini_token_count = 0
-        _gemini_reset_time = now
+        # Reset counters every 60 seconds
+        if now - _gemini_reset_time >= 60.0:
+            _gemini_call_count = 0
+            _gemini_token_count = 0
+            _gemini_reset_time = now
 
-    # Enforce minimum delay between calls (2 seconds for 30 RPM)
-    elapsed = now - _gemini_last_call
-    if elapsed < GEMINI_MIN_DELAY:
-        time.sleep(GEMINI_MIN_DELAY - elapsed)
+        # Enforce minimum delay between calls (2 seconds for 30 RPM)
+        elapsed = now - _gemini_last_call
+        if elapsed < GEMINI_MIN_DELAY:
+            time.sleep(GEMINI_MIN_DELAY - elapsed)
 
-    _gemini_last_call = time.monotonic()
-    _gemini_call_count += 1
+        _gemini_last_call = time.monotonic()
+        _gemini_call_count += 1
 
 
 async def llm_validate_single_job(

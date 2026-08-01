@@ -45,12 +45,13 @@ class TestRoutesWiring:
         assert "_pipeline_mode: str = \"manual\"" in routes_src
 
     def test_apply_button_honors_mode(self):
-        """Apply button must skip the browser in manual mode and include it
-        in automatic mode (contacts + email draft always run)."""
+        """Clicking Apply is an explicit apply request, so the full pipeline
+        (resume PDF → email draft → browser agent) always runs regardless of
+        pipeline mode. Pipeline mode only gates auto-apply during discovery."""
         routes_src = Path(
             "vellum/api/routes.py"
         ).read_text(encoding="utf-8")
-        assert "include_browser=(_pipeline_mode == \"automatic\")" in routes_src
+        assert "include_browser=True" in routes_src
 
 
 class TestPrepPipeline:

@@ -25,9 +25,9 @@ async def geocode_location(city: str) -> Optional[dict]:
         city_clean = city.strip()
         # Tier 1: Photon API (free OpenStreetMap geocoder by Komoot)
         try:
-            url = f"https://photon.komoot.io/api/?q={city_clean}&limit=1"
+            url = "https://photon.komoot.io/api/"
             headers = {"User-Agent": "VellumOS/1.0"}
-            res = requests.get(url, headers=headers, timeout=6)
+            res = requests.get(url, params={"q": city_clean, "limit": 1}, headers=headers, timeout=6)
             if res.status_code == 200:
                 data = res.json()
                 features = data.get("features", [])

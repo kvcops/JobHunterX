@@ -622,6 +622,19 @@ function handleSocketMessage(msg) {
   if (msg.event_type === "discovery" || msg.event_type === "complete" || msg.event_type === "job_deleted" || msg.event_type === "jobs_cleared") {
     loadInitialData();
   }
+
+  // Live status transitions (validating → matched/applying → applied/...):
+  // patch the in-memory job list so pills, counters, and the active filter
+  // update instantly without a full reload.
+  if (msg.event_type === "job_status_changed" && msg.data && msg.data.job_id && msg.data.status) {
+    const job = jobs.find(j => j.id === msg.data.job_id);
+    if (job) {
+      job.status = msg.data.status;
+      renderJobs();
+    } else {
+      loadInitialData();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -782,10 +795,13 @@ function renderJobs() {
   });
 
   sortedJobs.forEach(job => {
-    if (job.status === "applied" || job.status === "applied_manual") appliedCount++;
-    if (job.status === "matched") matchedCount++;
-    if (job.status === "needs_attention") needsAttentionCount++;
-    if (job.status === "discovered") lowScoreCount++;
+    // Counters mirror the filter buckets so pill counts always match the
+    // cards actually visible under each filter tab.
+    const st = job.status || "discovered";
+    if (st === "matched" || st === "validating" || st === "applying") matchedCount++;
+    if (st === "applied" || st === "applied_manual" || st === "force_applied") appliedCount++;
+    if (st === "needs_attention") needsAttentionCount++;
+    if (st === "discovered" || st === "skipped" || st === "failed") lowScoreCount++;
 
     const card = document.createElement("div");
     const matchPercent = getMatchScorePercent(job);
@@ -825,8 +841,11 @@ function renderJobs() {
     // Status Pill text and class
     const statusText = {
       matched: "Matched",
+      validating: "Validating",
       applying: "Applying",
       applied: "Applied",
+      applied_manual: "Applied",
+      force_applied: "Applied",
       needs_attention: "Attention",
       failed: "Failed",
       skipped: "Skipped"
@@ -834,8 +853,11 @@ function renderJobs() {
 
     const statusPillClass = {
       matched: "pill-matched",
+      validating: "pill-applying",
       applying: "pill-applying",
       applied: "pill-applied",
+      applied_manual: "pill-applied",
+      force_applied: "pill-applied",
       needs_attention: "pill-attention",
       failed: "pill-failed"
     }[job.status] || "pill-discovered";
@@ -874,8 +896,8 @@ function renderJobs() {
           <button class="clean-btn sec" onclick="openJobDetailsModal('${job.id}')">Details</button>
           <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="clean-btn icon-link" title="Open Application Link">↗</a>
           ${job.status === 'matched' || job.status === 'applied' || job.tailored_pdf ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
-          ${job.status === 'applying' ? `<span class="clean-btn applying">Applying...</span>` : ''}
-          ${job.status === 'applied' ? `<span class="clean-btn applied" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); font-size: 0.78rem; padding: 3px 8px; border-radius: 4px;">Applied ✓</span>` : ''}
+          ${job.status === 'applying' || job.status === 'validating' ? `<span class="clean-btn applying">Applying...</span>` : ''}
+          ${job.status === 'applied' || job.status === 'force_applied' ? `<span class="clean-btn applied" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); font-size: 0.78rem; padding: 3px 8px; border-radius: 4px;">Applied ✓</span>` : ''}
           ${job.status === 'needs_attention' ? `<button class="clean-btn warn" onclick="triggerHitlResume('${job.id}')">Solve Block</button><button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
           ${job.status === 'failed' || job.status === 'skipped' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
           ${job.status === 'discovered' || job.status === 'matched' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Apply</button>` : ''}
@@ -1587,6 +1609,24 @@ function filterJobs(status, triggerEl) {
   applyJobFilter();
 }
 
+// Maps each filter tab to the set of raw job statuses it shows. Statuses are
+// transient or dual-mapped (validating/applying live under Matched, manual or
+// forced applies count as Applied), so exact-string matching would make cards
+// vanish from every tab mid-pipeline.
+const JOB_STATUS_BUCKETS = {
+  matched: new Set(["matched", "validating", "applying"]),
+  applying: new Set(["applying", "validating"]),
+  applied: new Set(["applied", "applied_manual", "force_applied"]),
+  needs_attention: new Set(["needs_attention"]),
+  low_score: new Set(["discovered", "skipped", "failed"])
+};
+
+function jobStatusInFilter(status, filter) {
+  if (!filter || filter === "all") return true;
+  const bucket = JOB_STATUS_BUCKETS[filter];
+  return bucket ? bucket.has(status || "discovered") : false;
+}
+
 // Applies activeJobFilter to every currently rendered card. Called after
 // pill clicks AND after every renderJobs()/renderResumes() so newly streamed
 // jobs respect the user's chosen filter instead of bypassing it.
@@ -1596,17 +1636,7 @@ function applyJobFilter() {
 
   cards.forEach(card => {
     const cardStatus = card.dataset.status || "discovered";
-
-    let show = true;
-    if (activeJobFilter === "low_score") {
-      // Low Score tab: only show unvalidated / low-score jobs
-      show = cardStatus === "discovered";
-    } else if (activeJobFilter && activeJobFilter !== "all") {
-      // Other tabs: exact match
-      show = cardStatus === activeJobFilter;
-    }
-    // "all" shows everything
-
+    const show = jobStatusInFilter(cardStatus, activeJobFilter);
     card.style.display = show ? "flex" : "none";
     if (show) visibleCount++;
   });

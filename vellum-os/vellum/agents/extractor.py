@@ -244,7 +244,7 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
         )
         return profile
 
-    except (json.JSONDecodeError, Exception) as exc:
-        log.error("profile_extraction_failed", error=str(exc))
+    except Exception as exc:
+        log.error("profile_extraction_failed", error=str(exc), exc_type=type(exc).__name__)
         return CandidateProfile()
 

@@ -74,7 +74,7 @@ def _is_placeholder_email(address: str) -> bool:
         # "hello@..." is fine; "yourname@..." is not
         if local in PLACEHOLDER_LOCALPARTS or local.startswith("your"):
             return True
-    if re.search(r"(\d{4,})", local) and not re.search(r"^[a-z0-9]{1,4}\d{4,}$", local):
+    if re.search(r"(\d{4,})", local) and not re.search(r"^[a-z]{1,4}\d{4,}$", local):
         return True
     return False
 
@@ -639,9 +639,16 @@ async def run(state: dict) -> dict:
     # the referral/cold-outreach targets.
     linkedin_people_task = asyncio.create_task(email_enrichment.linkedin_company_people(company, role))
     linkedin_url_task = asyncio.create_task(email_enrichment.linkedin_company_url(company))
-    linkedin_people = await linkedin_people_task
+    linkedin_people, linkedin_url = await asyncio.gather(
+        linkedin_people_task, linkedin_url_task, return_exceptions=True
+    )
+    if isinstance(linkedin_people, Exception):
+        log.warning("linkedin_company_people_error", company=company, error=str(linkedin_people)[:200])
+        linkedin_people = []
+    if isinstance(linkedin_url, Exception):
+        log.warning("linkedin_company_url_error", company=company, error=str(linkedin_url)[:200])
+        linkedin_url = ""
     contact_result["linkedin_people"] = linkedin_people[:5]
-    linkedin_url = await linkedin_url_task
     contact_result["linkedin_company_url"] = linkedin_url
     linkedin_guest_emails = await email_enrichment.linkedin_guest_emails(company, linkedin_url)
     contact_result["linkedin_guest_emails"] = linkedin_guest_emails
@@ -674,10 +681,19 @@ async def run(state: dict) -> dict:
     # The Hunter-style flow: names first, then one targeted query per person
     # (all parallel). Runs concurrently with the LinkedIn profile harvest.
     profile_emails_task = asyncio.create_task(email_enrichment.linkedin_profile_emails(all_people))
-    person_emails = await search_person_emails(all_people, company, domain, location)
+    person_emails, profile_emails = await asyncio.gather(
+        search_person_emails(all_people, company, domain, location),
+        profile_emails_task,
+        return_exceptions=True,
+    )
+    if isinstance(person_emails, Exception):
+        log.warning("person_search_emails_error", company=company, error=str(person_emails)[:200])
+        person_emails = []
+    if isinstance(profile_emails, Exception):
+        log.warning("linkedin_profile_emails_error", company=company, error=str(profile_emails)[:200])
+        profile_emails = []
     contact_result["person_search_emails"] = person_emails
     email_guesses_all.extend(person_emails)
-    profile_emails = await profile_emails_task
     contact_result["linkedin_profile_emails"] = profile_emails
     email_guesses_all.extend(profile_emails)
 

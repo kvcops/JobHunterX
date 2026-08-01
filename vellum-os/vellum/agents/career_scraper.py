@@ -8,6 +8,7 @@ deterministic, structured data extraction.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import json
 from datetime import datetime, timezone
@@ -580,36 +581,41 @@ async def run(state: dict) -> dict:
         "data": {"percentage": 0, "total_companies": len(company_list)},
     })
     
-    # Scrape each company
-    for idx, company_slug in enumerate(company_list):
+    # Scrape each company — bounded concurrency (5 at a time) with a
+    # respectful pause between batches
+    semaphore = asyncio.Semaphore(5)
+
+    async def _scrape_one(idx: int, company_slug: str) -> None:
         if len(all_jobs) >= limit:
-            break
-        
-        try:
-            company_jobs = await scrape_single_company(
-                company_slug, role, location, user_experience
-            )
-            all_jobs.extend(company_jobs)
-            
-            if company_jobs:
-                log.info("company_jobs_found",
-                    company=company_slug, count=len(company_jobs))
-        except Exception as exc:
-            log.warning("company_scrape_error",
-                company=company_slug, error=str(exc)[:100])
-        
-        # Progress update every 10 companies
-        if (idx + 1) % 10 == 0 or idx == len(company_list) - 1:
-            pct = int(((idx + 1) / len(company_list)) * 70)
-            await ws_manager.broadcast({
-                "agent": "career_scraper",
-                "event_type": "search_progress",
-                "message": f"Scanned {idx + 1}/{len(company_list)} companies. Found {len(all_jobs)} jobs so far.",
-                "data": {"percentage": pct, "scanned": idx + 1, "total": len(company_list), "jobs_found": len(all_jobs)},
-            })
-        
-        # Small delay between companies to be respectful
-        import asyncio
+            return
+        async with semaphore:
+            try:
+                company_jobs = await scrape_single_company(
+                    company_slug, role, location, user_experience
+                )
+                all_jobs.extend(company_jobs)
+
+                if company_jobs:
+                    log.info("company_jobs_found",
+                        company=company_slug, count=len(company_jobs))
+            except Exception as exc:
+                log.warning("company_scrape_error",
+                    company=company_slug, error=str(exc)[:100])
+
+            # Progress update every 10 companies
+            if (idx + 1) % 10 == 0 or idx == len(company_list) - 1:
+                pct = int(((idx + 1) / len(company_list)) * 70)
+                await ws_manager.broadcast({
+                    "agent": "career_scraper",
+                    "event_type": "search_progress",
+                    "message": f"Scanned {idx + 1}/{len(company_list)} companies. Found {len(all_jobs)} jobs so far.",
+                    "data": {"percentage": pct, "scanned": idx + 1, "total": len(company_list), "jobs_found": len(all_jobs)},
+                })
+
+    for start in range(0, len(company_list), 5):
+        batch = company_list[start:start + 5]
+        await asyncio.gather(*(_scrape_one(start + i, slug) for i, slug in enumerate(batch)))
+        # Small delay between batches to be respectful
         await asyncio.sleep(0.5)
     
     # Deduplicate by apply_url

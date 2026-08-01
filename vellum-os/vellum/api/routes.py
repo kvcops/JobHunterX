@@ -343,10 +343,10 @@ async def clear_jobs_endpoint(status: str = ""):
 async def apply_single_job(job_id: str):
     """Run the per-job pipeline when the user clicks 'Apply' on a job card.
 
-    MANUAL mode (default): runs validate → contact search → email draft and
-    stops — the browser is never launched; the user reviews the draft and
-    submits themselves.
-    AUTOMATIC mode: additionally launches the browser agent to auto-submit.
+    Clicking Apply is an explicit request to apply, so the full pipeline runs
+    in both modes: validate/tailor (resume PDF) → contact search → email
+    draft → browser agent. The pipeline mode ('manual' vs 'automatic') only
+    controls whether discovery auto-applies without a click.
     """
     from vellum.agents.graph import run_single_job_apply
 
@@ -358,7 +358,7 @@ async def apply_single_job(job_id: str):
         try:
             result = await run_single_job_apply(
                 job_id,
-                include_browser=(_pipeline_mode == "automatic"),
+                include_browser=True,
             )
             log.info("single_job_apply_complete", job_id=job_id, result_keys=list(result.keys()) if isinstance(result, dict) else str(result))
         except Exception as exc:
@@ -575,9 +575,15 @@ async def resolve_intervention(session_id: int, status: str = "resolved"):
 @router.get("/screenshots/{job_id}")
 async def get_screenshot(job_id: str):
     """Serve a browser screenshot for a given job ID."""
-    from fastapi.responses import FileResponse
     from pathlib import Path
-    screenshot_path = Path(f"./data/screenshots/{job_id}.png")
+    import re as _re
+    from fastapi.responses import FileResponse
+    from vellum.config.settings import get_settings
+
+    if not _re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+
+    screenshot_path = Path(get_settings().screenshots_full_path) / f"{job_id}.png"
     if screenshot_path.exists():
         return FileResponse(str(screenshot_path), media_type="image/png")
     raise HTTPException(status_code=404, detail="Screenshot not found")

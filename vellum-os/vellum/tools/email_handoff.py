@@ -312,18 +312,18 @@ async def verify_emails_with_smtp(emails: list[dict]) -> list[dict]:
     if not emails:
         return emails
 
-    # Resolve MX hosts once per domain
+    import asyncio
+    import random
+    import string
+
+    # Resolve MX hosts once per domain (DNS in a worker thread)
     mx_hosts: dict[str, Optional[str]] = {}
     for e in emails:
         addr = e.get("address", "")
         if "@" in addr:
             domain = addr.split("@")[1]
             if domain not in mx_hosts:
-                mx_hosts[domain] = _get_mx_host(domain)
-
-    import asyncio
-    import random
-    import string
+                mx_hosts[domain] = await asyncio.to_thread(_get_mx_host, domain)
 
     async def _verify_one(addr: str, mx_host: str) -> Optional[int]:
         return await asyncio.to_thread(_smtp_rcpt_check, mx_host, addr, 10)
