@@ -90,3 +90,18 @@ class TestEffectiveMaxJobs:
 
     def test_ten_limit_floor(self):
         assert _effective_max_jobs(10) >= 80
+
+
+class TestQueryExpansion:
+    def test_get_role_synonyms(self):
+        from vellum.agents.graph import get_role_synonyms
+        syns = get_role_synonyms("Software Engineer")
+        assert "Software Engineer" in syns
+        assert "SDE" in syns or "sde" in [s.lower() for s in syns]
+        assert "Software Developer" in syns
+        
+        # Test senior prefix
+        syns_senior = get_role_synonyms("Senior Software Engineer")
+        assert "Senior Software Engineer" in syns_senior
+        assert "Senior SDE" in syns_senior or "senior sde" in [s.lower() for s in syns_senior]
+        assert "Senior Software Developer" in syns_senior

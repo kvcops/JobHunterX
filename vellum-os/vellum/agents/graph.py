@@ -32,6 +32,66 @@ from vellum.utils.json_helper import parse_llm_json
 
 log = get_logger("graph")
 
+
+def get_role_synonyms(role: str) -> list[str]:
+    """Generate a list of synonymous/broadened roles based on a target role."""
+    role_lower = role.lower().strip()
+    synonyms = [role] # Always include the original role first
+    
+    # Define primary mappings based on substring matching
+    mappings = {
+        "software engineer": ["software developer", "sde", "swe", "software programmer", "systems engineer", "full stack developer", "backend engineer"],
+        "software developer": ["software engineer", "sde", "swe", "software programmer", "application developer", "full stack engineer"],
+        "sde": ["software engineer", "software developer", "swe", "software development engineer"],
+        "swe": ["software engineer", "software developer", "sde"],
+        "frontend": ["front-end developer", "frontend engineer", "ui engineer", "react developer", "web developer"],
+        "front-end": ["frontend developer", "frontend engineer", "ui engineer", "react developer", "web developer"],
+        "backend": ["back-end developer", "backend engineer", "api engineer", "python developer", "software engineer"],
+        "back-end": ["backend developer", "backend engineer", "api engineer", "python developer", "software engineer"],
+        "full stack": ["fullstack engineer", "full-stack developer", "software engineer", "web developer"],
+        "fullstack": ["full stack engineer", "full-stack developer", "software engineer", "web developer"],
+        "data scientist": ["ml engineer", "machine learning engineer", "ai engineer", "data analyst", "quantitative analyst"],
+        "machine learning": ["ml engineer", "data scientist", "ai engineer", "deep learning engineer"],
+        "ml": ["machine learning engineer", "data scientist", "ai engineer", "deep learning engineer"],
+        "ai engineer": ["machine learning engineer", "ml engineer", "data scientist", "ai developer", "artificial intelligence engineer"],
+        "devops": ["sre", "site reliability engineer", "platform engineer", "infrastructure engineer", "cloud engineer"],
+        "sre": ["devops engineer", "site reliability engineer", "platform engineer"],
+        "product manager": ["product owner", "technical product manager", "product lead", "pm"],
+        "product owner": ["product manager", "technical product manager", "product lead"],
+        "data analyst": ["business analyst", "analytics engineer", "data specialist", "bi analyst"],
+        "business analyst": ["data analyst", "product analyst", "systems analyst"],
+    }
+    
+    # Find matching mappings
+    for key, values in mappings.items():
+        if key in role_lower:
+            for val in values:
+                # Format to Title Case or uppercase for short acronyms
+                val_title = val.title() if len(val) > 3 else val.upper()
+                if val_title.lower() not in [s.lower() for s in synonyms]:
+                    synonyms.append(val_title)
+                    
+    # Also support general variations by combining parts of the role
+    prefixes = ["senior", "junior", "lead", "staff", "principal", "associate", "intern", "graduate", "trainee"]
+    found_prefix = ""
+    base_role = role_lower
+    for p in prefixes:
+        if role_lower.startswith(p):
+            found_prefix = p
+            base_role = role_lower[len(p):].strip()
+            break
+            
+    if found_prefix:
+        # If there is a prefix, generate variations with the prefix applied to base synonyms
+        base_syns = get_role_synonyms(base_role)
+        for bs in base_syns:
+            combined = f"{found_prefix.title()} {bs.title() if len(bs) > 3 else bs.upper()}"
+            if combined.lower() not in [s.lower() for s in synonyms]:
+                synonyms.append(combined)
+                
+    return synonyms
+
+
 # ---------------------------------------------------------------------------
 # Graph 1: Discovery
 # ---------------------------------------------------------------------------
@@ -518,22 +578,71 @@ async def run_full_search(
     MAX_ROUNDS = 8  # Discovery attempts to reach the requested job count
     APPLY_SEMAPHORE = 3  # Max concurrent auto-applications
 
+    # Set up query expansion and rotation parameters
+    role_synonyms = get_role_synonyms(effective_role)
+    role_index = 0
+    
+    candidate_skills = profile.get("skills", []) or []
+    # Filter out empty/generic skills to focus on key technical terms for search query
+    specific_skills = [
+        s for s in candidate_skills 
+        if s and len(s) > 3 and s.lower() not in {
+            "communication", "leadership", "teamwork", "problem solving",
+            "analytical", "management", "agile", "sql",
+        }
+    ]
+    
+    skill_offset = 0
+    include_skills_in_query = True
+    searched_queries = set()
+    
+    current_role = effective_role
+    current_skills = list(candidate_skills)
+
     while len(final_validated) < limit and discovery_round < MAX_ROUNDS:
         discovery_round += 1
-        round_limit = min(limit * 2, 150)  # Discover extra to account for filtering
+        
+        # Ensure we have a fresh query combination that has not been searched yet
+        query_sig = (current_role, tuple(current_skills))
+        while query_sig in searched_queries:
+            # Expand/rotate to find a new signature
+            if include_skills_in_query and specific_skills:
+                # Try broadening by omitting skill keywords
+                include_skills_in_query = False
+                current_skills = []
+            else:
+                # Rotate to the next role synonym and rotate skill subset
+                include_skills_in_query = True
+                role_index = (role_index + 1) % len(role_synonyms)
+                current_role = role_synonyms[role_index]
+                if specific_skills:
+                    skill_offset = (skill_offset + 3) % len(specific_skills)
+                    rotated = specific_skills[skill_offset:] + specific_skills[:skill_offset]
+                    current_skills = rotated + [s for s in candidate_skills if s not in specific_skills]
+                else:
+                    current_skills = list(candidate_skills)
+            query_sig = (current_role, tuple(current_skills))
+            
+        searched_queries.add(query_sig)
+        
+        # Dynamically scale round limit based on round number to allow broader scans
+        round_limit = min(limit * 2 + (discovery_round * 15), 200)
 
         if event_callback:
+            skills_summary = ", ".join(current_skills[:3]) if current_skills else "none"
             await event_callback({
                 "agent": "graph",
                 "event_type": "progress",
-                "message": f"Discovery round {discovery_round}: searching for {effective_role} in {location}...",
+                "message": f"Discovery round {discovery_round}: searching for '{current_role}' (skills: {skills_summary}) in {location}...",
             })
 
-        log.info("discovery_round", round=discovery_round, target=limit, found_so_far=len(final_validated))
+        log.info("discovery_round", round=discovery_round, target=limit, found_so_far=len(final_validated), role=current_role, skills=current_skills[:5])
 
-        # Phase 1: Discovery
+        # Phase 1: Discovery with custom/broadened query parameters
+        round_profile = profile.copy()
+        round_profile["skills"] = current_skills
         try:
-            raw_jobs = await run_discovery(location, profile, role, round_limit, event_callback)
+            raw_jobs = await run_discovery(location, round_profile, current_role, round_limit, event_callback)
         except Exception as exc:
             log.error("discovery_error", round=discovery_round, error=str(exc))
             break
@@ -551,9 +660,23 @@ async def run_full_search(
                 await event_callback({
                     "agent": "graph",
                     "event_type": "progress",
-                    "message": f"Round {discovery_round}: no new jobs found. Expanding search...",
+                    "message": f"Round {discovery_round}: no new jobs found. Expanding search query...",
                 })
-            # Try web search with broader terms for next round
+            
+            # Force immediate mutation/broadening for the next round since this query yielded no results
+            if include_skills_in_query and specific_skills:
+                include_skills_in_query = False
+                current_skills = []
+            else:
+                include_skills_in_query = True
+                role_index = (role_index + 1) % len(role_synonyms)
+                current_role = role_synonyms[role_index]
+                if specific_skills:
+                    skill_offset = (skill_offset + 3) % len(specific_skills)
+                    rotated = specific_skills[skill_offset:] + specific_skills[:skill_offset]
+                    current_skills = rotated + [s for s in candidate_skills if s not in specific_skills]
+                else:
+                    current_skills = list(candidate_skills)
             continue
 
         all_discovered.extend(new_jobs)
