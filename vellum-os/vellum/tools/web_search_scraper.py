@@ -750,15 +750,28 @@ async def search_and_enrich(
                 seen_urls.add(url)
                 all_jobs.append(job)
     
-    # Enrich top results
-    enriched = []
+    # Enrich top results in parallel with a semaphore to be respectful of websites
+    sem = asyncio.Semaphore(6)
+    
+    async def enrich_with_sem(job: dict) -> dict:
+        async with sem:
+            # Small random jitter to avoid concurrent requests hit identical domains at the same millisecond
+            await asyncio.sleep(random.uniform(0.1, 0.8))
+            try:
+                return await enrich_job_from_page(job)
+            except Exception as exc:
+                log.warning("enrich_error", url=job.get("apply_url"), error=str(exc))
+                return job
+                
+    tasks = []
     for i, job in enumerate(all_jobs[:max_results]):
         if i < enrich_top:
-            enriched_job = await enrich_job_from_page(job)
-            enriched.append(enriched_job)
-            await asyncio.sleep(random.uniform(1.0, 3.0))
+            tasks.append(enrich_with_sem(job))
         else:
-            enriched.append(job)
+            async def _dummy(j): return j
+            tasks.append(_dummy(job))
+            
+    enriched = await asyncio.gather(*tasks)
     
     log.info(
         "search_complete",

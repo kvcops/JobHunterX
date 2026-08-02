@@ -288,8 +288,14 @@ async def discover_jobs_from_catalog(location: str, role: str, limit: int = 50) 
             if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
                 return
 
-            # Check Greenhouse
-            gh_jobs = await _fetch_cached("greenhouse", company_slug, fetch_greenhouse_jobs)
+            # Fetch Greenhouse, Lever, Ashby public jobs in parallel
+            gh_task = _fetch_cached("greenhouse", company_slug, fetch_greenhouse_jobs)
+            lever_task = _fetch_cached("lever", company_slug, fetch_lever_jobs)
+            ashby_task = _fetch_cached("ashby", company_slug, fetch_ashby_jobs)
+            
+            gh_jobs, lever_jobs, ashby_jobs = await asyncio.gather(gh_task, lever_task, ashby_task)
+
+            # Process Greenhouse
             for job in gh_jobs:
                 if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
                     break
@@ -302,8 +308,7 @@ async def discover_jobs_from_catalog(location: str, role: str, limit: int = 50) 
                     discovered.append(job)
                     company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
 
-            # Check Lever
-            lever_jobs = await _fetch_cached("lever", company_slug, fetch_lever_jobs)
+            # Process Lever
             for job in lever_jobs:
                 if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
                     break
@@ -316,8 +321,7 @@ async def discover_jobs_from_catalog(location: str, role: str, limit: int = 50) 
                     discovered.append(job)
                     company_job_count[company_slug] = company_job_count.get(company_slug, 0) + 1
 
-            # Check Ashby
-            ashby_jobs = await _fetch_cached("ashby", company_slug, fetch_ashby_jobs)
+            # Process Ashby
             for job in ashby_jobs:
                 if company_job_count.get(company_slug, 0) >= MAX_PER_COMPANY:
                     break

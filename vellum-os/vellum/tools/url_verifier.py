@@ -50,6 +50,33 @@ MIN_JD_KEYWORDS = [
 ]
 
 
+def verify_job_text_local(text: str, min_text_len: int = 100) -> tuple[bool, str]:
+    """Perform local regex and keyword checks on already fetched JD text.
+    
+    Avoids making redundant HTTP requests if the text was already enriched.
+    """
+    if not text:
+        return False, "Empty job description text"
+        
+    text_lower = text.lower()
+    
+    # 1. Check for closed / expired patterns
+    for pat in CLOSED_JOB_PATTERNS:
+        if re.search(pat, text_lower):
+            return False, f"Posting expired/closed ('{pat}')"
+            
+    # 2. Check minimum text length
+    if len(text) < min_text_len:
+        return False, f"Insufficient text content ({len(text)} chars)"
+        
+    # 3. Check for required JD keywords
+    has_jd_kw = any(kw in text_lower for kw in MIN_JD_KEYWORDS)
+    if not has_jd_kw:
+        return False, "Page lacks standard job description keywords"
+        
+    return True, "Active"
+
+
 async def verify_job_url(url: str, min_text_len: int = 100) -> tuple[bool, str, str]:
     """Verify if a job URL is active, reachable, and contains an active job posting.
 
@@ -134,7 +161,15 @@ async def filter_active_jobs(jobs: list[dict], max_concurrency: int = 8) -> list
     async def _check(job: dict) -> dict | None:
         async with semaphore:
             url = job.get("apply_url") or job.get("career_page_url") or ""
-            is_active, reason, text = await verify_job_url(url)
+            
+            # If the job description is already present and valid, skip HTTP fetch
+            jd_text = job.get("jd_text", "")
+            if jd_text and len(jd_text) >= 100:
+                is_active, reason = verify_job_text_local(jd_text)
+                text = jd_text
+            else:
+                is_active, reason, text = await verify_job_url(url)
+                
             if is_active:
                 if text and not job.get("jd_text"):
                     job["jd_text"] = text

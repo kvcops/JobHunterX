@@ -561,6 +561,13 @@ async def run(state: dict) -> dict:
         log.warning("no_companies_for_location", location=location)
         return {"discovered_jobs": [], "events": [], "errors": [f"No companies found for {location}"]}
     
+    # Check if verified URLs are loaded; if not, there is no verified company data to scrape.
+    # Return immediately to avoid looping through hundreds of companies with sequential delays.
+    verified_urls = _load_verified_urls()
+    if not verified_urls:
+        log.warning("career_scraper_no_verified_urls", message="Verified career URLs database is empty. Skipping career scraping phase.")
+        return {"discovered_jobs": [], "events": [], "errors": []}
+    
     # Extract user experience
     user_experience = None
     exp_str = profile.get("relevant_experience", "")
@@ -613,6 +620,8 @@ async def run(state: dict) -> dict:
                 })
 
     for start in range(0, len(company_list), 5):
+        if len(all_jobs) >= limit:
+            break
         batch = company_list[start:start + 5]
         await asyncio.gather(*(_scrape_one(start + i, slug) for i, slug in enumerate(batch)))
         # Small delay between batches to be respectful

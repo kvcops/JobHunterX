@@ -423,7 +423,7 @@ async def validate_and_filter_jobs(
         30
     )
     
-    from vellum.tools.url_verifier import verify_job_url
+    from vellum.tools.url_verifier import verify_job_url, verify_job_text_local
     from vellum.agents.geo_search import _matches_location_strict
     
     verified_located = []
@@ -440,8 +440,14 @@ async def validate_and_filter_jobs(
             if not url:
                 return job, "No valid job application or career URL"
                 
-            # Check if job is expired/closed
-            is_active, reason, page_text = await verify_job_url(url)
+            # If the job description is already present and valid, skip HTTP fetch
+            jd_text = job.get("jd_text", "")
+            if jd_text and len(jd_text) >= 100:
+                is_active, reason = verify_job_text_local(jd_text)
+                page_text = jd_text
+            else:
+                is_active, reason, page_text = await verify_job_url(url)
+                
             if not is_active:
                 return job, f"Job has expired or is closed: {reason}"
                 
