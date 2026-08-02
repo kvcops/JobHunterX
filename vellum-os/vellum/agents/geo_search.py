@@ -194,36 +194,46 @@ FOREIGN_LOCATION_TOKENS = [
 
 
 def _matches_location_strict(title: str, jd_text: str, target_location: str) -> bool:
-    """Strict location matching that rejects foreign-based jobs."""
+    """Strict location matching that rejects mismatching locations and foreign jobs."""
     if not target_location:
         return True
+    
     target_lower = target_location.lower().strip()
-    loc_line = (title + " " + jd_text[:300]).lower()
+    title_lower = title.lower()
+    jd_lower = (jd_text or "").lower()
+    full_text = f"{title_lower}\n{jd_lower}"
 
+    # 1. Reject foreign jobs immediately
     for tok in FOREIGN_LOCATION_TOKENS:
-        if tok in loc_line:
+        if tok in full_text:
             return False
 
-    if any(t in loc_line for t in ["worldwide", "anywhere", "global", "work from anywhere"]):
+    # 2. Check if remote-eligible (which is always accepted)
+    remote_keywords = ["remote", "work from home", "wfh", "anywhere", "global", "worldwide", "work from anywhere", "pan india", "pan-india"]
+    if any(r_kw in full_text for r_kw in remote_keywords):
         return True
 
-    if "remote" in loc_line or "work from home" in loc_line or "pan india" in loc_line:
-        return True
-
-    if "india" in loc_line:
-        return True
-
+    # 3. Normalize target location and check synonyms
     target_key = _normalise_city(target_lower)
     target_synonyms = INDIAN_CITIES.get(target_key, [target_key])
-    if any(syn in loc_line for syn in target_synonyms):
+    
+    has_target = any(syn in full_text for syn in target_synonyms)
+    if has_target:
         return True
 
-    if not jd_text or len(jd_text) < 15:
-        return True
+    # 4. Check if other major Indian cities are explicitly mentioned.
+    # If other cities are mentioned, but target location is not mentioned (and not remote), reject.
+    other_cities = []
+    for city_key, synonyms in INDIAN_CITIES.items():
+        if city_key != target_key:
+            other_cities.extend(synonyms)
+            
+    for other_city in other_cities:
+        if other_city in full_text:
+            return False
 
-    # Reject only when the text explicitly names another location.
-    # JDs that simply omit location info must NOT be rejected.
-    if re.search(r"\b(located in|located at|based in|based at|job in|position in)\b", loc_line):
+    # 5. Reject if other location phrases match
+    if re.search(r"\b(located in|located at|based in|based at|job in|position in|office in|office:)\b", full_text):
         return False
 
     return True

@@ -417,9 +417,76 @@ async def validate_and_filter_jobs(
         20
     )
 
+    # Stage 1.5: URL Active status and Location alignment pre-validation
+    await broadcast(
+        f"Pre-validating {len(exp_passed)} jobs for active URL and location target...",
+        30
+    )
+    
+    from vellum.tools.url_verifier import verify_job_url
+    from vellum.agents.geo_search import _matches_location_strict
+    
+    verified_located = []
+    
+    # Scale URL checking concurrency with CPU count
+    import os
+    cpu_count = os.cpu_count() or 4
+    concurrency_limit = min(32, max(8, cpu_count * 2))
+    sem = asyncio.Semaphore(concurrency_limit)
+    
+    async def verify_and_check_location(job: dict) -> tuple[dict, str | None]:
+        async with sem:
+            url = job.get("apply_url") or job.get("career_page_url") or ""
+            if not url:
+                return job, "No valid job application or career URL"
+                
+            # Check if job is expired/closed
+            is_active, reason, page_text = await verify_job_url(url)
+            if not is_active:
+                return job, f"Job has expired or is closed: {reason}"
+                
+            # If verify_job_url extracted the text and the job doesn't have it, enrich it
+            if page_text and not job.get("jd_text"):
+                job["jd_text"] = page_text
+                
+            # Check if location aligns strictly
+            if not _matches_location_strict(
+                job.get("title") or job.get("role") or "",
+                job.get("jd_text") or "",
+                location
+            ):
+                return job, f"Location mismatch: job is not in or remote-eligible for {location}"
+                
+            return job, None
+
+    # Run pre-verification in parallel
+    pv_tasks = [verify_and_check_location(j) for j in exp_passed]
+    pv_results = await asyncio.gather(*pv_tasks)
+    
+    for job, reject_reason in pv_results:
+        if reject_reason:
+            score = 15
+            job["match_score"] = round(score / 100.0, 2)
+            job["validation_status"] = "low_score"
+            job["one_line_summary"] = reject_reason
+            job["skills_needed"] = []
+            job["skills_matched"] = []
+            job["skills_missing"] = []
+            job["experience_verdict"] = reject_reason
+            job["validation_json"] = json.dumps({"relevance_score": score, "experience_ok": False, "reason": reject_reason})
+            low_score_jobs.append(job)
+        else:
+            verified_located.append(job)
+            
+    await broadcast(
+        f"Pre-validation complete: {len(verified_located)}/{len(exp_passed)} jobs active and located in {location} "
+        f"({len(exp_passed) - len(verified_located)} jobs skipped/expired)",
+        40
+    )
+
     # Stage 2: Gemma LLM validation in small batches
-    for i in range(0, len(exp_passed), BATCH_SIZE):
-        batch = exp_passed[i:i + BATCH_SIZE]
+    for i in range(0, len(verified_located), BATCH_SIZE):
+        batch = verified_located[i:i + BATCH_SIZE]
         total_processed += len(batch)
 
         tasks = [
@@ -472,15 +539,15 @@ async def validate_and_filter_jobs(
             job["validation_status"] = "validated"
             validated_jobs.append(job)
 
-        pct = min(80, int(20 + (total_processed / max(1, len(exp_passed))) * 60))
+        pct = min(80, int(40 + (total_processed / max(1, len(verified_located))) * 40))
         await broadcast(
-            f"Gemma validated {total_processed}/{len(exp_passed)} jobs — "
+            f"Gemma validated {total_processed}/{len(verified_located)} jobs — "
             f"{len(validated_jobs)} quality, {len(low_score_jobs)} low score",
             pct
         )
 
         # Rate limit: 2 second delay between batches (30 RPM = 1 call every 2s)
-        if i + BATCH_SIZE < len(exp_passed):
+        if i + BATCH_SIZE < len(verified_located):
             await asyncio.sleep(GEMINI_MIN_DELAY)
 
     validated_jobs.sort(key=lambda j: j.get("match_score", 0), reverse=True)

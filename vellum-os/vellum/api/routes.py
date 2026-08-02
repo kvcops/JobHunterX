@@ -505,7 +505,7 @@ async def pipeline_mode_endpoint(mode: str | None = None):
 @router.post("/reset")
 async def reset_system():
     """Cancel any active search task and clear the entire database."""
-    global _search_task, _current_profile
+    global _search_task, _current_profile, _apply_tasks
     if _search_task and not _search_task.done():
         _search_task.cancel()
         try:
@@ -513,6 +513,16 @@ async def reset_system():
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
         _search_task = None
+    
+    # Cancel active application tasks
+    for job_id, task in list(_apply_tasks.items()):
+        if not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+            except Exception:
+                pass
+    _apply_tasks.clear()
     
     # Clear active pipelines cache
     graph._active_pipelines.clear()

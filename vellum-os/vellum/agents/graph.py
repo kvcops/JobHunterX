@@ -638,7 +638,9 @@ async def run_full_search(
                 "event_type": "progress",
                 "message": f"Automatic mode: applying to {len(final_validated)} matched jobs...",
             })
-        semaphore = asyncio.Semaphore(APPLY_SEMAPHORE)
+        import os
+        concurrency = max(APPLY_SEMAPHORE, (os.cpu_count() or 4) // 2)
+        semaphore = asyncio.Semaphore(concurrency)
 
         async def _auto_apply_one(job: dict) -> None:
             nonlocal auto_applied, auto_failed

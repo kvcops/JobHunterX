@@ -581,9 +581,9 @@ async def run(state: dict) -> dict:
         "data": {"percentage": 0, "total_companies": len(company_list)},
     })
     
-    # Scrape each company — bounded concurrency (5 at a time) with a
-    # respectful pause between batches
-    semaphore = asyncio.Semaphore(5)
+    import os
+    cpu_count = os.cpu_count() or 4
+    semaphore = asyncio.Semaphore(max(5, cpu_count))
 
     async def _scrape_one(idx: int, company_slug: str) -> None:
         if len(all_jobs) >= limit:

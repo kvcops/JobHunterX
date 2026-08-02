@@ -126,7 +126,10 @@ async def filter_active_jobs(jobs: list[dict], max_concurrency: int = 8) -> list
     if not jobs:
         return []
 
-    semaphore = asyncio.Semaphore(max_concurrency)
+    import os
+    cpu_count = os.cpu_count() or 4
+    actual_concurrency = min(32, max(max_concurrency, cpu_count * 2))
+    semaphore = asyncio.Semaphore(actual_concurrency)
 
     async def _check(job: dict) -> dict | None:
         async with semaphore:

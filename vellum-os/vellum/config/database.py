@@ -8,6 +8,7 @@ search on job descriptions.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import uuid
@@ -543,28 +544,72 @@ async def get_token_usage_summary() -> dict:
 
 
 async def clear_database() -> None:
-    """Nuclear reset: destroy ALL tables and FTS indexes, rebuild from scratch.
-
-    FTS5 creates hidden internal tables (jobs_fts_data, jobs_fts_idx,
-    jobs_fts_docsize, jobs_fts_config). Both DROP VIRTUAL TABLE and
-    VACUUM are required to fully eliminate FTS ghost data.
+    """Nuclear reset: destroy ALL tables, database files, cache, screenshots, and browser profiles.
+    Rebuilds schema from scratch.
     """
-    async with aiosqlite.connect(_db_path) as db:
-        await db.execute("DROP TABLE IF EXISTS outreach_drafts")
-        await db.execute("DROP TABLE IF EXISTS agent_runs")
-        await db.execute("DROP TABLE IF EXISTS applied_urls")
-        await db.execute("DROP TABLE IF EXISTS intervention_sessions")
-        # Drop FTS virtual table - SQLite auto-drops internal _data, _idx,
-        # _docsize, _config helper tables too
-        await db.execute("DROP TABLE IF EXISTS jobs_fts")
-        await db.execute("DROP TABLE IF EXISTS jobs")
-        await db.execute("DROP TABLE IF EXISTS profiles")
-        # Rebuild schema fresh
-        await db.executescript(_SCHEMA_SQL)
-        # VACUUM compacts the file and reclaims all pages from dropped
-        # tables including any FTS ghost data lingering in WAL
-        await db.execute("VACUUM")
-        await db.commit()
+    log.info("nuclear_reset_started")
+    
+    # 1. Stop active browsers
+    try:
+        from vellum.agents.browser_agent import stop_all_active_browsers
+        await stop_all_active_browsers()
+    except Exception as exc:
+        log.warning("failed_to_stop_browsers_during_clear", error=str(exc))
+
+    # Let loop processes finish and run garbage collection to release file descriptors
+    await asyncio.sleep(0.5)
+    import gc
+    gc.collect()
+
+    import shutil
+    import os
+    from vellum.config.settings import get_settings
+    
+    settings = get_settings()
+    
+    # Directories to delete
+    dirs_to_delete = [
+        Path("./data/browser_profile"),
+        Path("./data/browser_profile_test"),
+        Path(settings.cache_dir),
+        Path(settings.screenshots_dir),
+    ]
+    
+    for dir_path in dirs_to_delete:
+        if dir_path.exists():
+            for i in range(5):
+                try:
+                    shutil.rmtree(dir_path)
+                    log.info("deleted_directory", path=str(dir_path))
+                    break
+                except Exception as exc:
+                    if i == 4:
+                         log.warning("failed_to_delete_dir", path=str(dir_path), error=str(exc))
+                    await asyncio.sleep(0.5)
+
+    # 2. Delete database files with retries
+    if _db_path:
+        db_file = Path(_db_path)
+        db_files = [
+            db_file,
+            Path(str(db_file) + "-wal"),
+            Path(str(db_file) + "-shm")
+        ]
+        for f_path in db_files:
+            if f_path.exists():
+                for i in range(5):
+                    try:
+                        os.remove(f_path)
+                        log.info("deleted_db_file", path=str(f_path))
+                        break
+                    except Exception as exc:
+                        if i == 4:
+                            log.warning("failed_to_delete_db_file", path=str(f_path), error=str(exc))
+                        await asyncio.sleep(0.5)
+
+    # 3. Re-initialize database schema
+    await init_db()
+    log.info("nuclear_reset_complete")
 
 
 # ---------------------------------------------------------------------------
