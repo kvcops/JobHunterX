@@ -1,79 +1,98 @@
-# Vellum OS — Architecture v3 (Zero-Touch Job Engine)
+# Vellum OS — Architecture v4 (Zero-Touch, Eligibility-First)
 
-> Fully automatic: the user uploads ONE resume. Nothing else.
-> No company selection, no dropdowns, no filters. Discovery, probing,
-> scoring and the review queue all run by themselves.
+> The user uploads ONE resume. Everything else — search strategy, discovery,
+> strict filtering, freshness proof, ranking — runs automatically.
+> No company selection, no filters, no "assumed" jobs.
 
-## The core insight
-
-ATS boards want to be read: Greenhouse, Ashby, Lever, Recruitee,
-SmartRecruiters and BambooHR all publish free, unauthenticated JSON APIs of
-their open jobs. Search engines block bots; ATS APIs don't. So:
-
-- **Discovery sources, ranked:**
-  1. **hasjob.co ATOM feed** (live, India-focused startup job board) —
-     fresh jobs + the startups that posted them, every sync. Companies found
-     here are auto-added to the company DB. (~New companies: 0 synonyms)
-  2. **Seed index** (`data/companies.csv`, 163 Indian startups) — auto-loaded
-     into the DB on the first sync. No user action ever required.
-  3. **User-added companies** (optional power feature; never required).
-- **Matching is resume-first.** Keyword prefilter (zero tokens) narrows to
-  plausible matches, then Gemma batch-scores them vs the profile.
-- **LLM is used ONLY where needed** (scoring, tailoring, parsing).
-  Only Gemma via Google AI Studio (`gemma-4-26b-a4b-it`), hard budget
-  tracker (15k RPD / 30 RPM). No other API keys, no web-search APIs.
-
-## Data flow (fully automatic)
+## The value chain (in order — each step kills waste before the next)
 
 ```
-USER UPLOADS RESUME  ──►  /api/upload-resume  → profile in DB
-                                  │
-                                  ▼
-      /api/start-search  (single trigger, no inputs)
-                                  │
-                     ┌────────────┴─────────────┐
-                     ▼                          ▼
-   seed CSV auto-load          hasjob.co ATOM feed fetch
-   (only if DB empty)          (fresh startup jobs + companies)
-                     │                          │
-                     └──────────┬───────────────┘
-                                ▼
-              companies table (seed + auto-discovered)
-                                ▼
-        ats_client.probe(company)      # parallel (6-way semaphore)
-                                ▼
-        ats_client.fetch_jobs(company)  # free JSON API per ATS
-                                ▼
-        normalize → dedupe by apply_url hash → store
-                                ▼
-        job_scorer.score_batch(jobs, profile) # keyword prefilter
-                                               # → Gemma batch (10/call)
-                                ▼
-        review queue (match_score desc)
-                                ▼
-        validator_tailor → browser_agent   # per job, on click/auto
+USER UPLOADS RESUME
+        │
+        ▼
+1. SEARCH PLAN (Gemma, 1 call)          ── profile → target roles, seniority
+        │                                  ceiling (entry/mid/senior), years,
+        │                                  accepted cities, reject terms
+        ▼
+2. LIVE DISCOVERY (3 channels, all free/unauthenticated)
+        ├─ hasjob.co ATOM feed           ── India startup job board, fresh
+        ├─ HN "Who's Hiring" (Firebase   ── 30-60 fresh company postings,
+        │     + Algolia JSON)               global + remote
+        └─ ATS boards (6 vendors)        ── Greenhouse/Ashby/Lever/Recruitee/
+                                           SmartRecruiters/BambooHR JSON APIs
+                                           (companies auto-added by feeds)
+        ▼
+3. ELIGIBILITY GATE (zero LLM tokens)    ── STRICT, deterministic, explains
+        │                                   every rejection:
+        │   • role family (sales/marketing/HR ≠ your field)
+        │   • reject terms (senior/lead/architect for entry-level, ...)
+        │   • location (Pune-only vs Bengaluru-only candidate → rejected)
+        │   • years required vs candidate years + seniority ceiling
+        ▼
+4. STORE (dedupe by apply_url hash)     ── only eligible jobs enter the DB
+        ▼
+5. GEMMA RANKING (budget-tracked)       ── batch 10 jobs/call, top ~80/day,
+        │                                   reasons recorded (score_reason)
+        ▼
+6. LIVENESS PROOF (zero tokens)         ── top matches GET-checked; closed
+        │                                   jobs marked status="closed"
+        ▼
+REVIEW QUEUE (match_score desc, reasons visible)
+        ▼
+validator_tailor → browser_agent (per job, on user click/auto)
 ```
+
+## Why this is the honest design (vs v2/v3)
+
+| Concern (raised in review) | v3 reality | v4 fix |
+|---|---|---|
+| "Senior dev shown to a fresher" | fuzzy keyword filter | **hard eligibility gate**: seniority ceiling + years math, zero tokens, rejects with a reason |
+| "Jobs dumped forever, stale" | stored once, never checked | **liveness check**: top matches GET-verified each sync, closed → status=closed |
+| "Wrong city suggested" | only soft boost | **location conflict = hard reject** (city aliases: Bangalore↔Bengaluru etc.) |
+| "Sales/marketing junk" | scored, maybe filtered | **role-family + reject-term hard reject** |
+| "Only 1 static source, static CSV" | hasjob + static seed | **3 live channels** (hasjob + HN + ATS), seed only bootstraps first run, feeds auto-add companies |
+| "Gemma underused" | scored ~20 jobs | **Gemma drives the plan + ranks up to ~80/day** with per-job reasons |
+| "Intelligence?" | keyword overlap | **search plan is the intelligence anchor** — Gemma decides roles/seniority/cities/rejects from the actual resume; gate + scorer all execute that plan |
+
+## Honest numbers (measured live, fresher profile, Bengaluru)
+
+- Plan call: ~530 tokens (1 Gemma call)
+- Feeds: 11 hasjob jobs + 42 HN job postings (~54 comments fetched)
+- Eligibility gate: **50 rejected / 3 eligible** — every rejection has a reason
+- Gemma ranking: 3 scored (~650 tokens, budget-tracked)
+- Liveness: 3/3 verified live
+- Companies auto-discovered from feeds: ~200+ (probed in later syncs)
+- Full-day budget usage: ~4k of 15k tokens — headroom for ATS-probe jobs
+
+## Budget math (brutal, honest)
+
+- 15k RPD / 30 RPM. Plan = 1 call (~530). Ranking = 10 jobs/call (~650/call)
+  → ~80-150 jobs/day LLM-ranked safely. Beyond that: keyword score still
+  ranks, gate still filters, nothing breaks — it just gets cheaper.
+- Fetching, gating, liveness: ZERO tokens. The expensive part (LLM ranking)
+  only ever sees candidates that already passed the strict gate.
 
 ## Modules
 
-| Module | Purpose |
+| Module | Role |
 |---|---|
-| `config/gemma.py` | Direct Gemma call via `google.genai` + budget tracker (15k RPD / 30 RPM), disk-persisted |
-| `tools/ats_client.py` | Unified free ATS JSON clients (probe + fetch), 6 ATS vendors |
-| `tools/hasjob.py` | Live hasjob.co ATOM feed client — automatic startup discovery |
-| `agents/job_sync.py` | Engine: seed bootstrap + feed discovery + parallel ATS probe → fetch → dedupe → score → store |
-| `agents/job_scorer.py` | Keyword prefilter + Gemma batch scoring, budget-aware |
-| `data/companies.csv` | Seed list of Indian startups (auto-loaded, not user-facing) |
-| `agents/extractor.py` | Resume PDF → structured profile (kept) |
-| `agents/validator_tailor.py` | Per-job resume tailoring (kept) |
-| `agents/browser_agent.py` | Automated application filling (kept) |
+| `agents/search_planner.py` | Gemma → search plan (roles, seniority ceiling, years, cities, reject terms) |
+| `agents/eligibility.py` | Strict deterministic gate, every rejection explained |
+| `tools/hasjob.py` | hasjob.co ATOM feed client |
+| `tools/hn_hiring.py` | HN "Who's Hiring" (Firebase + Algolia, free JSON) |
+| `tools/ats_client.py` | 6-vendor free ATS JSON clients (probe + fetch) |
+| `tools/liveness.py` | Apply-URL verification (live/gone/unknown) |
+| `agents/job_scorer.py` | Keyword prefilter + Gemma batch ranking with reasons |
+| `agents/job_sync.py` | Orchestrates plan → discover → gate → store → rank → verify |
+| `data/companies.csv` | First-run bootstrap only; feeds self-extend afterwards |
 
-## Honest constraints
+## Known honest limits
 
-- hasjob.co feed is community-posting only (no recruiters/placement
-  agencies) → high signal for real Indian startup jobs, ~0-50 jobs per day.
-- ATS boards are the bulk source; discovery rate depends on how many tracked
-  companies run Greenhouse/Ashby/Lever-class boards (~30% of seed list).
-- Gemma free tier: 15k RPD / 30 RPM. Batch scoring = 10 jobs/LLM call.
-  Budget tracker pauses LLM scoring (never fetching) at the RPD cap; the
-  keyword score keeps the queue usable until the next UTC day.
+- hasjob feed is small (~0-50/day, community only). HN is global/US-heavy —
+  for India-only candidates most HN jobs get rejected by the location gate
+  (correctly). ATS probing of the ~350 tracked companies is the volume
+  engine; ~30-40% run free ATS boards.
+- Liveness only checks top ~25 matches per sync (network cost), not all.
+- Eligibility gate is rule-based — it is *strict and explainable*, not
+  "smart". If a JD hides its requirements in prose ("we expect someone who
+  has shipped…"), the gate passes it and the LLM ranking catches it.

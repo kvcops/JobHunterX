@@ -345,6 +345,13 @@ async def list_jobs(status: str = "", limit: int = 100):
     # Don't send PDF blob in list response; parse validation_json
     for j in jobs:
         j.pop("tailored_pdf", None)
+        # Parse freshness_json (eligibility gate + liveness)
+        fj = j.get("freshness_json")
+        if fj and isinstance(fj, str):
+            try:
+                j["freshness"] = json.loads(fj)
+            except (json.JSONDecodeError, TypeError):
+                j["freshness"] = None
         # Fix match_score NA: ensure it's always a number
         if j.get("match_score") is None:
             # Try to extract from validation_json
@@ -375,6 +382,13 @@ async def get_job(job_id: str):
         raise HTTPException(404, "Job not found")
     # Don't send binary PDF in JSON
     job.pop("tailored_pdf", None)
+    fj = job.get("freshness_json")
+    if fj and isinstance(fj, str):
+        try:
+            job["freshness"] = json.loads(fj)
+            job.pop("freshness_json", None)
+        except (json.JSONDecodeError, TypeError):
+            pass
     # Fix match_score NA
     if job.get("match_score") is None:
         vj = job.get("validation_json")

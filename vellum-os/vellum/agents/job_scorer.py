@@ -90,16 +90,18 @@ def _llm_eligible(jobs: list[dict], profile: dict) -> list[int]:
     return idxs
 
 
-async def score_batch(jobs: list[dict], profile: dict, max_llm_jobs: int = 20) -> list[dict]:
-    """Score a list of job dicts in place: adds match_score to each dict.
+async def score_batch(jobs: list[dict], profile: dict, max_llm_jobs: int = 80) -> list[dict]:
+    """Score a list of eligible job dicts: adds match_score + score_reason.
 
-    Returns the same list (dictionaries mutated) with 'keyword_score' and
-    'match_score' set. match_score = Gemma score when available, else the
-    keyword score (budget-exhausted path).
+    max_llm_jobs caps Gemma-scored jobs per call; the rest keep the
+    keyword score. Budget math (15k RPD): ~800 tokens/call × 10 jobs →
+    ~18 calls/day safe. Keyword prefilter + eligibility gate should have
+    already cut the pool below 80 before this runs.
     """
     for job in jobs:
         job["keyword_score"] = _keyword_score(job, profile)
         job[FINAL_SCORE] = min(job["keyword_score"], 1.0)
+        job["score_reason"] = "keyword match"
 
     eligible = _llm_eligible(jobs, profile)
     if not eligible:
@@ -122,7 +124,7 @@ async def score_batch(jobs: list[dict], profile: dict, max_llm_jobs: int = 20) -
         lines = []
         for jid, idx in enumerate(group):
             job = jobs[idx]
-            jd = re.sub(r"\s+", " ", job.get("jd_text") or "")[:1000]
+            jd = re.sub(r"\s+", " ", job.get("jd_text") or "")[:700]
             lines.append(
                 f"[{jid}] title={job.get('role','')} | location={job.get('location','')} "
                 f"| dept={job.get('department','')} | posted={job.get('posted_at','')}\njd: {jd}"
@@ -144,6 +146,9 @@ async def score_batch(jobs: list[dict], profile: dict, max_llm_jobs: int = 20) -
                         s = entry.get("score")
                         if i is not None and s is not None and 0 <= i < len(group):
                             jobs[group[i]][FINAL_SCORE] = round(max(0.0, min(1.0, float(s))), 3)
+                            why = entry.get("why")
+                            if why:
+                                jobs[group[i]]["score_reason"] = str(why)[:200]
                     log.info("gemma_batch_scored", count=len(group), scores=len(scores))
                     continue
             except RuntimeError as exc:

@@ -35,7 +35,7 @@ from vellum.config import database as db
 from vellum.config.logging import get_logger
 from vellum.config.settings import get_settings
 from vellum.tools.ats_client import Company, Job, fetch_jobs, probe_company
-from vellum.tools import hasjob
+from vellum.tools import hasjob, hn_hiring, liveness
 
 log = get_logger("job_sync")
 
@@ -146,8 +146,16 @@ async def store_jobs(job_dicts: list[dict]) -> dict:
             "discovery_confidence": 0.8,
             "status": "discovered",
         })
+        job["id"] = job_id
+        extras = {}
         if job.get("match_score") is not None:
-            await db.update_job(job_id, match_score=job["match_score"])
+            extras["match_score"] = job["match_score"]
+        if job.get("eligibility") is not None:
+            extras["freshness_json"] = json.dumps({"eligibility": job["eligibility"]})
+        if job.get("score_reason"):
+            extras["validation_json"] = json.dumps({"score_reason": job["score_reason"]})
+        if extras:
+            await db.update_job(job_id, **extras)
         if h:
             existing.add(h)
         inserted += 1
@@ -168,16 +176,19 @@ async def run_sync(
 ) -> dict:
     """Run one full sync pass. Fully automatic — no company selection needed.
 
+    Value chain: search plan (Gemma) → live feeds (hasjob + HN Who's Hiring)
+    + ATS boards → strict eligibility gate (zero tokens) → store →
+    liveness check (top matches) → Gemma ranking of survivors.
+
     Args:
-        profile: candidate profile dict (for scoring). If None, jobs are
-                 stored unscored (keyword score only).
+        profile: candidate profile (required for eligibility + scoring).
         company_filter: only sync these company names (empty = all).
         limit_companies: cap how many companies to probe this run (0 = all).
-        discover: also ingest the live hasjob.co feed (auto-discovery of
-                  Indian startups + their jobs) before ATS probing.
+        discover: also ingest live feeds before ATS probing.
         probe_concurrency: how many companies to probe in parallel.
     """
     from vellum.config import gemma as g
+    from vellum.agents import eligibility, search_planner
 
     async def emit(etype: str, message: str, data: dict | None = None):
         if event_cb:
@@ -193,7 +204,24 @@ async def run_sync(
 
     summary = {"probed": 0, "ats_found": 0, "jobs_fetched": 0, "jobs_stored": 0,
                "scored": 0, "skipped_budget": False, "feed_jobs": 0,
-               "companies_discovered": 0, "duplicates": 0}
+               "hn_jobs": 0, "companies_discovered": 0, "eligible": 0,
+               "rejected": 0, "duplicates": 0, "verified": 0, "gone": 0,
+               "plan": None}
+
+    # --- Step 0: search plan — the intelligence anchor (Gemma, 1 call) ---
+    plan = None
+    if profile:
+        plan = await search_planner.build_search_plan(profile)
+        summary["plan"] = {
+            "seniority_max": plan.get("seniority_max"),
+            "years_experience": plan.get("years_experience"),
+            "locations": plan.get("locations"),
+            "reject_terms": plan.get("reject_terms"),
+        }
+        await emit("progress",
+                   f"Plan: {plan.get('seniority_max')} ceiling, "
+                   f"{plan.get('years_experience')} yrs, roles: "
+                   f"{', '.join((plan.get('target_roles') or [])[:3])}", {})
 
     # --- Step 1: auto-bootstrap the seed index on first run ---
     companies = await db.get_companies()
@@ -209,7 +237,7 @@ async def run_sync(
         await emit("error", "No companies available — seed CSV is missing.", {})
         return summary
 
-    # --- Step 2: live feed discovery (hasjob.co — Indian startup jobs) ---
+    # --- Step 2: live feed discovery (hasjob.co + HN Who's Hiring) ---
     feed_job_dicts: list[dict] = []
     if discover:
         try:
@@ -218,8 +246,15 @@ async def run_sync(
             log.warning("hasjob_fetch_failed", error=str(exc)[:150])
             feed_jobs = []
         summary["feed_jobs"] = len(feed_jobs)
+        try:
+            hn_jobs = await hn_hiring.fetch_hiring_posts()
+        except Exception as exc:
+            log.warning("hn_fetch_failed", error=str(exc)[:150])
+            hn_jobs = []
+        summary["hn_jobs"] = len(hn_jobs)
+
         known = {c["name"].lower() for c in companies}
-        for fj in feed_jobs:
+        for fj in feed_jobs + hn_jobs:
             cname = (fj.get("company") or "").strip()
             if not cname:
                 continue
@@ -233,21 +268,22 @@ async def run_sync(
                 known.add(cname.lower())
                 summary["companies_discovered"] += 1
             feed_job_dicts.append({
-                "id_key": _dedupe_key(fj.get("apply_url") or ""),
+                "id_key": _dedupe_key(fj.get("apply_url") or
+                                      f"{cname}|{fj.get('role') or ''}"),
                 "company": cname,
-                "role": _slug_role(fj.get("title") or ""),
+                "role": _slug_role(fj.get("title") or fj.get("role") or ""),
                 "location": fj.get("location") or "",
                 "department": "",
                 "jd_text": fj.get("jd_text") or "",
                 "apply_url": fj.get("apply_url") or "",
                 "career_page_url": fj.get("website") or "",
                 "posted_at": fj.get("posted_at") or "",
-                "source": "hasjob",
+                "source": fj.get("source") or "hasjob",
             })
         if feed_job_dicts:
             await emit("progress",
-                       f"Feed: {len(feed_jobs)} fresh startup jobs, "
-                       f"{summary['companies_discovered']} new companies discovered.", {})
+                       f"Feeds: {summary['feed_jobs']} hasjob + {summary['hn_jobs']} "
+                       f"HN jobs, {summary['companies_discovered']} new companies.", {})
         companies = await db.get_companies()
 
     # --- Step 3: probe + fetch ATS boards (parallel) ---
@@ -309,17 +345,54 @@ async def run_sync(
 
     all_job_dicts = feed_job_dicts + ats_job_dicts
 
-    # --- Step 4: score (keyword prefilter → Gemma batch, budget-guarded) ---
-    if profile and all_job_dicts:
-        all_job_dicts = await job_scorer.score_batch(all_job_dicts, profile)
-        summary["scored"] = sum(1 for j in all_job_dicts if j.get("match_score") is not None)
-        if g.is_exhausted():
-            summary["skipped_budget"] = True
+    # --- Step 4: strict eligibility gate (zero LLM tokens) ---
+    if plan:
+        all_job_dicts, rejected = eligibility.filter_jobs(all_job_dicts, plan)
+        summary["eligible"] = len(all_job_dicts)
+        summary["rejected"] = len(rejected)
+        if rejected:
+            sample = [{"company": j["company"], "role": j["role"],
+                       "why": j["eligibility"]["reason"]} for j in rejected[:5]]
+            await emit("progress",
+                       f"Gate: {len(rejected)} jobs rejected "
+                       f"(seniority/location/role) → {len(all_job_dicts)} eligible.", {})
+            log.info("eligibility_gate", rejected=len(rejected),
+                     eligible=len(all_job_dicts), sample=sample)
 
-    # --- Step 5: store (dedupe by apply_url) ---
+    # --- Step 5: store eligible jobs ---
     stored = await store_jobs(all_job_dicts)
     summary["jobs_stored"] += stored["inserted"]
     summary["duplicates"] = stored["duplicates"]
+
+    # --- Step 6: Gemma ranking of the eligible survivors ---
+    if profile and all_job_dicts:
+        all_job_dicts = await job_scorer.score_batch(all_job_dicts, profile)
+        summary["scored"] = sum(1 for j in all_job_dicts if j.get("match_score") is not None)
+        # Persist scores/reasons (store_jobs only wrote what it had pre-scoring)
+        for job in all_job_dicts:
+            if job.get("match_score") is not None:
+                await _persist_score(job)
+        if g.is_exhausted():
+            summary["skipped_budget"] = True
+
+    # --- Step 7: liveness check on TOP matches (prove they still exist) ---
+    if stored["inserted"]:
+        verdicts = await liveness.verify_top_jobs(all_job_dicts, max_checks=25)
+        for job in all_job_dicts:
+            jid = job.get("id") or job.get("id_key")
+            verdict = verdicts.get(jid or "")
+            if verdict == "gone":
+                summary["gone"] += 1
+                if job.get("id"):
+                    try:
+                        await db.update_job(job["id"], status="closed")
+                    except Exception:
+                        pass
+        summary["verified"] = sum(1 for v in verdicts.values() if v != "unknown")
+        if verdicts:
+            await emit("progress",
+                       f"Liveness: verified {summary['verified']} top matches, "
+                       f"{summary['gone']} closed.", {})
 
     if summary["skipped_budget"]:
         await emit("warning",
@@ -327,6 +400,27 @@ async def run_sync(
     await emit("complete", "Sync finished.", summary)
     log.info("sync_finished", **summary)
     return summary
+
+
+async def _persist_score(job: dict) -> None:
+    """Write match_score + reason back to the stored job row."""
+    jid = job.get("id") or job.get("id_key")
+    if not jid:
+        return
+    row = await db.get_job(jid)
+    if row is None:
+        return
+    await db.update_job(jid, match_score=job["match_score"])
+    reason = job.get("score_reason")
+    if reason:
+        vj = {}
+        if row.get("validation_json"):
+            try:
+                vj = json.loads(row["validation_json"])
+            except Exception:
+                vj = {}
+        vj["score_reason"] = reason
+        await db.update_job(jid, validation_json=json.dumps(vj))
 
 
 async def add_company(name: str, website: str = "", careers_url: str = "", hub: str = "") -> dict:
