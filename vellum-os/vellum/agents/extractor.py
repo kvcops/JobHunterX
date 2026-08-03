@@ -1,7 +1,7 @@
-"""
-Vellum OS — Resume Extractor Agent
+﻿"""
+Vellum OS ΓÇö Resume Extractor Agent
 
-PyMuPDF text extraction → LLM structured parsing → CandidateProfile.
+PyMuPDF text extraction ΓåÆ LLM structured parsing ΓåÆ CandidateProfile.
 The extracted `skills` list is ground truth and never modified.
 """
 
@@ -128,7 +128,7 @@ async def extract_text_and_links_from_pdf(pdf_bytes: bytes) -> tuple[str, list[s
 async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
     """Extract a structured CandidateProfile from PDF bytes.
 
-    Pipeline: PyMuPDF text & embedded link extraction → LLM structured parsing.
+    Pipeline: PyMuPDF text & embedded link extraction ΓåÆ LLM structured parsing.
     Uses the 'extraction' fallback chain (gemma-4-31b preferred).
     """
     # Step 1: Extract raw text and embedded links
@@ -220,9 +220,9 @@ async def extract_profile(pdf_bytes: bytes) -> CandidateProfile:
                         end = exp.get("end") or exp.get("end_date") or ""
                         bullets_raw = exp.get("bullets") or exp.get("contributions") or exp.get("responsibilities") or exp.get("achievements") or exp.get("highlights") or exp.get("description") or []
                         if isinstance(bullets_raw, str):
-                            bullets = [b.strip("-*• ").strip() for b in bullets_raw.split("\n") if b.strip()]
+                            bullets = [b.strip("-*ΓÇó ").strip() for b in bullets_raw.split("\n") if b.strip()]
                         elif isinstance(bullets_raw, list):
-                            bullets = [str(b).strip("-*• ").strip() for b in bullets_raw if str(b).strip()]
+                            bullets = [str(b).strip("-*ΓÇó ").strip() for b in bullets_raw if str(b).strip()]
                         else:
                             bullets = []
                         normalized_exp.append({

@@ -126,6 +126,18 @@ CREATE TABLE IF NOT EXISTS intervention_sessions (
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     resolved_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS companies (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    website     TEXT DEFAULT '',
+    careers_url TEXT DEFAULT '',
+    hub         TEXT DEFAULT '',
+    ats         TEXT DEFAULT '',
+    ats_token   TEXT DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 """
 
 # ---------------------------------------------------------------------------
@@ -660,3 +672,80 @@ async def resolve_intervention(session_id: int, status: str = "resolved") -> Non
             (status, _now_iso(), session_id),
         )
         await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Companies (board-first discovery)
+# ---------------------------------------------------------------------------
+
+async def insert_company(data: dict) -> str:
+    """Insert a company; returns id. If name exists, refresh ATS fields.
+
+    data keys: name, website, careers_url, hub, ats, ats_token.
+    """
+    cid = data.get("id") or _new_id()
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise ValueError("Company name required")
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT id FROM companies WHERE name = ?", (name,))
+        row = await cur.fetchone()
+        if row:
+            await db.execute(
+                """UPDATE companies SET website = ?, careers_url = ?, hub = ?, ats = ?,
+                   ats_token = ?, updated_at = ? WHERE id = ?""",
+                (data.get("website", ""), data.get("careers_url", ""),
+                 data.get("hub", ""), data.get("ats", ""),
+                 data.get("ats_token", ""), _now_iso(), row["id"]),
+            )
+            await db.commit()
+            return row["id"]
+        await db.execute(
+            """INSERT INTO companies (id, name, website, careers_url, hub, ats, ats_token, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (cid, name, data.get("website", ""), data.get("careers_url", ""),
+             data.get("hub", ""), data.get("ats", ""), data.get("ats_token", ""),
+             _now_iso(), _now_iso()),
+        )
+        await db.commit()
+        return cid
+
+
+async def get_companies() -> list[dict]:
+    """All tracked companies."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT id, name, website, careers_url, hub, ats, ats_token, created_at FROM companies ORDER BY name"
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def delete_company(company_id: str) -> bool:
+    """Remove a tracked company by id."""
+    async with aiosqlite.connect(_db_path) as db:
+        cur = await db.execute("DELETE FROM companies WHERE id = ?", (company_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def update_company_ats(company_id: str, ats: str, ats_token: str, careers_url: str = "") -> None:
+    """Persist detected ATS board info after a probe."""
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            """UPDATE companies SET ats = ?, ats_token = ?, careers_url = CASE
+               WHEN ? != '' THEN ? ELSE careers_url END, updated_at = ? WHERE id = ?""",
+            (ats, ats_token, careers_url, careers_url, _now_iso(), company_id),
+        )
+        await db.commit()
+
+
+async def get_company_by_name(name: str) -> Optional[dict]:
+    """Look up a company by exact name."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("SELECT * FROM companies WHERE name = ?", (name,))
+        row = await cur.fetchone()
+        return dict(row) if row else None

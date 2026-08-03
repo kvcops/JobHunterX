@@ -1,8 +1,8 @@
 """
 Vellum OS — REST API Routes
 
-All endpoints for resume upload, search control, job listing,
-outreach management, and HITL resume.
+Endpoints for resume upload, company tracking, job sync, job listing,
+per-job apply (browser), and HITL resume.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from vellum.config.logging import get_logger
 from vellum.agents import extractor, graph
 from vellum.agents.browser_agent import stop_all_active_browsers
 from vellum.api.ws import manager as ws_manager
-from vellum.tools.email_handoff import open_mail_client, create_gmail_compose_url
 
 log = get_logger("routes")
 
@@ -32,7 +31,7 @@ router = APIRouter(prefix="/api")
 class StartSearchRequest(BaseModel):
     location: str = "Bengaluru"
     role: str | None = None
-    limit: int = 50
+    limit: int = 5000
 
 
 class ResumeAgentRequest(BaseModel):
@@ -40,34 +39,119 @@ class ResumeAgentRequest(BaseModel):
     action: str = "done"  # "done" or "skip"
 
 
+class CompanyInput(BaseModel):
+    name: str
+    website: str = ""
+    careers_url: str = ""
+    hub: str = ""
+
+
 # ---------------------------------------------------------------------------
 # State
 # ---------------------------------------------------------------------------
 
 _current_profile: dict | None = None
-_search_task: asyncio.Task | None = None
+_sync_task: asyncio.Task | None = None
 _apply_tasks: dict[str, asyncio.Task] = {}  # Track per-job apply tasks
 _pipeline_mode: str = "manual"  # "automatic" or "manual"
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Company tracking (board-first discovery)
 # ---------------------------------------------------------------------------
 
-@router.get("/locations")
-async def get_available_locations():
-    """Get list of all Indian tech hub locations configured in ats_api.py."""
-    from vellum.tools.ats_api import TECH_HUB_STARTUPS
-    keys = list(TECH_HUB_STARTUPS.keys())
-    locations = []
-    for k in keys:
-        display = k.replace("-", " ").title()
-        if k == "ncr":
-            display = "NCR (Delhi / Gurgaon / Noida)"
-        elif k == "remote":
-            display = "Remote India"
-        locations.append({"key": k, "label": display, "company_count": len(TECH_HUB_STARTUPS[k])})
-    return {"locations": locations}
+@router.get("/companies")
+async def list_companies():
+    """All tracked companies with detected ATS status."""
+    companies = await db.get_companies()
+    return {"companies": companies}
+
+
+@router.post("/companies")
+async def add_company(company: CompanyInput):
+    """Add a company (probes its ATS board immediately)."""
+    from vellum.agents.job_sync import add_company as sync_add_company
+
+    try:
+        result = await sync_add_company(
+            name=company.name,
+            website=company.website,
+            careers_url=company.careers_url,
+            hub=company.hub,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await ws_manager.broadcast({
+        "agent": "system",
+        "event_type": "company_added",
+        "message": f"Company added: {company.name}",
+        "data": result,
+    })
+    return {"status": "ok", "company": result}
+
+
+@router.post("/companies/load-seed")
+async def load_seed_companies():
+    """Load the bundled Indian-startup seed list into the DB."""
+    from vellum.agents.job_sync import load_seed_companies as seed_fn, ensure_companies_in_db
+
+    rows = seed_fn()
+    count = await ensure_companies_in_db(rows)
+    return {"status": "ok", "loaded": count, "total_in_csv": len(rows)}
+
+
+@router.delete("/companies/{company_id}")
+async def delete_company(company_id: str):
+    """Remove a tracked company."""
+    ok = await db.delete_company(company_id)
+    if not ok:
+        raise HTTPException(404, "Company not found")
+    return {"status": "ok"}
+
+
+@router.post("/companies/sync")
+async def sync_companies():
+    """Run one sync pass: probe ATS → fetch jobs → Gemma score → store."""
+    global _sync_task
+
+    profile = await db.get_latest_profile()
+    if profile is None and _current_profile is not None:
+        profile = _current_profile
+
+    if _sync_task and not _sync_task.done():
+        raise HTTPException(409, "A sync is already running")
+
+    async def _run():
+        try:
+            from vellum.agents.job_sync import run_sync
+
+            result = await run_sync(
+                profile=profile,
+                event_callback=lambda e: ws_manager.broadcast(e),
+            )
+            log.info("sync_complete", result=result)
+        except Exception as exc:
+            log.error("sync_error", error=str(exc))
+            await ws_manager.broadcast({
+                "agent": "system",
+                "event_type": "error",
+                "message": f"Sync error: {str(exc)[:200]}",
+            })
+
+    _sync_task = asyncio.create_task(_run())
+    return {"status": "started", "profile_loaded": profile is not None}
+
+
+@router.get("/budget")
+async def get_budget():
+    """Gemma budget usage (15k RPD / 30 RPM)."""
+    from vellum.config.gemma import budget_status
+    return {"budget": budget_status()}
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 
 @router.post("/upload-resume")
@@ -112,8 +196,8 @@ async def upload_resume(file: UploadFile = File(...)):
 
 @router.post("/start-search")
 async def start_search(request: StartSearchRequest):
-    """Start the discovery + per-job pipeline flow."""
-    global _search_task
+    """Start the discovery flow (company sync → ATS fetch → Gemma scoring)."""
+    global _sync_task
 
     # Always fetch the latest profile from DB to avoid stale state
     profile = await db.get_latest_profile()
@@ -123,11 +207,11 @@ async def start_search(request: StartSearchRequest):
         else:
             raise HTTPException(400, "No resume uploaded yet")
 
-    # Cancel any running search and wait for it to finish
-    if _search_task and not _search_task.done():
-        _search_task.cancel()
+    # Cancel any running sync and wait for it to finish
+    if _sync_task and not _sync_task.done():
+        _sync_task.cancel()
         try:
-            await asyncio.wait_for(asyncio.shield(_search_task), timeout=2.0)
+            await asyncio.wait_for(asyncio.shield(_sync_task), timeout=2.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
     await stop_all_active_browsers()
@@ -155,7 +239,7 @@ async def start_search(request: StartSearchRequest):
                 "message": f"Search error: {str(exc)[:200]}",
             })
 
-    _search_task = asyncio.create_task(_run())
+    _sync_task = asyncio.create_task(_run())
 
     return {"status": "started", "location": request.location}
 
@@ -165,11 +249,11 @@ async def stop_browser_endpoint():
     """Explicitly halt any running Playwright/browser-use sessions."""
     log.info("received_stop_browser_request")
     await stop_all_active_browsers()
-    global _search_task
-    if _search_task and not _search_task.done():
-        _search_task.cancel()
+    global _sync_task
+    if _sync_task and not _sync_task.done():
+        _sync_task.cancel()
         try:
-            await asyncio.wait_for(asyncio.shield(_search_task), timeout=2.0)
+            await asyncio.wait_for(asyncio.shield(_sync_task), timeout=2.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
     return {"status": "ok", "message": "Browser session stopped successfully."}
@@ -405,77 +489,23 @@ async def download_resume_pdf(job_id: str):
     )
 
 
-@router.get("/outreach")
-async def list_outreach(limit: int = 100):
-    """List outreach drafts."""
-    drafts = await db.get_outreach_drafts(limit=limit)
-    return {"drafts": drafts}
-
-
-@router.post("/outreach/{draft_id}/open-mail")
-async def trigger_open_mail(draft_id: str):
-    """Open the user's mail client with the outreach email."""
-    drafts = await db.get_outreach_drafts()
-    draft = next((d for d in drafts if d.get("id") == draft_id), None)
-    if not draft:
-        raise HTTPException(404, "Draft not found")
-
-    mailto_uri = draft.get("mailto_uri", "")
-    if not mailto_uri:
-        raise HTTPException(400, "No mailto URI available")
-
-    success = open_mail_client(mailto_uri)
-    return {"status": "opened" if success else "failed"}
-
-
-@router.get("/outreach/{draft_id}/gmail-url")
-async def get_gmail_url(draft_id: str):
-    """Get direct Gmail web compose URL for an outreach draft."""
-    drafts = await db.get_outreach_drafts()
-    draft = next((d for d in drafts if d.get("id") == draft_id), None)
-    if not draft:
-        raise HTTPException(404, "Draft not found")
-
-    email_guesses = draft.get("email_guesses", [])
-    to_addr = email_guesses[0].get("address", "") if email_guesses else ""
-    subject = draft.get("subject", "")
-    body = draft.get("body", "")
-
-    gmail_url = create_gmail_compose_url(to_addr, subject, body)
-    return {"url": gmail_url, "to": to_addr, "subject": subject}
-
-
-
-@router.post("/outreach/{draft_id}/discard")
-async def discard_outreach(draft_id: str):
-    """Mark an outreach draft as discarded."""
-    # Simple update via raw SQL
-    import aiosqlite
-    from vellum.config.database import _db_path
-
-    async with aiosqlite.connect(_db_path) as conn:
-        await conn.execute(
-            "UPDATE outreach_drafts SET status = 'discarded' WHERE id = ?",
-            (draft_id,),
-        )
-        await conn.commit()
-    return {"status": "discarded"}
-
-
 @router.get("/status")
 async def get_status():
     """Overall system status and token usage summary."""
     token_usage = await db.get_token_usage_summary()
     jobs = await db.get_jobs(limit=1000)
+    companies = await db.get_companies()
     status_counts = {}
     for j in jobs:
         s = j.get("status", "unknown")
         status_counts[s] = status_counts.get(s, 0) + 1
 
     return {
-        "status": "running" if _search_task and not _search_task.done() else "idle",
+        "status": "running" if _sync_task and not _sync_task.done() else "idle",
         "job_counts": status_counts,
         "total_jobs": len(jobs),
+        "total_companies": len(companies),
+        "companies_with_ats": sum(1 for c in companies if c.get("ats") not in ("", "none")),
         "token_usage": token_usage,
         "pipeline_mode": _pipeline_mode,
     }
@@ -505,14 +535,14 @@ async def pipeline_mode_endpoint(mode: str | None = None):
 @router.post("/reset")
 async def reset_system():
     """Cancel any active search task and clear the entire database."""
-    global _search_task, _current_profile, _apply_tasks
-    if _search_task and not _search_task.done():
-        _search_task.cancel()
+    global _sync_task, _current_profile, _apply_tasks
+    if _sync_task and not _sync_task.done():
+        _sync_task.cancel()
         try:
-            await asyncio.wait_for(asyncio.shield(_search_task), timeout=2.0)
+            await asyncio.wait_for(asyncio.shield(_sync_task), timeout=2.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
-        _search_task = None
+        _sync_task = None
     
     # Cancel active application tasks
     for job_id, task in list(_apply_tasks.items()):

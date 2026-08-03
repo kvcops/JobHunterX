@@ -47,30 +47,27 @@ REASONING_EFFORT_MODELS = {"groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"
 # Do not inject LiteLLM thinking into Mistral: the provider rejects it for these IDs.
 THINKING_PARAM_MODELS: set[str] = set()
 
-# Provider → model fallback chains
+# Provider → model fallback chains. Gemma (google.genai-backed) is preferred;
+# gemini-3.1-flash-lite is an in-family fallback using the same Google key.
 FALLBACK_CHAINS: Dict[str, List[str]] = {
     "fast": [
+        "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
-        "groq/openai/gpt-oss-20b",
     ],
     "reasoning": [
-        "groq/openai/gpt-oss-120b",
-        "mistral/mistral-large-2512",
+        "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
     ],
     "tailoring": [
-        "mistral/mistral-large-2512",
-        "groq/openai/gpt-oss-120b",
+        "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
     ],
     "extraction": [
+        "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
-        "groq/openai/gpt-oss-120b",
     ],
     "browser": [
         "gemini/gemini-3.1-flash-lite",
-        "groq/openai/gpt-oss-20b",
-        "mistral/mistral-large-2512",
     ],
 }
 
