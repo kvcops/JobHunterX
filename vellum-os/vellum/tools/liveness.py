@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from typing import Optional
 
 from vellum.config.logging import get_logger
@@ -31,6 +32,9 @@ _GONE_MARKERS = (
     "position is no longer", "this job is no longer", "job has been filled",
     "vacancy closed", "job posting is closed", "we are no longer hiring",
     "not found", "404", "page not found", "no longer available",
+    "been filled", "historically filled", "applications have closed",
+    "applications are now closed", "application closes",
+    "posting has expired", "listing has expired", "this posting is closed",
 )
 
 
@@ -40,39 +44,56 @@ def _looks_gone(body: str) -> bool:
     return any(m in b for m in _GONE_MARKERS)
 
 
-def _check_url(url: str, timeout: float = 12.0) -> str:
-    """Return 'live' | 'gone' | 'unknown'."""
+def _check_url(url: str, timeout: float = 12.0, retries: int = 1) -> str:
+    """Return 'live' | 'gone' | 'unknown'.
+
+    A 403 (anti-bot) or 5xx (transient) is retried once before giving up —
+    a single bot-filter hit must not kill a live job. 404/410 are final.
+    """
     if not url or not url.startswith("http"):
         return "unknown"
     import httpx
     headers = {"User-Agent": _UA, "Accept": "text/html,application/xhtml+xml"}
-    # 1. HEAD
-    try:
-        with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as c:
-            r = c.head(url)
-            if r.status_code in (404, 410):
-                return "gone"
-            if r.status_code == 200:
-                # HEAD 200 isn't proof — a shell page can still be an error page
+
+    def _http() -> str:
+        # 1. HEAD (cheap)
+        try:
+            with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as c:
+                r = c.head(url)
+                if r.status_code in (404, 410):
+                    return "gone"
+                if r.status_code in (403, 429):
+                    return "retry"
+                if r.status_code >= 500:
+                    return "retry"
+                # HEAD 200 isn't proof — a shell page can still be an expiry
+                # page. Fall through to GET for the final word.
+        except Exception:
+            pass
+        # 2. GET (final word)
+        try:
+            with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as c:
+                r = c.get(url)
+                if r.status_code in (404, 410):
+                    return "gone"
+                if r.status_code == 200:
+                    return "gone" if _looks_gone(r.text) else "live"
+                if r.status_code in (403, 429):
+                    return "retry"
+                if r.status_code >= 500:
+                    return "retry"
                 return "unknown"
-            if r.status_code >= 500:
-                return "unknown"
-    except Exception:
-        pass
-    # 2. GET (final word)
-    try:
-        with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as c:
-            r = c.get(url)
-            if r.status_code in (404, 410):
-                return "gone"
-            if r.status_code == 200:
-                return "gone" if _looks_gone(r.text) else "live"
-            if r.status_code >= 500:
-                return "unknown"
+        except Exception as exc:
+            log.debug("liveness_check_error", url=url[:80], error=str(exc)[:100])
             return "unknown"
-    except Exception as exc:
-        log.debug("liveness_check_error", url=url[:80], error=str(exc)[:100])
-        return "unknown"
+
+    for attempt in range(retries + 1):
+        verdict = _http()
+        if verdict != "retry":
+            return verdict
+        if attempt < retries:
+            time.sleep(1.0 + attempt)  # brief backoff before the retry
+    return "unknown"
 
 
 async def verify_job(job: dict, timeout: float = 12.0) -> str:

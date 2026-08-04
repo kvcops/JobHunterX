@@ -33,29 +33,59 @@ _JUNIOR_WORDS = ("junior", "fresher", "entry", "trainee", "intern", "0-1",
 
 
 def _extract_required_years(text: str) -> Optional[float]:
-    """Min years the JD asks for, from explicit patterns."""
+    """Min years the JD asks for, from explicit patterns.
+
+    First-match wins; each pattern returns the MINIMUM of any range it sees
+    (a JD asking "3 to 5 years" requires 3). "Minimum 3 years of professional
+    experience" is caught even with an adjective between "of" and "experience".
+    """
     s = re.sub(r"\s+", " ", text or "").lower()
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|\+|to|-)+\s*(?:\d+)?\s*(?:years|yrs|year)", s)
+    # 1. "minimum / at least / requires N years..." — the N is the floor.
+    m = re.search(
+        r"(?:minimum|min\.|at least|requires?|requiring|needs?|looking for|"
+        r"we (?:want|need|seek|require)|must have|must possess)\s+(?:of\s+)?"
+        r"(\d+(?:\.\d+)?)\s*(?:\+)?\s*(?:years|yrs|year)",
+        s,
+    )
     if m:
         return float(m.group(1))
-    m = re.search(r"(\d+(?:\.\d+)?)\s*\+?\s*(?:years|yrs|year)s?\s+(?:of\s+)?(?:experience|exp|work)", s)
+    # 2. Range with an explicit separator: "3 to 5 years", "3-5 yrs", "3 – 5".
+    m = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:to|[-–—])\s*\d+(?:\.\d+)?\s*(?:years|yrs|year)",
+        s,
+    )
     if m:
         return float(m.group(1))
-    m = re.search(r"minimum\s+(?:of\s+)?(\d+(?:\.\d+)?)\s*(?:\+|to)", s)
+    # 3. "N+ years of <anything> experience" — word between "of" and experience ok.
+    m = re.search(
+        r"(\d+(?:\.\d+)?)\s*\+?\s*(?:years|yrs|year)s?\s+(?:of\s+)?"
+        r"(?:[\w\-]+\s+){0,3}?(?:experience|exp|experience\s+required)",
+        s,
+    )
     if m:
         return float(m.group(1))
-    m = re.search(r"(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)\s*(?:years|yrs|year)", s)
+    # 4. "N years" with no qualifier (fallback — explicit number still signals).
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:\+|plus|to)\s*(?:years|yrs|year)", s)
     if m:
         return float(m.group(1))
     return None
 
 
-def _has_senior_halo(role: str, jd: str) -> bool:
-    blob = f"{role or ''} {jd or ''}".lower()
+def _has_senior_halo(role: str) -> bool:
+    """Seniority signal from the ROLE TITLE only.
+
+    Deliberately NOT scanned against the JD: JD prose like "work with senior
+    engineers" or "we are a senior team" is context, not a requirement, and
+    scanning it false-rejects good entry jobs. Explicit year requirements in
+    the JD are handled separately by _extract_required_years.
+    """
+    blob = (role or "").lower()
     return any(w in blob for w in _SENIOR_WORDS)
 
 
 def _has_junior_marker(role: str, jd: str) -> bool:
+    """Junior markers may come from the JD too ('freshers welcome') — this
+    only ever PREVENTS a senior-halo rejection, never causes one."""
     blob = f"{role or ''} {jd or ''}".lower()
     return any(w in blob for w in _JUNIOR_WORDS)
 
@@ -114,12 +144,19 @@ def _role_family_conflict(role: str, plan: dict) -> Optional[str]:
     return None
 
 
-def _reject_term_hit(role: str, jd: str, plan: dict) -> Optional[str]:
-    blob = f"{role or ''} {jd or ''}".lower()
+def _reject_term_hit(role: str, plan: dict) -> Optional[str]:
+    """Plan reject terms apply to the ROLE TITLE only, never the JD body.
+
+    A reject term like 'senior' appearing inside a JD description is prose
+    context ("build features with our senior team") — rejecting on it throws
+    away good jobs. If the role title itself carries the term, it is a true
+    signal (title = "Senior X" or "Sales Y").
+    """
+    blob = (role or "").lower()
     for term in plan.get("reject_terms") or []:
         t = str(term).lower()
         if t and t in blob:
-            return f"Reject term: contains '{term}'"
+            return f"Reject term: title contains '{term}'"
     return None
 
 
@@ -143,8 +180,8 @@ def check_eligibility(
     if r:
         return {"verdict": "reject", "reason": r}
 
-    # 2. Explicit reject terms (sales, campus, etc.)
-    r = _reject_term_hit(role, jd, plan)
+    # 2. Explicit reject terms (sales, campus, etc.) — title only
+    r = _reject_term_hit(role, plan)
     if r:
         return {"verdict": "reject", "reason": r}
 
@@ -159,7 +196,7 @@ def check_eligibility(
     cand_years = float(plan.get("years_experience") or 0)
     ceiling = SENIORITY_CEILING.get(plan.get("seniority_max"), 1)
 
-    senior_halo = _has_senior_halo(role, jd)
+    senior_halo = _has_senior_halo(role)
     junior_marker = _has_junior_marker(role, jd)
 
     if senior_halo and not junior_marker:

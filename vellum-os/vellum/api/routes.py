@@ -127,7 +127,7 @@ async def sync_companies():
 
             result = await run_sync(
                 profile=profile,
-                event_callback=lambda e: ws_manager.broadcast(e),
+                event_cb=lambda e: ws_manager.broadcast(e),
             )
             log.info("sync_complete", result=result)
         except Exception as exc:
@@ -339,9 +339,16 @@ async def resume_agent(request: ResumeAgentRequest):
 
 
 @router.get("/jobs")
-async def list_jobs(status: str = "", limit: int = 100):
-    """List discovered jobs with optional status filter."""
-    jobs = await db.get_jobs(status=status or None, limit=limit)
+async def list_jobs(status: str = "", limit: int = 100, include_closed: bool = False):
+    """List discovered jobs with optional status filter.
+
+    Dead jobs (status='closed') are hidden by default — they waste the
+    user's time. Pass include_closed=true to see them.
+    """
+    if not status and not include_closed:
+        jobs = await db.get_jobs_excluding(["closed"], limit=limit)
+    else:
+        jobs = await db.get_jobs(status=status or None, limit=limit)
     # Don't send PDF blob in list response; parse validation_json
     for j in jobs:
         j.pop("tailored_pdf", None)

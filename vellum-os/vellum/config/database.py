@@ -128,15 +128,16 @@ CREATE TABLE IF NOT EXISTS intervention_sessions (
 );
 
 CREATE TABLE IF NOT EXISTS companies (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    website     TEXT DEFAULT '',
-    careers_url TEXT DEFAULT '',
-    hub         TEXT DEFAULT '',
-    ats         TEXT DEFAULT '',
-    ats_token   TEXT DEFAULT '',
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL UNIQUE,
+    website         TEXT DEFAULT '',
+    careers_url     TEXT DEFAULT '',
+    hub             TEXT DEFAULT '',
+    ats             TEXT DEFAULT '',
+    ats_token       TEXT DEFAULT '',
+    last_probed_at  TEXT DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 """
 
@@ -208,6 +209,13 @@ async def init_db() -> None:
     try:
         await conn.executescript(_SCHEMA_SQL)
         await conn.commit()
+        # Lightweight migrations for databases created by older schemas.
+        # SQLite has no "ADD COLUMN IF NOT EXISTS" — probe & ignore duplicate error.
+        try:
+            await conn.execute("ALTER TABLE companies ADD COLUMN last_probed_at TEXT DEFAULT ''")
+            await conn.commit()
+        except Exception:
+            pass  # column already exists
         log.info("database_ready")
     finally:
         await conn.close()
@@ -372,6 +380,22 @@ async def get_jobs(status: Optional[str] = None, limit: int = 100) -> list[dict]
             cursor = await db.execute(
                 "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
             )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_jobs_excluding(statuses: list[str], limit: int = 100) -> list[dict]:
+    """Return jobs whose status is NOT in the given list."""
+    if not statuses:
+        return await get_jobs(limit=limit)
+    placeholders = ",".join("?" for _ in statuses)
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            f"SELECT * FROM jobs WHERE status NOT IN ({placeholders}) "
+            "ORDER BY created_at DESC LIMIT ?",
+            (*statuses, limit),
+        )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
@@ -732,14 +756,35 @@ async def delete_company(company_id: str) -> bool:
 
 
 async def update_company_ats(company_id: str, ats: str, ats_token: str, careers_url: str = "") -> None:
-    """Persist detected ATS board info after a probe."""
+    """Persist detected ATS board info after a probe + stamp last_probed_at."""
     async with aiosqlite.connect(_db_path) as db:
         await db.execute(
             """UPDATE companies SET ats = ?, ats_token = ?, careers_url = CASE
-               WHEN ? != '' THEN ? ELSE careers_url END, updated_at = ? WHERE id = ?""",
-            (ats, ats_token, careers_url, careers_url, _now_iso(), company_id),
+               WHEN ? != '' THEN ? ELSE careers_url END,
+               last_probed_at = ?, updated_at = ? WHERE id = ?""",
+            (ats, ats_token, careers_url, careers_url, _now_iso(), _now_iso(), company_id),
         )
         await db.commit()
+
+
+async def get_companies_due_probe(stale_after_hours: float = 24.0) -> list[dict]:
+    """Companies that haven't been probed in the window, or never probed."""
+    import time as _time
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=stale_after_hours)).isoformat()
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT id, name, website, careers_url, hub, ats, ats_token,
+                      last_probed_at, created_at
+               FROM companies
+               WHERE last_probed_at = '' OR last_probed_at IS NULL OR last_probed_at < ?
+               ORDER BY last_probed_at ASC""",
+            (cutoff,),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
 
 
 async def get_company_by_name(name: str) -> Optional[dict]:

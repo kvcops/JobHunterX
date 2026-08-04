@@ -222,4 +222,10 @@ async def run_single_job_apply(
         validate_only=False,
         include_browser=include_browser,
     )
+
+    # Track application state so the UI never re-suggests an applied job.
+    if result.get("errors"):
+        await db.update_job(job_id, status="apply_failed")
+    else:
+        await db.update_job(job_id, status="applied")
     return result

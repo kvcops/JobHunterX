@@ -58,16 +58,23 @@ def _json_get(url: str, timeout: float = 20.0) -> Optional[dict]:
 # Thread lookup
 # ---------------------------------------------------------------------------
 
+_THREAD_TITLE_RE = r"^ask hn:\s*who\s+is\s+hiring"
+
 def _find_latest_thread() -> Optional[dict]:
-    """Latest 'Who Is Hiring' story via Algolia. Returns {id, title}."""
+    """Latest 'Who Is Hiring' story via Algolia. Returns {id, title}.
+
+    Must start with "Ask HN: Who is hiring" — otherwise discussion threads
+    like 'Why is the "Who is hiring?" post being re-aged?' match and return
+    zero jobs.
+    """
     url = ("https://hn.algolia.com/api/v1/search_by_date?tags=story&query="
-           "%22Who%20is%20hiring%22&hitsPerPage=5")
+           "%22Who%20is%20hiring%22&hitsPerPage=10")
     data = _json_get(url)
     if not data:
         return None
     for hit in data.get("hits", []):
-        title = (hit.get("title") or "")
-        if "who" in title.lower() and "hiring" in title.lower():
+        title = (hit.get("title") or "").strip()
+        if re.match(_THREAD_TITLE_RE, title, re.I):
             return {"id": hit.get("objectID"), "title": title}
     return None
 
@@ -89,6 +96,45 @@ def _clean_part(raw: str) -> str:
     s = html_mod.unescape(s)
     s = re.sub(r"\s+", " ", s)
     return s.strip()
+
+
+_TYPE_TOKENS = (
+    "remote", "onsite", "hybrid", "anywhere", "remote only", "worldwide",
+    "full-time", "full time", "part-time", "part time", "contract",
+    "internship", "intern", "fulltime", "full time / remote", "opportunity",
+)
+
+_LOCATION_RE = re.compile(
+    r"(?i)(^|[,\s(])(remote|onsite|on-site|hybrid|anywhere|worldwide)\b"
+    r"|(^|[,\s])(uk|usa|u\.s\.a\.?|us|canada|germany|india|japan|australia|"
+    r"singapore|switzerland|netherlands|france|spain|italy|ireland|austria|"
+    r"denmark|sweden|norway|finland|poland|israel|uae|china|korea|taiwan|"
+    r"brazil|mexico|philippines|vietnam|thailand|indonesia|germany|"
+    r"bengaluru|bangalore|mumbai|delhi|hyderabad|pune|chennai|kolkata|"
+    r"london|berlin|munich|paris|tokyo|toronto|new york|san francisco|"
+    r"seattle|boston|chicago|austin|boulder|zurich|amsterdam|sydney|"
+    r"melbourne|stockholm|oslo|copenhagen|helsinki|barcelona|madrid|"
+    r"lisbon|warsaw|prague|budapest|dublin|athens|tel aviv|remote)\b"
+    r"|,\s*[a-z]{2}(?:/[a-z]{2})*$"
+)
+
+
+def _is_type_or_loc(part: str) -> bool:
+    """True if a header part is a job-type or location token, not a role."""
+    p = (part or "").strip()
+    if not p:
+        return True
+    if p.lower() in _TYPE_TOKENS:
+        return True
+    if _is_note_token(p):
+        return False  # "no remote" is a note, not a location
+    return bool(_LOCATION_RE.search(p))
+
+
+def _is_note_token(part: str) -> bool:
+    """True if a header part is an explicit note ("no remote", "not hybrid")."""
+    p = (part or "").strip()
+    return p.lower().startswith(("no ", "not ", "must ", "requires "))
 
 
 def _role_looks_ok(role: str) -> bool:
@@ -126,23 +172,47 @@ def _parse_comment(comment_text: str) -> list[dict]:
             continue
         parts = _split_header(ln)
         if len(parts) >= 2:
-            first, second = parts[0], parts[1]
+            first, location = parts[0], ""
             if not company and first:
                 company = first
-            # second part should look like a role, not a location/sentence
-            if not second or len(second) < 2 or second.isdigit():
+            # Walk through header tokens until the first one that isn't a
+            # type/location token — that's the role. Tracks where the
+            # location ended up so it isn't spilled into `note`.
+            role = ""
+            for idx in range(1, len(parts)):
+                if _is_type_or_loc(parts[idx]):
+                    continue
+                if _is_note_token(parts[idx]):
+                    break  # "no remote | ..." → trailing note, role not ahead
+                if not _role_looks_ok(parts[idx]):
+                    continue  # salary/URL/etc — keep scanning for the real role
+                role = parts[idx]
+                role_idx = idx
+                break
+            if not role:
+                # Every token after `company` is a type/location or junk → no
+                # real role advertised on this line. Drop junk like
+                # "G-Research | London, UK | On-site" rather than emit
+                # role="London, UK".
                 continue
-            if second == first:
+            if role == first:
                 continue
-            if not _role_looks_ok(second):
-                continue
-            role = second
-            location = parts[2] if len(parts) > 2 else ""
+            # Location = type/loc tokens before the role + any leading
+            # type/loc tokens right after it (e.g. "Company | SWE |
+            # Bengaluru, India"). Everything after that is a note.
+            trailing = 0
+            for idx in range(role_idx + 1, len(parts)):
+                if _is_type_or_loc(parts[idx]):
+                    trailing += 1
+                else:
+                    break
+            location = " ".join(parts[1:role_idx] + parts[role_idx + 1:role_idx + 1 + trailing])
+            note = " | ".join(parts[role_idx + 1 + trailing:])
             jobs.append({
                 "company": first or company,
                 "role": role,
                 "location": location,
-                "note": " | ".join(parts[3:]),
+                "note": note,
                 "jd_text": comment_text[:4000],
             })
     if not jobs and company:

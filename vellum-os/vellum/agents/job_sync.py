@@ -113,7 +113,12 @@ def _normalize_job(job: Job, hub: str = "") -> dict:
 
 
 async def store_jobs(job_dicts: list[dict]) -> dict:
-    """Dedupe by apply_url hash and insert. Returns {inserted, duplicates}."""
+    """Dedupe by apply_url hash AND by normalized (company, role) across
+    sources (same job posted on hasjob + Greenhouse must not duplicate).
+
+    Source preference for the same role at the same company:
+    ATS (structured, richest) > hasjob > hn. Returns {inserted, duplicates}.
+    """
     import aiosqlite
 
     hashes = {}
@@ -129,9 +134,29 @@ async def store_jobs(job_dicts: list[dict]) -> dict:
     except Exception:
         pass
 
+    # Cross-source dedupe: prefer ATS data for identical (company, role).
+    SRC_PRIORITY = {"hn": 0, "hasjob": 1}
+    role_index: dict[tuple[str, str], dict] = {}
+    for job in job_dicts:
+        key = ((job.get("company") or "").lower(),
+               re.sub(r"[^a-z0-9]+", " ", (job.get("role") or "").lower()).strip())
+        if not key[1]:
+            continue
+        prior = role_index.get(key)
+        src = str(job.get("source") or "")
+        if prior is None or SRC_PRIORITY.get(src, 2) > SRC_PRIORITY.get(str(prior.get("source") or ""), 2):
+            role_index[key] = job
+
+    final_jobs = list(role_index.values())
+    for job in job_dicts:
+        key = ((job.get("company") or "").lower(),
+               re.sub(r"[^a-z0-9]+", " ", (job.get("role") or "").lower()).strip())
+        if key[1] and role_index.get(key) is not job:
+            job["_cross_dupe"] = True
+
     inserted = 0
     duplicates = 0
-    for job in job_dicts:
+    for job in final_jobs:
         h = hashes[job["id_key"]]
         if h and h in existing:
             duplicates += 1
@@ -173,6 +198,9 @@ async def run_sync(
     event_cb: Optional[EventCallback] = None,
     discover: bool = True,
     probe_concurrency: int = 6,
+    probe_freshness_hours: float = 24.0,
+    max_probe_per_run: int = 60,
+    liveness_max_checks: int = 40,
 ) -> dict:
     """Run one full sync pass. Fully automatic — no company selection needed.
 
@@ -186,6 +214,12 @@ async def run_sync(
         limit_companies: cap how many companies to probe this run (0 = all).
         discover: also ingest live feeds before ATS probing.
         probe_concurrency: how many companies to probe in parallel.
+        probe_freshness_hours: skip companies probed within this window.
+        max_probe_per_run: hard cap on companies probed per run. Feed
+            discovery grows the company DB unboundedly; without a cap a
+            sync could probe hundreds of never-checked companies and take
+            forever. Oldest-first cycling drains the backlog across runs.
+        liveness_max_checks: how many top matches get a liveness GET-check.
     """
     from vellum.config import gemma as g
     from vellum.agents import eligibility, search_planner
@@ -286,12 +320,18 @@ async def run_sync(
                        f"HN jobs, {summary['companies_discovered']} new companies.", {})
         companies = await db.get_companies()
 
-    # --- Step 3: probe + fetch ATS boards (parallel) ---
+    # --- Step 3: probe + fetch ATS boards (parallel, freshness-aware) ---
+    # Only companies not probed in the last N hours get re-probed. This keeps
+    # sync time bounded as the company DB grows from feed discovery.
+    companies = await db.get_companies_due_probe(stale_after_hours=probe_freshness_hours)
     if company_filter:
         fset = {c.lower() for c in company_filter}
         companies = [c for c in companies if c["name"].lower() in fset]
+    if max_probe_per_run:
+        companies = companies[:max_probe_per_run]
     if limit_companies:
         companies = companies[:limit_companies]
+    summary["companies_due_probe"] = len(companies)
 
     sem = asyncio.Semaphore(probe_concurrency)
 
@@ -377,17 +417,38 @@ async def run_sync(
 
     # --- Step 7: liveness check on TOP matches (prove they still exist) ---
     if stored["inserted"]:
-        verdicts = await liveness.verify_top_jobs(all_job_dicts, max_checks=25)
-        for job in all_job_dicts:
+        # HN jobs' apply_url is the HN comment page — always HTTP 200 forever,
+        # so liveness proves nothing for them. Exclude before checking.
+        checkable = [j for j in all_job_dicts if j.get("source") != "hn"]
+        verdicts = await liveness.verify_top_jobs(checkable,
+                                                  max_checks=liveness_max_checks)
+        from datetime import datetime, timezone
+        checked_at = datetime.now(timezone.utc).isoformat()
+        for job in checkable:
             jid = job.get("id") or job.get("id_key")
             verdict = verdicts.get(jid or "")
+            if not verdict or not job.get("id"):
+                continue
+            # Persist the verdict so the UI can show "verified live X ago"
+            try:
+                row = await db.get_job(job["id"])
+                fj = {}
+                if row and row.get("freshness_json"):
+                    try:
+                        fj = json.loads(row["freshness_json"])
+                    except Exception:
+                        fj = {}
+                fj["liveness"] = verdict
+                fj["liveness_checked_at"] = checked_at
+                await db.update_job(job["id"], freshness_json=json.dumps(fj))
+            except Exception as exc:
+                log.debug("liveness_persist_failed", error=str(exc)[:100])
             if verdict == "gone":
                 summary["gone"] += 1
-                if job.get("id"):
-                    try:
-                        await db.update_job(job["id"], status="closed")
-                    except Exception:
-                        pass
+                try:
+                    await db.update_job(job["id"], status="closed")
+                except Exception:
+                    pass
         summary["verified"] = sum(1 for v in verdicts.values() if v != "unknown")
         if verdicts:
             await emit("progress",

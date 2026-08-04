@@ -156,7 +156,7 @@ async def _fetch_json(url: str, timeout: float = 15.0) -> Optional[dict | list]:
         return None
 
 
-async def fetch_page(url: str, timeout: float = 15.0) -> str:
+async def fetch_page(url: str, timeout: float = 8.0) -> str:
     """Fetch raw HTML for ATS probing."""
     try:
         from curl_cffi import requests as cffi
@@ -188,27 +188,33 @@ def _clean_html(html: str) -> str:
     return text.strip()
 
 
-async def _greenhouse(token: str, company: str, careers_url: str) -> list[Job]:
-    url = f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
-    data = await _fetch_json(url)
-    jobs = []
-    if not data or not isinstance(data, dict):
-        return jobs
-    for item in data.get("jobs", []):
-        jd = _clean_html(item.get("content", ""))
-        loc = item.get("location") or {}
-        loc_name = loc.get("name", "") if isinstance(loc, dict) else str(loc or "")
-        jobs.append(Job(
-            company=company,
-            role=item.get("title", ""),
-            location=loc_name,
-            department="",
-            jd_text=jd,
-            apply_url=item.get("absolute_url", ""),
-            career_page_url=careers_url,
-            posted_at=item.get("updated_at", ""),
-            source=f"greenhouse:{token}",
-        ))
+async def _greenhouse(token: str, company: str, careers_url: str, max_pages: int = 5) -> list[Job]:
+    per_page = 100
+    jobs: list[Job] = []
+    for page in range(1, max_pages + 1):
+        url = (f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs"
+               f"?content=true&per_page={per_page}&page={page}")
+        data = await _fetch_json(url)
+        if not data or not isinstance(data, dict):
+            return jobs
+        chunk = data.get("jobs") or []
+        for item in chunk:
+            jd = _clean_html(item.get("content", ""))
+            loc = item.get("location") or {}
+            loc_name = loc.get("name", "") if isinstance(loc, dict) else str(loc or "")
+            jobs.append(Job(
+                company=company,
+                role=item.get("title", ""),
+                location=loc_name,
+                department="",
+                jd_text=jd,
+                apply_url=item.get("absolute_url", ""),
+                career_page_url=careers_url,
+                posted_at=item.get("updated_at", ""),
+                source=f"greenhouse:{token}",
+            ))
+        if len(chunk) < per_page:
+            break
     return jobs
 
 
@@ -282,26 +288,34 @@ async def _recruitee(token: str, company: str, careers_url: str) -> list[Job]:
     return jobs
 
 
-async def _smartrecruiters(token: str, company: str, careers_url: str) -> list[Job]:
-    url = f"https://api.smartrecruiters.com/v1/companies/{token}/postings"
-    data = await _fetch_json(url)
-    jobs = []
-    if not data or not isinstance(data, dict):
-        return jobs
-    for item in data.get("content", []):
-        loc = item.get("location") or {}
-        jd = item.get("jobAd", {}).get("sections", {}).get("jobDescription", {}).get("text", "")
-        jobs.append(Job(
-            company=company,
-            role=item.get("name", ""),
-            location=f"{loc.get('city', '')}, {loc.get('country', '')}".strip(", "),
-            department="",
-            jd_text=_clean_html(jd),
-            apply_url=item.get("ref", ""),
-            career_page_url=careers_url,
-            posted_at=item.get("releasedDate", ""),
-            source=f"smartrecruiters:{token}",
-        ))
+async def _smartrecruiters(token: str, company: str, careers_url: str, limit: int = 100) -> list[Job]:
+    jobs: list[Job] = []
+    offset = 0
+    while True:
+        url = (f"https://api.smartrecruiters.com/v1/companies/{token}/postings"
+               f"?limit={limit}&offset={offset}")
+        data = await _fetch_json(url)
+        if not data or not isinstance(data, dict):
+            break
+        chunk = data.get("content") or []
+        for item in chunk:
+            loc = item.get("location") or {}
+            jd = item.get("jobAd", {}).get("sections", {}).get("jobDescription", {}).get("text", "")
+            jobs.append(Job(
+                company=company,
+                role=item.get("name", ""),
+                location=f"{loc.get('city', '')}, {loc.get('country', '')}".strip(", "),
+                department="",
+                jd_text=_clean_html(jd),
+                apply_url=item.get("ref", ""),
+                career_page_url=careers_url,
+                posted_at=item.get("releasedDate", ""),
+                source=f"smartrecruiters:{token}",
+            ))
+        total = data.get("totalFound", 0) or 0
+        offset += len(chunk)
+        if offset >= total or not chunk:
+            break
     return jobs
 
 
@@ -341,7 +355,9 @@ async def probe_company(company: Company) -> Company:
     """Probe a company's careers page for an ATS board. Mutates and returns it.
 
     Tries, in order: explicit careers_url → website + /careers → website.
-    If a board token is found it is stored on the Company.
+    The candidate URLs are fetched IN PARALLEL — dead sites otherwise burn
+    the full timeout serially (up to 3 × per-URL timeout per company), which
+    is why syncs used to swim through never-probed backlogs.
     """
     candidates: list[str] = []
     if company.careers_url:
@@ -352,13 +368,23 @@ async def probe_company(company: Company) -> Company:
         candidates.append(base)
         candidates.append(base + "/careers.html")
     if not candidates:
+        company.ats = "none"
         return company
 
-    for url in candidates:
-        try:
-            html = await fetch_page(url)
-        except Exception:
-            continue
+    sem = asyncio.Semaphore(len(candidates))
+
+    async def fetch_one(url: str) -> tuple[str, str]:
+        async with sem:
+            try:
+                html = await fetch_page(url)
+            except Exception:
+                return url, ""
+            if not html:
+                return url, ""
+            return url, html
+
+    pages = await asyncio.gather(*(fetch_one(u) for u in candidates))
+    for url, html in pages:
         if not html:
             continue
         ats, token = detect_ats_from_html(html, url)

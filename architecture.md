@@ -56,12 +56,26 @@ validator_tailor → browser_agent (per job, on user click/auto)
 
 ## Honest numbers (measured live, fresher profile, Bengaluru)
 
-- Plan call: ~530 tokens (1 Gemma call)
-- Feeds: 11 hasjob jobs + 42 HN job postings (~54 comments fetched)
-- Eligibility gate: **50 rejected / 3 eligible** — every rejection has a reason
-- Gemma ranking: 3 scored (~650 tokens, budget-tracked)
-- Liveness: 3/3 verified live
-- Companies auto-discovered from feeds: ~200+ (probed in later syncs)
+- Plan call: ~520 tokens (1 Gemma call)
+- Feeds: 12 hasjob jobs + 90 HN postings (117 comments) — HN thread now matched
+  exactly (`^Ask HN: Who is hiring`), a re-aged discussion thread no longer fools it
+- Eligibility gate: **203 rejected / 68 eligible** — every rejection has a reason
+- Gemma ranking: 68 scored in 2 batches (~3.4k tokens total, budget-tracked)
+- Liveness: 18 top matches checked → **17 live / 1 gone** (gone → status=closed);
+  verdicts + `liveness_checked_at` persisted in `freshness_json`
+- ATS: probing is now **parallel** (per-company candidate URLs fetched at once),
+  so a dead careers page no longer burns 3 × URL-timeout serially. Live sweep of
+  the 163 seed companies (websites only) found boards on ~10: Razorpay/greenhouse
+  27, Freshworks/SmartRecruiters 154, Paytm/lever 242, SigNoz/ashby 15,
+  Livspace/recruitee 0; Workday + FreshTeam detected but have no public JSON
+  (0 jobs, marked probe-probed so they aren't re-probed). Real syncs bound this
+  to 60 oldest-first probes/run with 24h freshness
+- Cross-source dedupe: 51 dupes dropped (ATS wins over hasjob/HN on same role)
+- Probe freshness: companies stamped with `last_probed_at`; next syncs skip them
+  for 24h, so runs stay bounded as the company DB grows (~350 tracked)
+- Test suite: **90 tests pass** (`pytest tests/ -q`) — parse, eligibility,
+  ATS pagination+probe parallelism, dedupe/freshness, liveness, API, Gemma budget,
+  resume tailoring; offline via fakes/monkeypatching
 - Full-day budget usage: ~4k of 15k tokens — headroom for ATS-probe jobs
 
 ## Budget math (brutal, honest)
@@ -92,7 +106,10 @@ validator_tailor → browser_agent (per job, on user click/auto)
   for India-only candidates most HN jobs get rejected by the location gate
   (correctly). ATS probing of the ~350 tracked companies is the volume
   engine; ~30-40% run free ATS boards.
-- Liveness only checks top ~25 matches per sync (network cost), not all.
+- Liveness only checks a bounded set of top matches per sync (network cost; default
+  `liveness_max_checks=40`, configurable), not all. Retries on 403/429/5xx so a
+  single bot-block doesn't kill a live job. HN jobs are excluded — their apply_url
+  is the comment page, always HTTP 200, so a liveness verdict would prove nothing.
 - Eligibility gate is rule-based — it is *strict and explainable*, not
   "smart". If a JD hides its requirements in prose ("we expect someone who
   has shipped…"), the gate passes it and the LLM ranking catches it.
