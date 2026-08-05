@@ -101,6 +101,12 @@ _CITY_ALIASES = {
     "indore": "indore", "jaipur": "jaipur", "remote": "remote",
     "anywhere": "remote", "india": "india", "work from home": "remote",
     "wfh": "remote", "onsite": "", "hybrid": "",
+    "visakhapatnam": "visakhapatnam", "vizag": "visakhapatnam",
+    "mangalore": "mangalore", "mangaluru": "mangalore",
+    "coimbatore": "coimbatore", "mysore": "mysore", "mysuru": "mysore",
+    "chandigarh": "chandigarh", "lucknow": "lucknow", "nagpur": "nagpur",
+    "thiruvananthapuram": "thiruvananthapuram", "trivandrum": "thiruvananthapuram",
+    "bhopal": "bhopal",
 }
 
 

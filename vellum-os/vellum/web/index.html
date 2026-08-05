@@ -308,12 +308,12 @@
                   <p class="viewport-section-sub">Track active matches, form fields analysis, and Playwright automation progress.</p>
                 </div>
                 <div class="filter-pill-bar">
-                  <button class="filter-pill" onclick="filterJobs('all', this)">All Jobs</button>
-                  <button class="filter-pill active" onclick="filterJobs('matched', this)">Matched</button>
-                  <button class="filter-pill" onclick="filterJobs('applying', this)">Applying</button>
-                  <button class="filter-pill" onclick="filterJobs('applied', this)">Applied</button>
-                  <button class="filter-pill" onclick="filterJobs('needs_attention', this)">Attention</button>
-                  <button class="filter-pill" onclick="filterJobs('low_score', this)" style="color: #f87171;">Low Score</button>
+                  <button class="filter-pill" id="btn-filter-all" onclick="filterJobs('all', this)">All Jobs</button>
+                  <button class="filter-pill active" id="btn-filter-matched" onclick="filterJobs('matched', this)">Matched</button>
+                  <button class="filter-pill" id="btn-filter-applying" onclick="filterJobs('applying', this)">Applying</button>
+                  <button class="filter-pill" id="btn-filter-applied" onclick="filterJobs('applied', this)">Applied</button>
+                  <button class="filter-pill" id="btn-filter-needs_attention" onclick="filterJobs('needs_attention', this)">Attention</button>
+                  <button class="filter-pill" id="btn-filter-low_score" onclick="filterJobs('low_score', this)" style="color: #f87171;">Low Score</button>
                   <button class="filter-pill clear-all-btn" onclick="clearAllJobs()" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border-color: rgba(239, 68, 68, 0.3); margin-left: 8px;" title="Clear all jobs in queue">🗑️ Clear All</button>
                 </div>
               </div>

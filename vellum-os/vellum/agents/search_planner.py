@@ -27,9 +27,15 @@ from vellum.config.logging import get_logger
 
 log = get_logger("search_planner")
 
-_PLAN_SYSTEM = """You are a job-search strategist for one candidate.
+_PLAN_SYSTEM = """You are a job-search strategist for an Indian software candidate.
 Given their resume profile, build a precise search plan. Be strict and honest
 about what the candidate can realistically get — do NOT inflate seniority.
+
+Context: This is for the INDIAN job market. Focus on:
+- Indian cities (Bangalore, Hyderabad, Mumbai, Pune, Chennai, Delhi NCR, etc.)
+- Indian startups, product companies, SaaS companies
+- Avoid mass-hiring service companies (TCS, Infosys, Wipro, Cognizant, Accenture, HCL, etc.)
+- Focus on companies that actually pay well and have good growth
 
 Rules:
 - seniority_max must be the HARD CEILING the candidate can target, based on
@@ -37,10 +43,12 @@ Rules:
   5+ -> "senior". If the candidate is a fresher, seniority_max is "entry"
   no matter how good the projects are.
 - years_experience: total years, as a number. Fresher = 0.
-- target_roles: 2-4 role families, lowercase, e.g. ["software engineer", "full stack developer", "backend developer"].
+- target_roles: 2-5 role families, lowercase, e.g. ["software engineer", "full stack developer", "backend developer", "python developer"].
+  Include specific technology-based roles if the candidate has strong skills.
 - must_have: 4-8 skills from the profile that a matching job MUST touch.
 - reject_terms: phrases/roles the candidate should never be shown, e.g. sales, marketing, campus ambassador, senior (when seniority_max is entry/mid).
-- locations: the candidate's city plus other cities they'd accept; include "Remote".
+  Always reject: sales, marketing, business development, business analyst, recruiter, HR.
+- locations: the candidate's city plus 2-3 other major Indian tech cities; always include "Remote".
 Return ONLY valid JSON:
 {"target_roles": [...], "seniority_max": "entry", "years_experience": 0.0,
  "locations": [...], "must_have": [...], "reject_terms": [...], "reasoning": "short"}"""
@@ -61,15 +69,27 @@ def _default_plan(profile: dict) -> dict:
     """Zero-token fallback when Gemma is unavailable/budget-exhausted."""
     years = _parse_years(profile.get("relevant_experience") or "")
     seniority = "entry" if years < 2 else ("mid" if years < 5 else "senior")
-    skills = (profile.get("skills") or [])[:6]
+    skills = (profile.get("skills") or [])[:8]
     role = (profile.get("suggested_role") or "software engineer").lower()
-    reject = ["sales", "marketing", "business development", "recruiter",
-              "campus ambassador", "internship" if years >= 1 else "x__none"]
+    reject = ["sales", "marketing", "business development", "business analyst",
+              "recruiter", "hr ", "campus ambassador", "content writer",
+              "internship" if years >= 1 else "x__none"]
     if seniority in ("entry", "mid"):
-        reject += ["senior", "lead", "principal", "staff", "architect"]
-    locations = [profile.get("location") or "Bengaluru", "Remote"]
+        reject += ["senior", "lead", "principal", "staff", "architect", "manager",
+                    "director", "head of", "vp"]
+    locations = [profile.get("location") or "Bengaluru"]
+    if "Bengaluru" not in locations[0] and "Bangalore" not in locations[0]:
+        locations.append("Bengaluru")
+    locations.append("Remote")
+    tech_roles = [role]
+    if "engineer" in role:
+        tech_roles.append("developer")
+    elif "developer" in role:
+        tech_roles.append("engineer")
+    tech_roles.append("software engineer")
+    tech_roles = list(dict.fromkeys(tech_roles))[:5]
     return {
-        "target_roles": [role, "software engineer", "full stack"],
+        "target_roles": tech_roles,
         "seniority_max": seniority,
         "years_experience": years,
         "locations": [loc for loc in locations if loc],

@@ -795,17 +795,28 @@ function renderJobs() {
   });
 
   sortedJobs.forEach(job => {
-    // Counters mirror the filter buckets so pill counts always match the
-    // cards actually visible under each filter tab.
-    const st = job.status || "discovered";
-    if (st === "matched" || st === "validating" || st === "applying") matchedCount++;
-    if (st === "applied" || st === "applied_manual" || st === "force_applied") appliedCount++;
-    if (st === "needs_attention") needsAttentionCount++;
-    if (st === "discovered" || st === "skipped" || st === "failed") lowScoreCount++;
-
     const card = document.createElement("div");
     const matchPercent = getMatchScorePercent(job);
     const applyUrl = job.apply_url || job.career_page_url || "#";
+
+    // Determine effective status based on score threshold (60%) for discovered jobs
+    const st = job.status || "discovered";
+    let effectiveStatus = st;
+    if (st === "discovered") {
+      if (matchPercent >= 60) {
+        effectiveStatus = "matched";
+      } else {
+        effectiveStatus = "low_score";
+      }
+    } else if (st === "skipped" || st === "failed") {
+      effectiveStatus = "low_score";
+    }
+
+    if (effectiveStatus === "matched" || effectiveStatus === "validating" || effectiveStatus === "applying") matchedCount++;
+    if (st === "applying" || st === "validating") applyingCount++;
+    if (effectiveStatus === "applied" || effectiveStatus === "applied_manual" || effectiveStatus === "force_applied") appliedCount++;
+    if (effectiveStatus === "needs_attention") needsAttentionCount++;
+    if (effectiveStatus === "low_score") lowScoreCount++;
 
     // Use LLM-generated summary if available, fallback to raw JD snippet
     const snippetText = job.one_line_summary
@@ -848,8 +859,9 @@ function renderJobs() {
       force_applied: "Applied",
       needs_attention: "Attention",
       failed: "Failed",
-      skipped: "Skipped"
-    }[job.status] || "Discovered";
+      skipped: "Skipped",
+      low_score: "Low Score"
+    }[effectiveStatus] || "Discovered";
 
     const statusPillClass = {
       matched: "pill-matched",
@@ -859,14 +871,15 @@ function renderJobs() {
       applied_manual: "pill-applied",
       force_applied: "pill-applied",
       needs_attention: "pill-attention",
-      failed: "pill-failed"
-    }[job.status] || "pill-discovered";
+      failed: "pill-failed",
+      low_score: "pill-discovered"
+    }[effectiveStatus] || "pill-discovered";
 
     // data-status drives filterJobs() below — the redesigned card markup
     // ("clean-job-card" / "clean-status-pill") no longer carries the old
     // "job-status-indicator <status>" class the original filter relied on.
     card.className = "clean-job-card clickable-card";
-    card.dataset.status = job.status || "discovered";
+    card.dataset.status = effectiveStatus;
     card.innerHTML = `
       <div class="clean-card-header">
         <div class="clean-header-titles" onclick="openJobDetailsModal('${job.id}')" style="cursor: pointer;">
@@ -908,7 +921,7 @@ function renderJobs() {
     container.appendChild(card);
   });
 
-  updateJobsStatCounters(jobs.length, appliedCount, matchedCount, needsAttentionCount, lowScoreCount);
+  updateJobsStatCounters(jobs.length, appliedCount, matchedCount, applyingCount, needsAttentionCount, lowScoreCount);
 
   // Re-apply the user's active filter so newly rendered/streamed cards
   // respect it (e.g. filter stuck on "Matched" while discovery streams in).
@@ -917,7 +930,7 @@ function renderJobs() {
 
 // Updates both the sidebar telemetry counters and the ATS tab's own header
 // bar (which has separate IDs to avoid duplicate-ID collisions).
-function updateJobsStatCounters(discovered, applied, matched, needsAttention, lowScore) {
+function updateJobsStatCounters(discovered, applied, matched, applying, needsAttention, lowScore) {
   const setText = (id, val) => {
     const el = document.getElementById(id);
     if (el) el.innerText = val;
@@ -929,6 +942,18 @@ function updateJobsStatCounters(discovered, applied, matched, needsAttention, lo
   setText("stat-matched", matched);
   setText("stat-needs-attention", needsAttention);
   setText("stat-low-score", lowScore || 0);
+
+  // Update filter pill counts dynamically
+  const updatePill = (id, baseText, count) => {
+    const el = document.getElementById(id);
+    if (el) el.innerText = `${baseText} (${count})`;
+  };
+  updatePill("btn-filter-all", "All Jobs", discovered);
+  updatePill("btn-filter-matched", "Matched", matched);
+  updatePill("btn-filter-applying", "Applying", applying);
+  updatePill("btn-filter-applied", "Applied", applied);
+  updatePill("btn-filter-needs_attention", "Attention", needsAttention);
+  updatePill("btn-filter-low_score", "Low Score", lowScore);
 
   const atsBadge = document.getElementById("tab-count-ats");
   if (atsBadge) {
@@ -1595,11 +1620,6 @@ function stripHtml(html) {
   return tmp.textContent || tmp.innerText || "";
 }
 
-// Job status filter — reads the data-status attribute stamped onto each
-// card in renderJobs()/renderResumes() instead of relying on classes that
-// the redesigned card markup no longer has.
-// Accepts the clicked element explicitly (pass `this` from onclick) because
-// window.event is null in Firefox and under strict CSP.
 function filterJobs(status, triggerEl) {
   activeJobFilter = status || "all";
   document.querySelectorAll(".filter-pill").forEach(btn => btn.classList.remove("active"));
@@ -1609,16 +1629,12 @@ function filterJobs(status, triggerEl) {
   applyJobFilter();
 }
 
-// Maps each filter tab to the set of raw job statuses it shows. Statuses are
-// transient or dual-mapped (validating/applying live under Matched, manual or
-// forced applies count as Applied), so exact-string matching would make cards
-// vanish from every tab mid-pipeline.
 const JOB_STATUS_BUCKETS = {
   matched: new Set(["matched", "validating", "applying"]),
   applying: new Set(["applying", "validating"]),
   applied: new Set(["applied", "applied_manual", "force_applied"]),
   needs_attention: new Set(["needs_attention"]),
-  low_score: new Set(["discovered", "skipped", "failed"])
+  low_score: new Set(["low_score", "discovered", "skipped", "failed"])
 };
 
 function jobStatusInFilter(status, filter) {
@@ -1627,9 +1643,6 @@ function jobStatusInFilter(status, filter) {
   return bucket ? bucket.has(status || "discovered") : false;
 }
 
-// Applies activeJobFilter to every currently rendered card. Called after
-// pill clicks AND after every renderJobs()/renderResumes() so newly streamed
-// jobs respect the user's chosen filter instead of bypassing it.
 function applyJobFilter() {
   const cards = document.querySelectorAll("#jobs-container .clean-job-card");
   let visibleCount = 0;
@@ -1642,8 +1655,6 @@ function applyJobFilter() {
   });
   return visibleCount;
 }
-
-// ---------------------------------------------------------------------------
 // Candidate Profile & Reset Features
 // ---------------------------------------------------------------------------
 let editedSkills = [];

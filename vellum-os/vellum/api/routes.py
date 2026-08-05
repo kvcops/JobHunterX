@@ -145,8 +145,48 @@ async def sync_companies():
 @router.get("/locations")
 async def list_locations():
     """Supported target locations for the frontend dropdown."""
-    return {"locations": ["Bengaluru", "Hyderabad", "Mumbai", "Pune", "Chennai",
-                          "Delhi NCR", "Remote"]}
+    companies = await db.get_companies()
+    
+    SUPPORTED_LOCS = [
+        ("bengaluru", "Bengaluru"),
+        ("hyderabad", "Hyderabad"),
+        ("mumbai", "Mumbai"),
+        ("pune", "Pune"),
+        ("chennai", "Chennai"),
+        ("delhi ncr", "Delhi NCR"),
+        ("kolkata", "Kolkata"),
+        ("ahmedabad", "Ahmedabad"),
+        ("kochi", "Kochi"),
+        ("visakhapatnam", "Visakhapatnam"),
+        ("coimbatore", "Coimbatore"),
+        ("indore", "Indore"),
+        ("jaipur", "Jaipur"),
+        ("chandigarh", "Chandigarh"),
+        ("lucknow", "Lucknow"),
+        ("remote", "Remote"),
+    ]
+    
+    counts = {}
+    for c in companies:
+        hub = (c.get("hub") or "").lower().strip()
+        if not hub:
+            continue
+        if "bangalore" in hub or "bengaluru" in hub:
+            counts["bengaluru"] = counts.get("bengaluru", 0) + 1
+        elif "secunderabad" in hub or "hyderabad" in hub:
+            counts["hyderabad"] = counts.get("hyderabad", 0) + 1
+        elif "delhi" in hub or "ncr" in hub or "noida" in hub or "gurgaon" in hub or "gurugram" in hub:
+            counts["delhi ncr"] = counts.get("delhi ncr", 0) + 1
+        else:
+            for k, _ in SUPPORTED_LOCS:
+                if k in hub:
+                    counts[k] = counts.get(k, 0) + 1
+                    break
+                    
+    return {"locations": [
+        {"key": key, "label": label, "company_count": counts.get(key, 0)}
+        for key, label in SUPPORTED_LOCS
+    ]}
 
 
 @router.get("/budget")
@@ -620,6 +660,46 @@ async def update_profile(profile_data: dict):
         "message": f"Profile updated: {profile_data.get('name', 'Candidate')}",
     })
     return {"status": "ok", "profile_id": profile_id, "profile": profile_data}
+
+class OutreachSaveInput(BaseModel):
+    contact_name: str = ""
+    contact_role: str = ""
+    subject: str = ""
+    body: str = ""
+
+
+@router.get("/outreach")
+async def get_outreach():
+    """Get active outreach drafts."""
+    drafts = await db.get_outreach_drafts()
+    return {"drafts": drafts}
+
+
+@router.post("/outreach/{draft_id}/discard")
+async def discard_outreach(draft_id: str):
+    """Discard an outreach draft."""
+    conn = await db.get_connection()
+    try:
+        await conn.execute("UPDATE outreach_drafts SET status = 'discarded' WHERE id = ?", (draft_id,))
+        await conn.commit()
+    finally:
+        await conn.close()
+    return {"status": "ok"}
+
+
+@router.post("/outreach/{draft_id}/save")
+async def save_outreach(draft_id: str, data: OutreachSaveInput):
+    """Save changes to an outreach draft."""
+    conn = await db.get_connection()
+    try:
+        await conn.execute(
+            "UPDATE outreach_drafts SET contact_name = ?, contact_role = ?, subject = ?, body = ? WHERE id = ?",
+            (data.contact_name, data.contact_role, data.subject, data.body, draft_id)
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
