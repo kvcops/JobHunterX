@@ -116,3 +116,46 @@ def test_sync_route_wiring_does_not_400():
     the request (it may 409 if another sync is running, or 200 if not)."""
     resp = client.post("/api/companies/sync")
     assert resp.status_code in (200, 409)
+
+
+def test_locations_route_returns_supported_cities():
+    """The frontend calls GET /api/locations on every page load; it used to
+    404 (missing route). Must return a list of supported target cities."""
+    resp = client.get("/api/locations")
+    assert resp.status_code == 200
+    locs = resp.json()["locations"]
+    assert isinstance(locs, list) and len(locs) >= 3
+    assert "Bengaluru" in locs
+
+
+def test_full_search_wires_event_cb_to_run_sync(monkeypatch):
+    """graph.run_full_search passed `event_callback=` to job_sync.run_sync,
+    which expects `event_cb=` → TypeError raised inside the background task
+    (surfaced as search_error in the log). Must now call through cleanly."""
+    import asyncio
+
+    from vellum.agents import graph, job_sync
+
+    calls = {}
+
+    async def fake_run_sync(**kwargs):
+        calls["kwargs"] = kwargs
+        return {"jobs_stored": 3}
+
+    monkeypatch.setattr(job_sync, "run_sync", fake_run_sync)
+
+    async def run():
+        return await graph.run_full_search(
+            location="Hyderabad",
+            profile={"name": "Test Candidate", "skills": ["python"], "experience": []},
+            event_callback=lambda e: None,
+        )
+
+    result = asyncio.new_event_loop().run_until_complete(run())
+    assert result["jobs_discovered"] == 3
+    assert "event_cb" in calls["kwargs"], (
+        f"run_sync must receive event_cb, got keys: {sorted(calls['kwargs'])}"
+    )
+    assert calls["kwargs"]["preferred_location"] == "Hyderabad", (
+        "the user's chosen location must reach run_sync"
+    )

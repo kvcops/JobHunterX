@@ -142,6 +142,13 @@ async def sync_companies():
     return {"status": "started", "profile_loaded": profile is not None}
 
 
+@router.get("/locations")
+async def list_locations():
+    """Supported target locations for the frontend dropdown."""
+    return {"locations": ["Bengaluru", "Hyderabad", "Mumbai", "Pune", "Chennai",
+                          "Delhi NCR", "Remote"]}
+
+
 @router.get("/budget")
 async def get_budget():
     """Gemma budget usage (15k RPD / 30 RPM)."""

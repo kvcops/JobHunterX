@@ -111,6 +111,39 @@ def test_unknown_location_not_rejected():
     assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "pass"
 
 
+def test_new_york_usa_job_rejected():
+    """Foreign cities must never pass — previously 'New York, USA' had no
+    Indian city alias so it slipped through the gate."""
+    job = jd("great role", role="Software Engineer", loc="New York, USA")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"
+
+
+def test_london_uk_job_rejected():
+    job = jd("great role", role="Software Engineer", loc="London, UK")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"
+
+
+def test_san_francisco_job_rejected():
+    job = jd("great role", role="Software Engineer", loc="San Francisco, CA")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"
+
+
+def test_preferred_location_override_reaches_gate():
+    """When the user explicitly picks a city, jobs in other Indian cities
+    must be rejected even if the resume says Bengaluru."""
+    plan = dict(FRESHER_PLAN)
+    plan["locations"] = ["Hyderabad", "Remote"]
+    job = jd("great role", role="Software Engineer", loc="Bengaluru")
+    assert check_eligibility(job, plan)["verdict"] == "reject"
+
+
+def test_hybrid_suffix_still_matches_plan_city():
+    """'Bengaluru (Hybrid)' must match a Bengaluru plan — the raw string
+    contains the city, and normalization must not break the match."""
+    job = jd("great role", role="Software Engineer", loc="Bengaluru (Hybrid)")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "pass"
+
+
 # --- Junior markers prevent senior-halo rejection -------------------------
 
 

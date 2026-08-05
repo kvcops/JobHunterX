@@ -12,12 +12,12 @@ USER UPLOADS RESUME
         ▼
 1. SEARCH PLAN (Gemma, 1 call)          ── profile → target roles, seniority
         │                                  ceiling (entry/mid/senior), years,
-        │                                  accepted cities, reject terms
+        │                                  accepted cities, reject terms.
+        │                                  A user-chosen location (UI dropdown)
+        │                                  OVERRIDES the plan's city list.
         ▼
-2. LIVE DISCOVERY (3 channels, all free/unauthenticated)
+2. LIVE DISCOVERY (2 channels, all free/unauthenticated)
         ├─ hasjob.co ATOM feed           ── India startup job board, fresh
-        ├─ HN "Who's Hiring" (Firebase   ── 30-60 fresh company postings,
-        │     + Algolia JSON)               global + remote
         └─ ATS boards (6 vendors)        ── Greenhouse/Ashby/Lever/Recruitee/
                                            SmartRecruiters/BambooHR JSON APIs
                                            (companies auto-added by feeds)
@@ -26,7 +26,8 @@ USER UPLOADS RESUME
         │                                   every rejection:
         │   • role family (sales/marketing/HR ≠ your field)
         │   • reject terms (senior/lead/architect for entry-level, ...)
-        │   • location (Pune-only vs Bengaluru-only candidate → rejected)
+        │   • location (Pune-only vs Bengaluru-only candidate → rejected;
+        │     foreign cities like "New York, USA" / "London, UK" → rejected)
         │   • years required vs candidate years + seniority ceiling
         ▼
 4. STORE (dedupe by apply_url hash)     ── only eligible jobs enter the DB
@@ -50,15 +51,16 @@ validator_tailor → browser_agent (per job, on user click/auto)
 | "Jobs dumped forever, stale" | stored once, never checked | **liveness check**: top matches GET-verified each sync, closed → status=closed |
 | "Wrong city suggested" | only soft boost | **location conflict = hard reject** (city aliases: Bangalore↔Bengaluru etc.) |
 | "Sales/marketing junk" | scored, maybe filtered | **role-family + reject-term hard reject** |
-| "Only 1 static source, static CSV" | hasjob + static seed | **3 live channels** (hasjob + HN + ATS), seed only bootstraps first run, feeds auto-add companies |
+| "Only 1 static source, static CSV" | hasjob + static seed | **2 live channels** (hasjob + ATS), seed only bootstraps first run, feeds auto-add companies |
+| "Wrong city shown despite my choice" | plan city from resume only | **UI location override**: user-chosen city replaces the plan's list; foreign cities hard-rejected by the gate |
 | "Gemma underused" | scored ~20 jobs | **Gemma drives the plan + ranks up to ~80/day** with per-job reasons |
 | "Intelligence?" | keyword overlap | **search plan is the intelligence anchor** — Gemma decides roles/seniority/cities/rejects from the actual resume; gate + scorer all execute that plan |
 
 ## Honest numbers (measured live, fresher profile, Bengaluru)
 
 - Plan call: ~520 tokens (1 Gemma call)
-- Feeds: 12 hasjob jobs + 90 HN postings (117 comments) — HN thread now matched
-  exactly (`^Ask HN: Who is hiring`), a re-aged discussion thread no longer fools it
+- Feeds: 12 hasjob jobs (HN "Who's Hiring" removed — global/US-heavy, was the
+  main source of wrong-location junk; not worth it for an India-only candidate)
 - Eligibility gate: **203 rejected / 68 eligible** — every rejection has a reason
 - Gemma ranking: 68 scored in 2 batches (~3.4k tokens total, budget-tracked)
 - Liveness: 18 top matches checked → **17 live / 1 gone** (gone → status=closed);
@@ -93,7 +95,6 @@ validator_tailor → browser_agent (per job, on user click/auto)
 | `agents/search_planner.py` | Gemma → search plan (roles, seniority ceiling, years, cities, reject terms) |
 | `agents/eligibility.py` | Strict deterministic gate, every rejection explained |
 | `tools/hasjob.py` | hasjob.co ATOM feed client |
-| `tools/hn_hiring.py` | HN "Who's Hiring" (Firebase + Algolia, free JSON) |
 | `tools/ats_client.py` | 6-vendor free ATS JSON clients (probe + fetch) |
 | `tools/liveness.py` | Apply-URL verification (live/gone/unknown) |
 | `agents/job_scorer.py` | Keyword prefilter + Gemma batch ranking with reasons |
@@ -102,14 +103,11 @@ validator_tailor → browser_agent (per job, on user click/auto)
 
 ## Known honest limits
 
-- hasjob feed is small (~0-50/day, community only). HN is global/US-heavy —
-  for India-only candidates most HN jobs get rejected by the location gate
-  (correctly). ATS probing of the ~350 tracked companies is the volume
-  engine; ~30-40% run free ATS boards.
+- hasjob feed is small (~0-50/day, community only). ATS probing of the ~350
+  tracked companies is the volume engine; ~30-40% run free ATS boards.
 - Liveness only checks a bounded set of top matches per sync (network cost; default
   `liveness_max_checks=40`, configurable), not all. Retries on 403/429/5xx so a
-  single bot-block doesn't kill a live job. HN jobs are excluded — their apply_url
-  is the comment page, always HTTP 200, so a liveness verdict would prove nothing.
+  single bot-block doesn't kill a live job.
 - Eligibility gate is rule-based — it is *strict and explainable*, not
   "smart". If a JD hides its requirements in prose ("we expect someone who
   has shipped…"), the gate passes it and the LLM ranking catches it.

@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.140-009688?logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/AI-Gemma%204-4285F4?logo=google&logoColor=white" alt="Gemma 4">
-  <img src="https://img.shields.io/badge/tests-90%20passing-4caf50" alt="90 tests passing">
+  <img src="https://img.shields.io/badge/tests-85%20passing-4caf50" alt="85 tests passing">
   <img src="https://img.shields.io/badge/local%20first-100%25%20private-FF6F00" alt="Local first">
 </p>
 
@@ -44,8 +44,8 @@ of irrelevant ones.**
 
 | ✨ | What Vellum does that feels like magic |
 |---|---|
-| 🧠 | Reads **your actual resume** and builds a *search strategy* from it (one AI call) |
-| 🔍 | Scans **3 live free channels** — a startup job feed, HN "Who's Hiring", and 6 big hiring-software (ATS) boards |
+| 🧠 | Reads **your actual resume** and builds a *search strategy* from it (one AI call) — and your chosen city overrides the resume's |
+| 🔍 | Scans **2 live free channels** — an Indian startup job feed and 6 big hiring-software (ATS) boards |
 | 🚦 | Runs a **zero-cost, super-strict filter** so a fresher never sees a Senior role |
 | 📊 | Ranks every survivor with AI and a written **"why this match"** reason |
 | 💀 | **Checks each top job's link is still alive** before showing it; dead ones are auto-closed |
@@ -78,12 +78,12 @@ of irrelevant ones.**
                    │
                    ▼
         🔎  DISCOVERY  (all free · no login · live)
-  ┌──────────────────┬─────────────────┬───────────────────────┐
-  │ ✅ hasjob.co     │ 💬 HN "Who's    │ 🏢 ATS boards (6 kinds)│
-  │  India startups  │    Hiring?"     │  Greenhouse · Ashby ·  │
-  │  fresh, small    │  global+remote  │  Lever · Recruitee ·   │
-  │                  │                 │  SmartRecruiters · BHR │
-  └──────────────────┴─────────────────┴───────────────────────┘
+  ┌──────────────────┬───────────────────────────────┐
+  │ ✅ hasjob.co     │ 🏢 ATS boards (6 kinds)       │
+  │  India startups  │  Greenhouse · Ashby · Lever · │
+  │  fresh, small    │  Recruitee · SmartRecruiters ·│
+  │                  │  BambooHR                     │
+  └──────────────────┴───────────────────────────────┘
                    │
                    ▼
   ┌──────────────────────────────────────────────┐
@@ -91,7 +91,7 @@ of irrelevant ones.**
   │  strict rules, every rejection has a reason  │
   │   ❌ "Senior Dev" → you're a fresher         │
   │   ❌ "Pune only"  → you're in Bengaluru      │
-  │   ❌ "Sales role" → you're an engineer       │
+  │   ❌ "New York"   → abroad, hard-rejected     │
   └──────────────────────────────────────────────┘
                    │
                    ▼
@@ -132,9 +132,9 @@ of irrelevant ones.**
               ┌───────────┬───────────┬───────────┐
             🧠 PLAN     🔍 DISCOVER  🚦 GATE      📈 SCORE
               │            │            │            │
-        Gemma makes   hasjob    strict rules,  keyword sort,
-        the strategy  + HN       zero tokens,  then Gemma 10/call
-                      + ATS      with reasons  with reasons
+        Gemma makes   hasjob +    strict rules,  keyword sort,
+        the strategy  ATS boards  zero tokens,  then Gemma 10/call
+        + your city               with reasons  with reasons
               └───────────┴──────┬───────────────┘
                                  │
                               👇 WHAT PASSES
@@ -156,24 +156,27 @@ name, contact, skills, experience, education, location.
 > The tailoring step only *re-words experiences* — it will never add a skill you don't have.
 
 ### 2️⃣ Plan — Gemma turns that profile into a strategy
-One AI call makes a **SearchPlan**:
+One AI call makes a **SearchPlan** — and the city you pick in the dropdown
+**overrides** the plan's location list (your choice wins over the resume):
 
 | Plan field | Example | Meaning |
 |---|---|---|
 | `target_roles` | `["software engineer", "sde"]` | careers to look for |
 | `seniority_max` | `entry` | highest level to accept |
 | `years_experience` | `1` | your experience |
-| `locations` | `["Bengaluru"]` | cities you'll accept |
+| `locations` | `["Hyderabad", "Remote"]` | your chosen city + Remote |
 | `reject_terms` | `["lead", "architect"]` | words ⇒ auto-reject |
 
 Every later step runs from this one plan — so the whole system agrees on strategy.
 
-### 3️⃣ Discovery — three live free channels
+### 3️⃣ Discovery — two live free channels
 | Channel | What it is | Why it's good |
 |---|---|---|
 | 🌏 **hasjob.co** | Indian startup job feed (ATOM/XML) | fresh, local, small & honest |
-| 💬 **HN "Who's Hiring"** | Hacker News monthly hiring thread (free Firebase + Algolia JSON) | live at the moment, global + remote |
 | 🏢 **ATS boards** | Greenhouse · Ashby · Lever · Recruitee · SmartRecruiters · BambooHR — via their **public posting JSON** | real companies, structured data, full pagination (100s of jobs) |
+
+> 🗑️ **Hacker News "Who's Hiring?" was removed** — it's global/US-heavy, so
+> for an India-only candidate it mostly produced wrong-location junk. Not worth it.
 
 Everyone (known or *found by the feeds*) lives in the **company list** (~350 and
 growing). Vellum smartly "probes" only companies it hasn't checked in 24h —
@@ -189,6 +192,7 @@ any AI scoring. It can only *reject*, never guess — and it always says why.
 | Role family | *"Account Manager"* for a software candidate | ❌ reject |
 | Seniority | *"Senior/Lead/Architect"* for an entry-level plan | ❌ reject |
 | Location conflict | *"Pune only"* for a Bengaluru-only candidate | ❌ reject |
+| Foreign location | *"New York, USA" / "London, UK"* for an India-only candidate | ❌ reject |
 | Years required | *"Minimum 3 years required"* vs a 1-year candidate | ❌ reject |
 | Junior markers | *"fresher / graduate / early career"* | ✅ passes |
 
@@ -198,7 +202,7 @@ any AI scoring. It can only *reject*, never guess — and it always says why.
 ### 5️⃣ Store — dedupe, so you never see the same job twice
 The same role is often posted on hasjob AND the company's Greenhouse board.
 Vellum hashes the apply-URL **and** cross-checks *(company, role)* across sources,
-keeping the **richest version** (ATS > hasjob > HN). Result: **~51 dupes dropped**
+keeping the **richest version** (ATS > hasjob). Result: **~51 dupes dropped**
 in a single run.
 
 ### 6️⃣ Score — free first, AI second (budget-first design)
@@ -218,8 +222,7 @@ Each sync, the **top matches** get a real HTTP check of their apply-URL:
   alarm never kills a real job
 
 Each verdict is time-stamped and stored, so the UI can say
-*"verified live 3 hours ago."* HN jobs are skipped on purpose (their link is a
-forum page that is always "200" — checking proves nothing).
+*"verified live 3 hours ago."*
 
 ### 8️⃣ Apply — the optional, on-click finale 🤖
 A careful click ("Apply") starts a **per-job pipeline**:
@@ -242,7 +245,7 @@ A careful click ("Apply") starts a **per-job pipeline**:
 | 📄 PDF | PyMuPDF (read) + xhtml2pdf (tailored resume) |
 | 🤖 Browser automation | **browser-use** + Playwright — stealth, headless, live-streamed |
 | 🔁 Resilience | tenacity retries, diskcache, structlog JSON logs |
-| 🧪 Tests | pytest — **90 passing**, all offline (fakes/monkeypatch, no internet) |
+| 🧪 Tests | pytest — **85 passing**, all offline (fakes/monkeypatch, no internet) |
 
 ### 📂 Where's the code?
 ```
@@ -266,9 +269,9 @@ All measured live (Bengaluru-fresher profile) — not marketing:
 
 | Metric | Value |
 |---|---|
-| 🧠 Search plan | 1 AI call · ~520 tokens |
-| 🌏 Feeds | 12 hasjob jobs + 90 HN postings (117 comments) |
-| 🚦 Conductivity | **203 rejected / 68 eligible** (every rejection has a reason) |
+| 🧠 Search plan | 1 AI call · ~520 tokens (your dropdown city wins over the resume) |
+| 🌏 Feeds | 12 hasjob jobs (HN removed — global junk, no longer worth it) |
+| 🚦 Conductivity | **203 rejected / 68 eligible** (every rejection has a reason; foreign cities hard-rejected) |
 | 🏆 AI ranking | 68 jobs, 2 batches (~3.4k tokens) |
 | 💀 Liveness | 17 live / 1 gone (gone ⇒ auto-closed) |
 | 🏢 ATS probe | parallel; live sweep of 163 seed companies → boards found: Razorpay 27 · Freshworks 154 · Paytm 242 · SigNoz 15 (Lever/Greenhouse/Ashby/SmartRecruiters) |
@@ -368,9 +371,7 @@ pytest tests/ -q        # 90 offline tests, no internet needed
 
 Nothing about this project pretends to be perfect:
 
-- 🌏 **hasjob is small** (0–50/day, community). **HN is global/US-heavy**, so most
-  of its jobs are *correctly* rejected by the India location gate.
-- 🏢 **ATS is the volume engine** (~350 companies), but some big ATSes —
+- 🌏 **hasjob is small** (0–50/day, community). **ATS is the volume engine** (~350 companies), but some big ATSes —
   **Workday, FreshTeam** — expose **no public JSON**, so those companies yield 0 jobs (marked "probed", skipped next time).
 - 💀 Liveness checks a **bounded set of top matches per sync** (default 40), not every job.
 - 🚦 The Gate is **rule-based**: strict and explainable, not "smart". If a JD hides
@@ -384,12 +385,13 @@ Nothing about this project pretends to be perfect:
 
 ## 🛣️ What's next (roadmap)
 
-- [ ] 🎯 More free ATS connectors + a public-company feed to grow volume
+- [ ] 🌏 More free ATS connectors + a public-company feed to grow volume
 - [ ] 📉 Smarter lossless dedupe (title-normalization edge cases)
 - [ ] 🧪 Continuous weekly live-verification runs
 - [ ] 🕹️ One-click auto-apply with safer form guards (captcha detection, HITL fallback)
 - [ ] 📊 Analytics panel: what you applied to, response rates, re-verify staleness
 - [ ] 🌐 Multi-profile support (multiple resumes per .env)
+- [ ] 💬 Optional: re-add HN as an opt-in source behind a config flag (off by default)
 
 ---
 

@@ -35,7 +35,7 @@ from vellum.config import database as db
 from vellum.config.logging import get_logger
 from vellum.config.settings import get_settings
 from vellum.tools.ats_client import Company, Job, fetch_jobs, probe_company
-from vellum.tools import hasjob, hn_hiring, liveness
+from vellum.tools import hasjob, liveness
 
 log = get_logger("job_sync")
 
@@ -201,12 +201,13 @@ async def run_sync(
     probe_freshness_hours: float = 24.0,
     max_probe_per_run: int = 60,
     liveness_max_checks: int = 40,
+    preferred_location: Optional[str] = None,
 ) -> dict:
     """Run one full sync pass. Fully automatic — no company selection needed.
 
-    Value chain: search plan (Gemma) → live feeds (hasjob + HN Who's Hiring)
-    + ATS boards → strict eligibility gate (zero tokens) → store →
-    liveness check (top matches) → Gemma ranking of survivors.
+    Value chain: search plan (Gemma) → hasjob.co feed + ATS boards → strict
+    eligibility gate (zero tokens) → store → liveness check (top matches) →
+    Gemma ranking of survivors.
 
     Args:
         profile: candidate profile (required for eligibility + scoring).
@@ -220,6 +221,9 @@ async def run_sync(
             sync could probe hundreds of never-checked companies and take
             forever. Oldest-first cycling drains the backlog across runs.
         liveness_max_checks: how many top matches get a liveness GET-check.
+        preferred_location: the user's explicitly chosen city. Overrides the
+            plan's location list — the resume's city alone must never decide
+            where jobs are accepted (that's the "search ruined" bug).
     """
     from vellum.config import gemma as g
     from vellum.agents import eligibility, search_planner
@@ -238,7 +242,7 @@ async def run_sync(
 
     summary = {"probed": 0, "ats_found": 0, "jobs_fetched": 0, "jobs_stored": 0,
                "scored": 0, "skipped_budget": False, "feed_jobs": 0,
-               "hn_jobs": 0, "companies_discovered": 0, "eligible": 0,
+               "companies_discovered": 0, "eligible": 0,
                "rejected": 0, "duplicates": 0, "verified": 0, "gone": 0,
                "plan": None}
 
@@ -246,6 +250,11 @@ async def run_sync(
     plan = None
     if profile:
         plan = await search_planner.build_search_plan(profile)
+        # The user's explicit location wins over whatever the resume says.
+        if preferred_location and preferred_location.strip():
+            loc = preferred_location.strip().title()
+            plan["locations"] = [loc] + [l for l in (plan.get("locations") or [])
+                                         if l.lower() != loc.lower()]
         summary["plan"] = {
             "seniority_max": plan.get("seniority_max"),
             "years_experience": plan.get("years_experience"),
@@ -271,7 +280,7 @@ async def run_sync(
         await emit("error", "No companies available — seed CSV is missing.", {})
         return summary
 
-    # --- Step 2: live feed discovery (hasjob.co + HN Who's Hiring) ---
+    # --- Step 2: live feed discovery (hasjob.co) ---
     feed_job_dicts: list[dict] = []
     if discover:
         try:
@@ -280,15 +289,9 @@ async def run_sync(
             log.warning("hasjob_fetch_failed", error=str(exc)[:150])
             feed_jobs = []
         summary["feed_jobs"] = len(feed_jobs)
-        try:
-            hn_jobs = await hn_hiring.fetch_hiring_posts()
-        except Exception as exc:
-            log.warning("hn_fetch_failed", error=str(exc)[:150])
-            hn_jobs = []
-        summary["hn_jobs"] = len(hn_jobs)
 
         known = {c["name"].lower() for c in companies}
-        for fj in feed_jobs + hn_jobs:
+        for fj in feed_jobs:
             cname = (fj.get("company") or "").strip()
             if not cname:
                 continue
@@ -316,8 +319,8 @@ async def run_sync(
             })
         if feed_job_dicts:
             await emit("progress",
-                       f"Feeds: {summary['feed_jobs']} hasjob + {summary['hn_jobs']} "
-                       f"HN jobs, {summary['companies_discovered']} new companies.", {})
+                       f"Feeds: {summary['feed_jobs']} hasjob jobs, "
+                       f"{summary['companies_discovered']} new companies.", {})
         companies = await db.get_companies()
 
     # --- Step 3: probe + fetch ATS boards (parallel, freshness-aware) ---
@@ -417,9 +420,7 @@ async def run_sync(
 
     # --- Step 7: liveness check on TOP matches (prove they still exist) ---
     if stored["inserted"]:
-        # HN jobs' apply_url is the HN comment page — always HTTP 200 forever,
-        # so liveness proves nothing for them. Exclude before checking.
-        checkable = [j for j in all_job_dicts if j.get("source") != "hn"]
+        checkable = list(all_job_dicts)
         verdicts = await liveness.verify_top_jobs(checkable,
                                                   max_checks=liveness_max_checks)
         from datetime import datetime, timezone

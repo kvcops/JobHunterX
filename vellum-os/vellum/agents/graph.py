@@ -183,7 +183,8 @@ async def run_full_search(
     """
     summary = await job_sync.run_sync(
         profile=profile,
-        event_callback=event_callback,
+        event_cb=event_callback,
+        preferred_location=location,
     )
     return {
         "run_id": str(uuid.uuid4()),

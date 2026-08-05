@@ -111,6 +111,16 @@ def _norm_city(raw: str) -> str:
     return _CITY_ALIASES.get(s, s.split(",")[0].strip())
 
 
+# Locations that provably are NOT India (job is unusable for an India-only candidate).
+# "New York, USA", "London, UK", "Berlin" — none of these should ever pass the gate.
+_FOREIGN_MARKERS = (
+    " usa", " united states", " u.s.", " uk", " united kingdom", "london",
+    "new york", "san francisco", "bay area", "berlin", "amsterdam", "paris",
+    "toronto", "vancouver", "sydney", "melbourne", "singapore", "dubai",
+    "tokyo", "stockholm", "zurich", "remote eu", "europe", "european",
+)
+
+
 def _location_conflict(job_location: str, plan_locations: list[str]) -> Optional[str]:
     """Return reason if job location provably excludes the candidate."""
     jl = (job_location or "").lower()
@@ -123,8 +133,16 @@ def _location_conflict(job_location: str, plan_locations: list[str]) -> Optional
         return None
     for want in plan_locations:
         w = _norm_city(want)
-        if w and w in (jl_norm, jl):
+        # Substring match: "Bengaluru (Hybrid)", "Hyderabad, Telangana" both
+        # contain the plan city even when _norm_city can't canonicalize them.
+        if w and (w in jl or jl_norm == w):
             return None
+    # Foreign city/country markers → provably wrong, even without an Indian
+    # city alias in the string ("New York, USA" has no Indian alias).
+    # Word-boundary match so "new york" matches "New York, USA" at start too.
+    jl_bounded = f" {jl} "
+    if any(re.search(rf"\b{re.escape(m.strip())}\b", jl_bounded) for m in _FOREIGN_MARKERS):
+        return f"Location: job is abroad ({jl_norm or jl}), not in your accepted cities"
     # Candidate city explicitly absent + job is tied to a specific other city
     known_cities = set(_CITY_ALIASES.keys()) - {"remote", "anywhere", "india", "onsite", "hybrid", "wfh", "work from home"}
     if any(c in jl for c in known_cities):
