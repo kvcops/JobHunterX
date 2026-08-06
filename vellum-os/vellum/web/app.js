@@ -148,15 +148,6 @@ function setupEventListeners() {
     saveProfBtn.addEventListener("click", saveProfileChanges);
   }
 
-  // Filter pills (Application Queue tab) — bind directly instead of relying
-  // on inline onclick + window.event, which is deprecated in some browsers.
-  document.querySelectorAll(".filter-pill").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const status = btn.getAttribute("data-filter") || btn.innerText.trim().toLowerCase().replace(/\s+/g, "_");
-      filterJobs(status, btn);
-    });
-  });
-
   // Keyboard escape handler for modals
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -618,6 +609,26 @@ function handleSocketMessage(msg) {
     addInterventionCard(msg.data);
   }
 
+  // Handle streaming real-time job discovery & scoring events
+  if (msg.event_type === "job_found" && msg.data && msg.data.job) {
+    const existing = jobs.find(j => j.id === msg.data.job.id);
+    if (!existing) {
+      jobs.push(msg.data.job);
+      renderJobs();
+    }
+  }
+
+  if (msg.event_type === "job_scored" && msg.data) {
+    const job = jobs.find(j => j.id === msg.data.job_id);
+    if (job) {
+      job.match_score = msg.data.match_score;
+      if (msg.data.reason) {
+        job.validation_json = JSON.stringify({ score_reason: msg.data.reason, match_score: msg.data.match_score });
+      }
+      renderJobs();
+    }
+  }
+
   // Reload data for job/outreach updates
   if (msg.event_type === "discovery" || msg.event_type === "complete" || msg.event_type === "job_deleted" || msg.event_type === "jobs_cleared") {
     loadInitialData();
@@ -782,6 +793,7 @@ function renderJobs() {
 
   let appliedCount = 0;
   let matchedCount = 0;
+  let applyingCount = 0;
   let needsAttentionCount = 0;
   let lowScoreCount = 0;
   container.innerHTML = "";
@@ -908,12 +920,12 @@ function renderJobs() {
         <div class="clean-footer-actions">
           <button class="clean-btn sec" onclick="openJobDetailsModal('${job.id}')">Details</button>
           <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="clean-btn icon-link" title="Open Application Link">↗</a>
-          ${job.status === 'matched' || job.status === 'applied' || job.tailored_pdf ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
-          ${job.status === 'applying' || job.status === 'validating' ? `<span class="clean-btn applying">Applying...</span>` : ''}
-          ${job.status === 'applied' || job.status === 'force_applied' ? `<span class="clean-btn applied" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); font-size: 0.78rem; padding: 3px 8px; border-radius: 4px;">Applied ✓</span>` : ''}
-          ${job.status === 'needs_attention' ? `<button class="clean-btn warn" onclick="triggerHitlResume('${job.id}')">Solve Block</button><button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
-          ${job.status === 'failed' || job.status === 'skipped' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
-          ${job.status === 'discovered' || job.status === 'matched' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Apply</button>` : ''}
+          ${effectiveStatus === 'matched' || effectiveStatus === 'applied' || job.tailored_pdf ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
+          ${effectiveStatus === 'applying' || effectiveStatus === 'validating' ? `<span class="clean-btn applying">Applying...</span>` : ''}
+          ${effectiveStatus === 'applied' || effectiveStatus === 'force_applied' ? `<span class="clean-btn applied" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); font-size: 0.78rem; padding: 3px 8px; border-radius: 4px;">Applied ✓</span>` : ''}
+          ${effectiveStatus === 'needs_attention' ? `<button class="clean-btn warn" onclick="triggerHitlResume('${job.id}')">Solve Block</button><button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
+          ${effectiveStatus === 'failed' || effectiveStatus === 'skipped' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
+          ${effectiveStatus === 'discovered' || effectiveStatus === 'matched' ? `<button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Apply</button>` : ''}
           <button class="clean-btn del-btn" onclick="deleteSingleJob(event, '${job.id}')" title="Delete job posting" style="color: #f87171; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); font-size: 0.78rem; padding: 3px 8px; cursor: pointer;">🗑️</button>
         </div>
       </div>
@@ -967,7 +979,11 @@ function renderResumes() {
   const container = document.getElementById("resumes-container");
   if (!container) return;
 
-  const matchedJobs = jobs.filter(j => j.status === 'matched' || j.status === 'applied' || j.status === 'applying' || j.status === 'needs_attention');
+  const matchedJobs = jobs.filter(j => {
+    const st = j.status || 'discovered';
+    const score = getMatchScorePercent(j);
+    return st === 'matched' || st === 'applied' || st === 'applying' || st === 'needs_attention' || (st === 'discovered' && score >= 60);
+  });
 
   const cvBadge = document.getElementById("tab-count-resumes");
   if (cvBadge) {
@@ -2730,3 +2746,42 @@ window.switchTab = function(tabName) {
     if (_browserCanvas) _browserCanvas.focus();
   }
 };
+
+// ---------------------------------------------------------------------------
+// Clear All Jobs & System Reset Modals
+// ---------------------------------------------------------------------------
+
+function clearAllJobs() {
+  const modal = document.getElementById("clear-confirm-modal");
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closeClearModal() {
+  const modal = document.getElementById("clear-confirm-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function confirmClearAllJobs() {
+  const btn = document.getElementById("confirm-clear-btn");
+  if (btn) btn.setAttribute("disabled", "true");
+  try {
+    const res = await fetch(`${API_BASE}/jobs/clear`, { method: "POST" });
+    const data = await res.json();
+    closeClearModal();
+    logEvent("system", `Cleared ${data.cleared_count || 0} jobs from queue.`);
+    loadInitialData();
+  } catch (err) {
+    console.error("Failed to clear jobs:", err);
+    logEvent("error", "Failed to clear jobs from queue.");
+  } finally {
+    if (btn) btn.removeAttribute("disabled");
+  }
+}
+
+function handleSystemReset() {
+  jobs = [];
+  renderJobs();
+  const container = document.getElementById("jobs-container");
+  if (container) container.innerHTML = `<div class="empty-state">Queue reset. Ready for new search.</div>`;
+  loadInitialData();
+}

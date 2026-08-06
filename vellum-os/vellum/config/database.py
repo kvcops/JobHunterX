@@ -88,6 +88,14 @@ CREATE TABLE IF NOT EXISTS applied_urls (
     applied_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS seen_job_urls (
+    url_hash    TEXT PRIMARY KEY,
+    url         TEXT,
+    company     TEXT,
+    role        TEXT,
+    seen_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 -- FTS5 virtual table for full-text search on job descriptions
 CREATE VIRTUAL TABLE IF NOT EXISTS jobs_fts USING fts5(
     company,
@@ -330,6 +338,11 @@ async def insert_job(job_data: dict) -> str:
                     _now_iso(),
                 ),
             )
+            if url_hash:
+                await db.execute(
+                    "INSERT OR IGNORE INTO seen_job_urls (url_hash, url, company, role, seen_at) VALUES (?, ?, ?, ?, ?)",
+                    (url_hash, apply_url, job_data.get("company", ""), job_data.get("role", ""), _now_iso()),
+                )
             await db.commit()
         except sqlite3.IntegrityError:
             # Race: another task inserted the same URL between our SELECT and INSERT.
@@ -468,6 +481,37 @@ async def clear_jobs(status: Optional[str] = None) -> int:
         await _reconcile_fts(db)
         await db.commit()
         return cursor.rowcount
+
+
+async def mark_url_seen(url_hash: str, url: str = "", company: str = "", role: str = "") -> None:
+    """Record a URL hash as seen so it isn't re-discovered after a job queue clear."""
+    if not url_hash:
+        return
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO seen_job_urls (url_hash, url, company, role, seen_at) VALUES (?, ?, ?, ?, ?)",
+            (url_hash, url, company, role, _now_iso()),
+        )
+        await db.commit()
+
+
+async def get_seen_url_hashes() -> set[str]:
+    """Get all seen URL hashes."""
+    async with aiosqlite.connect(_db_path) as db:
+        cursor = await db.execute("SELECT url_hash FROM seen_job_urls")
+        rows = await cursor.fetchall()
+        return {r[0] for r in rows if r[0]}
+
+
+async def is_url_seen(url_hash: str) -> bool:
+    """Check if a URL hash has ever been seen/discovered."""
+    if not url_hash:
+        return False
+    async with aiosqlite.connect(_db_path) as db:
+        cursor = await db.execute("SELECT 1 FROM seen_job_urls WHERE url_hash = ?", (url_hash,))
+        row = await cursor.fetchone()
+        return row is not None
+
 
 
 async def insert_outreach(draft: dict) -> str:

@@ -176,15 +176,13 @@ async def run_full_search(
     event_callback=None,
     auto_apply: bool = False,
 ) -> dict:
-    """Run the board-first discovery flow.
+    """Run the multi-agent job discovery & streaming evaluation flow."""
+    from vellum.agents import job_search_agents
 
-    Delegate to job_sync: probe companies → fetch ATS jobs → score (Gemma)
-    → store. `location`/`role`/`limit` are accepted for API compat.
-    """
-    summary = await job_sync.run_sync(
+    summary = await job_search_agents.run_multi_agent_search(
         profile=profile,
-        event_cb=event_callback,
         preferred_location=location,
+        event_cb=event_callback,
     )
     return {
         "run_id": str(uuid.uuid4()),

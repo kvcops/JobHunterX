@@ -125,24 +125,22 @@ def test_locations_route_returns_supported_cities():
     assert resp.status_code == 200
     locs = resp.json()["locations"]
     assert isinstance(locs, list) and len(locs) >= 3
-    assert "Bengaluru" in locs
+    assert any(isinstance(l, dict) and l.get("label") == "Bengaluru" for l in locs)
 
 
 def test_full_search_wires_event_cb_to_run_sync(monkeypatch):
-    """graph.run_full_search passed `event_callback=` to job_sync.run_sync,
-    which expects `event_cb=` → TypeError raised inside the background task
-    (surfaced as search_error in the log). Must now call through cleanly."""
+    """graph.run_full_search invokes job_search_agents.run_multi_agent_search cleanly."""
     import asyncio
 
-    from vellum.agents import graph, job_sync
+    from vellum.agents import graph, job_search_agents
 
     calls = {}
 
-    async def fake_run_sync(**kwargs):
+    async def fake_search(**kwargs):
         calls["kwargs"] = kwargs
         return {"jobs_stored": 3}
 
-    monkeypatch.setattr(job_sync, "run_sync", fake_run_sync)
+    monkeypatch.setattr(job_search_agents, "run_multi_agent_search", fake_search)
 
     async def run():
         return await graph.run_full_search(
@@ -153,9 +151,5 @@ def test_full_search_wires_event_cb_to_run_sync(monkeypatch):
 
     result = asyncio.new_event_loop().run_until_complete(run())
     assert result["jobs_discovered"] == 3
-    assert "event_cb" in calls["kwargs"], (
-        f"run_sync must receive event_cb, got keys: {sorted(calls['kwargs'])}"
-    )
-    assert calls["kwargs"]["preferred_location"] == "Hyderabad", (
-        "the user's chosen location must reach run_sync"
-    )
+    assert "event_cb" in calls["kwargs"]
+    assert calls["kwargs"]["preferred_location"] == "Hyderabad"

@@ -49,36 +49,13 @@ SEED_CSV = Path(__file__).resolve().parents[2] / "data" / "companies.csv"
 
 
 def load_seed_companies() -> list[dict]:
-    """Load the bundled seed list. Every row: name, website, careers_url, hub, ats, ats_token."""
-    rows: list[dict] = []
-    if not SEED_CSV.exists():
-        log.warning("seed_csv_missing", path=str(SEED_CSV))
-        return rows
-    try:
-        with open(SEED_CSV, encoding="utf-8", newline="") as f:
-            for r in csv.DictReader(f):
-                rows.append({
-                    "name": (r.get("name") or "").strip(),
-                    "website": (r.get("website") or "").strip(),
-                    "careers_url": (r.get("careers_url") or "").strip(),
-                    "hub": (r.get("hub") or "").strip(),
-                    "ats": (r.get("ats") or "").strip(),
-                    "ats_token": (r.get("ats_token") or "").strip(),
-                })
-    except Exception as exc:
-        log.error("seed_csv_read_failed", error=str(exc))
-    return [r for r in rows if r["name"]]
+    """Deprecated: Seed CSV removed. Multi-agent dynamic web discovery is used."""
+    return []
 
 
 async def ensure_companies_in_db(companies: list[dict]) -> int:
-    """Insert companies that aren't in the DB yet. Returns inserted count."""
-    count = 0
-    for c in companies:
-        existing = await db.get_company_by_name(c["name"])
-        if existing is None:
-            await db.insert_company(c)
-            count += 1
-    return count
+    """Deprecated: Seed CSV removed."""
+    return 0
 
 
 def _slug_role(raw: str) -> str:
@@ -150,7 +127,7 @@ async def store_jobs(job_dicts: list[dict]) -> dict:
     except Exception:
         pass
 
-    SRC_PRIORITY = {"hasjob": 0, "ddg_search": 1, "career_page": 2}
+    SRC_PRIORITY = {"hasjob": 0, "hn": 0, "ddg_search": 1, "multi_agent_ddg": 2, "career_page": 3}
     role_index: dict[tuple[str, str], dict] = {}
     for job in job_dicts:
         key = ((job.get("company") or "").lower(),
@@ -160,9 +137,13 @@ async def store_jobs(job_dicts: list[dict]) -> dict:
         prior = role_index.get(key)
         src = str(job.get("source") or "")
         src_base = src.split(":")[0] if ":" in src else src
-        if prior is None or SRC_PRIORITY.get(src_base, 3) > SRC_PRIORITY.get(
-            str(prior.get("source") or "").split(":")[0], 3
-        ):
+        
+        def _get_prio(s: str) -> int:
+            if ":" in s or s in ("greenhouse", "lever", "ashby", "workable", "recruitee"):
+                return 5
+            return SRC_PRIORITY.get(s, 1)
+
+        if prior is None or _get_prio(src) > _get_prio(str(prior.get("source") or "")):
             role_index[key] = job
 
     final_jobs = list(role_index.values())
@@ -212,32 +193,17 @@ async def run_sync(
     liveness_max_checks: int = 40,
     preferred_location: Optional[str] = None,
 ) -> dict:
-    """Run one full sync pass. Fully automatic — no company selection needed.
+    """Run multi-agent job search and streaming evaluation pass."""
+    from vellum.agents import job_search_agents
 
-    New value chain:
-      1. Search plan (Gemma, 1 call)
-      2. DuckDuckGo discovery (FREE, main source)
-      3. Career page scraping (seed companies, FREE)
-      4. ATS board fetch (bonus for companies with Greenhouse/Lever etc.)
-      5. Strict eligibility gate (zero tokens)
-      6. Store eligible jobs
-      7. Gemma ranking of survivors
-      8. Liveness check on top matches
-    """
-    from vellum.config import gemma as g
-    from vellum.agents import eligibility, search_planner
+    if not profile:
+        return {"jobs_stored": 0, "message": "No profile provided"}
 
-    async def emit(etype: str, message: str, data: dict | None = None):
-        if event_cb:
-            try:
-                await event_cb({
-                    "agent": "job_sync",
-                    "event_type": etype,
-                    "message": message,
-                    "data": data or {},
-                })
-            except Exception:
-                pass
+    return await job_search_agents.run_multi_agent_search(
+        profile=profile,
+        preferred_location=preferred_location,
+        event_cb=event_cb,
+    )
 
     summary = {
         "probed": 0, "ats_found": 0, "jobs_fetched": 0, "jobs_stored": 0,

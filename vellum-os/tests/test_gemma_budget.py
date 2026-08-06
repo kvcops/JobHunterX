@@ -92,6 +92,9 @@ async def test_no_api_key_raises(monkeypatch):
     class NoKey:
         google_api_key = ""
     monkeypatch.setattr(g, "get_settings", lambda: NoKey())
+    monkeypatch.setenv("GOOGLE_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setattr(g, "_genai_client", None)
     monkeypatch.setattr(g, "_state_file", lambda: None)
     with pytest.raises(RuntimeError, match="No Google API key"):
         await g.call_gemma("s", "u")

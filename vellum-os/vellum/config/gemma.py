@@ -27,10 +27,10 @@ MODEL = "gemma-4-26b-a4b-it"
 
 # Free-tier hard limits (override via env GEMMA_DAILY_TOKENS / GEMMA_RPM)
 DEFAULT_DAILY_TOKENS = 15000
-DEFAULT_RPM = 30
+DEFAULT_RPM = 15
 
-# Inter-request minimum gap. 30 RPM => 2.0s. Keep a little slack.
-_MIN_INTERVAL_S = 2.2
+# Inter-request minimum gap for Google AI Studio Free Tier (3.5s ensures no 429/500 rate limit spikes)
+_MIN_INTERVAL_S = 3.5
 
 # Budget state file lives under the data dir, next to the run.
 _budget_path: Path | None = None
@@ -39,6 +39,7 @@ _requests_today = 0
 _loaded_date: str | None = None
 _last_request_mono = 0.0
 _rate_lock: asyncio.Lock | None = None
+_genai_client: Any | None = None
 
 
 def _state_file() -> Path:
@@ -148,7 +149,7 @@ async def call_gemma(
     persisted to disk. Raises RuntimeError('gemma_budget_exhausted') when
     the cap is hit so callers can fall back gracefully (skip scoring).
     """
-    global _last_request_mono, _tokens_used, _requests_today
+    global _last_request_mono, _tokens_used, _requests_today, _genai_client
     settings = get_settings()
     api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -159,9 +160,9 @@ async def call_gemma(
         log.warning("gemma_budget_exhausted", used=_tokens_used)
         raise RuntimeError("gemma_budget_exhausted")
 
-    from google import genai
-
-    client = genai.Client(api_key=api_key)
+    if _genai_client is None:
+        from google import genai
+        _genai_client = genai.Client(api_key=api_key)
 
     cfg = {"thinkingConfig": {"thinkingLevel": thinking_level}}
     if temperature is not None:
@@ -171,22 +172,38 @@ async def call_gemma(
 
     async def _run_with_ratelimit() -> str:
         global _last_request_mono
-        async with _rate_lock_():
-            now = time.monotonic()
-            wait = (_last_request_mono + _MIN_INTERVAL_S) - now
-            if wait > 0:
-                await asyncio.sleep(wait)
-            _last_request_mono = time.monotonic()
+        max_retries = 3
+        backoff = 3.0
 
-            def _sync_call() -> str:
-                response = client.models.generate_content(
-                    model=MODEL,
-                    contents=f"SYSTEM INSTRUCTIONS:\n{system}\n\nUSER:\n{user}",
-                    config=cfg,
-                )
-                return getattr(response, "text", "") or ""
+        for attempt in range(max_retries):
+            async with _rate_lock_():
+                now = time.monotonic()
+                wait = (_last_request_mono + _MIN_INTERVAL_S) - now
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                _last_request_mono = time.monotonic()
 
-            return await asyncio.to_thread(_sync_call)
+                def _sync_call() -> str:
+                    response = _genai_client.models.generate_content(
+                        model=MODEL,
+                        contents=f"SYSTEM INSTRUCTIONS:\n{system}\n\nUSER:\n{user}",
+                        config=cfg,
+                    )
+                    return getattr(response, "text", "") or ""
+
+                try:
+                    return await asyncio.to_thread(_sync_call)
+                except Exception as exc:
+                    err_str = str(exc)
+                    is_transient = any(code in err_str for code in ["500", "503", "429", "RESOURCE_EXHAUSTED", "INTERNAL"])
+                    if is_transient and attempt < max_retries - 1:
+                        log.warning("gemma_transient_error_retry", attempt=attempt+1, error=err_str[:120], backoff_s=backoff)
+                        await asyncio.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    raise
+
+        return ""
 
     content = await _run_with_ratelimit()
 
