@@ -89,30 +89,34 @@ Vellum OS uses a **multi-provider LLM router** (`llm_router.py`) with automatic 
 
 ```mermaid
 graph LR
-    classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px
-    classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px
-    classDef mistral fill:#FF7000,stroke:#cc5a00,color:#fff,stroke-width:2px
-
     subgraph Google["☁️ Google AI Studio (Free Tier)"]
-        G1["gemma-4-26b-a4b-it"] :::google
-        G2["gemini-3.1-flash-lite"] :::google
-        G3["gemma-4-27b-it"] :::google
+        G1["gemma-4-26b-a4b-it"]
+        G2["gemini-3.1-flash-lite"]
+        G3["gemma-4-27b-it"]
     end
 
     subgraph Groq["⚡ Groq (Free Tier)"]
-        GR1["llama-3.3-70b-versatile"] :::groq
-        GR2["gpt-oss-120b"] :::groq
-        GR3["gpt-oss-20b"] :::groq
+        GR1["llama-3.3-70b-versatile"]
+        GR2["gpt-oss-120b"]
+        GR3["gpt-oss-20b"]
     end
 
     subgraph Mistral["🌀 Mistral AI (Free Tier)"]
-        M1["mistral-large-latest"] :::mistral
+        M1["mistral-large-latest"]
     end
 
     G1 -->|fallback| G2
     G2 -->|fallback| GR1
     GR1 -->|fallback| M1
     M1 -->|fallback| G3
+
+    classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px;
+    classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px;
+    classDef mistral fill:#FF7000,stroke:#cc5a00,color:#fff,stroke-width:2px;
+
+    class G1,G2,G3 google;
+    class GR1,GR2,GR3 groq;
+    class M1 mistral;
 ```
 
 ### Fallback Chains by Task
@@ -145,35 +149,40 @@ Vellum OS runs in two modes, switchable at any time from the dashboard or via th
 
 ```mermaid
 flowchart TD
-    classDef auto fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
-    classDef manual fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px
-    classDef shared fill:#1e293b,stroke:#475569,color:#e2e8f0,stroke-width:2px
-    classDef hitl fill:#f59e0b,stroke:#d97706,color:#1e293b,stroke-width:2px
-
     START([📄 Upload Resume]) --> DISCOVER
-    DISCOVER["🕵️ Discover & Score Jobs"] :::shared
+    DISCOVER["🕵️ Discover & Score Jobs"]
 
     DISCOVER -->|Automatic Mode| AUTO_PIPE
     DISCOVER -->|Manual Mode| MANUAL_PIPE
 
     subgraph AUTO ["🤖 AUTOMATIC MODE"]
-        AUTO_PIPE["Auto-qualify jobs<br/>match_score ≥ 0.3"] :::auto
-        AUTO_PIPE --> TAILOR_A["✨ Tailor Resume PDF"] :::auto
-        TAILOR_A --> BROWSER_A["🥷 Browser Agent Applies"] :::auto
-        BROWSER_A -->|CAPTCHA/Login/MFA| HITL_A["⚠️ HITL Takeover"] :::hitl
+        AUTO_PIPE["Auto-qualify jobs<br/>match_score ≥ 0.3"]
+        AUTO_PIPE --> TAILOR_A["✨ Tailor Resume PDF"]
+        TAILOR_A --> BROWSER_A["🥷 Browser Agent Applies"]
+        BROWSER_A -->|CAPTCHA/Login/MFA| HITL_A["⚠️ HITL Takeover"]
         HITL_A -->|User resolves| BROWSER_A
-        BROWSER_A --> DONE_A(["✅ Applied!"]) :::auto
+        BROWSER_A --> DONE_A(["✅ Applied!"])
     end
 
     subgraph MANUAL ["👤 MANUAL MODE"]
-        MANUAL_PIPE["Review scored job cards"] :::manual
-        MANUAL_PIPE --> REVIEW["Inspect tailored PDF<br/>& match breakdown"] :::manual
-        REVIEW -->|Click Apply| TAILOR_M["✨ Tailor Resume PDF"] :::manual
-        TAILOR_M --> BROWSER_M["🥷 Browser Agent Applies"] :::manual
-        BROWSER_M -->|CAPTCHA/Login/MFA| HITL_M["⚠️ HITL Takeover"] :::hitl
+        MANUAL_PIPE["Review scored job cards"]
+        MANUAL_PIPE --> REVIEW["Inspect tailored PDF<br/>& match breakdown"]
+        REVIEW -->|Click Apply| TAILOR_M["✨ Tailor Resume PDF"]
+        TAILOR_M --> BROWSER_M["🥷 Browser Agent Applies"]
+        BROWSER_M -->|CAPTCHA/Login/MFA| HITL_M["⚠️ HITL Takeover"]
         HITL_M -->|User resolves| BROWSER_M
-        BROWSER_M --> DONE_M(["✅ Applied!"]) :::manual
+        BROWSER_M --> DONE_M(["✅ Applied!"])
     end
+
+    classDef auto fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px;
+    classDef manual fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px;
+    classDef shared fill:#1e293b,stroke:#475569,color:#e2e8f0,stroke-width:2px;
+    classDef hitl fill:#f59e0b,stroke:#d97706,color:#1e293b,stroke-width:2px;
+
+    class DISCOVER shared;
+    class AUTO_PIPE,TAILOR_A,BROWSER_A,DONE_A auto;
+    class MANUAL_PIPE,REVIEW,TAILOR_M,BROWSER_M,DONE_M manual;
+    class HITL_A,HITL_M hitl;
 ```
 
 | Feature | 🤖 Automatic Mode | 👤 Manual Mode |
@@ -237,44 +246,39 @@ The Web Scout agent directly scrapes these **Applicant Tracking Systems** withou
 
 ```mermaid
 graph TB
-    classDef frontend fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
-    classDef api fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px
-    classDef agent fill:#059669,stroke:#047857,color:#fff,stroke-width:2px
-    classDef infra fill:#d97706,stroke:#b45309,color:#fff,stroke-width:2px
-
     subgraph Client ["🖥️ Single Page Application"]
         direction LR
-        UI["Web Dashboard<br/>(HTML/JS/CSS)"] :::frontend
-        Canvas["Live Browser Canvas<br/>(CDP Screencast)"] :::frontend
-        WS_C["WebSocket Client"] :::frontend
+        UI["Web Dashboard<br/>(HTML/JS/CSS)"]
+        Canvas["Live Browser Canvas<br/>(CDP Screencast)"]
+        WS_C["WebSocket Client"]
     end
 
     subgraph Server ["⚡ FastAPI Server"]
         direction LR
-        REST["REST API Routes<br/>(/api/*)"] :::api
-        WS_S["WebSocket Manager<br/>(/ws)"] :::api
-        CDP["CDP Broadcaster<br/>(/ws/browser)"] :::api
+        REST["REST API Routes<br/>(/api/*)"]
+        WS_S["WebSocket Manager<br/>(/ws)"]
+        CDP["CDP Broadcaster<br/>(/ws/browser)"]
     end
 
     subgraph Pipeline ["🧠 LangGraph Agent Pipeline"]
         direction TB
-        A1["🧬 Profile Extractor"] :::agent
-        A2["🗺️ Search Planner"] :::agent
-        A3["🕵️ Web Scout & ATS Scraper"] :::agent
-        EG["🚫 Eligibility Gate"] :::agent
-        A4["🎯 Job Evaluator"] :::agent
-        A5["✨ Resume Validator & Tailor"] :::agent
-        A6["🥷 Stealth Browser Agent"] :::agent
+        A1["🧬 Profile Extractor"]
+        A2["🗺️ Search Planner"]
+        A3["🕵️ Web Scout & ATS Scraper"]
+        EG["🚫 Eligibility Gate"]
+        A4["🎯 Job Evaluator"]
+        A5["✨ Resume Validator & Tailor"]
+        A6["🥷 Stealth Browser Agent"]
 
         A1 --> A2 --> A3 --> EG --> A4 --> A5 --> A6
     end
 
     subgraph Infra ["🛡️ Infrastructure"]
         direction LR
-        LLM["LLM Router<br/>(LiteLLM + Fallbacks)"] :::infra
-        DB[("SQLite<br/>(aiosqlite)")] :::infra
-        Cache[("DiskCache<br/>+ Gemma Budget")] :::infra
-        Chrome["Chromium<br/>(Persistent Profile)"] :::infra
+        LLM["LLM Router<br/>(LiteLLM + Fallbacks)"]
+        DB[("SQLite<br/>(aiosqlite)")]
+        Cache[("DiskCache<br/>+ Gemma Budget")]
+        Chrome["Chromium<br/>(Persistent Profile)"]
     end
 
     UI --> REST
@@ -286,6 +290,16 @@ graph TB
     Pipeline --> Cache
     A6 --> Chrome
     Chrome --> CDP
+
+    classDef frontend fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px;
+    classDef api fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px;
+    classDef agent fill:#059669,stroke:#047857,color:#fff,stroke-width:2px;
+    classDef infra fill:#d97706,stroke:#b45309,color:#fff,stroke-width:2px;
+
+    class UI,Canvas,WS_C frontend;
+    class REST,WS_S,CDP api;
+    class A1,A2,A3,EG,A4,A5,A6 agent;
+    class LLM,DB,Cache,Chrome infra;
 ```
 
 ---
