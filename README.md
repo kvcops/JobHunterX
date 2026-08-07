@@ -1,411 +1,552 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/FastAPI-0.140-009688?logo=fastapi&logoColor=white" alt="FastAPI">
-  <img src="https://img.shields.io/badge/AI-Gemma%204-4285F4?logo=google&logoColor=white" alt="Gemma 4">
-  <img src="https://img.shields.io/badge/tests-85%20passing-4caf50" alt="85 tests passing">
-  <img src="https://img.shields.io/badge/local%20first-100%25%20private-FF6F00" alt="Local first">
-</p>
-
-<h1 align="center">📜 Vellum OS</h1>
-<h3 align="center">Careers, but make it automatic.</h3>
-<p align="center">
-  Upload <b>ONE resume</b>. Vellum figures out who you are, what to look for,
-  finds <b>live jobs for free</b>, filters out the ones that waste your time,
-  ranks the rest with AI, proves they're still open — and can even apply for you.
-</p>
-
 <div align="center">
 
-| 🧍 You | 🤖 Vellum |
-|---|---|
-| Upload `Resume.pdf` | Everything else. Zero clicks. |
+<img src="assets/hero_banner.jpg" alt="Vellum OS — AI Career Intelligence Agent" width="100%"/>
+
+<br/>
+
+# ⚡ VELLUM OS
+
+### Your AI Career Intelligence Agent That Hunts, Matches, Tailors, and Applies — While You Sleep
+
+<br/>
+
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.140+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Pipeline-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![Gemma 4](https://img.shields.io/badge/Gemma_4_26B-Google-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![Llama 3.3](https://img.shields.io/badge/Llama_3.3_70B-Groq-F55036?style=for-the-badge&logo=meta&logoColor=white)](https://groq.com)
+[![Mistral Large](https://img.shields.io/badge/Mistral_Large-Mistral_AI-FF7000?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3QgeD0iMSIgeT0iMSIgd2lkdGg9IjYiIGhlaWdodD0iNiIvPjxyZWN0IHg9IjkiIHk9IjEiIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48cmVjdCB4PSIxNyIgeT0iMSIgd2lkdGg9IjYiIGhlaWdodD0iNiIvPjxyZWN0IHg9IjEiIHk9IjkiIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48cmVjdCB4PSIxNyIgeT0iOSIgd2lkdGg9IjYiIGhlaWdodD0iNiIvPjxyZWN0IHg9IjEiIHk9IjE3IiB3aWR0aD0iNiIgaGVpZ2h0PSI2Ii8+PHJlY3QgeD0iOSIgeT0iMTciIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48cmVjdCB4PSIxNyIgeT0iMTciIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48L3N2Zz4=&logoColor=white)](https://mistral.ai)
+[![Playwright](https://img.shields.io/badge/Playwright-Stealth-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
+
+<br/>
+
+**6 AI Agents** · **3 LLM Providers** · **6 ATS Platforms** · **16 Indian Tech Hubs** · **85 Tests Passing**
+
+---
+
+*Upload your resume. Pick a city. Go grab coffee.*
+*Vellum OS discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.*
+
+*It's the job-hunting wingman you always wished you had.*
+
+---
 
 </div>
 
----
+<br/>
 
-## 🎯 What is this? (in 30 seconds)
+## 🖥️ Dashboard Preview
 
-Vellum OS is a **local-first, AI-powered job-search agent** built for one very
-specific person: **a software candidate who wants the right jobs, not a flood
-of irrelevant ones.**
+<div align="center">
+<img src="assets/dashboard_preview.jpg" alt="Vellum OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
+<br/>
+<sub><i>Dark-mode dashboard with scored job cards, live browser canvas streaming, and real-time agent activity feed</i></sub>
+</div>
 
-🔹 It runs **entirely on your computer** — no cloud, your data stays with you.
-🔹 It works on the **free tier** of AI models (Google AI Studio, **Gemma 4**), so it costs ₹0 to run.
-🔹 It only ever looks at **free, public, no-login job sources**.
-🔹 It is **brutally honest** — it rejects more than it accepts, and it tells you *why*.
-
-> 💡 **The goal was never "more jobs". It was "fewer wrong jobs."**
-> You don't need 500 jobs. You need the 20 that actually fit you — and proof that those 20 are still open.
+<br/>
 
 ---
+## ✨ Browser Agent Preview 
 
-## ⚡ Why is this cool?
+<div align="center">
+<img src="assets/browser_agent.jpg" alt="Vellum OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
+<br/>
+<sub><i>live browser canvas streaming, and real-time agent activity feed</i></sub>
+</div>
 
-| ✨ | What Vellum does that feels like magic |
-|---|---|
-| 🧠 | Reads **your actual resume** and builds a *search strategy* from it (one AI call) — and your chosen city overrides the resume's |
-| 🔍 | Scans **2 live free channels** — an Indian startup job feed and 6 big hiring-software (ATS) boards |
-| 🚦 | Runs a **zero-cost, super-strict filter** so a fresher never sees a Senior role |
-| 📊 | Ranks every survivor with AI and a written **"why this match"** reason |
-| 💀 | **Checks each top job's link is still alive** before showing it; dead ones are auto-closed |
-| 🧾 | Deduplicates — the same job posted on 3 sites appears once |
-| 🤖 | On your click: **tailors your resume** to the job and can auto-fill the application in a real browser |
-| 💸 | Respects a tiny daily AI budget (`15,000 tokens`) and **keeps working** even when it's spent |
+## 🧠 The 6-Agent Pipeline
+
+Vellum OS isn't one monolithic script. It's a **team of 6 specialized AI agents**, orchestrated by a **LangGraph state machine**, each doing what it does best — like a Formula 1 pit crew, but for your career.
+
+<div align="center">
+<img src="assets/agent_pipeline.jpg" alt="Vellum OS — 6-Stage AI Agent Pipeline" width="90%"/>
+</div>
+
+<br/>
+
+### Agent Breakdown
+
+| # | Agent | Codename | What It Does | Powered By |
+|:-:|:------|:---------|:-------------|:-----------|
+| 🧬 | **Profile Extractor** | `extractor.py` | Parses your resume PDF (via PyMuPDF), extracts skills, experience, education, projects, LinkedIn/GitHub URLs, and builds a structured `CandidateProfile` — the ground truth that powers everything downstream. | **Gemma 4 26B** → Gemini 3.1 Flash Lite |
+| 🗺️ | **Search Planner** | `search_planner.py` | Reads your profile and generates a smart `search_plan`: seniority ceiling, target roles, reject terms, and location preferences. In multi-agent mode, crafts 15–20 precision DuckDuckGo queries targeting startups and product companies while filtering out mass-hiring IT service spam. | **Gemma 4 26B** (direct Google GenAI) |
+| 🕵️ | **Web Scout & ATS Scraper** | `job_search_agents.py` + `ats_client.py` | Executes search queries, scrapes ATS boards (Greenhouse, Ashby, Lever, Recruitee, SmartRecruiters, BambooHR), blacklists aggregators (LinkedIn, Indeed, Naukri, Glassdoor), deduplicates via `seen_job_urls`, runs the zero-token Eligibility Gate, and streams `job_found` events live. | **Zero-token** (pure async Python + HTTP) |
+| 🎯 | **Job Evaluator** | `job_scorer.py` | Two-stage scoring: (1) **Deterministic keyword pre-filter** — skill overlap 55%, role match 20%, location 10%, freshness 5%. (2) **Gemma batch scoring** — groups top jobs into batches of 10, scores multi-dimensionally (skill fit, seniority, location, experience), and generates match reasons. | **Gemma 4 26B** (budget-aware, 15K tokens/day) |
+| ✨ | **Resume Validator & Tailor** | `validator_tailor.py` | Validates freshness (URL/header checks), evaluates match score, then generates a tailored Executive Summary and transforms experience bullets using Google's XYZ action-led formula. Includes **anti-hallucination sanitizers** — no fabricated skills or made-up metrics. Renders a single-page ATS-optimized PDF via Jinja2 + xhtml2pdf with 4 iterative shrink profiles. | **Gemma 4 26B** → Gemini 3.1 Flash Lite |
+| 🥷 | **Stealth Browser Agent** | `browser_agent.py` | The closer. Opens a persistent Chrome profile with anti-detection headers, fills personal details, education, work history, Q&A memory (salary, notice period, work auth), uploads the tailored PDF, and submits. Streams every browser frame live via CDP WebSocket. When it hits a login wall, CAPTCHA, or MFA — it pauses and hands you the keyboard. | **Gemini 3.1 Flash Lite** → Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B |
+
+<br/>
+
+> [!TIP]
+> **The Eligibility Gate** (`eligibility.py`) runs between Agents 3 and 4 as a zero-token strict filter. It rejects non-dev roles (sales, HR, marketing), foreign locations, and seniority mismatches — all without spending a single API token.
 
 ---
 
-## 🗺️ The Big Picture (one flow, no magic, no mermaid)
+## 🤖 LLM Models & Provider Architecture
 
-```
-        📄  YOU UPLOAD ONE RESUME
-                   │
-                   ▼
-  ┌──────────────────────────────────────────────┐
-  │  STEP 1 · EXTRACT  (free, on your PC)        │
-  │  PDF  →  your skills, experience, location   │
-  │  ⭐ skills = ground truth, never rewritten    │
-  └──────────────────────────────────────────────┘
-                   │
-                   ▼
-  ┌──────────────────────────────────────────────┐
-  │  STEP 2 · PLAN  (Gemma AI, ONE call ~530 tok)│
-  │  "the intelligence anchor"                   │
-  │   ✅ target roles   ✅ max seniority         │
-  │   ✅ years needed   ✅ cities you accept     │
-  │   ✅ words that mean "reject this"           │
-  └──────────────────────────────────────────────┘
-                   │
-                   ▼
-        🔎  DISCOVERY  (all free · no login · live)
-  ┌──────────────────┬───────────────────────────────┐
-  │ ✅ hasjob.co     │ 🏢 ATS boards (6 kinds)       │
-  │  India startups  │  Greenhouse · Ashby · Lever · │
-  │  fresh, small    │  Recruitee · SmartRecruiters ·│
-  │                  │  BambooHR                     │
-  └──────────────────┴───────────────────────────────┘
-                   │
-                   ▼
-  ┌──────────────────────────────────────────────┐
-  │  STEP 3 · THE GATE  (ZERO AI tokens)         │
-  │  strict rules, every rejection has a reason  │
-  │   ❌ "Senior Dev" → you're a fresher         │
-  │   ❌ "Pune only"  → you're in Bengaluru      │
-  │   ❌ "New York"   → abroad, hard-rejected     │
-  └──────────────────────────────────────────────┘
-                   │
-                   ▼
-  ┌──────────────────────────────────────────────┐
-  │  STEP 4 · STORE  (SQLite, dedupe)            │
-  │  same job from 3 sources → kept ONCE         │
-  └──────────────────────────────────────────────┘
-                   │
-                   ▼
-  ┌──────────────────────────────────────────────┐
-  │  STEP 5 · SCORE  (free keyword first,        │
-  │    then Gemma in batches of 10)              │
-  │  🏆 best match first + a written reason      │
-  └──────────────────────────────────────────────┘
-                   │
-                   ▼
-  ┌──────────────────────────────────────────────┐
-  │  STEP 6 · PROVE IT'S ALIVE  (free GET check) │
-  │  🔥 live        → shown to you               │
-  │  🪦 dead link   → auto-closed                │
-  └──────────────────────────────────────────────┘
-                   │
-                   ▼
-        💜 YOUR REVIEW QUEUE  (ranked, reasons visible)
-                   │
-                   ▼  (only when YOU click Apply)
-  ┌──────────────────────────────────────────────┐
-  │  STEP 7 · APPLY  (per job, automatable)      │
-  │  resume tailored to that JD → real browser   │
-  │  fills the application form for you          │
-  └──────────────────────────────────────────────┘
+Vellum OS uses a **multi-provider LLM router** (`llm_router.py`) with automatic failover, per-provider rate limiting, disk caching, and concurrency semaphores. Here's every model in the system:
+
+```mermaid
+graph LR
+    classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px
+    classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px
+    classDef mistral fill:#FF7000,stroke:#cc5a00,color:#fff,stroke-width:2px
+
+    subgraph Google["☁️ Google AI Studio (Free Tier)"]
+        G1["gemma-4-26b-a4b-it"] :::google
+        G2["gemini-3.1-flash-lite"] :::google
+        G3["gemma-4-27b-it"] :::google
+    end
+
+    subgraph Groq["⚡ Groq (Free Tier)"]
+        GR1["llama-3.3-70b-versatile"] :::groq
+        GR2["gpt-oss-120b"] :::groq
+        GR3["gpt-oss-20b"] :::groq
+    end
+
+    subgraph Mistral["🌀 Mistral AI (Free Tier)"]
+        M1["mistral-large-latest"] :::mistral
+    end
+
+    G1 -->|fallback| G2
+    G2 -->|fallback| GR1
+    GR1 -->|fallback| M1
+    M1 -->|fallback| G3
 ```
 
-### 🧱 The same idea as a mind-map
+### Fallback Chains by Task
 
+| Chain Name | Purpose | Model Sequence |
+|:-----------|:--------|:---------------|
+| `fast` | Quick operations (search planning, scoring) | Gemma 4 26B → Gemini 3.1 Flash Lite |
+| `reasoning` | Deep analysis (validation, match evaluation) | Gemma 4 26B → Gemini 3.1 Flash Lite |
+| `tailoring` | Resume rewriting & bullet transforms | Gemma 4 26B → Gemini 3.1 Flash Lite |
+| `extraction` | PDF resume parsing & profile construction | Gemma 4 26B → Gemini 3.1 Flash Lite |
+| `browser` | Browser agent form-filling decisions | Gemini 3.1 Flash Lite |
+| Browser fallback | When primary browser LLM fails | Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B |
+
+### Rate Limiting & Budget Control
+
+| Provider | RPM Limit | Min Delay Between Requests | Cooldown on 429 | Concurrency |
+|:---------|:----------|:---------------------------|:-----------------|:------------|
+| **Google (Gemini/Gemma)** | ~15 RPM | 4.5s | 60s | 3 parallel |
+| **Groq** | 30 RPM | 3.2s | 30s | 1 serial |
+| **Mistral** | ~60 RPM | 2.0s | 15s | 1 serial |
+
+> [!NOTE]
+> **Gemma Budget System** (`gemma.py`): Enforces a hard daily cap of **15,000 tokens** on `gemma-4-26b-a4b-it` to stay within Google AI Studio's free tier. State is persisted to `data/gemma_budget.json` across restarts. When the budget is exhausted, scoring gracefully degrades to the zero-token keyword pre-filter.
+
+---
+
+## 🔄 Pipeline Modes: Automatic vs. Manual
+
+Vellum OS runs in two modes, switchable at any time from the dashboard or via the `/api/pipeline-mode` endpoint.
+
+```mermaid
+flowchart TD
+    classDef auto fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
+    classDef manual fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px
+    classDef shared fill:#1e293b,stroke:#475569,color:#e2e8f0,stroke-width:2px
+    classDef hitl fill:#f59e0b,stroke:#d97706,color:#1e293b,stroke-width:2px
+
+    START([📄 Upload Resume]) --> DISCOVER
+    DISCOVER["🕵️ Discover & Score Jobs"] :::shared
+
+    DISCOVER -->|Automatic Mode| AUTO_PIPE
+    DISCOVER -->|Manual Mode| MANUAL_PIPE
+
+    subgraph AUTO ["🤖 AUTOMATIC MODE"]
+        AUTO_PIPE["Auto-qualify jobs<br/>match_score ≥ 0.3"] :::auto
+        AUTO_PIPE --> TAILOR_A["✨ Tailor Resume PDF"] :::auto
+        TAILOR_A --> BROWSER_A["🥷 Browser Agent Applies"] :::auto
+        BROWSER_A -->|CAPTCHA/Login/MFA| HITL_A["⚠️ HITL Takeover"] :::hitl
+        HITL_A -->|User resolves| BROWSER_A
+        BROWSER_A --> DONE_A(["✅ Applied!"]) :::auto
+    end
+
+    subgraph MANUAL ["👤 MANUAL MODE"]
+        MANUAL_PIPE["Review scored job cards"] :::manual
+        MANUAL_PIPE --> REVIEW["Inspect tailored PDF<br/>& match breakdown"] :::manual
+        REVIEW -->|Click Apply| TAILOR_M["✨ Tailor Resume PDF"] :::manual
+        TAILOR_M --> BROWSER_M["🥷 Browser Agent Applies"] :::manual
+        BROWSER_M -->|CAPTCHA/Login/MFA| HITL_M["⚠️ HITL Takeover"] :::hitl
+        HITL_M -->|User resolves| BROWSER_M
+        BROWSER_M --> DONE_M(["✅ Applied!"]) :::manual
+    end
 ```
-                        VELLUM OS
-              ┌───────────┬───────────┬───────────┐
-            🧠 PLAN     🔍 DISCOVER  🚦 GATE      📈 SCORE
-              │            │            │            │
-        Gemma makes   hasjob +    strict rules,  keyword sort,
-        the strategy  ATS boards  zero tokens,  then Gemma 10/call
-        + your city               with reasons  with reasons
-              └───────────┴──────┬───────────────┘
-                                 │
-                              👇 WHAT PASSES
-                    🧾 STORE (deduped) → 💀 LIVENESS PROOF
-                                 │
-                         💜 YOUR REVIEW QUEUE
-                                 │
-                     🤖 TAILOR + AUTO-APPLY (on click)
+
+| Feature | 🤖 Automatic Mode | 👤 Manual Mode |
+|:--------|:------------------|:---------------|
+| **Discovery & Scoring** | Runs automatically across all tracked companies | Same — runs automatically |
+| **Application Trigger** | Jobs with `match_score ≥ 0.3` are auto-queued for apply | You review each job card and click **"Apply"** |
+| **Resume Tailoring** | Happens automatically before browser launch | Happens when you trigger apply |
+| **Browser Automation** | Launches immediately after tailoring | Launches only after your explicit click |
+| **HITL Takeover** | Agent pauses & alerts you on login/CAPTCHA/MFA | Same behavior |
+| **Best For** | Overnight autonomous job hunting | Careful, selective applications |
+
+---
+
+## 🛡️ Human-in-the-Loop (HITL) System
+
+The browser agent doesn't panic when it hits a wall. It **gracefully pauses**, saves session state, captures a screenshot, and broadcasts an intervention event to your dashboard.
+
+```mermaid
+stateDiagram-v2
+    [*] --> BrowserRunning: Agent starts filling forms
+    BrowserRunning --> DetectObstacle: Login/CAPTCHA/MFA detected
+
+    DetectObstacle --> SaveSession: Save browser state & screenshot
+    SaveSession --> NotifyUser: Broadcast intervention event to UI
+    NotifyUser --> UserTakeover: User clicks "Take Over"
+
+    UserTakeover --> ManualControl: User controls real Chrome window
+    ManualControl --> UserDone: User clicks "Continue" in dashboard
+
+    UserDone --> BrowserRunning: Agent resumes from saved state
+    BrowserRunning --> [*]: Application submitted ✅
+```
+
+| HITL Type | Trigger Condition | What Happens |
+|:----------|:------------------|:-------------|
+| 🔐 `LOGIN` | Sign-in / password prompts detected | Browser pauses, Chrome window stays open for manual login |
+| 🤖 `CAPTCHA` | reCAPTCHA / hCaptcha / Turnstile detected | Screenshot captured, user solves in live Chrome window |
+| 📱 `MFA` | OTP / 2FA / authenticator prompt | Agent waits for user to enter verification code |
+| 📝 `MANUAL_FORM` | Complex custom form fields | User fills tricky fields, agent handles the rest |
+| ⚠️ `TOO_COMPLEX` | Unsupported multi-page portal | Session saved, user can complete manually |
+
+---
+
+## 🌐 ATS Platform Support
+
+The Web Scout agent directly scrapes these **Applicant Tracking Systems** without needing any API keys:
+
+| Platform | Method | What It Fetches |
+|:---------|:-------|:----------------|
+| **Greenhouse** | Public JSON board API | Jobs with titles, locations, departments |
+| **Ashby** | Public JSON board API | Full listings with descriptions |
+| **Lever** | Public JSON board API | Postings with team & location data |
+| **Recruitee** | Public board scraping | Career page job listings |
+| **SmartRecruiters** | Public JSON API | Jobs with detailed descriptions |
+| **BambooHR** | Public board API | Open positions and departments |
+| **Direct Career Pages** | HTML scraping + Trafilatura | Any company career page via web discovery |
+
+---
+
+## 📐 Full System Architecture
+
+```mermaid
+graph TB
+    classDef frontend fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
+    classDef api fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px
+    classDef agent fill:#059669,stroke:#047857,color:#fff,stroke-width:2px
+    classDef infra fill:#d97706,stroke:#b45309,color:#fff,stroke-width:2px
+
+    subgraph Client ["🖥️ Single Page Application"]
+        direction LR
+        UI["Web Dashboard<br/>(HTML/JS/CSS)"] :::frontend
+        Canvas["Live Browser Canvas<br/>(CDP Screencast)"] :::frontend
+        WS_C["WebSocket Client"] :::frontend
+    end
+
+    subgraph Server ["⚡ FastAPI Server"]
+        direction LR
+        REST["REST API Routes<br/>(/api/*)"] :::api
+        WS_S["WebSocket Manager<br/>(/ws)"] :::api
+        CDP["CDP Broadcaster<br/>(/ws/browser)"] :::api
+    end
+
+    subgraph Pipeline ["🧠 LangGraph Agent Pipeline"]
+        direction TB
+        A1["🧬 Profile Extractor"] :::agent
+        A2["🗺️ Search Planner"] :::agent
+        A3["🕵️ Web Scout & ATS Scraper"] :::agent
+        EG["🚫 Eligibility Gate"] :::agent
+        A4["🎯 Job Evaluator"] :::agent
+        A5["✨ Resume Validator & Tailor"] :::agent
+        A6["🥷 Stealth Browser Agent"] :::agent
+
+        A1 --> A2 --> A3 --> EG --> A4 --> A5 --> A6
+    end
+
+    subgraph Infra ["🛡️ Infrastructure"]
+        direction LR
+        LLM["LLM Router<br/>(LiteLLM + Fallbacks)"] :::infra
+        DB[("SQLite<br/>(aiosqlite)")] :::infra
+        Cache[("DiskCache<br/>+ Gemma Budget")] :::infra
+        Chrome["Chromium<br/>(Persistent Profile)"] :::infra
+    end
+
+    UI --> REST
+    WS_C <--> WS_S
+    WS_C <--> CDP
+    REST --> Pipeline
+    Pipeline --> LLM
+    Pipeline --> DB
+    Pipeline --> Cache
+    A6 --> Chrome
+    Chrome --> CDP
 ```
 
 ---
 
-## 🔬 Deep dive: each step, in plain English
+## 📁 Project Structure
 
-### 1️⃣ Extract — your resume becomes a data card
-A PDF parser (`extractor`) reads your resume and builds a **Candidate Profile**:
-name, contact, skills, experience, education, location.
-> ⭐ **Ground truth rule:** your *skills* are never modified or invented. Ever.
-> The tailoring step only *re-words experiences* — it will never add a skill you don't have.
-
-### 2️⃣ Plan — Gemma turns that profile into a strategy
-One AI call makes a **SearchPlan** — and the city you pick in the dropdown
-**overrides** the plan's location list (your choice wins over the resume):
-
-| Plan field | Example | Meaning |
-|---|---|---|
-| `target_roles` | `["software engineer", "sde"]` | careers to look for |
-| `seniority_max` | `entry` | highest level to accept |
-| `years_experience` | `1` | your experience |
-| `locations` | `["Hyderabad", "Remote"]` | your chosen city + Remote |
-| `reject_terms` | `["lead", "architect"]` | words ⇒ auto-reject |
-
-Every later step runs from this one plan — so the whole system agrees on strategy.
-
-### 3️⃣ Discovery — two live free channels
-| Channel | What it is | Why it's good |
-|---|---|---|
-| 🌏 **hasjob.co** | Indian startup job feed (ATOM/XML) | fresh, local, small & honest |
-| 🏢 **ATS boards** | Greenhouse · Ashby · Lever · Recruitee · SmartRecruiters · BambooHR — via their **public posting JSON** | real companies, structured data, full pagination (100s of jobs) |
-
-> 🗑️ **Hacker News "Who's Hiring?" was removed** — it's global/US-heavy, so
-> for an India-only candidate it mostly produced wrong-location junk. Not worth it.
-
-Everyone (known or *found by the feeds*) lives in the **company list** (~350 and
-growing). Vellum smartly "probes" only companies it hasn't checked in 24h —
-so each sync stays short even as the list grows. Probing is **parallel**: a dead
-website no longer slows down the good ones.
-
-### 4️⃣ The Gate — the heart of the whole design 🚦
-The Gate is a **deterministic, free, explainable** filter. It runs *before*
-any AI scoring. It can only *reject*, never guess — and it always says why.
-
-| Rule | Example | Verdict |
-|---|---|---|
-| Role family | *"Account Manager"* for a software candidate | ❌ reject |
-| Seniority | *"Senior/Lead/Architect"* for an entry-level plan | ❌ reject |
-| Location conflict | *"Pune only"* for a Bengaluru-only candidate | ❌ reject |
-| Foreign location | *"New York, USA" / "London, UK"* for an India-only candidate | ❌ reject |
-| Years required | *"Minimum 3 years required"* vs a 1-year candidate | ❌ reject |
-| Junior markers | *"fresher / graduate / early career"* | ✅ passes |
-
-> 📊 Measured in a live run (Bengaluru fresher profile):
-> **203 jobs rejected / 68 eligible** — every rejection logged with a reason.
-
-### 5️⃣ Store — dedupe, so you never see the same job twice
-The same role is often posted on hasjob AND the company's Greenhouse board.
-Vellum hashes the apply-URL **and** cross-checks *(company, role)* across sources,
-keeping the **richest version** (ATS > hasjob). Result: **~51 dupes dropped**
-in a single run.
-
-### 6️⃣ Score — free first, AI second (budget-first design)
-Two stages:
-1. **Keyword pre-score** — `0` AI tokens; skills × role × location overlap.
-2. **Gemma batch re-rank** — `10 jobs per AI call`, returns a strict `0–1` score +
-   a one-line reason. Trusted order: excellent ≥ 0.8, good 0.5–0.7, weak 0.2–0.4, none 0.
-
-🧯 **Graceful degradation:** if the daily AI budget runs out, the keyword score
-still stands. Nothing breaks — the system just gets cheaper.
-
-### 7️⃣ Liveness — prove it before you click 💀
-Each sync, the **top matches** get a real HTTP check of their apply-URL:
-- ✅ `200 / live` → shown as **verified live**
-- ❌ `404 / "job expired"` → **status = `closed`**, hidden from your list
-- ⚠️ bot-block (403) → **retried once** before calling it, so a single false
-  alarm never kills a real job
-
-Each verdict is time-stamped and stored, so the UI can say
-*"verified live 3 hours ago."*
-
-### 8️⃣ Apply — the optional, on-click finale 🤖
-A careful click ("Apply") starts a **per-job pipeline**:
-1. **Validate + tailor** your resume against *that specific* job description (AI bullets, strict ground truth)
-2. Turn it into a **fresh PDF** exports with a clean filename (e.g. `Company_Role.pdf`)
-3. Launch a **real browser** (headless, streamed live to the web UI over WebSocket/CDP) to open the form
-4. Watch it fill the application for you — and you can take over anytime (HITL)
-
----
-
-## 🧰 Tech stack & modules
-
-| Corner | Tech |
-|---|---|
-| 🖥️ Web API | **FastAPI** + **Uvicorn** + WebSocket (live progress + browser screencast) |
-| 🗄️ Storage | **SQLite** (aiosqlite) — jobs, companies, profiles, goals |
-| 🧠 AI | **Gemma 4** (`gemma-4-26b-a4b-it`) via **Google AI Studio** direct call, with a persisted **budget tracker** (15k tokens/day, 30 req/min) |
-| 🧭 Search | DuckDuckGo (ddgs) — lightweight, no API key dead-ends |
-| 🕸️ Scraping | curl-cffi (browser-like fingerprints) + trafilatura + BeautifulSoup |
-| 📄 PDF | PyMuPDF (read) + xhtml2pdf (tailored resume) |
-| 🤖 Browser automation | **browser-use** + Playwright — stealth, headless, live-streamed |
-| 🔁 Resilience | tenacity retries, diskcache, structlog JSON logs |
-| 🧪 Tests | pytest — **85 passing**, all offline (fakes/monkeypatch, no internet) |
-
-### 📂 Where's the code?
 ```
 vellum-os/
-├── vellum/
-│   ├── api/            # FastAPI routes, WebSocket, screencast stream
-│   ├── agents/         # search_planner · eligibility · job_scorer ·
-│   │                   # job_sync · extractor · validator_tailor · browser_agent · graph
-│   ├── tools/          # ats_client · hasjob · hn_hiring · liveness · scrape · pdf_render
-│   ├── config/         # settings (.env) · gemma budget · database · logging
-│   └── utils/          # json_helper · job_cleaner
-├── tests/              # 90 offline tests
-└── data/               # companies.csv seed · vellum.db · gemma_budget.json
+│
+├── 📂 assets/                          # README images & visual assets
+│
+├── 📂 company-data/                    # Regional IT company databases
+│   ├── IT_Companies_By_City.txt        # Master list across all hubs
+│   ├── merge_companies.py              # Deduplication & ATS slug compiler
+│   ├── {city}-it-companies.txt         # Per-city company lists
+│   └── verify_counts.py               # Database integrity checker
+│
+├── 📂 data/                            # Runtime storage (gitignored)
+│   └── gemma_budget.json              # Gemma daily token tracker
+│
+├── 📂 vellum-os/                       # Main Python package
+│   ├── pyproject.toml                  # Build config & dependency spec
+│   ├── requirements.txt               # Pinned dependencies
+│   ├── .env.example                    # Environment variable template
+│   │
+│   ├── 📂 tests/                       # 85 automated tests
+│   │   ├── test_api.py                 # API route tests
+│   │   ├── test_ats_pagination.py      # ATS scraper pagination tests
+│   │   ├── test_dedupe_freshness.py    # Job deduplication tests
+│   │   ├── test_eligibility.py         # Eligibility gate tests
+│   │   ├── test_gemma_budget.py        # Token budget enforcement tests
+│   │   ├── test_json_helper.py         # LLM JSON parsing tests
+│   │   ├── test_liveness.py            # URL liveness checker tests
+│   │   └── test_resume_tailoring.py    # Resume tailor & PDF tests
+│   │
+│   └── 📂 vellum/                      # Application source code
+│       ├── models.py                   # Pydantic models (CandidateProfile, JobPipelineState, etc.)
+│       │
+│       ├── 📂 agents/                  # The 6 AI agents
+│       │   ├── extractor.py            # 🧬 Profile Extractor
+│       │   ├── search_planner.py       # 🗺️ Search Planner
+│       │   ├── job_search_agents.py    # 🕵️ Web Scout (multi-agent search)
+│       │   ├── eligibility.py          # 🚫 Eligibility Gate (zero-token)
+│       │   ├── job_scorer.py           # 🎯 Job Evaluator
+│       │   ├── job_sync.py             # Company sync & ATS probing
+│       │   ├── validator_tailor.py     # ✨ Resume Validator & Tailor
+│       │   ├── browser_agent.py        # 🥷 Stealth Browser Agent
+│       │   └── graph.py                # LangGraph state machine orchestrator
+│       │
+│       ├── 📂 api/                     # FastAPI server
+│       │   ├── main.py                 # App entry point, lifespan, CDP streaming
+│       │   ├── routes.py               # All REST endpoints
+│       │   └── ws.py                   # WebSocket connection manager
+│       │
+│       ├── 📂 config/                  # Configuration & infrastructure
+│       │   ├── settings.py             # Pydantic settings (.env loader)
+│       │   ├── llm_router.py           # Unified LLM router (LiteLLM)
+│       │   ├── gemma.py                # Gemma budget tracker (15K/day)
+│       │   ├── database.py             # SQLite schema & queries (aiosqlite)
+│       │   └── logging.py              # Structured logging (structlog)
+│       │
+│       ├── 📂 tools/                   # Scraping & utility tools
+│       │   ├── ats_client.py           # ATS board scrapers (6 platforms)
+│       │   ├── job_discovery.py        # DuckDuckGo search & page scraping
+│       │   ├── liveness.py             # Job URL liveness verification
+│       │   ├── scrape.py               # Web content extraction
+│       │   └── pdf_render.py           # Jinja2 + xhtml2pdf resume renderer
+│       │
+│       ├── 📂 templates/              # HTML templates
+│       │   └── resume.html             # ATS-optimized resume template
+│       │
+│       ├── 📂 utils/                   # Helpers
+│       │   ├── json_helper.py          # LLM JSON response parser
+│       │   └── job_cleaner.py          # Job data normalization
+│       │
+│       └── 📂 web/                     # Frontend SPA
+│           ├── index.html              # Main dashboard page
+│           ├── app.js                  # Application logic (~111KB)
+│           ├── styles.css              # Styling (~98KB)
+│           └── sw.js                   # Service worker
+│
+├── .gitignore
+├── requirements.txt
+└── README.md                           # You are reading this!
 ```
 
 ---
 
-## 📊 Honest, measured numbers
-
-All measured live (Bengaluru-fresher profile) — not marketing:
-
-| Metric | Value |
-|---|---|
-| 🧠 Search plan | 1 AI call · ~520 tokens (your dropdown city wins over the resume) |
-| 🌏 Feeds | 12 hasjob jobs (HN removed — global junk, no longer worth it) |
-| 🚦 Conductivity | **203 rejected / 68 eligible** (every rejection has a reason; foreign cities hard-rejected) |
-| 🏆 AI ranking | 68 jobs, 2 batches (~3.4k tokens) |
-| 💀 Liveness | 17 live / 1 gone (gone ⇒ auto-closed) |
-| 🏢 ATS probe | parallel; live sweep of 163 seed companies → boards found: Razorpay 27 · Freshworks 154 · Paytm 242 · SigNoz 15 (Lever/Greenhouse/Ashby/SmartRecruiters) |
-| 🧾 Dedupe | 51 duplicates dropped |
-| 💰 Budget (full day) | ~4k of 15k tokens — lots of headroom |
-
-### 💸 Budget math (brutal & honest)
-> Free tier: **15,000 tokens/day**, **30 requests/min**.
-
-| Wants AI | Always free |
-|---|---|
-| Plan (1 call ≈ 530) | Fetching & parsing |
-| Ranking (10 jobs ≈ 650/call) | Eligibility gate |
-| → ~80–150 jobs/day safely ranked | Liveness checks |
-| | Keyword pre-score |
-
-The expensive AI step only ever sees jobs that **already passed the strict gate.**
-
----
-
-## 🚀 Getting started
+## ⚡ Quickstart
 
 ### Prerequisites
-- 🐍 **Python 3.11+**
-- 🔑 A **Google AI Studio** API key (`GOOGLE_API_KEY`)*
-- 🌐 Internet (for live feeds + ATS boards)
 
-\* *Vellum degrades gracefully without it — discovery, the gate, keyword scoring
-and liveness work with zero AI. You just lose plan + AI ranking.*
+- **Python 3.11+**
+- **At least one LLM API key** (Google AI Studio recommended — it's free)
 
-### Install
+### 1. Clone & Setup
+
+```bash
+git clone https://github.com/kvcops/vellum-os.git
+cd vellum-os
+
+# Create virtual environment
+python -m venv .venv
+
+# Activate (choose your OS)
+.venv\Scripts\activate          # Windows PowerShell
+source .venv/bin/activate       # Linux / macOS
+```
+
+### 2. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 3. Configure Environment
+
+```bash
+cp vellum-os/.env.example vellum-os/.env
+```
+
+Edit `vellum-os/.env` with your API keys:
+
+```env
+# At minimum, set one of these (Google recommended for free tier):
+GOOGLE_API_KEY=your_google_ai_studio_key
+GROQ_API_KEY=your_groq_key           # Optional
+MISTRAL_API_KEY=your_mistral_key     # Optional
+
+# Application settings
+BROWSER_USE_HEADLESS=true
+HOST=127.0.0.1
+PORT=8000
+LOG_LEVEL=INFO
+```
+
+> [!TIP]
+> **Getting API keys (all free):**
+> - **Google AI Studio**: [aistudio.google.com](https://aistudio.google.com/) — Create key → Use Gemma 4 & Gemini 3.1 Flash Lite
+> - **Groq**: [console.groq.com](https://console.groq.com/) — Free tier with Llama 3.3 70B
+> - **Mistral**: [console.mistral.ai](https://console.mistral.ai/) — Free tier with Mistral Large
+
+### 4. Launch 🚀
+
 ```bash
 cd vellum-os
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -e ".[dev]"
-```
-
-### Configure
-```bash
-cp .env.example .env
-# open .env and paste your GOOGLE_API_KEY
-```
-`.env` in a nutshell:
-```env
-GOOGLE_API_KEY=your_gemini_api_key     # the only "must" for full AI features
-HOST=127.0.0.1                          # local only by default
-PORT=8000
-BROWSER_USE_HEADLESS=false              # show or hide the applying browser
-```
-
-### Run
-```bash
 python -m vellum.api.main
 ```
-Open **http://127.0.0.1:8000** in your browser. That's it. 🎉
 
-First run auto-loads **~163 Indian startups** (the seed index) and the sync
-begins: probe → fetch → gate → store → score → prove-live. Live progress streams
-to the dashboard over WebSocket.
+Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting.
 
-### Run the tests
+---
+
+## 🔌 API Reference
+
+### Core Endpoints
+
+| Method | Endpoint | What It Does |
+|:------:|:---------|:-------------|
+| `POST` | `/api/upload-resume` | Upload resume PDF → extract candidate profile |
+| `GET` | `/api/profile` | Get current candidate profile |
+| `POST` | `/api/start-search` | Launch full discovery + scoring pipeline |
+| `GET` | `/api/jobs` | List all discovered & scored jobs |
+| `GET` | `/api/jobs/{id}` | Get detailed job info + match breakdown |
+| `POST` | `/api/jobs/{id}/apply` | Trigger per-job apply pipeline (tailor → browser) |
+| `GET` | `/api/jobs/{id}/resume-pdf` | Download tailored resume PDF |
+| `DELETE` | `/api/jobs/{id}` | Remove a job listing |
+
+### Company Management
+
+| Method | Endpoint | What It Does |
+|:------:|:---------|:-------------|
+| `GET` | `/api/companies` | List tracked companies with ATS status |
+| `POST` | `/api/companies` | Add company → auto-probe ATS board |
+| `POST` | `/api/companies/load-seed` | Import 4,000+ pre-indexed Indian startups |
+| `POST` | `/api/companies/sync` | Run sync pass: probe → fetch → score → store |
+
+### System Control
+
+| Method | Endpoint | What It Does |
+|:------:|:---------|:-------------|
+| `GET/POST` | `/api/pipeline-mode` | Get or set mode (`automatic` / `manual`) |
+| `GET` | `/api/budget` | View Gemma token usage (15K RPD / 30 RPM) |
+| `GET` | `/api/status` | System status, job counts, token telemetry |
+| `POST` | `/api/stop-browser` | Kill active browser sessions |
+| `POST` | `/api/browser/takeover` | Request HITL takeover of live browser |
+| `POST` | `/api/browser/release` | Release control back to agent |
+| `POST` | `/api/reset` | Nuclear option — clear everything |
+
+### WebSocket Streams
+
+| Endpoint | What It Streams |
+|:---------|:----------------|
+| `/ws` | Agent logs, pipeline progress, job events, scoring updates, intervention alerts |
+| `/ws/browser` | Live CDP JPEG frames (screencast) + mouse/keyboard event forwarding |
+
+---
+
+## 🧪 Testing
+
+85 tests. Zero flaky. All passing.
+
 ```bash
-cd vellum-os
-pytest tests/ -q        # 90 offline tests, no internet needed
+pytest vellum-os/tests/ -v
+```
+
+```
+tests/test_api.py                 ......... (9 passed)
+tests/test_ats_pagination.py      .......... (10 passed)
+tests/test_dedupe_freshness.py    ........ (8 passed)
+tests/test_eligibility.py         ..................... (21 passed)
+tests/test_gemma_budget.py        ..... (5 passed)
+tests/test_json_helper.py         .... (4 passed)
+tests/test_liveness.py            ............. (13 passed)
+tests/test_resume_tailoring.py    ............... (15 passed)
+
+======================== 85 passed ========================
 ```
 
 ---
 
-## 🔌 API quick-reference
+## 🇮🇳 Pre-Seeded Regional Data
 
-| Method | Endpoint | What it does |
-|---|---|---|
-| `POST` | `/api/upload-resume` | Upload resume PDF → extract profile |
-| `POST` | `/api/start-search` | Full discovery flow (sync → score) |
-| `POST` | `/api/companies/sync` | Just run the ATS sync pass |
-| `GET` | `/api/jobs` | Ranked jobs (`include_closed=true` to see dead ones) |
-| `GET` | `/api/jobs/{id}` | One job's full detail + freshness |
-| `DELETE` | `/api/jobs` · `POST /api/jobs/clear` | Clear jobs |
-| `POST` | `/api/jobs/{id}/apply` | Launch tailor + auto-apply for one job |
-| `GET` | `/api/jobs/{id}/resume-pdf` | Download the tailored resume PDF |
-| `GET` | `/api/companies` | Tracked companies + ATS status |
-| `POST` | `/api/companies` | Add a company (probes ATS right away) |
-| `GET` | `/api/budget` | Gemma budget usage live |
-| `GET`/`POST` | `/api/pipeline-mode` | manual ⇄ automatic applying |
-| `POST` | `/api/reset` | Full wipe + halt |
-| `GET` | `/api/status` | Jobs, companies, token usage, state |
-| `WS` | `/ws` · `/ws/browser` | Progress events · live browser screencast |
+Vellum OS ships with indexed company databases covering **16 Indian tech hubs** and **4,000+** companies:
+
+| Hub | Companies | Hub | Companies |
+|:----|:---------:|:----|:---------:|
+| 🏙️ Bengaluru | 800+ | 🏙️ Chennai | 1,220+ |
+| 🏙️ Hyderabad | 500+ | 🏙️ Mumbai | 1,211+ |
+| 🏙️ Pune | 525+ | 🏙️ Delhi NCR | 1,070+ |
+| 🏙️ Kolkata | 500+ | 🏙️ Ahmedabad | 308+ |
+| 🏙️ Kochi | 100+ | 🏙️ Bhubaneswar | 200+ |
+| 🏙️ Visakhapatnam | 150+ | 🏙️ Coimbatore | 100+ |
+| 🏙️ Indore | 90+ | 🏙️ Chandigarh | 120+ |
+| 🏙️ Jaipur | 50+ | 🏙️ Remote | ∞ |
 
 ---
 
-## ⚠️ Honest known limits
+## 🛡️ Stealth Browser Architecture
 
-Nothing about this project pretends to be perfect:
+The browser agent doesn't show up on radar:
 
-- 🌏 **hasjob is small** (0–50/day, community). **ATS is the volume engine** (~350 companies), but some big ATSes —
-  **Workday, FreshTeam** — expose **no public JSON**, so those companies yield 0 jobs (marked "probed", skipped next time).
-- 💀 Liveness checks a **bounded set of top matches per sync** (default 40), not every job.
-- 🚦 The Gate is **rule-based**: strict and explainable, not "smart". If a JD hides
-  requirements in vague prose, the gate may pass it — and the **AI ranking catches it**.
-- 🧠 All AI is **Gemma 4 lightweight** — cheap, free, and honest, but not a frontier
-  model. The system is built to lean on deterministic logic (gate, keyword score,
-  liveness) rather than trusting the model completely.
-- ⚖️ It optimizes for **Bengaluru-fresher software profiles**; other profiles work but are less tuned.
+- **Persistent Chrome Profile** — Cookies, localStorage, and browsing history accumulate across sessions, building trust with Cloudflare and similar WAFs
+- **Desktop User-Agent** — `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36`
+- **Anti-Automation Flags** — `--disable-blink-features=AutomationControlled`, disabled site isolation
+- **Zombie Chrome Cleanup** — Automatically kills orphan Chrome processes and clears `SingletonLock` files before each launch
+- **Cloud Browser Support** — Optional cloud stealth browser integration via `BROWSER_USE_API_KEY`
 
 ---
 
-## 🛣️ What's next (roadmap)
+<div align="center">
 
-- [ ] 🌏 More free ATS connectors + a public-company feed to grow volume
-- [ ] 📉 Smarter lossless dedupe (title-normalization edge cases)
-- [ ] 🧪 Continuous weekly live-verification runs
-- [ ] 🕹️ One-click auto-apply with safer form guards (captcha detection, HITL fallback)
-- [ ] 📊 Analytics panel: what you applied to, response rates, re-verify staleness
-- [ ] 🌐 Multi-profile support (multiple resumes per .env)
-- [ ] 💬 Optional: re-add HN as an opt-in source behind a config flag (off by default)
+## 📜 License
 
----
+**MIT License** — Build on it, fork it, make it yours.
 
-## 🧠 Concept recap — the 3 words that define Vellum
+Built with ❤️ and an unhealthy amount of caffeine for job seekers who refuse to waste time on repetitive applications.
 
-| Word | Meaning here |
-|---|---|
-| 🔎 **Eligibility-first** | Reject the wrong stuff *before* spending any brain power. |
-| 🪙 **Budget-first** | Every AI call is metered; work keeps going when the meter is empty. |
-| 💜 **Prove-then-show** | Don't show a job unless we can verify it's still open. |
+<br/>
 
----
+**⭐ Star this repo if Vellum OS saved you from the soul-crushing grind of manual job applications**
 
-<p align="center">
-  Made with 💜, a free-tier AI key, and a healthy fear of spammy job boards.<br>
-  <sub>Architecture deep-dive lives in <code>architecture.md</code> (with the v4 fixes and honest numbers).</sub>
-</p>
+</div>

@@ -8,62 +8,9 @@ $RECYCLE.BIN/
 .Spotlight-V100/
 .Trashes/
 ._*
-
+GEMINI.md
 # =========================
-# Logs
-# =========================
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# =========================
-# Runtime Data
-# =========================
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# =========================
-# Environment Variables
-# =========================
-.env
-.env.*
-!.env.example
-!.env.sample
-
-# =========================
-# Dependencies
-# =========================
-node_modules/
-jspm_packages/
-bower_components/
-
-# =========================
-# Build Output
-# =========================
-dist/
-build/
-out/
-target/
-release/
-debug/
-coverage/
-.cache/
-.tmp/
-temp/
-
-# =========================
-# TypeScript
-# =========================
-*.tsbuildinfo
-
-# =========================
-# Python
+# Python Caches & Bytecode
 # =========================
 __pycache__/
 *.py[cod]
@@ -74,92 +21,51 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .tox/
+
+# =========================
+# Virtual Environments
+# =========================
 .venv/
 venv/
 env/
 ENV/
+venv*/
 
 # =========================
-# Java / Kotlin
+# Package Build & Egg Info
 # =========================
-*.class
-*.jar
-*.war
-*.ear
-.gradle/
-.gradle-cache/
-
-# =========================
-# Go
-# =========================
-bin/
-pkg/
-
-# =========================
-# Rust
-# =========================
+dist/
+build/
+out/
 target/
-Cargo.lock
-
-# Uncomment the next line if building a library
-#! Cargo.lock
-
-# =========================
-# C / C++
-# =========================
-*.o
-*.obj
-*.so
-*.dll
-*.exe
-*.out
+release/
+debug/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
 
 # =========================
-# Swift / Xcode
-# =========================
-.build/
-DerivedData/
-
-# =========================
-# IDEs
-# =========================
-
-# VS Code
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-
-# IntelliJ IDEA
-.idea/
-*.iml
-
-# Eclipse
-.project
-.classpath
-.settings/
-
-# =========================
-# Package Managers
-# =========================
-.pnpm-store/
-.npm/
-.yarn/
-.yarn/cache/
-.yarn/unplugged/
-.yarn/build-state.yml
-.yarn/install-state.gz
-
-# =========================
-# Testing
+# Testing & Coverage
 # =========================
 coverage/
 .nyc_output/
+.coverage
+.coverage.*
+htmlcov/
 
 # =========================
-# Miscellaneous
+# Runtime Logs & Temp Files
 # =========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+pids/
+*.pid
+*.seed
+*.pid.lock
 *.bak
 *.tmp
 *.swp
@@ -167,21 +73,63 @@ coverage/
 *.orig
 
 # =========================
-# Secrets
+# Vellum OS Data & Runtime Storage
 # =========================
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/cache/
+data/screenshots/
+data/browser_profile/
+vellum-os/data/
+vellum-os/vellum/data/
+vellum.db
+.cache/
+.tmp/
+temp/
+scratch/
+
+# =========================
+# Environment & Secret Files
+# =========================
+.env
+.env.*
+!.env.example
+!.env.sample
 *.pem
 *.key
 *.crt
 *.p12
 
 # =========================
-# Local Notes
+# Node & Frontend Dependencies
+# =========================
+node_modules/
+jspm_packages/
+bower_components/
+.pnpm-store/
+.npm/
+.yarn/
+.yarn/cache/
+
+# =========================
+# IDE & Editor Configurations
+# =========================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# =========================
+# Project Internal Artifacts & Notes
 # =========================
 idea.md
 plan.md
 .agent
-vellum-os/data
 opencode.json
-
-PROJECT_TECHNICAL_DOCUMENTATION.md
-GEMINI.md

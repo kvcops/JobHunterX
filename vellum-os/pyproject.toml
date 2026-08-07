@@ -8,10 +8,11 @@ version = "0.1.0"
 description = "Career Intelligence & Application Agent — local-first, AI-powered"
 requires-python = ">=3.11"
 dependencies = [
-    # --- Web Framework ---
+    # --- Web Framework & Networking ---
     "fastapi>=0.140.0",
     "uvicorn[standard]>=0.34.0",
     "python-multipart>=0.0.20",
+    "httpx>=0.27.0",
 
     # --- Data & Config ---
     "pydantic>=2.11.0",
@@ -19,10 +20,12 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "langgraph>=1.2.9",
 
-    # --- Search (replaces broken googlesearch-python) ---
-    "ddgs>=7.0.0",
+    # --- LLM Provider & Router ---
+    "litellm>=1.95.0",
+    "google-genai>=1.65.0",
 
-    # --- Scraping & Parsing ---
+    # --- Search & Scraping ---
+    "ddgs>=9.0.0",
     "curl-cffi>=0.15.0",
     "trafilatura>=2.0.0",
     "beautifulsoup4>=4.13.0",
@@ -41,20 +44,15 @@ dependencies = [
     "tenacity>=9.1.0",
     "diskcache>=5.6.0",
 
-    # --- Observability ---
+    # --- Observability & System ---
     "structlog>=26.1.0",
-
-    # --- Email Verification ---
-    "dnspython>=2.8.0",
     "psutil>=7.0.0",
+
+    # --- Browser Automation ---
     "browser-use[core]>=0.13.7",
-    "bubus==1.5.6",
 ]
 
 [project.optional-dependencies]
-embeddings = [
-    "sentence-transformers>=4.0.0",
-]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",

@@ -1,10 +1,22 @@
 """Merge agent-researched company data into ats_api.py"""
 import re
 
-API_PATH = r"C:\Users\vamsi\OneDrive\Desktop\Job agent\vellum-os\vellum\tools\ats_api.py"
+from pathlib import Path
 
-with open(API_PATH, "r", encoding="utf-8") as f:
-    content = f.read()
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+API_PATH = PROJECT_ROOT / "vellum-os" / "vellum" / "tools" / "ats_client.py"
+
+def read_company_file(filename: str) -> str:
+    path = BASE_DIR / filename
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    return ""
+
+content = ""
+if API_PATH.exists():
+    with open(API_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
 
 # Helper to parse comma-separated lists
 def parse_csv(text):
@@ -54,10 +66,10 @@ def replace_city_section(content, city_key, new_companies):
 # ============================================
 
 # 1. CHENNAI - 1220 companies
-chennai_raw = open(r"C:\Users\vamsi\OneDrive\Desktop\Job agent\chennai-it-companies-list.txt", encoding="utf-8").read()
+chennai_raw = read_company_file("chennai-it-companies-list.txt")
 # Remove the line 2 and 3 which are additional entries
-lines = chennai_raw.strip().split("\n")
-chennai_text = lines[0].strip()
+lines = chennai_raw.split("\n")
+chennai_text = lines[0].strip() if lines else ""
 if len(lines) > 1:
     chennai_text += "," + lines[1].strip()
 if len(lines) > 2:
@@ -65,20 +77,20 @@ if len(lines) > 2:
 chennai = parse_csv(chennai_text)
 
 # 2. MUMBAI - 1211 companies
-mumbai_text = open(r"C:\Users\vamsi\OneDrive\Desktop\Job agent\mumbai-it-companies.txt", encoding="utf-8").read().strip()
+mumbai_text = read_company_file("mumbai-it-companies.txt")
 mumbai = parse_csv(mumbai_text)
 
 # 3. NCR/DELHI - 1070 companies
-ncr_text = open(r"C:\Users\vamsi\OneDrive\Desktop\Job agent\delhi-ncr-it-companies-final.txt", encoding="utf-8").read().strip()
+ncr_text = read_company_file("delhi-ncr-it-companies-final.txt")
 ncr = parse_csv(ncr_text)
 
 # Also read the slugs file as backup
-ncr_slugs_text = open(r"C:\Users\vamsi\OneDrive\Desktop\Job agent\delhi-ncr-it-company-slugs.txt", encoding="utf-8").read().strip()
+ncr_slugs_text = read_company_file("delhi-ncr-it-company-slugs.txt")
 ncr_slugs = parse_csv(ncr_slugs_text)
 ncr = dedup(ncr + ncr_slugs)
 
 # 4. PUNE - 525 companies
-pune_text = open(r"C:\Users\vamsi\OneDrive\Desktop\Job agent\pune-it-companies.txt", encoding="utf-8").read().strip()
+pune_text = read_company_file("pune-it-companies.txt")
 pune = parse_csv(pune_text)
 
 # 5. KOLKATA - from agent output
@@ -86,7 +98,7 @@ kolkata_text = """tata-consultancy-services, infosys, wipro, cognizant, accentur
 kolkata = parse_csv(kolkata_text)
 
 # 6. AHMEDABAD - 308 companies
-ahmedabad_text = open(r"C:\Users\vamsi\OneDrive\Desktop\Job agent\ahmedabad-it-companies.txt", encoding="utf-8").read().strip()
+ahmedabad_text = read_company_file("ahmedabad-it-companies.txt")
 ahmedabad = parse_csv(ahmedabad_text)
 
 # 7. VISAKHAPATNAM - need to compose from agent partial data + existing
@@ -184,7 +196,7 @@ indore_text = """accenture, appscrip, appsqadz, bharatx, brainvire, bridgestone-
 indore = parse_csv(indore_text)
 
 # 11. BHUBANESWAR - from file
-bhubaneswar_text = open(r"C:\Users\vamsi\OneDrive\Desktop\Job agent\bhubaneswar-it-companies.txt", encoding="utf-8").read().strip()
+bhubaneswar_text = read_company_file("bhubaneswar-it-companies.txt")
 bhubaneswar = parse_csv(bhubaneswar_text.replace("\n", ","))
 
 # 12. TIER-3 CITIES - from agent output
