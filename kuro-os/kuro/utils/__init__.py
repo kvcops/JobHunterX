@@ -1,3 +1,0 @@
-"""
-Kuro OS — Utility modules
-"""

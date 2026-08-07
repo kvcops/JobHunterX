@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="assets/hero_banner.jpg" alt="Kuro OS — AI Career Intelligence Agent" width="100%"/>
+<img src="assets/hero_banner.jpg" alt="JobHunterX — AI Career Intelligence Agent" width="100%"/>
 
 <br/>
 <br/>
 
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=700&size=28&pause=1000&color=A855F7&center=true&vCenter=true&width=650&height=50&lines=%E2%9A%A1+VELLUM+OS+%E2%80%94+AI+CAREER+INTELLIGENCE;Hunts%2C+Matches%2C+Tailors+%26+Applies;Autonomous+Job+Hunting+While+You+Sleep;6+AI+Agents+%C2%B7+3+LLM+Providers+%C2%B7+6+ATS+Boards" alt="Typing SVG" />
+  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=700&size=28&pause=1000&color=A855F7&center=true&vCenter=true&width=650&height=50&lines=%E2%9A%A1+JOBHUNTERX+%E2%80%94+AI+CAREER+HUNTER;Hunts%2C+Matches%2C+Tailors+%26+Applies;Stealth+Form+Auto-Fill+While+You+Sleep;6+AI+Agents+%C2%B7+3+LLM+Providers+%C2%B7+6+ATS+Boards" alt="Typing SVG" />
 </p>
 
 ### 🚀 Your Autonomous AI Career Intelligence Agent That Hunts, Matches, Tailors, and Applies — While You Sleep
@@ -36,7 +36,7 @@
 ---
 
 *Upload your resume. Pick a city. Go grab coffee.*  
-*Kuro OS discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.*
+*JobHunterX discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.*
 
 ***It's the job-hunting wingman you always wished you had.***
 
@@ -49,7 +49,7 @@
 ## 🖥️ Dashboard Preview
 
 <div align="center">
-<img src="assets/dashboard_preview.jpg" alt="Kuro OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
+<img src="assets/dashboard_preview.jpg" alt="JobHunterX Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
 <br/>
 <sub><i>Dark-mode dashboard with scored job cards, live browser canvas streaming, and real-time agent activity feed</i></sub>
 </div>
@@ -60,17 +60,17 @@
 ## ✨ Browser Agent Preview 
 
 <div align="center">
-<img src="assets/browser_agent.jpg" alt="Kuro OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
+<img src="assets/browser_agent.jpg" alt="JobHunterX Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
 <br/>
 <sub><i>live browser canvas streaming, and real-time agent activity feed</i></sub>
 </div>
 
 ## 🧠 The 6-Agent Pipeline
 
-Kuro OS isn't one monolithic script. It's a **team of 6 specialized AI agents**, orchestrated by a **LangGraph state machine**, each doing what it does best — like a Formula 1 pit crew, but for your career.
+JobHunterX isn't one monolithic script. It's a **team of 6 specialized AI agents**, orchestrated by a **LangGraph state machine**, each doing what it does best — like a Formula 1 pit crew, but for your career.
 
 <div align="center">
-<img src="assets/agent_pipeline.jpg" alt="Kuro OS — 6-Stage AI Agent Pipeline" width="90%"/>
+<img src="assets/agent_pipeline.jpg" alt="JobHunterX — 6-Stage AI Agent Pipeline" width="90%"/>
 </div>
 
 <br/>
@@ -95,7 +95,7 @@ Kuro OS isn't one monolithic script. It's a **team of 6 specialized AI agents**,
 
 ## 🤖 LLM Models & Provider Architecture
 
-Kuro OS uses a **multi-provider LLM router** (`llm_router.py`) with automatic failover, per-provider rate limiting, disk caching, and concurrency semaphores. Here's every model in the system:
+JobHunterX uses a **multi-provider LLM router** (`llm_router.py`) with automatic failover, per-provider rate limiting, disk caching, and concurrency semaphores. Here's every model in the system:
 
 ```mermaid
 graph LR
@@ -155,7 +155,7 @@ graph LR
 
 ## 🔄 Pipeline Modes: Automatic vs. Manual
 
-Kuro OS runs in two modes, switchable at any time from the dashboard or via the `/api/pipeline-mode` endpoint.
+JobHunterX runs in two modes, switchable at any time from the dashboard or via the `/api/pipeline-mode` endpoint.
 
 ```mermaid
 flowchart TD
@@ -317,7 +317,7 @@ graph TB
 ## 📁 Project Structure
 
 ```
-kuro-os/
+jobhunterx/
 │
 ├── 📂 assets/                          # README images & visual assets
 │
@@ -330,7 +330,7 @@ kuro-os/
 ├── 📂 data/                            # Runtime storage (gitignored)
 │   └── gemma_budget.json              # Gemma daily token tracker
 │
-├── 📂 kuro-os/                       # Main Python package
+├── 📂 jobhunterx/                       # Main Python package
 │   ├── pyproject.toml                  # Build config & dependency spec
 │   ├── requirements.txt               # Pinned dependencies
 │   ├── .env.example                    # Environment variable template
@@ -408,8 +408,8 @@ kuro-os/
 ### 1. Clone & Setup
 
 ```bash
-git clone https://github.com/kvcops/kuro-os.git
-cd kuro-os
+git clone https://github.com/kvcops/jobhunterx.git
+cd jobhunterx
 
 # Create virtual environment
 python -m venv .venv
@@ -429,10 +429,10 @@ playwright install chromium
 ### 3. Configure Environment
 
 ```bash
-cp kuro-os/.env.example kuro-os/.env
+cp jobhunterx/.env.example jobhunterx/.env
 ```
 
-Edit `kuro-os/.env` with your API keys:
+Edit `jobhunterx/.env` with your API keys:
 
 ```env
 # At minimum, set one of these (Google recommended for free tier):
@@ -456,8 +456,8 @@ LOG_LEVEL=INFO
 ### 4. Launch 🚀
 
 ```bash
-cd kuro-os
-python -m kuro.api.main
+cd jobhunterx
+python -m jobhunterx.api.main
 ```
 
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting.
@@ -514,7 +514,7 @@ Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting.
 85 tests. Zero flaky. All passing.
 
 ```bash
-pytest kuro-os/tests/ -v
+pytest jobhunterx/tests/ -v
 ```
 
 ```
@@ -534,7 +534,7 @@ tests/test_resume_tailoring.py    ............... (15 passed)
 
 ## 🇮🇳 Pre-Seeded Regional Data
 
-Kuro OS ships with indexed company databases covering **16 Indian tech hubs** and **4,000+** companies:
+JobHunterX ships with indexed company databases covering **16 Indian tech hubs** and **4,000+** companies:
 
 | Hub | Companies | Hub | Companies |
 |:----|:---------:|:----|:---------:|
@@ -571,6 +571,6 @@ Built with ❤️ and an unhealthy amount of caffeine for job seekers who refuse
 
 <br/>
 
-**⭐ Star this repo if Kuro OS saved you from the soul-crushing grind of manual job applications**
+**⭐ Star this repo if JobHunterX saved you from the soul-crushing grind of manual job applications**
 
 </div>

@@ -1,1 +1,0 @@
-# kuro.templates package

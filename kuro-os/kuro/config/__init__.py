@@ -1,1 +1,0 @@
-# kuro.config package

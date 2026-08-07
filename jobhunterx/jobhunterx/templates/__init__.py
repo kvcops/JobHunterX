@@ -1,0 +1,1 @@
+# jobhunterx.templates package

@@ -73,7 +73,7 @@ pids/
 *.orig
 
 # =========================
-# Kuro OS Data & Runtime Storage
+# JobHunterX Data & Runtime Storage
 # =========================
 data/*.db
 data/*.sqlite
@@ -81,9 +81,9 @@ data/*.sqlite3
 data/cache/
 data/screenshots/
 data/browser_profile/
-kuro-os/data/
-kuro-os/vellum/data/
-kuro.db
+jobhunterx/data/
+jobhunterx/vellum/data/
+jobhunterx.db
 .cache/
 .tmp/
 temp/

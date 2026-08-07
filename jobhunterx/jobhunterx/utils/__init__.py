@@ -1,0 +1,3 @@
+"""
+JobHunterX — Utility modules
+"""
