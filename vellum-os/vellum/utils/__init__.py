@@ -1,3 +1,0 @@
-"""
-Vellum OS — Utility modules
-"""

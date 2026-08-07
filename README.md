@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/hero_banner.jpg" alt="Vellum OS — AI Career Intelligence Agent" width="100%"/>
+<img src="assets/hero_banner.jpg" alt="Kuro OS — AI Career Intelligence Agent" width="100%"/>
 
 <br/>
 <br/>
@@ -36,7 +36,7 @@
 ---
 
 *Upload your resume. Pick a city. Go grab coffee.*  
-*Vellum OS discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.*
+*Kuro OS discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.*
 
 ***It's the job-hunting wingman you always wished you had.***
 
@@ -49,7 +49,7 @@
 ## 🖥️ Dashboard Preview
 
 <div align="center">
-<img src="assets/dashboard_preview.jpg" alt="Vellum OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
+<img src="assets/dashboard_preview.jpg" alt="Kuro OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
 <br/>
 <sub><i>Dark-mode dashboard with scored job cards, live browser canvas streaming, and real-time agent activity feed</i></sub>
 </div>
@@ -60,17 +60,17 @@
 ## ✨ Browser Agent Preview 
 
 <div align="center">
-<img src="assets/browser_agent.jpg" alt="Vellum OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
+<img src="assets/browser_agent.jpg" alt="Kuro OS Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
 <br/>
 <sub><i>live browser canvas streaming, and real-time agent activity feed</i></sub>
 </div>
 
 ## 🧠 The 6-Agent Pipeline
 
-Vellum OS isn't one monolithic script. It's a **team of 6 specialized AI agents**, orchestrated by a **LangGraph state machine**, each doing what it does best — like a Formula 1 pit crew, but for your career.
+Kuro OS isn't one monolithic script. It's a **team of 6 specialized AI agents**, orchestrated by a **LangGraph state machine**, each doing what it does best — like a Formula 1 pit crew, but for your career.
 
 <div align="center">
-<img src="assets/agent_pipeline.jpg" alt="Vellum OS — 6-Stage AI Agent Pipeline" width="90%"/>
+<img src="assets/agent_pipeline.jpg" alt="Kuro OS — 6-Stage AI Agent Pipeline" width="90%"/>
 </div>
 
 <br/>
@@ -95,7 +95,7 @@ Vellum OS isn't one monolithic script. It's a **team of 6 specialized AI agents*
 
 ## 🤖 LLM Models & Provider Architecture
 
-Vellum OS uses a **multi-provider LLM router** (`llm_router.py`) with automatic failover, per-provider rate limiting, disk caching, and concurrency semaphores. Here's every model in the system:
+Kuro OS uses a **multi-provider LLM router** (`llm_router.py`) with automatic failover, per-provider rate limiting, disk caching, and concurrency semaphores. Here's every model in the system:
 
 ```mermaid
 graph LR
@@ -155,7 +155,7 @@ graph LR
 
 ## 🔄 Pipeline Modes: Automatic vs. Manual
 
-Vellum OS runs in two modes, switchable at any time from the dashboard or via the `/api/pipeline-mode` endpoint.
+Kuro OS runs in two modes, switchable at any time from the dashboard or via the `/api/pipeline-mode` endpoint.
 
 ```mermaid
 flowchart TD
@@ -317,7 +317,7 @@ graph TB
 ## 📁 Project Structure
 
 ```
-vellum-os/
+kuro-os/
 │
 ├── 📂 assets/                          # README images & visual assets
 │
@@ -330,7 +330,7 @@ vellum-os/
 ├── 📂 data/                            # Runtime storage (gitignored)
 │   └── gemma_budget.json              # Gemma daily token tracker
 │
-├── 📂 vellum-os/                       # Main Python package
+├── 📂 kuro-os/                       # Main Python package
 │   ├── pyproject.toml                  # Build config & dependency spec
 │   ├── requirements.txt               # Pinned dependencies
 │   ├── .env.example                    # Environment variable template
@@ -408,8 +408,8 @@ vellum-os/
 ### 1. Clone & Setup
 
 ```bash
-git clone https://github.com/kvcops/vellum-os.git
-cd vellum-os
+git clone https://github.com/kvcops/kuro-os.git
+cd kuro-os
 
 # Create virtual environment
 python -m venv .venv
@@ -429,10 +429,10 @@ playwright install chromium
 ### 3. Configure Environment
 
 ```bash
-cp vellum-os/.env.example vellum-os/.env
+cp kuro-os/.env.example kuro-os/.env
 ```
 
-Edit `vellum-os/.env` with your API keys:
+Edit `kuro-os/.env` with your API keys:
 
 ```env
 # At minimum, set one of these (Google recommended for free tier):
@@ -456,8 +456,8 @@ LOG_LEVEL=INFO
 ### 4. Launch 🚀
 
 ```bash
-cd vellum-os
-python -m vellum.api.main
+cd kuro-os
+python -m kuro.api.main
 ```
 
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting.
@@ -514,7 +514,7 @@ Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting.
 85 tests. Zero flaky. All passing.
 
 ```bash
-pytest vellum-os/tests/ -v
+pytest kuro-os/tests/ -v
 ```
 
 ```
@@ -534,7 +534,7 @@ tests/test_resume_tailoring.py    ............... (15 passed)
 
 ## 🇮🇳 Pre-Seeded Regional Data
 
-Vellum OS ships with indexed company databases covering **16 Indian tech hubs** and **4,000+** companies:
+Kuro OS ships with indexed company databases covering **16 Indian tech hubs** and **4,000+** companies:
 
 | Hub | Companies | Hub | Companies |
 |:----|:---------:|:----|:---------:|
@@ -571,6 +571,6 @@ Built with ❤️ and an unhealthy amount of caffeine for job seekers who refuse
 
 <br/>
 
-**⭐ Star this repo if Vellum OS saved you from the soul-crushing grind of manual job applications**
+**⭐ Star this repo if Kuro OS saved you from the soul-crushing grind of manual job applications**
 
 </div>
