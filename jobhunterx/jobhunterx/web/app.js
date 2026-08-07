@@ -1290,13 +1290,34 @@ function updateStatusIndicator(status) {
 }
 
 function updateTokenTelemetry(tokenMap) {
-  let total = 0;
+  let grandTotal = 0;
+  let totalIn = 0;
+  let totalOut = 0;
+
   if (tokenMap) {
-    Object.values(tokenMap).forEach(usage => {
-      total += (usage.tokens_in || 0) + (usage.tokens_out || 0);
-    });
+    if (typeof tokenMap.grand_total === "number") {
+      grandTotal = tokenMap.grand_total;
+      totalIn = tokenMap.total_in || 0;
+      totalOut = tokenMap.total_out || 0;
+    } else {
+      const byModel = tokenMap.by_model || tokenMap;
+      Object.entries(byModel).forEach(([key, usage]) => {
+        if (key !== "by_model" && usage && typeof usage === "object") {
+          const tin = usage.tokens_in || 0;
+          const tout = usage.tokens_out || 0;
+          totalIn += tin;
+          totalOut += tout;
+          grandTotal += tin + tout;
+        }
+      });
+    }
   }
-  document.getElementById("stat-tokens").innerText = total.toLocaleString();
+
+  const statEl = document.getElementById("stat-tokens");
+  if (statEl) statEl.innerText = grandTotal.toLocaleString();
+
+  const subEl = document.getElementById("stat-tokens-sub");
+  if (subEl) subEl.innerText = `${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out`;
 }
 
 function togglePipelineMode() {

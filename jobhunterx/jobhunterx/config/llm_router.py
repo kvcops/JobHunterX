@@ -47,27 +47,39 @@ REASONING_EFFORT_MODELS = {"groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"
 # Do not inject LiteLLM thinking into Mistral: the provider rejects it for these IDs.
 THINKING_PARAM_MODELS: set[str] = set()
 
-# Provider → model fallback chains. Gemma (google.genai-backed) is preferred;
-# gemini-3.1-flash-lite is an in-family fallback using the same Google key.
+# Provider → model fallback chains using updated August 2026 model IDs.
+# Google AI Studio models (Gemma 4 26B, Gemini 3.1 Flash Lite) are primary;
+# Groq (Llama 3.3 70B, Llama 3.1 8B) and Mistral (mistral-small-2603, mistral-large-2512, codestral-2508)
+# provide cross-provider failover.
 FALLBACK_CHAINS: Dict[str, List[str]] = {
     "fast": [
         "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
+        "groq/llama-3.1-8b-instant",
+        "mistral/mistral-small-2603",
     ],
     "reasoning": [
         "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
+        "groq/llama-3.3-70b-versatile",
+        "mistral/mistral-large-2512",
     ],
     "tailoring": [
         "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
+        "groq/llama-3.3-70b-versatile",
+        "mistral/codestral-2508",
     ],
     "extraction": [
         "gemini/gemma-4-26b-a4b-it",
         "gemini/gemini-3.1-flash-lite",
+        "groq/llama-3.1-8b-instant",
+        "mistral/mistral-small-2603",
     ],
     "browser": [
         "gemini/gemini-3.1-flash-lite",
+        "groq/llama-3.3-70b-versatile",
+        "mistral/mistral-small-2603",
     ],
 }
 
@@ -81,11 +93,11 @@ _semaphores: Dict[int, Dict[str, asyncio.Semaphore]] = {}
 # Minimum delay (seconds) between requests per provider to respect RPM limits.
 # Groq free: 30 RPM → 1 req per 2s minimum
 # Mistral free: ~60 RPM → 1 req per 1s minimum
-# Gemini free: ~15 RPM → 1 req per 4s minimum (conservative)
+# Gemini 3.1 Flash Lite free: 15 RPM (250K TPM / 500 RPD) → 1 req per 4.0s minimum
 _PROVIDER_MIN_DELAY: Dict[str, float] = {
     "groq": 3.2,
     "mistral": 2.0,
-    "gemini": 4.5,
+    "gemini": 4.0,
     "default": 1.5,
 }
 
@@ -281,7 +293,7 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
                 "rate limit" in err_str
                 or "429" in err_str
                 or "too many requests" in err_str
-                or isinstance(exc, (litellm.RateLimitError, litellm.ServiceUnavailableError))
+                or isinstance(exc, litellm.RateLimitError)
             )
             if is_rate_limit:
                 _record_rate_limit(model)
@@ -301,6 +313,66 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
                 raise
 
 
+async def _call_google_genai(
+    model_name: str,
+    messages: List[Dict[str, str]],
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Direct Google GenAI SDK call for all Gemini & Gemma models (bypasses LiteLLM completely)."""
+    settings = get_settings()
+    api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("No Google API key configured")
+
+    raw_model = model_name.split("/", 1)[-1] if "/" in model_name else model_name
+
+    from google import genai
+    client = genai.Client(api_key=api_key)
+
+    system_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
+    user_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") != "system")
+
+    contents = []
+    if system_content:
+        contents.append(f"SYSTEM INSTRUCTIONS:\n{system_content}")
+    contents.append(f"USER:\n{user_content}")
+    prompt_str = "\n\n".join(contents)
+
+    cfg: Dict[str, Any] = {}
+    max_tokens = kwargs.get("max_tokens") or kwargs.get("max_output_tokens")
+    if max_tokens:
+        cfg["max_output_tokens"] = max_tokens
+
+    t0 = time.monotonic()
+
+    def _sync_generate():
+        return client.models.generate_content(
+            model=raw_model,
+            contents=prompt_str,
+            config=cfg if cfg else None,
+        )
+
+    response = await asyncio.to_thread(_sync_generate)
+    latency_ms = (time.monotonic() - t0) * 1000
+
+    content = getattr(response, "text", "") or ""
+    usage_meta = getattr(response, "usage_metadata", None)
+    t_in = getattr(usage_meta, "prompt_token_count", 0) if usage_meta else 0
+    t_out = getattr(usage_meta, "candidates_token_count", 0) if usage_meta else 0
+
+    if not t_in and not t_out:
+        t_in = max(1, len(prompt_str) // 4)
+        t_out = max(1, len(content) // 4)
+
+    return {
+        "content": content,
+        "tokens_in": int(t_in or 0),
+        "tokens_out": int(t_out or 0),
+        "model": model_name,
+        "latency_ms": round(latency_ms, 1),
+        "cache_hit": False,
+    }
+
 
 async def call_llm(
     model: str,
@@ -312,8 +384,8 @@ async def call_llm(
     """High-level async LLM call with all infrastructure:
 
     1. Check disk cache
-    2. Acquire provider semaphore
-    3. Auto-inject thinking params
+    2. Direct Google GenAI SDK for Gemini/Gemma models
+    3. Acquire provider semaphore for LiteLLM models (Groq, Mistral)
     4. Call litellm.acompletion with retry
     5. Log token usage
     6. Cache result
@@ -330,6 +402,53 @@ async def call_llm(
         if cached is not None:
             log.info("llm_cache_hit", model=model)
             return {**cached, "cache_hit": True}
+
+    # --- Direct Google GenAI SDK routing for ALL Gemini & Gemma models ---
+    if model.startswith("gemini/") or model.startswith("google/") or "gemma" in model:
+        if model in ("gemini/gemma-4-26b-a4b-it", "gemma-4-26b-a4b-it"):
+            from jobhunterx.config.gemma import call_gemma
+            system_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
+            user_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") != "system")
+            t0 = time.monotonic()
+            content = await call_gemma(
+                system=system_content,
+                user=user_content,
+                max_tokens=kwargs.get("max_tokens", 1024),
+                temperature=kwargs.get("temperature"),
+            )
+            latency_ms = (time.monotonic() - t0) * 1000
+            result = {
+                "content": content,
+                "tokens_in": max(1, (len(system_content) + len(user_content)) // 4),
+                "tokens_out": max(1, len(content) // 4),
+                "model": model,
+                "latency_ms": round(latency_ms, 1),
+                "cache_hit": False,
+            }
+        else:
+            await _enforce_rate_limit(model)
+            result = await _call_google_genai(model, messages, **kwargs)
+
+        # Log token usage to database
+        try:
+            from jobhunterx.config import database as _db
+            if _db._db_path:
+                await _db.log_agent_event(
+                    run_id=ck or "llm",
+                    agent_name="google_genai_direct",
+                    event_type="llm_call",
+                    tokens_in=result["tokens_in"],
+                    tokens_out=result["tokens_out"],
+                    model=model,
+                    latency_ms=result["latency_ms"],
+                )
+        except Exception as exc:
+            log.warning("google_db_log_failed", error=str(exc))
+
+        if use_cache and ck:
+            cache = _get_cache()
+            cache.set(ck, result, expire=cache_ttl)
+        return result
 
     # --- Build params ---
     params = get_llm_params(model)
@@ -358,13 +477,18 @@ async def call_llm(
     choice = response.choices[0]
     content = choice.message.content or ""
     usage = getattr(response, "usage", None)
-    tokens_in = usage.prompt_tokens if usage else 0
-    tokens_out = usage.completion_tokens if usage else 0
+    tokens_in = getattr(usage, "prompt_tokens", 0) if usage else 0
+    tokens_out = getattr(usage, "completion_tokens", 0) if usage else 0
+
+    if not tokens_in and not tokens_out:
+        prompt_len = sum(len(m.get("content", "")) for m in messages)
+        tokens_in = max(1, prompt_len // 4)
+        tokens_out = max(1, len(content) // 4)
 
     result = {
         "content": content,
-        "tokens_in": tokens_in,
-        "tokens_out": tokens_out,
+        "tokens_in": int(tokens_in or 0),
+        "tokens_out": int(tokens_out or 0),
         "model": model,
         "latency_ms": round(latency_ms, 1),
         "cache_hit": False,
@@ -382,24 +506,17 @@ async def call_llm(
     try:
         from jobhunterx.config import database as _db
         if _db._db_path:
-            import asyncio as _aio
-            _log_coro = _db.log_agent_event(
+            await _db.log_agent_event(
                 run_id=ck or "llm",
                 agent_name="llm_router",
                 event_type="llm_call",
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
+                tokens_in=int(tokens_in or 0),
+                tokens_out=int(tokens_out or 0),
                 model=model,
                 latency_ms=round(latency_ms, 1),
             )
-            try:
-                loop = _aio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop and loop.is_running():
-                loop.create_task(_log_coro)
     except Exception as exc:
-        log.warning("llm_db_log_failed", error=str(exc), exc_info=True)
+        log.warning("llm_db_log_failed", error=str(exc))
 
     # --- Cache store ---
     if use_cache and ck:

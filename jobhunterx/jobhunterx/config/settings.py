@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     groq_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
 
-    # --- Gemma budget (Google AI Studio free tier: 15k RPD / 30 RPM) ---
-    gemma_daily_tokens: int = 15000
+    # --- Gemma budget (Google AI Studio free tier: 14.4k RPD / 30 RPM / 16k TPM) ---
+    gemma_daily_requests: int = 14400
+    gemma_daily_tokens: int = 14400
     gemma_rpm: int = 30
 
     # --- Application ---

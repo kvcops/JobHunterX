@@ -55,11 +55,11 @@ Job Description:
 
 Return valid JSON object only. Do NOT include unescaped quotes or line breaks inside string values."""
 
-SUMMARY_TAILORING_PROMPT = """You are a world-class executive resume writer. Craft a high-impact, 2-3 sentence Professional Executive Summary for the candidate, tailored specifically to the target Job Description.
+SUMMARY_TAILORING_PROMPT = """You are a world-class executive resume writer. Craft a high-impact, 2-3 sentence Professional Executive Summary for the candidate, tailored specifically to the target Job Description and its key required skills.
 
 CRITICAL ATS & TRUTHFULNESS RULES:
-1. Highlight the candidate's real technical background, core skills, and alignment with the target role ({target_role}).
-2. Naturally integrate key requirements and domain keywords from the Target Job Description.
+1. Prioritize and highlight candidate's matching skills for this target role ({matching_skills_str}) alongside candidate's core technical background and alignment with the target role ({target_role}).
+2. Naturally integrate key requirements, matching skills, and domain keywords from the Target Job Description.
 3. STRICT TRUTHFULNESS: Do NOT invent fake experience, unearned titles, or fake metric numbers not backed by candidate's profile.
 4. ABSOLUTELY DO NOT add any technologies, tools, frameworks, or programming languages that are NOT in the candidate's skill list below. If the JD mentions a skill the candidate doesn't have, DO NOT add it.
 5. Write in active, powerful third-person tone (no "I", "my", or "our").
@@ -68,6 +68,7 @@ CRITICAL ATS & TRUTHFULNESS RULES:
 Candidate Details:
 Name: {name}
 Target Role: {target_role}
+Matching Job Skills: {matching_skills_str}
 Key Skills (ONLY use these): {skills_list}
 Original Summary: {original_summary}
 
@@ -80,11 +81,11 @@ Return a JSON object:
 }}
 Return valid JSON only. No markdown."""
 
-BULLET_TAILORING_PROMPT = """You are an elite ATS Resume Optimization Specialist. Rewrite the candidate's raw work experience bullet points into high-impact, technical bullet points tailored to the target Job Description.
+BULLET_TAILORING_PROMPT = """You are an elite ATS Resume Optimization Specialist. Rewrite the candidate's raw work experience bullet points into high-impact, technical bullet points tailored to the target Job Description and its key required skills.
 
 CRITICAL ATS & IMPACT RULES:
 1. Action-led bullets: Start with a strong action verb (Built, Designed, Led, Optimized, Automated, Architected, etc.), specify the technical tools/methods used, and describe the engineering outcome.
-2. Keywords Integration: Seamlessly embed relevant technical terms from the Job Description ONLY IF they exist in the candidate's real skill list ({skills_list}). DO NOT invent or add technologies the candidate doesn't know.
+2. Skill Matching Priority: Seamlessly weave in candidate's matching skills for this target role ({matching_skills_str}) into the bullet points where relevant. DO NOT invent or add technologies the candidate doesn't know. ONLY use skills from candidate's real skill list ({skills_list}).
 3. Technical Depth & Context: Do NOT make bullets artificially short or generic. Write rich, impactful 20-35 word bullet points.
 4. STRICT TRUTHFULNESS — NO FABRICATED METRICS: You MUST NOT invent numbers, percentages, counts, revenue, users, or time savings. Never write "X%", "Y%", "increased X", "reduced Y by Z", "X+ users", or any placeholder letters as metrics. If the original bullet contains a REAL metric, preserve it exactly. If it has no metric, describe the work and impact qualitatively ("delivered", "enabled", "streamlined") without making up quantities.
 5. ABSOLUTELY FORBIDDEN: Adding any technology, framework, tool, or programming language not explicitly in the candidate's skill list above. If the JD mentions React but candidate doesn't know React, do NOT mention React.
@@ -96,6 +97,7 @@ Role: {role_title} at {company_name}
 Original Bullets:
 {original_bullets}
 
+Matching Job Skills: {matching_skills_str}
 Candidate's REAL Skill List (ONLY use these): {skills_list}
 
 Target Job Description:
@@ -104,8 +106,8 @@ Target Job Description:
 Return a JSON array of strings only. Valid JSON, no markdown."""
 
 
-def _categorize_skills(skills: list[str]) -> dict[str, list[str]]:
-    """Categorize candidate skills into logical ATS skill groups."""
+def _categorize_skills(skills: list[str], target_matching_skills: list[str] | None = None) -> dict[str, list[str]]:
+    """Categorize candidate skills into logical ATS skill groups, prioritizing skills matched to the target job."""
     categories: dict[str, list[str]] = {
         "Languages": [],
         "Frameworks & AI": [],
@@ -113,6 +115,8 @@ def _categorize_skills(skills: list[str]) -> dict[str, list[str]]:
         "Databases & Tools": [],
         "Core Competencies": [],
     }
+    
+    matched_set = {s.lower().strip() for s in (target_matching_skills or []) if s}
     
     lang_keywords = {"python", "javascript", "typescript", "c++", "c#", "java", "rust", "go", "sql", "html", "css", "bash", "r", "php", "ruby"}
     framework_keywords = {"react", "next.js", "vue", "angular", "node.js", "express", "fastapi", "django", "flask", "pytorch", "tensorflow", "langchain", "llama", "gemma", "gemini", "scikit-learn", "tailwind", "redux"}
@@ -133,6 +137,11 @@ def _categorize_skills(skills: list[str]) -> dict[str, list[str]]:
             categories["Databases & Tools"].append(skill)
         else:
             categories["Core Competencies"].append(skill)
+
+    # Sort each category so that candidate skills that explicitly match the target job appear FIRST
+    if matched_set:
+        for cat in categories:
+            categories[cat].sort(key=lambda s: 0 if any(m in s.lower() or s.lower() in m for m in matched_set) else 1)
 
     # Filter out empty categories
     return {k: v for k, v in categories.items() if v}
@@ -412,6 +421,8 @@ Education:
 
     candidate_skills = profile.get("skills", [])
     skills_list_str = ", ".join(candidate_skills)
+    matching_skills = validation.get("matching_skills", [])
+    matching_skills_str = ", ".join(matching_skills) if matching_skills else "General technical competencies"
 
     # A) Tailored Executive Summary
     tailored_summary = profile.get("summary", "")
@@ -423,6 +434,7 @@ Education:
                 "content": SUMMARY_TAILORING_PROMPT.format(
                     name=profile.get("name", "Candidate"),
                     target_role=target_role,
+                    matching_skills_str=matching_skills_str,
                     skills_list=skills_list_str,
                     original_summary=profile.get("summary", ""),
                     jd_text=jd_text[:2500],
@@ -438,7 +450,7 @@ Education:
     except Exception as exc:
         log.warning("summary_tailor_failed", error=str(exc))
 
-    # B) Tailored Experience Bullets (Google XYZ Formula)
+    # B) Tailored Experience Bullets (Job Skill Focused)
     tailored_bullets: dict[int, list[str]] = {}
     for i, exp in enumerate(profile.get("experience", [])):
         original_bullets = exp.get("bullets", [])
@@ -452,6 +464,7 @@ Education:
                 "content": BULLET_TAILORING_PROMPT.format(
                     role_title=exp.get("role", "Engineer"),
                     company_name=exp.get("company", "Company"),
+                    matching_skills_str=matching_skills_str,
                     skills_list=skills_list_str,
                     original_bullets=json.dumps(original_bullets),
                     jd_text=jd_text[:2500],
@@ -486,8 +499,8 @@ Education:
             errors.append(f"Tailoring error for exp {i}: {exc}")
             log.error("tailoring_error", job_id=job_id, exp_idx=i, error=str(exc))
 
-    # Categorize skills for resume template
-    categorized_skills = _categorize_skills(profile.get("skills", []))
+    # Categorize skills for resume template, prioritizing target job matching skills
+    categorized_skills = _categorize_skills(profile.get("skills", []), target_matching_skills=matching_skills)
 
     # ------------------------------------------------------------------
     # Step 4: PDF generation (high-impact template with shrink loop)

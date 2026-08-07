@@ -613,13 +613,31 @@ async def get_token_usage_summary() -> dict:
                GROUP BY model"""
         )
         rows = await cursor.fetchall()
-        return {
-            row["model"]: {
-                "tokens_in": row["total_in"] or 0,
-                "tokens_out": row["total_out"] or 0,
-                "calls": row["call_count"],
+        by_model = {}
+        grand_in = 0
+        grand_out = 0
+        grand_calls = 0
+        for row in rows:
+            t_in = row["total_in"] or 0
+            t_out = row["total_out"] or 0
+            calls = row["call_count"] or 0
+            by_model[row["model"]] = {
+                "tokens_in": t_in,
+                "tokens_out": t_out,
+                "total_tokens": t_in + t_out,
+                "calls": calls,
             }
-            for row in rows
+            grand_in += t_in
+            grand_out += t_out
+            grand_calls += calls
+
+        return {
+            "by_model": by_model,
+            "total_in": grand_in,
+            "total_out": grand_out,
+            "grand_total": grand_in + grand_out,
+            "total_calls": grand_calls,
+            **by_model,
         }
 
 

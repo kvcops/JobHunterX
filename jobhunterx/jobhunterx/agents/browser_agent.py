@@ -739,12 +739,12 @@ async def _run_impl(state: dict) -> dict:
         if fallback_llm is None and mistral_key and ChatMistral is not None:
             try:
                 fallback_llm = ChatMistral(
-                    model="mistral-large-latest",
+                    model="mistral-small-2603",
                     api_key=mistral_key,
                     temperature=0.2,
                     max_retries=10,
                 )
-                log.info("configured_fallback_llm", provider="mistral", model="mistral-large-latest")
+                log.info("configured_fallback_llm", provider="mistral", model="mistral-small-2603")
             except Exception as f_exc:
                 log.warning("fallback_llm_mistral_init_failed", error=str(f_exc))
         if fallback_llm is None and google_api_key:

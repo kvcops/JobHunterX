@@ -142,14 +142,42 @@ graph LR
 
 ### Rate Limiting & Budget Control
 
-| Provider | RPM Limit | Min Delay Between Requests | Cooldown on 429 | Concurrency |
-|:---------|:----------|:---------------------------|:-----------------|:------------|
-| **Google (Gemini/Gemma)** | ~15 RPM | 4.5s | 60s | 3 parallel |
-| **Groq** | 30 RPM | 3.2s | 30s | 1 serial |
-| **Mistral** | ~60 RPM | 2.0s | 15s | 1 serial |
+#### 🟢 Google AI Studio (Free Tier)
+| Model ID | RPM Limit | Min Delay | TPM Limit | RPD Limit (Requests Per Day) |
+|:---------|:----------|:----------|:----------|:-----------------------------|
+| **Gemma 4 26B** (`gemma-4-26b-a4b-it`) | 30 RPM | 2.0s | 16K TPM | **14,400 RPD** (14.4K req/day) |
+| **Gemini 3.1 Flash Lite** (`gemini-3.1-flash-lite`) | 15 RPM | 4.0s | 250K TPM | **500 RPD** (500 req/day) |
+
+#### ⚡ Groq Cloud (Free Tier)
+| Model ID | RPM | RPD (Requests/Day) | TPM | TPD (Tokens/Day) |
+|:---------|:----|:-------------------|:----|:-----------------|
+| `llama-3.1-8b-instant` | 30 RPM | **14.4K RPD** | 6K TPM | 500K TPD |
+| `llama-3.3-70b-versatile` | 30 RPM | **1K RPD** | 12K TPM | 100K TPD |
+| `openai/gpt-oss-120b` | 30 RPM | **1K RPD** | 8K TPM | 200K TPD |
+| `openai/gpt-oss-20b` | 30 RPM | **1K RPD** | 8K TPM | 200K TPD |
+| `qwen/qwen3.6-27b` | 30 RPM | **1K RPD** | 8K TPM | 200K TPD |
+| `meta-llama/llama-prompt-guard-2-22m/86m` | 30 RPM | **14.4K RPD** | 15K TPM | 500K TPD |
+
+#### 🌀 Mistral AI (Updated August 2026)
+| Model ID | RPS Limit | Approx RPM | TPM Limit | Category / Purpose |
+|:---------|:----------|:-----------|:----------|:-------------------|
+| `codestral-2508` | 2.08 RPS | ~125 RPM | 625K TPM | Code Generation & Agent Tooling |
+| `codestral-embed` | 1.00 RPS | 60 RPM | 50K TPM | Code Embeddings |
+| `devstral-2512` | 0.83 RPS | ~50 RPM | 1M TPM | Developer Agent Tasks |
+| `labs-leanstral-1-5-1` | 0.63 RPS | ~38 RPM | 5M TPM | Experimental / High Throughput |
+| `ministral-14b-2512` | 0.50 RPS | 30 RPM | 937.5K TPM | Edge / Fast Reasoning |
+| `ministral-3b-2512` | 12.50 RPS | 750 RPM | 1.3M TPM | Ultra-fast Micro Decisions |
+| `ministral-8b-2512` | 3.13 RPS | ~188 RPM | 625K TPM | High-Speed Lightweight Agent |
+| `mistral-embed-2312` | 1.00 RPS | 60 RPM | 20M TPM | Text Embeddings |
+| `mistral-large-2512` | 0.07 RPS | ~4 RPM | 250K TPM | Heavy Reasoning Fallback |
+| `mistral-medium-2505` | 0.42 RPS | ~25 RPM | 375K TPM | Mid-tier Reasoning |
+| `mistral-medium-2508` | 0.38 RPS | ~23 RPM | 356.25K TPM | Mid-tier Reasoning |
+| `mistral-medium-latest` | 0.83 RPS | ~50 RPM | 25K TPM | General Tasks |
+| `mistral-moderation-2603` | 1.67 RPS | ~100 RPM | 50K TPM | Content Moderation Guard |
+| `mistral-small-2603` | 0.83 RPS | ~50 RPM | 50K TPM | Fast General Fallback |
 
 > [!NOTE]
-> **Gemma Budget System** (`gemma.py`): Enforces a hard daily cap of **15,000 tokens** on `gemma-4-26b-a4b-it` to stay within Google AI Studio's free tier. State is persisted to `data/gemma_budget.json` across restarts. When the budget is exhausted, scoring gracefully degrades to the zero-token keyword pre-filter.
+> **Gemma Budget System** (`gemma.py`): Enforces a hard daily cap of **14,400 requests/day** (14.4K RPD) and 30 RPM on `gemma-4-26b-a4b-it` to stay strictly within Google AI Studio's free tier. State is tracked in-memory. When the budget is exhausted, scoring gracefully degrades to the zero-token keyword pre-filter.
 
 ---
 
@@ -328,7 +356,6 @@ jobhunterx/
 │   └── verify_counts.py               # Database integrity checker
 │
 ├── 📂 data/                            # Runtime storage (gitignored)
-│   └── gemma_budget.json              # Gemma daily token tracker
 │
 ├── 📂 jobhunterx/                       # Main Python package
 │   ├── pyproject.toml                  # Build config & dependency spec

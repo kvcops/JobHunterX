@@ -14,8 +14,7 @@ from jobhunterx.config import gemma as g
 
 
 @pytest.fixture(autouse=True)
-def reset_state(tmp_path):
-    g._state_file_path = tmp_path / "gemma_state.json"
+def reset_state():
     g._tokens_used = 0
     g._requests_today = 0
     yield
@@ -82,7 +81,7 @@ async def test_budget_tracks_tokens(monkeypatch):
 @pytest.mark.asyncio
 async def test_budget_exhausted_raises(monkeypatch):
     _install_fake_client(monkeypatch)
-    g._tokens_used = g._daily_cap()  # simulate a fully used day
+    g._requests_today = g._daily_cap()  # simulate reaching daily RPD limit (14,400 RPD)
     with pytest.raises(RuntimeError, match="gemma_budget_exhausted"):
         await g.call_gemma("s", "u")
 
@@ -95,14 +94,12 @@ async def test_no_api_key_raises(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setattr(g, "_genai_client", None)
-    monkeypatch.setattr(g, "_state_file", lambda: None)
     with pytest.raises(RuntimeError, match="No Google API key"):
         await g.call_gemma("s", "u")
 
 
 def test_budget_status_shape():
     g._tokens_used = 100
-    g._save_state()
     st = g.budget_status()
     assert st["tokens_used"] == 100
     assert st["tokens_cap"] == g._daily_cap()
