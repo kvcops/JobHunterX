@@ -3,32 +3,42 @@
 <img src="assets/hero_banner.jpg" alt="Vellum OS — AI Career Intelligence Agent" width="100%"/>
 
 <br/>
+<br/>
 
-# ⚡ VELLUM OS
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=700&size=28&pause=1000&color=A855F7&center=true&vCenter=true&width=650&height=50&lines=%E2%9A%A1+VELLUM+OS+%E2%80%94+AI+CAREER+INTELLIGENCE;Hunts%2C+Matches%2C+Tailors+%26+Applies;Autonomous+Job+Hunting+While+You+Sleep;6+AI+Agents+%C2%B7+3+LLM+Providers+%C2%B7+6+ATS+Boards" alt="Typing SVG" />
+</p>
 
-### Your AI Career Intelligence Agent That Hunts, Matches, Tailors, and Applies — While You Sleep
+### 🚀 Your Autonomous AI Career Intelligence Agent That Hunts, Matches, Tailors, and Applies — While You Sleep
 
 <br/>
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.140+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Pipeline-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
-[![Gemma 4](https://img.shields.io/badge/Gemma_4_26B-Google-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
-[![Llama 3.3](https://img.shields.io/badge/Llama_3.3_70B-Groq-F55036?style=for-the-badge&logo=meta&logoColor=white)](https://groq.com)
-[![Mistral Large](https://img.shields.io/badge/Mistral_Large-Mistral_AI-FF7000?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3QgeD0iMSIgeT0iMSIgd2lkdGg9IjYiIGhlaWdodD0iNiIvPjxyZWN0IHg9IjkiIHk9IjEiIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48cmVjdCB4PSIxNyIgeT0iMSIgd2lkdGg9IjYiIGhlaWdodD0iNiIvPjxyZWN0IHg9IjEiIHk9IjkiIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48cmVjdCB4PSIxNyIgeT0iOSIgd2lkdGg9IjYiIGhlaWdodD0iNiIvPjxyZWN0IHg9IjEiIHk9IjE3IiB3aWR0aD0iNiIgaGVpZ2h0PSI2Ii8+PHJlY3QgeD0iOSIgeT0iMTciIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48cmVjdCB4PSIxNyIgeT0iMTciIHdpZHRoPSI2IiBoZWlnaHQ9IjYiLz48L3N2Zz4=&logoColor=white)](https://mistral.ai)
-[![Playwright](https://img.shields.io/badge/Playwright-Stealth-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)](https://playwright.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-A855F7?style=for-the-badge)](LICENSE)
+<p align="center">
+  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" /></a>
+  <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-0.140+-009688?style=for-the-badge&logo=fastapi&logoColor=white" /></a>
+  <a href="https://langchain-ai.github.io/langgraph/"><img src="https://img.shields.io/badge/LangGraph-State_Machine-7C3AED?style=for-the-badge&logo=langchain&logoColor=white" /></a>
+  <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemma_4_26B-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
+  <a href="https://groq.com"><img src="https://img.shields.io/badge/Llama_3.3_70B-Groq-F55036?style=for-the-badge&logo=meta&logoColor=white" /></a>
+  <a href="https://mistral.ai"><img src="https://img.shields.io/badge/Mistral_Large-Mistral-FF7000?style=for-the-badge&logo=mistral&logoColor=white" /></a>
+  <a href="https://playwright.dev"><img src="https://img.shields.io/badge/Playwright-Stealth_Browser-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" /></a>
+  <img src="https://img.shields.io/badge/Tests-85%20Passed-10B981?style=for-the-badge&logo=pytest&logoColor=white" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/AI_Agents-6_Specialized-purple?style=flat-square&logo=openai&logoColor=white" />
+  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Groq_·_Mistral-blue?style=flat-square&logo=google&logoColor=white" />
+  <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_SmartRecruiters-emerald?style=flat-square" />
+  <img src="https://img.shields.io/badge/Indian_Tech_Hubs-16_Cities_·_4000+_Companies-orange?style=flat-square" />
+</p>
 
 <br/>
-
-**6 AI Agents** · **3 LLM Providers** · **6 ATS Platforms** · **16 Indian Tech Hubs** · **85 Tests Passing**
 
 ---
 
-*Upload your resume. Pick a city. Go grab coffee.*
+*Upload your resume. Pick a city. Go grab coffee.*  
 *Vellum OS discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.*
 
-*It's the job-hunting wingman you always wished you had.*
+***It's the job-hunting wingman you always wished you had.***
 
 ---
 
