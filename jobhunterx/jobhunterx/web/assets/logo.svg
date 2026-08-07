@@ -1,49 +1,71 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%" fill="none">
   <defs>
-    <linearGradient id="jhx-grad-1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#a855f7"/>
-      <stop offset="50%" stop-color="#06b6d4"/>
+    <!-- Primary Neon Gradient -->
+    <linearGradient id="jhx-main-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="35%" stop-color="#9333ea"/>
+      <stop offset="70%" stop-color="#06b6d4"/>
       <stop offset="100%" stop-color="#10b981"/>
     </linearGradient>
-    <linearGradient id="jhx-grad-2" x1="100%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ec4899"/>
-      <stop offset="50%" stop-color="#8b5cf6"/>
+
+    <!-- Core Crosshair Accent Gradient -->
+    <linearGradient id="jhx-accent-grad" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="50%" stop-color="#a855f7"/>
       <stop offset="100%" stop-color="#3b82f6"/>
     </linearGradient>
-    <filter id="jhx-glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
+
+    <!-- Radial Core Glow -->
+    <radialGradient id="jhx-core-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#06b6d4" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Glow Filter -->
+    <filter id="jhx-glow-filter" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.5" result="blur"/>
       <feComposite in="SourceGraphic" in2="blur" operator="over"/>
     </filter>
   </defs>
 
-  <!-- Outer Cyber Hexagon Shield -->
-  <polygon points="50,8 88,28 88,72 50,92 12,72 12,28" 
-           stroke="url(#jhx-grad-1)" 
-           stroke-width="3.5" 
-           stroke-linecap="round" 
-           stroke-linejoin="round"
-           filter="url(#jhx-glow)"/>
+  <!-- Glowing Background Halo -->
+  <circle cx="60" cy="60" r="42" fill="url(#jhx-core-glow)" />
 
-  <!-- Target Crosshair Sight Rings -->
-  <circle cx="50" cy="50" r="28" stroke="url(#jhx-grad-2)" stroke-width="2" stroke-dasharray="8 4" opacity="0.8"/>
-  <circle cx="50" cy="50" r="16" stroke="#06b6d4" stroke-width="1.5" opacity="0.9" filter="url(#jhx-glow)"/>
+  <!-- Outer Cyber Diamond Shield -->
+  <path d="M 60,10 L 105,60 L 60,110 L 15,60 Z" 
+        stroke="url(#jhx-main-grad)" 
+        stroke-width="4" 
+        stroke-linejoin="round" 
+        filter="url(#jhx-glow-filter)"/>
 
-  <!-- Stylized 'X' Hunter Blade Wings -->
-  <path d="M 30,30 L 70,70 M 70,30 L 30,70" 
-        stroke="url(#jhx-grad-1)" 
-        stroke-width="6" 
-        stroke-linecap="round" 
-        filter="url(#jhx-glow)"/>
+  <!-- Inner Octagonal Precision Frame -->
+  <polygon points="60,22 92,42 92,78 60,98 28,78 28,42" 
+           stroke="url(#jhx-accent-grad)" 
+           stroke-width="2" 
+           stroke-dasharray="6 3" 
+           opacity="0.85"/>
 
-  <!-- Central Target Core -->
-  <circle cx="50" cy="50" r="5" fill="#ffffff" filter="url(#jhx-glow)"/>
-  <circle cx="50" cy="50" r="2.5" fill="#a855f7"/>
+  <!-- Stylized Falcon Hunter 'X' Blades -->
+  <path d="M 38,38 Q 60,52 82,38 Q 68,60 82,82 Q 60,68 38,82 Q 52,60 38,38 Z" 
+        fill="url(#jhx-main-grad)" 
+        opacity="0.9"
+        filter="url(#jhx-glow-filter)"/>
 
-  <!-- Precision Tech Nodes -->
-  <circle cx="50" cy="14" r="3" fill="#06b6d4" filter="url(#jhx-glow)"/>
-  <circle cx="82" cy="32" r="3" fill="#10b981" filter="url(#jhx-glow)"/>
-  <circle cx="82" cy="68" r="3" fill="#a855f7" filter="url(#jhx-glow)"/>
-  <circle cx="50" cy="86" r="3" fill="#ec4899" filter="url(#jhx-glow)"/>
-  <circle cx="18" cy="68" r="3" fill="#3b82f6" filter="url(#jhx-glow)"/>
-  <circle cx="18" cy="32" r="3" fill="#8b5cf6" filter="url(#jhx-glow)"/>
+  <!-- Precision Crosshair Reticle -->
+  <circle cx="60" cy="60" r="22" stroke="#06b6d4" stroke-width="2" stroke-dasharray="4 2" opacity="0.9"/>
+  <line x1="60" y1="28" x2="60" y2="42" stroke="#a855f7" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="60" y1="78" x2="60" y2="92" stroke="#a855f7" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="28" y1="60" x2="42" y2="60" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="78" y1="60" x2="92" y2="60" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Glowing Target Core -->
+  <circle cx="60" cy="60" r="7" fill="#ffffff" filter="url(#jhx-glow-filter)"/>
+  <circle cx="60" cy="60" r="3.5" fill="#a855f7"/>
+
+  <!-- Satellite Nodes -->
+  <circle cx="60" cy="10" r="3.5" fill="#c084fc" filter="url(#jhx-glow-filter)"/>
+  <circle cx="105" cy="60" r="3.5" fill="#10b981" filter="url(#jhx-glow-filter)"/>
+  <circle cx="60" cy="110" r="3.5" fill="#06b6d4" filter="url(#jhx-glow-filter)"/>
+  <circle cx="15" cy="60" r="3.5" fill="#f43f5e" filter="url(#jhx-glow-filter)"/>
 </svg>
