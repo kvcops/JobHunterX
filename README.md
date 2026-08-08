@@ -540,9 +540,12 @@ source .venv/bin/activate       # Linux / macOS
 ### 2. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt --prefer-binary
 playwright install chromium
 ```
+
+> [!TIP]
+> `--prefer-binary` tells pip to pick the newest release that ships a prebuilt wheel instead of compiling from source. The flag is also baked into `requirements.txt`, so `pip install -r requirements.txt` alone already avoids the issue.
 
 ### 3. Configure Environment
 
