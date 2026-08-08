@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     browser_use_headless_original: bool = False # fallback reference
     browser_use_cloud: bool = False     # set True + BROWSER_USE_API_KEY in .env to use stealth cloud browsers
 
+    # --- Web Search API Provider Keys & Router Settings ---
+    enable_web_search_apis: bool = True
+    search_router_mode: str = "sequential"
+    primary_search_provider: str = "tinyfish"
+    strict_zero_spend_protection: bool = True
+    quality_score_threshold: float = 0.60
+
+    tinyfish_api_key: Optional[str] = None
+    tavily_api_key: Optional[str] = None
+    exa_api_key: Optional[str] = None
+    brave_api_key: Optional[str] = None
+    brave_enabled: bool = False
+    tavily_search_depth: str = "basic"
+    exa_search_num_results: int = 10
+
 
     # --- Storage Paths ---
     db_path: str = str(_BASE_DIR / "data" / "jobhunterx.db")

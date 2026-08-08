@@ -158,6 +158,7 @@ async def store_jobs(job_dicts: list[dict]) -> dict:
         job_id = await db.insert_job({
             "company": job["company"],
             "role": job["role"],
+            "location": job.get("location", ""),
             "career_page_url": job.get("career_page_url", ""),
             "apply_url": job.get("apply_url", ""),
             "jd_text": job.get("jd_text", ""),

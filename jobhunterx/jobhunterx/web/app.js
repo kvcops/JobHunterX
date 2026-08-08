@@ -59,6 +59,8 @@ const maxWsReconnectDelay = 30000;
 const API_BASE = `${window.location.protocol}//${window.location.host}/api`;
 const WS_BASE = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
+let enableWebSearchAPIs = true;
+
 // ---------------------------------------------------------------------------
 // Document Ready Init
 // ---------------------------------------------------------------------------
@@ -67,7 +69,60 @@ document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
   connectWebSocket();
   loadInitialData();
+  fetchSettings();
 });
+
+async function fetchSettings() {
+  try {
+    const res = await fetch("/api/settings");
+    if (res.ok) {
+      const data = await res.json();
+      enableWebSearchAPIs = data.enable_web_search_apis !== false;
+      updateWebSearchAPIsUI();
+    }
+  } catch (err) {
+    console.error("Error fetching settings:", err);
+  }
+}
+
+async function toggleWebSearchAPIs() {
+  enableWebSearchAPIs = !enableWebSearchAPIs;
+  updateWebSearchAPIsUI();
+  showToast(
+    enableWebSearchAPIs
+      ? "Web Search APIs Enabled (TinyFish, Tavily, Exa, Brave)"
+      : "Web Search APIs Disabled (Direct Scraper Mode Only)",
+    enableWebSearchAPIs ? "success" : "info"
+  );
+  try {
+    await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enable_web_search_apis: enableWebSearchAPIs }),
+    });
+  } catch (err) {
+    console.error("Error updating settings:", err);
+  }
+}
+
+function updateWebSearchAPIsUI() {
+  const btn = document.getElementById("header-search-api-toggle-btn");
+  const text = document.getElementById("header-search-api-text");
+  const dot = document.getElementById("search-api-pulse-dot");
+  if (!btn || !text || !dot) return;
+
+  if (enableWebSearchAPIs) {
+    btn.className = "compact-mode-pill search-toggle active";
+    text.textContent = "Web APIs: ON";
+    dot.className = "mode-pulse-dot automatic";
+    btn.title = "Web Search APIs Enabled. Click to toggle OFF for direct scraper mode.";
+  } else {
+    btn.className = "compact-mode-pill search-toggle disabled";
+    text.textContent = "Web APIs: OFF";
+    dot.className = "mode-pulse-dot manual";
+    btn.title = "Web Search APIs Disabled. Using direct scraper mode. Click to toggle ON.";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Toast Notifications

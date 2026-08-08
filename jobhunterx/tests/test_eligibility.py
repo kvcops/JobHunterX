@@ -165,3 +165,26 @@ def test_senior_role_with_junior_marker_pass_attempt():
 def test_campus_ambassador_rejected():
     job = jd("Spread the word on campus!", role="Campus Ambassador")
     assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"
+
+
+# --- Foreign Remote & Language Leakage Rejection ---------------------------
+
+
+def test_us_remote_job_rejected():
+    job = jd("Great remote engineering role for US candidates.", role="Software Engineer", loc="US Remote")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"
+
+
+def test_remote_russia_job_rejected():
+    job = jd("Remote opportunity in Moscow.", role="Backend Engineer", loc="Remote - Russia")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"
+
+
+def test_cyrillic_script_job_rejected():
+    job = jd("Требуемый опыт: от 3 лет. Полная занятость, удаленная работа.", role="Разработчик Python", loc="Remote")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"
+
+
+def test_europe_remote_job_rejected():
+    job = jd("Must be based in EU timezone.", role="Software Engineer", loc="Remote (Europe)")
+    assert check_eligibility(job, FRESHER_PLAN)["verdict"] == "reject"

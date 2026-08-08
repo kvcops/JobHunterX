@@ -106,11 +106,44 @@ def _is_blacklisted_company(name: str) -> bool:
     return False
 
 
+_DIRECT_JOB_URL_PATTERNS = [
+    r"linkedin\.com/jobs/(?:view|collections)",
+    r"indeed\.(?:com|co\.in)/(?:viewjob|job)",
+    r"foundit\.in/job",
+    r"naukri\.com/job-listings",
+    r"instahyre\.com/job",
+    r"hirist\.(?:com|tech)/j/",
+    r"cutshort\.io/job",
+    r"wellfound\.com/jobs",
+    r"boards\.greenhouse\.io",
+    r"jobs\.lever\.co",
+    r"jobs\.ashbyhq\.com",
+    r"apply\.workable\.com",
+    r"careers\.smartrecruiters\.com",
+    r"jobs\.smartrecruiters\.com",
+    r"\.bamboohr\.com/careers",
+    r"\.freshteam\.com/jobs",
+    r"\.breezy\.hr/p/",
+    r"myworkdayjobs\.com",
+]
+
+
+def _is_direct_job_url(url: str) -> bool:
+    url_low = url.lower()
+    for pat in _DIRECT_JOB_URL_PATTERNS:
+        if re.search(pat, url_low):
+            return True
+    return False
+
+
 def _is_aggregator(url: str) -> bool:
+    if _is_direct_job_url(url):
+        return False
     try:
+        url_low = url.lower()
         domain = urlparse(url).netloc.lower()
         for agg in AGGREGATOR_DOMAINS:
-            if agg in domain:
+            if agg in domain or agg in url_low:
                 return True
     except Exception:
         pass
@@ -118,6 +151,8 @@ def _is_aggregator(url: str) -> bool:
 
 
 def _looks_like_job_url(url: str) -> bool:
+    if _is_direct_job_url(url):
+        return True
     url_low = url.lower()
     for pat in CAREER_PAGE_PATTERNS:
         if re.search(pat, url_low):
@@ -261,38 +296,38 @@ def build_search_queries(profile: dict, plan: dict) -> list[str]:
             india_locations.append(loc)
 
     primary_role = target_roles[0] if target_roles else "software engineer"
+    target_loc_name = india_locations[0] if india_locations else "India"
+    loc_str = "India remote" if target_loc_name.lower() == "remote" else f'"{target_loc_name}" India'
 
     for loc in india_locations[:3]:
-        suffix = "India" if loc.lower() != "remote" else ""
-        queries.append(f'"{primary_role}" hiring {loc} {suffix} 2026'.strip())
+        suf = "India" if loc.lower() != "remote" else "India remote"
+        queries.append(f'"{primary_role}" hiring "{loc}" {suf}'.strip())
 
     if len(target_roles) > 1:
         for role in target_roles[1:3]:
-            loc = india_locations[0] if india_locations else "India"
-            queries.append(f'"{role}" jobs {loc} India')
+            queries.append(f'"{role}" jobs {loc_str}')
 
     if years < 1:
         for loc in india_locations[:2]:
-            queries.append(f'"{primary_role}" fresher hiring {loc} 2026')
-        queries.append(f'{primary_role} freshers India startup hiring 2026')
+            queries.append(f'"{primary_role}" fresher hiring "{loc}" India')
+        queries.append(f'"{primary_role}" freshers {loc_str} startup hiring')
 
     top_skills = skills[:3]
     if top_skills:
         skill_str = " ".join(top_skills)
-        loc = india_locations[0] if india_locations else "India"
-        queries.append(f'{skill_str} developer jobs {loc} India startup')
+        queries.append(f'{skill_str} developer jobs {loc_str} startup')
 
     for loc in india_locations[:2]:
-        queries.append(f'startup hiring {primary_role} {loc} India careers')
+        queries.append(f'startup hiring "{primary_role}" "{loc}" India careers')
 
-    queries.append(f'{primary_role} India startup careers page hiring 2026')
+    queries.append(f'"{primary_role}" {loc_str} startup careers page hiring')
 
     if top_skills:
-        queries.append(f'{" ".join(top_skills[:2])} hiring India careers apply')
+        queries.append(f'{" ".join(top_skills[:2])} hiring {loc_str} careers apply')
 
     for loc in india_locations[:2]:
         if exp_terms:
-            queries.append(f'{primary_role} {exp_terms[0]} {loc} India hiring')
+            queries.append(f'"{primary_role}" {exp_terms[0]} "{loc}" India hiring')
 
     seen = set()
     unique_queries = []
@@ -376,68 +411,157 @@ async def scrape_job_page(url: str) -> dict:
         soup = BeautifulSoup(html_content, "html.parser")
         data = {}
 
-        for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
-            tag.decompose()
+        # 1. Parse structured JSON-LD JobPosting FIRST (before decomposing script tags!)
+        for ld_json in soup.find_all("script", type="application/ld+json"):
+            try:
+                if not ld_json.string:
+                    continue
+                import json
+                ld = json.loads(ld_json.string)
+                if isinstance(ld, list):
+                    ld = next((x for x in ld if isinstance(x, dict) and x.get("@type") == "JobPosting"), ld[0] if ld else {})
+                if isinstance(ld, dict) and ld.get("@type") == "JobPosting":
+                    if ld.get("title"):
+                        data["title"] = str(ld["title"])[:200]
+                    org = ld.get("hiringOrganization") or {}
+                    if isinstance(org, dict) and org.get("name"):
+                        data["company"] = str(org["name"])[:100]
+                    jl = ld.get("jobLocation")
+                    if isinstance(jl, list):
+                        jl = jl[0] if jl else {}
+                    if isinstance(jl, dict):
+                        addr = jl.get("address") or {}
+                        if isinstance(addr, dict):
+                            city = addr.get("addressLocality", "")
+                            region = addr.get("addressRegion", "")
+                            country = addr.get("addressCountry", "")
+                            if isinstance(country, dict):
+                                country = country.get("name") or country.get("addressCountry") or ""
+                            parts = [p for p in (city, region, country) if p]
+                            if parts:
+                                data["location"] = ", ".join(parts)[:150]
+                    elif isinstance(jl, str) and jl.strip():
+                        data["location"] = jl.strip()[:150]
+                    
+                    desc = ld.get("description", "")
+                    if desc and len(desc) > 100:
+                        clean = re.sub(r"<[^>]+>", " ", desc)
+                        data["jd_text"] = re.sub(r"\s+", " ", clean)[:6000]
+            except Exception:
+                pass
 
-        title_el = soup.find("h1")
-        if title_el:
-            data["title"] = title_el.get_text(strip=True)[:200]
+        # 2. Extract OpenGraph and Meta tags
+        og_site = soup.find("meta", property="og:site_name")
+        if og_site and not data.get("company"):
+            data["company"] = (og_site.get("content") or "")[:100]
+
+        if not data.get("company"):
+            data["company"] = _extract_company_from_url(page_url)
 
         if not data.get("title"):
-            og = soup.find("meta", property="og:title")
-            if og:
-                data["title"] = (og.get("content") or "")[:200]
+            h1 = soup.find("h1")
+            if h1:
+                data["title"] = h1.get_text(strip=True)[:200]
+
+        if not data.get("title"):
+            og_title = soup.find("meta", property="og:title")
+            if og_title:
+                data["title"] = (og_title.get("content") or "")[:200]
 
         if not data.get("title"):
             title_tag = soup.find("title")
             if title_tag:
                 data["title"] = title_tag.get_text(strip=True)[:200]
 
-        body_text = soup.get_text(separator=" ", strip=True)
-        body_text = re.sub(r"\s+", " ", body_text)[:6000]
-        data["jd_text"] = body_text
+        # 3. Specific location element extraction if JSON-LD location was not found
+        if not data.get("location"):
+            meta_loc = soup.find("meta", attrs={"name": re.compile(r"job:location|location", re.I)})
+            if meta_loc and meta_loc.get("content"):
+                data["location"] = meta_loc.get("content").strip()[:150]
 
-        loc_markers = []
-        for city in INDIA_CITIES:
-            if city in body_text.lower():
-                loc_markers.append(city.title())
-        if "remote" in body_text.lower():
-            loc_markers.append("Remote")
-        if loc_markers:
-            data["location"] = ", ".join(loc_markers[:3])
+        if not data.get("location"):
+            loc_el = soup.find(class_=re.compile(r"location|job-location|posting-category", re.I))
+            if loc_el:
+                loc_txt = loc_el.get_text(separator=" ", strip=True)
+                if loc_txt and len(loc_txt) < 100:
+                    data["location"] = loc_txt
 
-        company = _extract_company_from_url(page_url)
-        og_site = soup.find("meta", property="og:site_name")
-        if og_site:
-            company = (og_site.get("content") or company or "")[:100]
-        data["company"] = company
+        # Specific portal extractors (LinkedIn, Indeed, FoundIt, Naukri, Instahyre)
+        low_url = page_url.lower()
+        if "linkedin.com" in low_url:
+            comp_el = soup.find(class_=re.compile(r"topcard__flavor|top-card-layout__first-sub-row|company-name", re.I))
+            if comp_el and not data.get("company"):
+                data["company"] = comp_el.get_text(strip=True)[:100]
+            loc_el = soup.find(class_=re.compile(r"topcard__flavor--bullet|top-card-layout__second-sub-row|location", re.I))
+            if loc_el and not data.get("location"):
+                data["location"] = loc_el.get_text(strip=True)[:100]
+            desc_el = soup.find(class_=re.compile(r"description__text|show-more-less-html", re.I))
+            if desc_el:
+                clean_desc = re.sub(r"\s+", " ", desc_el.get_text(separator=" ", strip=True))
+                if len(clean_desc) > 100:
+                    data["jd_text"] = clean_desc[:6000]
 
-        ld_json = soup.find("script", type="application/ld+json")
-        if ld_json:
-            try:
-                import json
-                ld = json.loads(ld_json.string or "")
-                if isinstance(ld, list):
-                    ld = next((x for x in ld if x.get("@type") == "JobPosting"), ld[0] if ld else {})
-                if isinstance(ld, dict):
-                    if ld.get("@type") == "JobPosting":
-                        data["title"] = data.get("title") or ld.get("title", "")
-                        org = ld.get("hiringOrganization") or {}
-                        if isinstance(org, dict):
-                            data["company"] = org.get("name") or data.get("company", "")
-                        jl = ld.get("jobLocation")
-                        if isinstance(jl, dict):
-                            addr = jl.get("address") or {}
-                            if isinstance(addr, dict):
-                                city = addr.get("addressLocality", "")
-                                region = addr.get("addressRegion", "")
-                                data["location"] = f"{city}, {region}".strip(", ") or data.get("location", "")
-                        desc = ld.get("description", "")
-                        if desc and len(desc) > len(data.get("jd_text", "")):
-                            clean = re.sub(r"<[^>]+>", " ", desc)
-                            data["jd_text"] = re.sub(r"\s+", " ", clean)[:6000]
-            except Exception:
-                pass
+        elif "indeed." in low_url:
+            comp_el = soup.find(attrs={"data-testid": "inlineHeader-companyName"}) or soup.find(class_=re.compile(r"companyName", re.I))
+            if comp_el and not data.get("company"):
+                data["company"] = comp_el.get_text(strip=True)[:100]
+            loc_el = soup.find(attrs={"data-testid": "inlineHeader-companyLocation"}) or soup.find(class_=re.compile(r"companyLocation", re.I))
+            if loc_el and not data.get("location"):
+                data["location"] = loc_el.get_text(strip=True)[:100]
+
+        elif "foundit.in" in low_url:
+            comp_el = soup.find(class_=re.compile(r"company-name|employer-name", re.I))
+            if comp_el and not data.get("company"):
+                data["company"] = comp_el.get_text(strip=True)[:100]
+            loc_el = soup.find(class_=re.compile(r"location|job-location", re.I))
+            if loc_el and not data.get("location"):
+                data["location"] = loc_el.get_text(strip=True)[:100]
+
+        elif "naukri.com" in low_url:
+            comp_el = soup.find(class_=re.compile(r"jd-header-comp-name|comp-name", re.I))
+            if comp_el and not data.get("company"):
+                data["company"] = comp_el.get_text(strip=True)[:100]
+            loc_el = soup.find(class_=re.compile(r"location|loc", re.I))
+            if loc_el and not data.get("location"):
+                data["location"] = loc_el.get_text(strip=True)[:100]
+
+        elif "instahyre.com" in low_url:
+            comp_el = soup.find(class_=re.compile(r"company-name|employer", re.I))
+            if comp_el and not data.get("company"):
+                data["company"] = comp_el.get_text(strip=True)[:100]
+            loc_el = soup.find(class_=re.compile(r"location|job-location", re.I))
+            if loc_el and not data.get("location"):
+                data["location"] = loc_el.get_text(strip=True)[:100]
+
+        # 4. Clean noise elements for body text extraction
+        for tag in soup.find_all(["script", "style", "nav", "footer", "header", "svg", "iframe"]):
+            tag.decompose()
+
+        if not data.get("jd_text"):
+            body_text = soup.get_text(separator=" ", strip=True)
+            body_text = re.sub(r"\s+", " ", body_text)[:6000]
+            data["jd_text"] = body_text
+        else:
+            body_text = data["jd_text"]
+
+        # 5. Fallback location extraction if still unknown
+        if not data.get("location"):
+            loc_markers = []
+            for city in INDIA_CITIES:
+                if city in body_text.lower():
+                    loc_markers.append(city.title())
+            if "remote" in body_text.lower():
+                loc_markers.append("Remote")
+            if loc_markers:
+                data["location"] = ", ".join(loc_markers[:3])
+            else:
+                body_low = body_text.lower()
+                foreign_found = []
+                for f_marker in ("russia", "moscow", "saint petersburg", "united states", "usa", "san francisco", "new york", "uk", "london", "berlin", "canada", "toronto"):
+                    if f_marker in body_low:
+                        foreign_found.append(f_marker.title())
+                if foreign_found:
+                    data["location"] = ", ".join(foreign_found[:2])
 
         _APPLY_LINK_PATTERNS = [
             "greenhouse.io", "lever.co", "ashbyhq.com", "recruitee.com",
@@ -486,20 +610,11 @@ async def discover_jobs(
     inter_query_delay: float = 1.5,
     event_cb=None,
 ) -> list[dict]:
-    """Full discovery pipeline: search → filter → scrape → structure.
-
-    Args:
-        profile: candidate profile dict
-        plan: search plan from search_planner
-        max_queries: how many DDG queries to run
-        results_per_query: results per query
-        max_scrape: max URLs to scrape for job details
-        scrape_concurrency: parallel scrape workers
-        inter_query_delay: seconds between DDG queries (rate limit)
-        event_cb: async callback for progress events
-
-    Returns: list of job dicts ready for scoring/storage
-    """
+    """Full discovery pipeline: SearchRouter -> QualityGate -> FetchPipeline -> Structure."""
+    from jobhunterx.config.settings import get_settings
+    from jobhunterx.tools.quality_gate import SearchContext
+    from jobhunterx.tools.search_router import route_search_queries
+    from jobhunterx.tools.fetch_pipeline import execute_fetch_pipeline
 
     async def emit(msg: str):
         if event_cb:
@@ -512,67 +627,62 @@ async def discover_jobs(
             except Exception:
                 pass
 
+    s = get_settings()
+    target_roles = plan.get("target_roles") or [profile.get("suggested_role") or "Software Engineer"]
+    locations = plan.get("locations") or [profile.get("location") or "Hyderabad"]
+
+    context = SearchContext(
+        target_role=target_roles[0],
+        target_location=locations[0],
+        experience_level=float(plan.get("years_experience") or 0),
+        remote_preference=profile.get("work_type", "hybrid"),
+        freshness_requirement="recent",
+    )
+
+    cfg = {
+        "SEARCH_ROUTER_MODE": s.search_router_mode,
+        "PRIMARY_SEARCH_PROVIDER": s.primary_search_provider,
+        "STRICT_ZERO_SPEND_PROTECTION": s.strict_zero_spend_protection,
+        "QUALITY_SCORE_THRESHOLD": s.quality_score_threshold,
+        "TINYFISH_API_KEY": s.tinyfish_api_key,
+        "TAVILY_API_KEY": s.tavily_api_key,
+        "EXA_API_KEY": s.exa_api_key,
+        "BRAVE_API_KEY": s.brave_api_key,
+        "BRAVE_ENABLED": s.brave_enabled,
+    }
+
     queries = build_search_queries(profile, plan)[:max_queries]
-    await emit(f"Built {len(queries)} search queries for {plan.get('locations', ['India'])}")
+    await emit(f"Built {len(queries)} search queries for {locations}")
 
-    all_results: list[SearchResult] = []
-    seen_urls: set[str] = set()
+    if getattr(s, "enable_web_search_apis", True):
+        serp_items = await route_search_queries(queries, context=context, config=cfg)
+        await emit(f"Discovered {len(serp_items)} search results across providers")
+        urls_to_fetch = [item.url for item in serp_items]
+    else:
+        await emit("Web Search APIs disabled in settings. Using direct scraper fallback...")
+        urls_to_fetch = []
 
-    for i, query in enumerate(queries):
-        await emit(f"[{i+1}/{len(queries)}] Searching: {query[:60]}...")
-        results = await search_ddg(query, max_results=results_per_query)
-        for r in results:
-            norm_url = r.url.rstrip("/").lower()
-            if norm_url not in seen_urls:
-                seen_urls.add(norm_url)
-                all_results.append(r)
-        if i < len(queries) - 1:
-            await asyncio.sleep(inter_query_delay)
+    if not urls_to_fetch:
+        # Fallback to direct DDG search if disabled or no provider results
+        for q in queries[:4]:
+            ddg_res = await search_ddg(q, max_results=10)
+            urls_to_fetch.extend([r.url for r in ddg_res])
 
-    log.info("ddg_search_complete", total_queries=len(queries),
-             unique_results=len(all_results))
-    await emit(f"Found {len(all_results)} unique results from {len(queries)} searches")
-
-    job_results = [r for r in all_results if r.is_job_posting]
-    non_job = [r for r in all_results if not r.is_job_posting]
-
-    to_scrape = job_results[:max_scrape]
-    remaining = max_scrape - len(to_scrape)
-    if remaining > 0:
-        to_scrape.extend(non_job[:remaining])
-
-    await emit(f"Scraping {len(to_scrape)} promising URLs for job details...")
-
-    sem = asyncio.Semaphore(scrape_concurrency)
-
-    async def scrape_one(result: SearchResult) -> Optional[dict]:
-        async with sem:
-            data = await scrape_job_page(result.url)
-            if not data or not data.get("jd_text"):
-                return None
-            data["company"] = data.get("company") or result.company or ""
-            data["title"] = data.get("title") or result.title or ""
-            data["search_snippet"] = result.snippet
-            data["source"] = "ddg_search"
-            return data
-
-    scraped = await asyncio.gather(*(scrape_one(r) for r in to_scrape))
-    jobs = [j for j in scraped if j is not None]
+    await emit(f"Fetching job details for {len(urls_to_fetch[:max_scrape])} candidate URLs...")
+    extracted_jobs = await execute_fetch_pipeline(urls_to_fetch, max_fetch=max_scrape, config=cfg)
 
     valid_jobs = []
-    for job in jobs:
+    for job in extracted_jobs:
         company = job.get("company", "")
         if _is_blacklisted_company(company):
             continue
         if not job.get("title") and not job.get("jd_text"):
             continue
-        title = job.get("title") or ""
-        jd = job.get("jd_text") or ""
-        combined = f"{title} {jd}".lower()
-        has_india = any(c in combined for c in INDIA_CITIES) or "india" in combined or "remote" in combined
-        if not has_india and not job.get("location"):
-            continue
         valid_jobs.append(job)
+
+    log.info("discover_jobs_complete", valid_jobs_count=len(valid_jobs))
+    await emit(f"Extracted {len(valid_jobs)} valid job postings")
+    return valid_jobs
 
     log.info("discovery_complete", scraped=len(jobs), valid=len(valid_jobs))
     await emit(f"Discovery complete: {len(valid_jobs)} valid jobs from {len(jobs)} scraped pages")

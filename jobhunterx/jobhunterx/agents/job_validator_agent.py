@@ -155,14 +155,15 @@ async def validate_and_clean_job(job: dict) -> dict:
     url = job.get("apply_url") or job.get("career_page_url", "")
     jd_snippet = (job.get("jd_text") or "")[:800]
 
-    # Reject foreign script noise directly
-    if re.search(r"[\u0400-\u04FF]", raw_company) or re.search(r"[\u0400-\u04FF]", raw_role):
+    # Reject foreign script noise or Russian language text in company, role, or description
+    combined_sample = f"{raw_company} {raw_role} {jd_snippet}".lower()
+    if re.search(r"[\u0400-\u04FF]", combined_sample) or any(k in combined_sample for k in ("вакансии", "откликнуться", "команду", "разработчик")):
         log.info("rejected_foreign_garbage_job", company=raw_company, role=raw_role)
         return {
             "is_valid_job": False,
             "clean_company": "",
             "clean_role": "",
-            "reject_reason": "Foreign script noise detected"
+            "reject_reason": "Foreign non-English script/language noise detected"
         }
 
     # Quick heuristic pass first

@@ -80,6 +80,11 @@
 
       <!-- Right Header Actions Island -->
       <div class="header-actions-area glass-pill-island">
+        <button id="header-search-api-toggle-btn" class="compact-mode-pill search-toggle" onclick="toggleWebSearchAPIs()" title="Toggle Web Search APIs (TinyFish, Tavily, Exa, Brave) vs Direct Scraper Mode">
+          <span class="mode-pulse-dot automatic" id="search-api-pulse-dot"></span>
+          <span id="header-search-api-text" class="mode-text">Web APIs: ON</span>
+        </button>
+
         <button id="header-mode-toggle-btn" class="compact-mode-pill auto" onclick="togglePipelineMode()" title="Execution Mode: Automatic. Click to switch to Manual mode.">
           <span class="mode-pulse-dot automatic" id="mode-pulse-dot"></span>
           <span id="header-mode-text" class="mode-text">Auto Mode</span>

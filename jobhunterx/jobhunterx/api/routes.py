@@ -189,6 +189,69 @@ async def list_locations():
     ]}
 
 
+def _mask_api_key(key: Optional[str]) -> str:
+    if not key or not key.strip():
+        return ""
+    val = key.strip()
+    if len(val) <= 6:
+        return "******"
+    return "********" + val[-4:]
+
+
+@router.get("/settings")
+async def get_settings_masked():
+    """Return application settings with masked API keys for privacy/security."""
+    from jobhunterx.config.settings import get_settings
+    s = get_settings()
+
+    return {
+        "enable_web_search_apis": getattr(s, "enable_web_search_apis", True),
+        "search_router_mode": s.search_router_mode,
+        "primary_search_provider": s.primary_search_provider,
+        "strict_zero_spend_protection": s.strict_zero_spend_protection,
+        "quality_score_threshold": s.quality_score_threshold,
+        "tinyfish_configured": bool(s.tinyfish_api_key),
+        "tinyfish_key_masked": _mask_api_key(s.tinyfish_api_key),
+        "tavily_configured": bool(s.tavily_api_key),
+        "tavily_key_masked": _mask_api_key(s.tavily_api_key),
+        "exa_configured": bool(s.exa_api_key),
+        "exa_key_masked": _mask_api_key(s.exa_api_key),
+        "brave_configured": bool(s.brave_api_key),
+        "brave_enabled": s.brave_enabled,
+        "brave_key_masked": _mask_api_key(s.brave_api_key),
+    }
+
+
+@router.post("/settings")
+async def update_settings(payload: dict):
+    """Update search API provider configuration settings."""
+    from jobhunterx.config.settings import get_settings
+    s = get_settings()
+
+    if "enable_web_search_apis" in payload:
+        s.enable_web_search_apis = bool(payload["enable_web_search_apis"])
+    if "tinyfish_api_key" in payload:
+        s.tinyfish_api_key = payload["tinyfish_api_key"]
+    if "tavily_api_key" in payload:
+        s.tavily_api_key = payload["tavily_api_key"]
+    if "exa_api_key" in payload:
+        s.exa_api_key = payload["exa_api_key"]
+    if "brave_api_key" in payload:
+        s.brave_api_key = payload["brave_api_key"]
+    if "brave_enabled" in payload:
+        s.brave_enabled = bool(payload["brave_enabled"])
+    if "primary_search_provider" in payload:
+        s.primary_search_provider = str(payload["primary_search_provider"])
+    if "strict_zero_spend_protection" in payload:
+        s.strict_zero_spend_protection = bool(payload["strict_zero_spend_protection"])
+
+    return {
+        "status": "updated",
+        "enable_web_search_apis": s.enable_web_search_apis,
+        "primary_search_provider": s.primary_search_provider,
+    }
+
+
 @router.get("/budget")
 async def get_budget():
     """Gemma budget usage (15k RPD / 30 RPM)."""

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     id                  TEXT PRIMARY KEY,
     company             TEXT NOT NULL,
     role                TEXT,
+    location            TEXT,
     career_page_url     TEXT,
     apply_url           TEXT,
     apply_url_hash      TEXT UNIQUE,
@@ -163,6 +164,15 @@ def set_db_path(path: str) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
+def get_db_path() -> str:
+    """Get the current database path or fallback to settings."""
+    global _db_path
+    if _db_path:
+        return _db_path
+    from jobhunterx.config.settings import get_settings
+    return get_settings().db_path
+
+
 async def get_connection() -> aiosqlite.Connection:
     """Open a new connection to the database."""
     if _db_path is None:
@@ -224,6 +234,11 @@ async def init_db() -> None:
             await conn.commit()
         except Exception:
             pass  # column already exists
+        try:
+            await conn.execute("ALTER TABLE jobs ADD COLUMN location TEXT DEFAULT ''")
+            await conn.commit()
+        except Exception:
+            pass  # column already exists
         log.info("database_ready")
     finally:
         await conn.close()
@@ -275,11 +290,12 @@ async def get_latest_profile() -> Optional[dict]:
 async def _update_existing_job(db, job_id: str, job_data: dict) -> None:
     """Refresh an existing job row with fresh discovered data."""
     await db.execute(
-        """UPDATE jobs SET company = ?, role = ?, jd_text = ?, 
+        """UPDATE jobs SET company = ?, role = ?, location = ?, jd_text = ?, 
            source = ?, updated_at = ? WHERE id = ?""",
         (
             job_data.get("company", ""),
             job_data.get("role"),
+            job_data.get("location"),
             job_data.get("jd_text"),
             job_data.get("source"),
             _now_iso(),
@@ -320,13 +336,14 @@ async def insert_job(job_data: dict) -> str:
         try:
             await db.execute(
                 """INSERT INTO jobs
-                   (id, company, role, career_page_url, apply_url, apply_url_hash,
+                   (id, company, role, location, career_page_url, apply_url, apply_url_hash,
                     jd_text, source, discovery_confidence, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job_id,
                     job_data.get("company", ""),
                     job_data.get("role"),
+                    job_data.get("location", ""),
                     job_data.get("career_page_url"),
                     apply_url,
                     url_hash,
@@ -360,7 +377,7 @@ async def insert_job(job_data: dict) -> str:
 
 
 _JOB_UPDATEABLE_COLUMNS = frozenset({
-    "company", "role", "career_page_url", "apply_url", "apply_url_hash",
+    "company", "role", "location", "career_page_url", "apply_url", "apply_url_hash",
     "jd_text", "source", "discovery_confidence", "freshness_json",
     "validation_json", "match_score", "status", "tailored_pdf",
 })

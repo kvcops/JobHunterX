@@ -181,6 +181,85 @@ graph LR
 
 ---
 
+## 🌐 Web Search Architecture & Provider Modes
+
+JobHunterX features a multi-provider web search architecture designed for high-precision job discovery, zero accidental billing, and request conservation. It supports two switchable search execution modes, controllable via the UI header toggle button (**`Web APIs: ON / OFF`**) or the `.env` configuration file (`ENABLE_WEB_SEARCH_APIS=true/false`).
+
+```mermaid
+flowchart TD
+    SEARCH_REQ([🔍 User Job Search Query]) --> MODE_CHECK{"Web Search APIs Mode?"}
+
+    MODE_CHECK -->|ON (ENABLE_WEB_SEARCH_APIS=true)| ROUTER["Intelligent Sequential Search Router"]
+    MODE_CHECK -->|OFF (ENABLE_WEB_SEARCH_APIS=false)| DIRECT_SCRAPER["Direct Scraper Fallback Engine<br/>(0 API Keys Required)"]
+
+    subgraph API_ROUTER ["⚡ SEQUENTIAL ROUTER PRIORITY"]
+        ROUTER --> TF["1. TinyFish Search API<br/>(0 Credits Free Utility)"]
+        TF --> QG1{"Quality Gate<br/>Pass (≥0.60)?"}
+        QG1 -->|Yes| STOP1["STOP Router & Return SERP"]
+        QG1 -->|Insufficient / Error| TAV["2. Tavily Search API<br/>(1,000 Free Credits/Mo)"]
+        TAV --> QG2{"Quality Gate<br/>Pass (≥0.60)?"}
+        QG2 -->|Yes| STOP2["STOP Router & Return SERP"]
+        QG2 -->|Insufficient / Error| EXA["3. Exa AI Search API<br/>($10/Mo Free Credit)"]
+        EXA --> QG3{"Quality Gate<br/>Pass (≥0.60)?"}
+        QG3 -->|Yes| STOP3["STOP Router & Return SERP"]
+        QG3 -->|Insufficient / Error| DDGS_FB["4. DuckDuckGo Scraper Fallback"]
+    end
+
+    DIRECT_SCRAPER --> HYBRID_FETCH
+    STOP1 --> HYBRID_FETCH
+    STOP2 --> HYBRID_FETCH
+    STOP3 --> HYBRID_FETCH
+    DDGS_FB --> HYBRID_FETCH
+
+    subgraph HYBRID_FETCH ["📦 HYBRID FETCH PIPELINE"]
+        STEP1["Safe URL Normalization<br/>(Strips utm_*, ref, source, gclid)"] --> STEP2["Lightweight Async Direct HTTP"]
+        STEP2 -->|Static HTML| BS4["BeautifulSoup Local Parser"]
+        STEP2 -->|JS Shell / Blocked ATS| TF_FETCH["TinyFish Fetch API<br/>(POST https://api.fetch.tinyfish.ai)"]
+    end
+
+    HYBRID_FETCH --> DEDUPE["Semantic Identity Deduplication<br/>(job_id ➔ canonical_url ➔ company+title+location)"]
+    DEDUPE --> SCORE["🎯 Job Evaluator (Gemma Scoring)"]
+```
+
+### 1. Mode Comparison
+
+| Feature / Behavior | Mode 1: Web Search APIs Mode (ON) | Mode 2: Direct Scraper Mode (OFF) |
+|:-------------------|:----------------------------------|:-----------------------------------|
+| **Toggle Control** | Header Button: **`Web APIs: ON`** / `.env`: `ENABLE_WEB_SEARCH_APIS=true` | Header Button: **`Web APIs: OFF`** / `.env`: `ENABLE_WEB_SEARCH_APIS=false` |
+| **Search Engines Used** | **TinyFish** $\rightarrow$ **Tavily** $\rightarrow$ **Exa AI** $\rightarrow$ **DDGS** (Optional: **Brave**) | Direct unauthenticated search scrapers + BeautifulSoup parser |
+| **API Keys Required** | Optional (degrades gracefully per provider) | **0 API Keys Required** |
+| **Quality Gate** | **Context-Aware Weighted SERP Quality Gate** (evaluates SERP score before calling next provider) | Direct scraping & pre-filter |
+| **JS Rendering Engine** | **TinyFish Fetch API** (batching up to 10 URLs/request for Greenhouse/Lever/Ashby) | Direct HTTP parser |
+| **Zero-Spend Protection** | Enforces 2-tier zero-spend circuit breaker | 100% Free / Unauthenticated |
+
+---
+
+### 2. Search Provider Breakdown
+
+| Provider | API Endpoint & Method | Free Monthly Allowance | Rate Limits & Capacity | Cost Model & Safety Rules |
+|:---------|:----------------------|:-----------------------|:-----------------------|:--------------------------|
+| **TinyFish Search** | `GET https://api.search.tinyfish.ai` | **Unlimited 0-credit search utility** | 30 RPM default (configurable, dynamic 429 backoff) | 0 credits. Zero cost. |
+| **TinyFish Fetch** | `POST https://api.fetch.tinyfish.ai` | **Unlimited 0-credit fetch utility** | 150 URLs/min (max 10 URLs per batch payload) | 0 credits. Zero cost. Used for JS-heavy ATS pages. |
+| **Tavily Search** | `POST https://api.tavily.com/search` | **1,000 free API credits / month** | 100 RPM limit | 1 credit (`search_depth="basic"`). `auto_parameters` is strictly disabled under zero-spend protection. |
+| **Exa AI Search** | `POST https://api.exa.ai/search` | **$10.00 / month recurring credit** | Dynamic 429 backoff | $0.007 / base request (≤10 results). Dynamically checks parameter cost. |
+| **Brave Search** | `GET https://api.search.brave.com/res/v1/web/search` | $5.00 / month recurring credit | 50 QPS capacity | $0.005 / request. **Disabled by default** (`BRAVE_ENABLED=false`) as Brave requires linking a payment card. |
+| **DuckDuckGo** | Python `ddgs` (Local Wrapper) | Unofficial scraper fallback | Adaptive backoff on 429/CAPTCHA | 0 credits. Emergency fallback when API keys are not provided or exhausted. |
+
+---
+
+### 3. Agent Responsibilities by Scenario
+
+| Agent Module | Primary Role in Search & Fetch | Behavior when Web APIs = ON | Behavior when Web APIs = OFF |
+|:-------------|:-------------------------------|:----------------------------|:-----------------------------|
+| 🗺️ **Search Planner** (`search_planner.py`) | Query Strategist | Generates 5 targeted job search queries scoped by role & location. | Generates 5 targeted job search queries scoped by role & location. |
+| 🕵️ **Web Scout & Discovery** (`job_discovery.py`) | Search Router & Orchestrator | Delegates queries to `SearchRouter` & `QualityGate`. Runs `execute_fetch_pipeline()`. | Skips Search Router. Calls direct unauthenticated scrapers & BeautifulSoup parser. |
+| 🛡️ **Zero-Spend Circuit Breaker** (`zero_spend.py`) | Safety Enforcement | Evaluates $\text{remaining\_free\_balance} - \text{worst\_case\_cost} \ge 0$. Blocks request if cost is `UNKNOWN`. | Inactive (0-cost mode). |
+| ⚖️ **Quality Gate** (`quality_gate.py`) | SERP Quality Evaluator | Scores SERP items ($0.30 \text{Rel} + 0.25 \text{Loc} + 0.20 \text{Fresh} + 0.15 \text{Src} + 0.10 \text{Uniq}$). Halts router when score $\ge 0.60$. | Inactive. |
+| 📊 **Usage Ledger** (`usage_ledger.py`) | Ledger Tracker | Records every search and fetch attempt, native billing units, and error status in SQLite. | Records scraper fetch attempts in SQLite. |
+| 🎯 **Job Evaluator** (`job_scorer.py`) | Match Scoring | Scores extracted job descriptions against skills using local Gemma LLM. | Scores extracted job descriptions against skills using local Gemma LLM. |
+
+---
+
 ## 🔄 Pipeline Modes: Automatic vs. Manual
 
 JobHunterX runs in two modes, switchable at any time from the dashboard or via the `/api/pipeline-mode` endpoint.

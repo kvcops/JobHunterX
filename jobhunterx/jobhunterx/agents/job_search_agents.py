@@ -32,18 +32,18 @@ log = get_logger("job_search_agents")
 
 EventCallback = Callable[[dict], Awaitable[None]]
 
-_QUERY_GEN_SYSTEM = """You are an expert technical talent recruiter and search strategist specialized in the INDIAN tech market.
-Generate 15 to 20 highly effective, distinct web search queries to find open job postings for a candidate.
+_QUERY_GEN_SYSTEM = """You are an expert technical talent recruiter and search strategist specialized in the Indian tech job market.
+Generate 15 to 20 highly effective, distinct web search queries to find open job postings strictly matching the candidate's specified target location.
 
 Guidelines:
-- Target Indian locations (Bengaluru, Hyderabad, Mumbai, Pune, Gurgaon, Noida, Chennai, Remote, etc.)
-- Focus on startups, product companies, SaaS, fintech, and high-growth engineering teams.
+- CRITICAL: Target ONLY the candidate's specified Preferred Locations (e.g., if they target Hyderabad, generate queries specifically for Hyderabad and India-Remote). Do NOT generate queries for other unselected cities.
+- Focus on startups, product companies, SaaS, fintech, and high-growth engineering teams in India.
 - STRICTLY avoid mass-hiring IT service companies (TCS, Infosys, Wipro, Cognizant, Accenture, HCL, LTI).
 - Build queries focusing on:
-  1. Direct job role + location + 'hiring'/'careers'/'apply'
-  2. Skill-specific developer roles in India
-  3. Indian startup job postings on Greenhouse, Lever, Ashby, or company career sites
-  4. Fresher / junior or mid-level specific queries based on candidate experience
+  1. Direct job role + candidate target location + 'hiring'/'careers'/'apply'
+  2. Skill-specific developer roles in candidate target location or India remote
+  3. Job postings on Greenhouse, Lever, Ashby, or company career sites in target location
+  4. Experience level specific queries based on candidate background
 - Output ONLY a JSON array of query strings: ["query 1", "query 2", ...]"""
 
 
@@ -88,7 +88,30 @@ async def generate_search_queries(profile: dict, plan: dict) -> list[str]:
         # Fallback query generation logic
         queries = job_discovery.build_search_queries(profile, plan)
 
-    return queries[:20]
+    # Post-process queries: enforce location / India scoping to prevent global DDG leakage
+    target_loc = locations[0] if locations else "India"
+    target_role = target_roles[0] if target_roles else "Software Engineer"
+
+    # Inject direct multi-source ATS & portal queries (LinkedIn, FoundIt, Naukri, Instahyre, Greenhouse, Lever, Ashby)
+    portal_queries = [
+        f'site:boards.greenhouse.io "{target_role}" "{target_loc}"',
+        f'site:jobs.lever.co "{target_role}" "{target_loc}"',
+        f'site:jobs.ashbyhq.com "{target_role}" "{target_loc}"',
+        f'site:linkedin.com/jobs/view "{target_role}" "{target_loc}" India',
+        f'site:naukri.com/job-listings "{target_role}" "{target_loc}"',
+        f'site:foundit.in/job "{target_role}" "{target_loc}"',
+        f'site:instahyre.com/job "{target_role}" "{target_loc}"',
+    ]
+
+    scoped_queries = list(portal_queries)
+    for q in queries:
+        q_low = q.lower()
+        if not any(loc.lower() in q_low for loc in locations) and "india" not in q_low:
+            q = f"{q} {target_loc}"
+        if q not in scoped_queries:
+            scoped_queries.append(q)
+
+    return scoped_queries[:25]
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +181,6 @@ async def evaluate_single_job(job: dict, profile: dict, plan: dict) -> dict:
     # Fallback deterministic evaluation
     from jobhunterx.agents.job_scorer import _keyword_score
     score = _keyword_score(job, profile)
-    reason = f"Keyword skill match ({int(score * 100)}%)"
     return {"match_score": score, "reason": reason}
 
 
@@ -199,7 +221,10 @@ async def run_multi_agent_search(
     plan = await search_planner.build_search_plan(profile)
     if preferred_location and preferred_location.strip():
         loc = preferred_location.strip().title()
-        plan["locations"] = [loc] + [l for l in (plan.get("locations") or []) if l.lower() != loc.lower()]
+        if loc.lower() == "remote":
+            plan["locations"] = ["Remote"]
+        else:
+            plan["locations"] = [loc, "Remote"]
 
     # 2. Agent 1: Generate Queries
     await emit("progress", "Agent 1 (Query Strategist): Generating targeted search queries...", {})
@@ -284,6 +309,7 @@ async def run_multi_agent_search(
             job_id = await db.insert_job({
                 "company": valid_job["company"],
                 "role": valid_job["role"],
+                "location": valid_job.get("location") or "",
                 "career_page_url": valid_job["career_page_url"],
                 "apply_url": valid_job["apply_url"],
                 "jd_text": valid_job["jd_text"],

@@ -118,41 +118,83 @@ def _norm_city(raw: str) -> str:
 
 
 # Locations that provably are NOT India (job is unusable for an India-only candidate).
-# "New York, USA", "London, UK", "Berlin" — none of these should ever pass the gate.
+# "New York, USA", "London, UK", "Berlin", "Moscow, Russia" — none of these should ever pass the gate.
 _FOREIGN_MARKERS = (
     " usa", " united states", " u.s.", " uk", " united kingdom", "london",
     "new york", "san francisco", "bay area", "berlin", "amsterdam", "paris",
     "toronto", "vancouver", "sydney", "melbourne", "singapore", "dubai",
-    "tokyo", "stockholm", "zurich", "remote eu", "europe", "european",
+    "tokyo", "stockholm", "zurich", "remote eu", "europe", "european", "russia",
+    "moscow", "saint petersburg", "novosibirsk", "emea", "apac", "latam",
+    "americas", "germany", "canada", "australia", "china", "beijing", "shanghai",
+    "japan", "brazil", "mexico", "poland", "spain", "italy", "israel",
+)
+
+_FOREIGN_REMOTE_PATTERNS = (
+    "us remote", "remote us", "remote (us)", "us only", "remote - us", "remote, us",
+    "russia remote", "remote russia", "remote (russia)", "remote - russia",
+    "europe remote", "remote europe", "remote (europe)", "remote - europe", "remote eu",
+    "uk remote", "remote uk", "remote (uk)", "remote - uk",
+    "canada remote", "latam remote", "emea remote", "apac remote",
 )
 
 
-def _location_conflict(job_location: str, plan_locations: list[str]) -> Optional[str]:
+def _location_conflict(job_location: str, plan_locations: list[str], jd_text: str = "", role: str = "") -> Optional[str]:
     """Return reason if job location provably excludes the candidate."""
-    jl = (job_location or "").lower()
+    jl = (job_location or "").lower().strip()
+    jd_low = (jd_text or "").lower()[:2000]
+    role_low = (role or "").lower()
+    combined_text = f"{role_low} {jl} {jd_low}"
+
+    # 1. Foreign script / Russian text check (Cyrillic script)
+    if re.search(r"[\u0400-\u04FF]", combined_text):
+        return "Location/Language: Cyrillic / Russian text in posting, not an Indian job"
+
+    # Russian language keywords
+    ru_keywords = ("вакансии", "откликнуться", "команду", "разработчик", "требуемый опыт", "работа в")
+    if any(k in combined_text for k in ru_keywords):
+        return "Location/Language: Russian language posting"
+
+    # 2. Foreign remote restriction markers check BEFORE generic remote check
+    for f_pat in _FOREIGN_REMOTE_PATTERNS:
+        if f_pat in jl or f_pat in jd_low:
+            return f"Location: foreign remote restriction ({f_pat}), not available for India candidate"
+
+    # Foreign city/country markers check in job location AND top JD text
+    jl_bounded = f" {jl} "
+    for m in _FOREIGN_MARKERS:
+        marker = m.strip()
+        if re.search(rf"\b{re.escape(marker)}\b", jl_bounded) or re.search(rf"\b{re.escape(marker)}\b", f" {jl} "):
+            return f"Location: job is abroad ({jl}), not in your accepted target location"
+
+    # 3. Empty location handling: check JD for foreign markers or Indian cities
     if not jl:
-        return None  # unknown location → let the scorer judge
+        for m in _FOREIGN_MARKERS:
+            marker = m.strip()
+            if re.search(rf"\b{re.escape(marker)}\b", f" {jd_low} "):
+                return f"Location: JD text indicates foreign location ({marker})"
+        if any(w in jd_low for w in ("remote", "anywhere", "work from home", "wfh", "india")):
+            return None
+
+    # 4. Valid remote check (for India or unrestricted global remote)
     if any(w in jl for w in ("remote", "anywhere", "work from home", "wfh")):
         return None
+
     jl_norm = _norm_city(jl)
     if jl_norm in ("remote", "india"):
         return None
-    for want in plan_locations:
-        w = _norm_city(want)
-        # Substring match: "Bengaluru (Hybrid)", "Hyderabad, Telangana" both
-        # contain the plan city even when _norm_city can't canonicalize them.
-        if w and (w in jl or jl_norm == w):
+
+    # 5. User Target Location Enforcement
+    if plan_locations:
+        for want in plan_locations:
+            w = _norm_city(want)
+            if w and (w in jl or jl_norm == w):
+                return None
+        if "india" in jl:
             return None
-    # Foreign city/country markers → provably wrong, even without an Indian
-    # city alias in the string ("New York, USA" has no Indian alias).
-    # Word-boundary match so "new york" matches "New York, USA" at start too.
-    jl_bounded = f" {jl} "
-    if any(re.search(rf"\b{re.escape(m.strip())}\b", jl_bounded) for m in _FOREIGN_MARKERS):
-        return f"Location: job is abroad ({jl_norm or jl}), not in your accepted cities"
-    # Candidate city explicitly absent + job is tied to a specific other city
-    known_cities = set(_CITY_ALIASES.keys()) - {"remote", "anywhere", "india", "onsite", "hybrid", "wfh", "work from home"}
-    if any(c in jl for c in known_cities):
-        return f"Location: job is in {jl_norm or jl}, not in your accepted cities"
+        known_cities = set(_CITY_ALIASES.keys()) - {"remote", "anywhere", "india", "onsite", "hybrid", "wfh", "work from home"}
+        if any(c in jl for c in known_cities):
+            return f"Location: job is in {jl_norm or jl}, not in your accepted target locations ({', '.join(plan_locations)})"
+
     return None
 
 
@@ -211,7 +253,7 @@ def check_eligibility(
 
     # 3. Location conflict
     if strict_seniority:
-        r = _location_conflict(loc, plan.get("locations") or [])
+        r = _location_conflict(loc, plan.get("locations") or [], jd_text=jd, role=role)
         if r:
             return {"verdict": "reject", "reason": r}
 
