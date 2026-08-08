@@ -189,8 +189,8 @@ JobHunterX features a multi-provider web search architecture designed for high-p
 flowchart TD
     SEARCH_REQ([🔍 User Job Search Query]) --> MODE_CHECK{"Web Search APIs Mode?"}
 
-    MODE_CHECK -->|ON (ENABLE_WEB_SEARCH_APIS=true)| ROUTER["Intelligent Sequential Search Router"]
-    MODE_CHECK -->|OFF (ENABLE_WEB_SEARCH_APIS=false)| DIRECT_SCRAPER["Direct Scraper Fallback Engine<br/>(0 API Keys Required)"]
+    MODE_CHECK -->|"ON (ENABLE_WEB_SEARCH_APIS=true)"| ROUTER["Intelligent Sequential Search Router"]
+    MODE_CHECK -->|"OFF (ENABLE_WEB_SEARCH_APIS=false)"| DIRECT_SCRAPER["Direct Scraper Fallback Engine<br/>(0 API Keys Required)"]
 
     subgraph API_ROUTER ["⚡ SEQUENTIAL ROUTER PRIORITY"]
         ROUTER --> TF["1. TinyFish Search API<br/>(0 Credits Free Utility)"]
@@ -253,7 +253,7 @@ flowchart TD
 |:-------------|:-------------------------------|:----------------------------|:-----------------------------|
 | 🗺️ **Search Planner** (`search_planner.py`) | Query Strategist | Generates 5 targeted job search queries scoped by role & location. | Generates 5 targeted job search queries scoped by role & location. |
 | 🕵️ **Web Scout & Discovery** (`job_discovery.py`) | Search Router & Orchestrator | Delegates queries to `SearchRouter` & `QualityGate`. Runs `execute_fetch_pipeline()`. | Skips Search Router. Calls direct unauthenticated scrapers & BeautifulSoup parser. |
-| 🛡️ **Zero-Spend Circuit Breaker** (`zero_spend.py`) | Safety Enforcement | Evaluates $\text{remaining\_free\_balance} - \text{worst\_case\_cost} \ge 0$. Blocks request if cost is `UNKNOWN`. | Inactive (0-cost mode). |
+| 🛡️ **Zero-Spend Circuit Breaker** (`zero_spend.py`) | Safety Enforcement | Evaluates `remaining_free_balance` − `worst_case_cost` $\ge 0$. Blocks request if cost is `UNKNOWN`. | Inactive (0-cost mode). |
 | ⚖️ **Quality Gate** (`quality_gate.py`) | SERP Quality Evaluator | Scores SERP items ($0.30 \text{Rel} + 0.25 \text{Loc} + 0.20 \text{Fresh} + 0.15 \text{Src} + 0.10 \text{Uniq}$). Halts router when score $\ge 0.60$. | Inactive. |
 | 📊 **Usage Ledger** (`usage_ledger.py`) | Ledger Tracker | Records every search and fetch attempt, native billing units, and error status in SQLite. | Records scraper fetch attempts in SQLite. |
 | 🎯 **Job Evaluator** (`job_scorer.py`) | Match Scoring | Scores extracted job descriptions against skills using local Gemma LLM. | Scores extracted job descriptions against skills using local Gemma LLM. |
