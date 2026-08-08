@@ -3,13 +3,14 @@
 <img src="assets/hero_banner.jpg" alt="JobHunterX — AI Career Intelligence Agent" width="100%"/>
 
 <br/>
-<br/>
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=120&section=header&text=&fontSize=0" width="100%"/>
 
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=700&size=28&pause=1000&color=A855F7&center=true&vCenter=true&width=650&height=50&lines=%E2%9A%A1+JOBHUNTERX+%E2%80%94+AI+CAREER+HUNTER;Hunts%2C+Matches%2C+Tailors+%26+Applies;Stealth+Form+Auto-Fill+While+You+Sleep;6+AI+Agents+%C2%B7+3+LLM+Providers+%C2%B7+6+ATS+Boards" alt="Typing SVG" />
+  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=800&size=30&duration=3000&pause=1000&color=A855F7&center=true&vCenter=true&width=700&height=60&lines=%E2%9A%A1+JOBHUNTERX+%E2%80%94+AI+CAREER+HUNTER;Hunts%2C+Matches%2C+Tailors+%26+Applies;Stealth+Form+Auto-Fill+While+You+Sleep;6+AI+Agents+%C2%B7+3+LLM+Providers+%C2%B7+6+ATS+Boards" alt="Typing SVG" />
 </p>
 
-### 🚀 Your Autonomous AI Career Intelligence Agent That Hunts, Matches, Tailors, and Applies — While You Sleep
+<h3 align="center">🚀 Your Autonomous AI Career Intelligence Agent That Hunts, Matches, Tailors, and Applies — While You Sleep</h3>
 
 <br/>
 
@@ -17,32 +18,83 @@
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" /></a>
   <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-0.140+-009688?style=for-the-badge&logo=fastapi&logoColor=white" /></a>
   <a href="https://langchain-ai.github.io/langgraph/"><img src="https://img.shields.io/badge/LangGraph-State_Machine-7C3AED?style=for-the-badge&logo=langchain&logoColor=white" /></a>
+  <a href="https://playwright.dev"><img src="https://img.shields.io/badge/Playwright-Stealth_Browser-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" /></a>
+</p>
+
+<p align="center">
   <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemma_4_26B-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
   <a href="https://groq.com"><img src="https://img.shields.io/badge/Llama_3.3_70B-Groq-F55036?style=for-the-badge&logo=meta&logoColor=white" /></a>
   <a href="https://mistral.ai"><img src="https://img.shields.io/badge/Mistral_Large-Mistral-FF7000?style=for-the-badge&logo=mistral&logoColor=white" /></a>
-  <a href="https://playwright.dev"><img src="https://img.shields.io/badge/Playwright-Stealth_Browser-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" /></a>
   <img src="https://img.shields.io/badge/Tests-85%20Passed-10B981?style=for-the-badge&logo=pytest&logoColor=white" />
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/AI_Agents-6_Specialized-purple?style=flat-square&logo=openai&logoColor=white" />
-  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Groq_·_Mistral-blue?style=flat-square&logo=google&logoColor=white" />
-  <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_SmartRecruiters-emerald?style=flat-square" />
-  <img src="https://img.shields.io/badge/Indian_Tech_Hubs-16_Cities_·_4000+_Companies-orange?style=flat-square" />
+  <img src="https://img.shields.io/badge/AI_Agents-6_Specialized-A855F7?style=flat-square&logo=openai&logoColor=white&labelColor=1e1b2e" />
+  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Groq_·_Mistral-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
+  <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_SmartRecruiters-10B981?style=flat-square&labelColor=1e1b2e" />
+  <img src="https://img.shields.io/badge/Indian_Tech_Hubs-16_Cities_·_4000+_Companies-F59E0B?style=flat-square&labelColor=1e1b2e" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/stars/kvcops/jobhunterx?style=social" />
+  <img src="https://img.shields.io/github/forks/kvcops/jobhunterx?style=social" />
+  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square&labelColor=1e1b2e" />
 </p>
 
 <br/>
 
----
+<img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/>
 
-*Upload your resume. Pick a city. Go grab coffee.*  
-*JobHunterX discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.*
+<br/>
 
-***It's the job-hunting wingman you always wished you had.***
+<table>
+<tr><td align="center">
 
----
+*Upload your resume. Pick a city. Go grab coffee.*
+**JobHunterX** discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.
+
+### 💜 *It's the job-hunting wingman you always wished you had.* 💜
+
+</td></tr>
+</table>
+
+<br/>
+
+<a href="#-quickstart"><img src="https://img.shields.io/badge/🚀_Get_Started-A855F7?style=for-the-badge&logoColor=white" /></a>
+<a href="#-the-6-agent-pipeline"><img src="https://img.shields.io/badge/🧠_How_It_Works-06B6D4?style=for-the-badge&logoColor=white" /></a>
+<a href="#-api-reference"><img src="https://img.shields.io/badge/🔌_API_Docs-10B981?style=for-the-badge&logoColor=white" /></a>
+<a href="#-testing"><img src="https://img.shields.io/badge/🧪_Tests-F59E0B?style=for-the-badge&logoColor=white" /></a>
 
 </div>
+
+<br/>
+
+<div align="center">
+<img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/>
+</div>
+
+<br/>
+
+<details open>
+<summary><b>📚 Table of Contents</b></summary>
+<br/>
+
+- [🖥️ Dashboard Preview](#️-dashboard-preview)
+- [✨ Browser Agent Preview](#-browser-agent-preview)
+- [🧠 The 6-Agent Pipeline](#-the-6-agent-pipeline)
+- [🤖 LLM Models & Provider Architecture](#-llm-models--provider-architecture)
+- [🌐 Web Search Architecture](#-web-search-architecture--provider-modes)
+- [🔄 Pipeline Modes](#-pipeline-modes-automatic-vs-manual)
+- [🛡️ Human-in-the-Loop System](#️-human-in-the-loop-hitl-system)
+- [🌐 ATS Platform Support](#-ats-platform-support)
+- [📐 Full System Architecture](#-full-system-architecture)
+- [📁 Project Structure](#-project-structure)
+- [⚡ Quickstart](#-quickstart)
+- [🔌 API Reference](#-api-reference)
+- [🛡️ Stealth Browser Architecture](#️-stealth-browser-architecture)
+- [📜 License](#-license)
+
+</details>
 
 <br/>
 
@@ -55,15 +107,20 @@
 </div>
 
 <br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
----
-## ✨ Browser Agent Preview 
+## ✨ Browser Agent Preview
 
 <div align="center">
-<img src="assets/browser_agent.jpg" alt="JobHunterX Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
+<img src="assets/browser_agent.jpg" alt="JobHunterX Browser Agent — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
 <br/>
-<sub><i>live browser canvas streaming, and real-time agent activity feed</i></sub>
+<sub><i>Live browser canvas streaming, and real-time agent activity feed</i></sub>
 </div>
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🧠 The 6-Agent Pipeline
 
@@ -77,21 +134,70 @@ JobHunterX isn't one monolithic script. It's a **team of 6 specialized AI agents
 
 ### Agent Breakdown
 
-| # | Agent | Codename | What It Does | Powered By |
-|:-:|:------|:---------|:-------------|:-----------|
-| 🧬 | **Profile Extractor** | `extractor.py` | Parses your resume PDF (via PyMuPDF), extracts skills, experience, education, projects, LinkedIn/GitHub URLs, and builds a structured `CandidateProfile` — the ground truth that powers everything downstream. | **Gemma 4 26B** → Gemini 3.1 Flash Lite |
-| 🗺️ | **Search Planner** | `search_planner.py` | Reads your profile and generates a smart `search_plan`: seniority ceiling, target roles, reject terms, and location preferences. In multi-agent mode, crafts 15–20 precision DuckDuckGo queries targeting startups and product companies while filtering out mass-hiring IT service spam. | **Gemma 4 26B** (direct Google GenAI) |
-| 🕵️ | **Web Scout & ATS Scraper** | `job_search_agents.py` + `ats_client.py` | Executes search queries, scrapes ATS boards (Greenhouse, Ashby, Lever, Recruitee, SmartRecruiters, BambooHR), blacklists aggregators (LinkedIn, Indeed, Naukri, Glassdoor), deduplicates via `seen_job_urls`, runs the zero-token Eligibility Gate, and streams `job_found` events live. | **Zero-token** (pure async Python + HTTP) |
-| 🎯 | **Job Evaluator** | `job_scorer.py` | Two-stage scoring: (1) **Deterministic keyword pre-filter** — skill overlap 55%, role match 20%, location 10%, freshness 5%. (2) **Gemma batch scoring** — groups top jobs into batches of 10, scores multi-dimensionally (skill fit, seniority, location, experience), and generates match reasons. | **Gemma 4 26B** (budget-aware, 15K tokens/day) |
-| ✨ | **Resume Validator & Tailor** | `validator_tailor.py` | Validates freshness (URL/header checks), evaluates match score, then generates a tailored Executive Summary and transforms experience bullets using Google's XYZ action-led formula. Includes **anti-hallucination sanitizers** — no fabricated skills or made-up metrics. Renders a single-page ATS-optimized PDF via Jinja2 + xhtml2pdf with 4 iterative shrink profiles. | **Gemma 4 26B** → Gemini 3.1 Flash Lite |
-| 🥷 | **Stealth Browser Agent** | `browser_agent.py` | The closer. Opens a persistent Chrome profile with anti-detection headers, fills personal details, education, work history, Q&A memory (salary, notice period, work auth), uploads the tailored PDF, and submits. Streams every browser frame live via CDP WebSocket. When it hits a login wall, CAPTCHA, or MFA — it pauses and hands you the keyboard. | **Gemini 3.1 Flash Lite** → Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B |
+<table>
+<thead>
+<tr>
+<th align="center">#</th>
+<th align="left">Agent</th>
+<th align="left">Codename</th>
+<th align="left">What It Does</th>
+<th align="left">Powered By</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center">🧬</td>
+<td><b>Profile Extractor</b></td>
+<td><code>extractor.py</code></td>
+<td>Parses your resume PDF (via PyMuPDF), extracts skills, experience, education, projects, LinkedIn/GitHub URLs, and builds a structured <code>CandidateProfile</code> — the ground truth that powers everything downstream.</td>
+<td><b>Gemma 4 26B</b> → Gemini 3.1 Flash Lite</td>
+</tr>
+<tr>
+<td align="center">🗺️</td>
+<td><b>Search Planner</b></td>
+<td><code>search_planner.py</code></td>
+<td>Reads your profile and generates a smart <code>search_plan</code>: seniority ceiling, target roles, reject terms, and location preferences. In multi-agent mode, crafts 15–20 precision DuckDuckGo queries targeting startups and product companies while filtering out mass-hiring IT service spam.</td>
+<td><b>Gemma 4 26B</b> (direct Google GenAI)</td>
+</tr>
+<tr>
+<td align="center">🕵️</td>
+<td><b>Web Scout & ATS Scraper</b></td>
+<td><code>job_search_agents.py</code> + <code>ats_client.py</code></td>
+<td>Executes search queries, scrapes ATS boards (Greenhouse, Ashby, Lever, Recruitee, SmartRecruiters, BambooHR), blacklists aggregators (LinkedIn, Indeed, Naukri, Glassdoor), deduplicates via <code>seen_job_urls</code>, runs the zero-token Eligibility Gate, and streams <code>job_found</code> events live.</td>
+<td><b>Zero-token</b> (pure async Python + HTTP)</td>
+</tr>
+<tr>
+<td align="center">🎯</td>
+<td><b>Job Evaluator</b></td>
+<td><code>job_scorer.py</code></td>
+<td>Two-stage scoring: (1) <b>Deterministic keyword pre-filter</b> — skill overlap 55%, role match 20%, location 10%, freshness 5%. (2) <b>Gemma batch scoring</b> — groups top jobs into batches of 10, scores multi-dimensionally (skill fit, seniority, location, experience), and generates match reasons.</td>
+<td><b>Gemma 4 26B</b> (budget-aware, 15K tokens/day)</td>
+</tr>
+<tr>
+<td align="center">✨</td>
+<td><b>Resume Validator & Tailor</b></td>
+<td><code>validator_tailor.py</code></td>
+<td>Validates freshness (URL/header checks), evaluates match score, then generates a tailored Executive Summary and transforms experience bullets using Google's XYZ action-led formula. Includes <b>anti-hallucination sanitizers</b> — no fabricated skills or made-up metrics. Renders a single-page ATS-optimized PDF via Jinja2 + xhtml2pdf with 4 iterative shrink profiles.</td>
+<td><b>Gemma 4 26B</b> → Gemini 3.1 Flash Lite</td>
+</tr>
+<tr>
+<td align="center">🥷</td>
+<td><b>Stealth Browser Agent</b></td>
+<td><code>browser_agent.py</code></td>
+<td>The closer. Opens a persistent Chrome profile with anti-detection headers, fills personal details, education, work history, Q&A memory (salary, notice period, work auth), uploads the tailored PDF, and submits. Streams every browser frame live via CDP WebSocket. When it hits a login wall, CAPTCHA, or MFA — it pauses and hands you the keyboard.</td>
+<td><b>Gemini 3.1 Flash Lite</b> → Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B</td>
+</tr>
+</tbody>
+</table>
 
 <br/>
 
 > [!TIP]
 > **The Eligibility Gate** (`eligibility.py`) runs between Agents 3 and 4 as a zero-token strict filter. It rejects non-dev roles (sales, HR, marketing), foreign locations, and seniority mismatches — all without spending a single API token.
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🤖 LLM Models & Provider Architecture
 
@@ -140,15 +246,25 @@ graph LR
 | `browser` | Browser agent form-filling decisions | Gemini 3.1 Flash Lite |
 | Browser fallback | When primary browser LLM fails | Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B |
 
-### Rate Limiting & Budget Control
+<br/>
 
-#### 🟢 Google AI Studio (Free Tier)
+### 💳 Rate Limiting & Budget Control
+
+<details open>
+<summary><b>🟢 Google AI Studio (Free Tier)</b></summary>
+<br/>
+
 | Model ID | RPM Limit | Min Delay | TPM Limit | RPD Limit (Requests Per Day) |
 |:---------|:----------|:----------|:----------|:-----------------------------|
 | **Gemma 4 26B** (`gemma-4-26b-a4b-it`) | 30 RPM | 2.0s | 16K TPM | **14,400 RPD** (14.4K req/day) |
 | **Gemini 3.1 Flash Lite** (`gemini-3.1-flash-lite`) | 15 RPM | 4.0s | 250K TPM | **500 RPD** (500 req/day) |
 
-#### ⚡ Groq Cloud (Free Tier)
+</details>
+
+<details>
+<summary><b>⚡ Groq Cloud (Free Tier)</b></summary>
+<br/>
+
 | Model ID | RPM | RPD (Requests/Day) | TPM | TPD (Tokens/Day) |
 |:---------|:----|:-------------------|:----|:-----------------|
 | `llama-3.1-8b-instant` | 30 RPM | **14.4K RPD** | 6K TPM | 500K TPD |
@@ -158,7 +274,12 @@ graph LR
 | `qwen/qwen3.6-27b` | 30 RPM | **1K RPD** | 8K TPM | 200K TPD |
 | `meta-llama/llama-prompt-guard-2-22m/86m` | 30 RPM | **14.4K RPD** | 15K TPM | 500K TPD |
 
-#### 🌀 Mistral AI (Updated August 2026)
+</details>
+
+<details>
+<summary><b>🌀 Mistral AI (Updated August 2026)</b></summary>
+<br/>
+
 | Model ID | RPS Limit | Approx RPM | TPM Limit | Category / Purpose |
 |:---------|:----------|:-----------|:----------|:-------------------|
 | `codestral-2508` | 2.08 RPS | ~125 RPM | 625K TPM | Code Generation & Agent Tooling |
@@ -176,10 +297,16 @@ graph LR
 | `mistral-moderation-2603` | 1.67 RPS | ~100 RPM | 50K TPM | Content Moderation Guard |
 | `mistral-small-2603` | 0.83 RPS | ~50 RPM | 50K TPM | Fast General Fallback |
 
+</details>
+
+<br/>
+
 > [!NOTE]
 > **Gemma Budget System** (`gemma.py`): Enforces a hard daily cap of **14,400 requests/day** (14.4K RPD) and 30 RPM on `gemma-4-26b-a4b-it` to stay strictly within Google AI Studio's free tier. State is tracked in-memory. When the budget is exhausted, scoring gracefully degrades to the zero-token keyword pre-filter.
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🌐 Web Search Architecture & Provider Modes
 
@@ -236,7 +363,7 @@ flowchart TD
 | **JS Rendering Engine** | **TinyFish Fetch API** (batching up to 10 URLs/request for Greenhouse/Lever/Ashby) | Direct HTTP parser |
 | **Zero-Spend Protection** | Enforces 2-tier zero-spend circuit breaker | 100% Free / Unauthenticated |
 
----
+<br/>
 
 ### 2. Search Provider Breakdown
 
@@ -249,7 +376,7 @@ flowchart TD
 | **Brave Search** | `GET https://api.search.brave.com/res/v1/web/search` | $5.00 / month recurring credit | 50 QPS capacity | $0.005 / request. **Disabled by default** (`BRAVE_ENABLED=false`) as Brave requires linking a payment card. |
 | **DuckDuckGo** | Python `ddgs` (Local Wrapper) | Unofficial scraper fallback | Adaptive backoff on 429/CAPTCHA | 0 credits. Emergency fallback when API keys are not provided or exhausted. |
 
----
+<br/>
 
 ### 🔑 Official API Key Dashboards & Setup Links
 
@@ -263,7 +390,7 @@ flowchart TD
 | **Groq** | Llama 3.3 & DeepSeek LLMs | 14.4k RPD / 30 RPM Free | [Groq Console](https://console.groq.com/keys) |
 | **Mistral AI** | Mistral Large LLM | Free Tier | [Mistral AI Admin](https://admin.mistral.ai/organization/api-keys) |
 
----
+<br/>
 
 ### 3. Agent Responsibilities by Scenario
 
@@ -271,12 +398,14 @@ flowchart TD
 |:-------------|:-------------------------------|:----------------------------|:-----------------------------|
 | 🗺️ **Search Planner** (`search_planner.py`) | Query Strategist | Generates 5 targeted job search queries scoped by role & location. | Generates 5 targeted job search queries scoped by role & location. |
 | 🕵️ **Web Scout & Discovery** (`job_discovery.py`) | Search Router & Orchestrator | Delegates queries to `SearchRouter` & `QualityGate`. Runs `execute_fetch_pipeline()`. | Skips Search Router. Calls direct unauthenticated scrapers & BeautifulSoup parser. |
-| 🛡️ **Zero-Spend Circuit Breaker** (`zero_spend.py`) | Safety Enforcement | Evaluates `remaining_free_balance` − `worst_case_cost` $\ge 0$. Blocks request if cost is `UNKNOWN`. | Inactive (0-cost mode). |
-| ⚖️ **Quality Gate** (`quality_gate.py`) | SERP Quality Evaluator | Scores SERP items ($0.30 \text{Rel} + 0.25 \text{Loc} + 0.20 \text{Fresh} + 0.15 \text{Src} + 0.10 \text{Uniq}$). Halts router when score $\ge 0.60$. | Inactive. |
+| 🛡️ **Zero-Spend Circuit Breaker** (`zero_spend.py`) | Safety Enforcement | Evaluates `remaining_free_balance` − `worst_case_cost` ≥ 0. Blocks request if cost is `UNKNOWN`. | Inactive (0-cost mode). |
+| ⚖️ **Quality Gate** (`quality_gate.py`) | SERP Quality Evaluator | Scores SERP items (0.30 Rel + 0.25 Loc + 0.20 Fresh + 0.15 Src + 0.10 Uniq). Halts router when score ≥ 0.60. | Inactive. |
 | 📊 **Usage Ledger** (`usage_ledger.py`) | Ledger Tracker | Records every search and fetch attempt, native billing units, and error status in SQLite. | Records scraper fetch attempts in SQLite. |
 | 🎯 **Job Evaluator** (`job_scorer.py`) | Match Scoring | Scores extracted job descriptions against skills using local Gemma LLM. | Scores extracted job descriptions against skills using local Gemma LLM. |
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🔄 Pipeline Modes: Automatic vs. Manual
 
@@ -329,7 +458,9 @@ flowchart TD
 | **HITL Takeover** | Agent pauses & alerts you on login/CAPTCHA/MFA | Same behavior |
 | **Best For** | Overnight autonomous job hunting | Careful, selective applications |
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🛡️ Human-in-the-Loop (HITL) System
 
@@ -359,7 +490,9 @@ stateDiagram-v2
 | 📝 `MANUAL_FORM` | Complex custom form fields | User fills tricky fields, agent handles the rest |
 | ⚠️ `TOO_COMPLEX` | Unsupported multi-page portal | Session saved, user can complete manually |
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🌐 ATS Platform Support
 
@@ -375,7 +508,9 @@ The Web Scout agent directly scrapes these **Applicant Tracking Systems** withou
 | **BambooHR** | Public board API | Open positions and departments |
 | **Direct Career Pages** | HTML scraping + Trafilatura | Any company career page via web discovery |
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 📐 Full System Architecture
 
@@ -437,9 +572,14 @@ graph TB
     class LLM,DB,Cache,Chrome infra;
 ```
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 📁 Project Structure
+
+<details>
+<summary><b>Click to expand full directory tree</b></summary>
 
 ```
 jobhunterx/
@@ -514,7 +654,11 @@ jobhunterx/
 └── README.md                           # You are reading this!
 ```
 
----
+</details>
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## ⚡ Quickstart
 
@@ -523,7 +667,9 @@ jobhunterx/
 - **Python 3.11+**
 - **At least one LLM API key** (Google AI Studio recommended — it's free)
 
-### 1. Clone & Setup
+<br/>
+
+### ① Clone & Setup
 
 ```bash
 git clone https://github.com/kvcops/jobhunterx.git
@@ -537,7 +683,7 @@ python -m venv .venv
 source .venv/bin/activate       # Linux / macOS
 ```
 
-### 2. Install Dependencies
+### ② Install Dependencies
 
 ```bash
 pip install -r requirements.txt --prefer-binary
@@ -547,7 +693,7 @@ playwright install chromium
 > [!TIP]
 > `--prefer-binary` tells pip to pick the newest release that ships a prebuilt wheel instead of compiling from source. The flag is also baked into `requirements.txt`, so `pip install -r requirements.txt` alone already avoids the issue.
 
-### 3. Configure Environment
+### ③ Configure Environment
 
 ```bash
 cp jobhunterx/.env.example jobhunterx/.env
@@ -574,16 +720,22 @@ LOG_LEVEL=INFO
 > - **Groq**: [console.groq.com](https://console.groq.com/) — Free tier with Llama 3.3 70B
 > - **Mistral**: [console.mistral.ai](https://console.mistral.ai/) — Free tier with Mistral Large
 
-### 4. Launch 🚀
+### ④ Launch 🚀
 
 ```bash
 cd jobhunterx
 python -m jobhunterx.api.main
 ```
 
-Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting.
+<div align="center">
 
----
+### Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting. 🎯
+
+</div>
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🔌 API Reference
 
@@ -628,61 +780,29 @@ Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting.
 | `/ws` | Agent logs, pipeline progress, job events, scoring updates, intervention alerts |
 | `/ws/browser` | Live CDP JPEG frames (screencast) + mouse/keyboard event forwarding |
 
----
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
-## 🧪 Testing
-
-85 tests. Zero flaky. All passing.
-
-```bash
-pytest jobhunterx/tests/ -v
-```
-
-```
-tests/test_api.py                 ......... (9 passed)
-tests/test_ats_pagination.py      .......... (10 passed)
-tests/test_dedupe_freshness.py    ........ (8 passed)
-tests/test_eligibility.py         ..................... (21 passed)
-tests/test_gemma_budget.py        ..... (5 passed)
-tests/test_json_helper.py         .... (4 passed)
-tests/test_liveness.py            ............. (13 passed)
-tests/test_resume_tailoring.py    ............... (15 passed)
-
-======================== 85 passed ========================
-```
-
----
-
-## 🇮🇳 Pre-Seeded Regional Data
-
-JobHunterX ships with indexed company databases covering **16 Indian tech hubs** and **4,000+** companies:
-
-| Hub | Companies | Hub | Companies |
-|:----|:---------:|:----|:---------:|
-| 🏙️ Bengaluru | 800+ | 🏙️ Chennai | 1,220+ |
-| 🏙️ Hyderabad | 500+ | 🏙️ Mumbai | 1,211+ |
-| 🏙️ Pune | 525+ | 🏙️ Delhi NCR | 1,070+ |
-| 🏙️ Kolkata | 500+ | 🏙️ Ahmedabad | 308+ |
-| 🏙️ Kochi | 100+ | 🏙️ Bhubaneswar | 200+ |
-| 🏙️ Visakhapatnam | 150+ | 🏙️ Coimbatore | 100+ |
-| 🏙️ Indore | 90+ | 🏙️ Chandigarh | 120+ |
-| 🏙️ Jaipur | 50+ | 🏙️ Remote | ∞ |
-
----
 
 ## 🛡️ Stealth Browser Architecture
 
 The browser agent doesn't show up on radar:
 
-- **Persistent Chrome Profile** — Cookies, localStorage, and browsing history accumulate across sessions, building trust with Cloudflare and similar WAFs
-- **Desktop User-Agent** — `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36`
-- **Anti-Automation Flags** — `--disable-blink-features=AutomationControlled`, disabled site isolation
-- **Zombie Chrome Cleanup** — Automatically kills orphan Chrome processes and clears `SingletonLock` files before each launch
-- **Cloud Browser Support** — Optional cloud stealth browser integration via `BROWSER_USE_API_KEY`
+- 🍪 **Persistent Chrome Profile** — Cookies, localStorage, and browsing history accumulate across sessions, building trust with Cloudflare and similar WAFs
+- 🖥️ **Desktop User-Agent** — `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36`
+- 🚫 **Anti-Automation Flags** — `--disable-blink-features=AutomationControlled`, disabled site isolation
+- 🧹 **Zombie Chrome Cleanup** — Automatically kills orphan Chrome processes and clears `SingletonLock` files before each launch
+- ☁️ **Cloud Browser Support** — Optional cloud stealth browser integration via `BROWSER_USE_API_KEY`
 
----
+<br/>
 
 <div align="center">
+
+<img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/>
+
+<br/>
+<br/>
 
 ## 📜 License
 
@@ -692,6 +812,17 @@ Built with ❤️ and an unhealthy amount of caffeine for job seekers who refuse
 
 <br/>
 
-**⭐ Star this repo if JobHunterX saved you from the soul-crushing grind of manual job applications**
+### ⭐ Star this repo if JobHunterX saved you from the soul-crushing grind of manual job applications
+
+<br/>
+
+<a href="https://github.com/kvcops/jobhunterx/stargazers"><img src="https://img.shields.io/badge/⭐_Star_on_GitHub-A855F7?style=for-the-badge&logoColor=white" /></a>
+<a href="https://github.com/kvcops/jobhunterx/fork"><img src="https://img.shields.io/badge/🍴_Fork_the_Repo-06B6D4?style=for-the-badge&logoColor=white" /></a>
+<a href="https://github.com/kvcops/jobhunterx/issues"><img src="https://img.shields.io/badge/🐛_Report_a_Bug-10B981?style=for-the-badge&logoColor=white" /></a>
+
+<br/>
+<br/>
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=100&section=footer" width="100%"/>
 
 </div>
