@@ -3,6 +3,11 @@
 # Optimized & Conflict-Free Installation
 # =============================================================================
 
+# Prefer prebuilt wheels over source tarballs. Some packages (e.g. litellm)
+# ship sdists that require a Rust toolchain to build; this flag makes pip pick
+# the latest version with a ready-made wheel instead.
+--prefer-binary
+
 # --- Core Web Framework & Server ---
 fastapi>=0.140.0
 uvicorn[standard]>=0.34.0
@@ -16,7 +21,10 @@ python-dotenv>=1.1.0
 langgraph>=1.2.9
 
 # --- LLM Providers & Router ---
-litellm>=1.40.0
+# litellm is pinned to 1.80.0: browser-use pins openai==2.16.0, but litellm
+# >=1.85.0 requires openai>=2.20. This version ships prebuilt wheels for all
+# platforms (no Rust toolchain needed) and resolves with browser-use.
+litellm==1.80.0
 google-genai>=1.65.0
 
 # --- Search & Web Scraping ---
