@@ -329,6 +329,14 @@ def build_search_queries(profile: dict, plan: dict) -> list[str]:
         if exp_terms:
             queries.append(f'"{primary_role}" {exp_terms[0]} "{loc}" India hiring')
 
+    # Operator-style queries for ATS & verified portals (used when LLM strategist is down)
+    for loc in india_locations[:2]:
+        suf = "India" if loc.lower() != "remote" else "India remote"
+        queries.append(f'site:boards.greenhouse.io "{primary_role}" "{loc}" {suf}')
+        queries.append(f'site:jobs.lever.co "{primary_role}" "{loc}" {suf}')
+        queries.append(f'site:jobs.ashbyhq.com "{primary_role}" "{loc}" {suf}')
+        queries.append(f'intitle:"{primary_role}" "{loc}" {suf} apply')
+
     seen = set()
     unique_queries = []
     for q in queries:

@@ -51,10 +51,15 @@ class SearchRouter:
         return ["tinyfish", "tavily", "exa", "ddgs"]
 
     async def execute_query(
-        self, query: str, context: SearchContext, max_results: int = 10
+        self, query: str, context: SearchContext, max_results: int = 10,
+        providers: Optional[List[str]] = None,
     ) -> List[SearchResultItem]:
-        """Execute a single search query following sequential fallback priority."""
-        priority_list = self.get_priority_order()
+        """Execute a single search query following sequential fallback priority.
+
+        `providers`: optional sub-list of providers to try (useful for per-run
+        provider rotation). Defaults to the full priority order.
+        """
+        priority_list = providers or self.get_priority_order()
         collected_items: List[SearchResultItem] = []
 
         for p_name in priority_list:
@@ -136,7 +141,14 @@ class SearchRouter:
 async def route_search_queries(
     queries: List[str], context: SearchContext, config: Optional[Dict[str, Any]] = None
 ) -> List[SearchResultItem]:
-    """Execute search queries using router with safety bounds."""
+    """Execute search queries using router with safety bounds.
+
+    Paid/primary providers are ROTATED across queries (never one provider for the
+    whole run): every configured provider gets a fair share, capped per run by
+    MAX_REQUESTS_PER_PROVIDER_PER_RUN (default 2 for Tavily/Exa/Brave; TinyFish
+    and DDGS are unlimited since they cost 0 credits). If a query's provider
+    fails or the quality gate rejects its SERP, DDGS runs as the free safety net.
+    """
     cfg = config or {}
     router = SearchRouter(config=cfg)
 
@@ -145,13 +157,60 @@ async def route_search_queries(
     all_results: List[SearchResultItem] = []
     seen_urls: set[str] = set()
 
-    for q in bounded_queries:
-        res_items = await router.execute_query(q, context=context, max_results=10)
+    # Which providers actually have keys/are enabled for this run
+    available = [
+        p for p in router.get_priority_order()
+        if p in router.providers
+        and router.providers[p].is_available(cfg, session_disabled=False)
+    ]
+    rotation_pool = [p for p in available if p != "ddgs"]
+    ddgs_available = "ddgs" in available
+
+    # Cap usage of paid providers so no single one dominates the run
+    max_per_provider = max(1, int(cfg.get("MAX_REQUESTS_PER_PROVIDER_PER_RUN", 2)))
+    paid_provider = {"tavily", "exa", "brave"}
+    used: Dict[str, int] = {}
+
+    for i, q in enumerate(bounded_queries):
+        # Rotate starting provider across queries; skip providers that hit their cap.
+        chosen: Optional[str] = None
+        if rotation_pool:
+            for k in range(len(rotation_pool)):
+                cand = rotation_pool[(i + k) % len(rotation_pool)]
+                if cand in paid_provider and used.get(cand, 0) >= max_per_provider:
+                    continue
+                chosen = cand
+                break
+            # Paid caps exhausted but more queries remain -> fall back to TinyFish/DDG
+            if chosen is None:
+                chosen = next((p for p in rotation_pool if p not in paid_provider), None)
+
+        if chosen:
+            used[chosen] = used.get(chosen, 0) + 1
+            log.info("search_router_provider_chosen", query_i=i, provider=chosen)
+            if ddgs_available:
+                res_items = await router.execute_query(
+                    q, context=context, max_results=10, providers=[chosen, "ddgs"]
+                )
+            else:
+                res_items = await router.execute_query(
+                    q, context=context, max_results=10, providers=[chosen]
+                )
+        elif ddgs_available:
+            res_items = await router.execute_query(
+                q, context=context, max_results=10, providers=["ddgs"]
+            )
+        else:
+            res_items = await router.execute_query(q, context=context, max_results=10)
+
         for item in res_items:
             url_norm = item.url.strip().rstrip("/").lower()
             if url_norm not in seen_urls:
                 seen_urls.add(url_norm)
                 all_results.append(item)
 
-    log.info("route_search_queries_complete", queries_count=len(bounded_queries), total_unique_results=len(all_results))
+    log.info(
+        "route_search_queries_complete", queries_count=len(bounded_queries),
+        total_unique_results=len(all_results), provider_usage=used,
+    )
     return all_results

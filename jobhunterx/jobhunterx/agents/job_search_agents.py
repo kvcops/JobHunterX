@@ -32,19 +32,30 @@ log = get_logger("job_search_agents")
 
 EventCallback = Callable[[dict], Awaitable[None]]
 
-_QUERY_GEN_SYSTEM = """You are an expert technical talent recruiter and search strategist specialized in the Indian tech job market.
-Generate 15 to 20 highly effective, distinct web search queries to find open job postings strictly matching the candidate's specified target location.
+_QUERY_GEN_SYSTEM = """You are an elite technical sourcing strategist for the Indian job market. Your ONLY job is to craft web-search queries that surface REAL, current, directly-applicable job postings — not career-page noise, not job-board SEO spam, not aggregates.
 
-Guidelines:
-- CRITICAL: Target ONLY the candidate's specified Preferred Locations (e.g., if they target Hyderabad, generate queries specifically for Hyderabad and India-Remote). Do NOT generate queries for other unselected cities.
-- Focus on startups, product companies, SaaS, fintech, and high-growth engineering teams in India.
-- STRICTLY avoid mass-hiring IT service companies (TCS, Infosys, Wipro, Cognizant, Accenture, HCL, LTI).
-- Build queries focusing on:
-  1. Direct job role + candidate target location + 'hiring'/'careers'/'apply'
-  2. Skill-specific developer roles in candidate target location or India remote
-  3. Job postings on Greenhouse, Lever, Ashby, or company career sites in target location
-  4. Experience level specific queries based on candidate background
-- Output ONLY a JSON array of query strings: ["query 1", "query 2", ...]"""
+CANDIDATE CONTEXT IS FILTERED IN: roles, top skills, target cities (India), and years of experience. Every query MUST respect the candidate's city and experience level — no deviations.
+
+QUERY CRAFTING RULES (apply these to every single query):
+1. DIVERSITY BY PATTERN — generate a varied mix:
+   - Exact-role queries:  "ai engineer" "hyderabad" (hiring OR careers OR opening)  — quote exact phrases, no loose word salad.
+   - Operator queries:  site:jobs.lever.co "ai engineer" "hyderabad", site:boards.greenhouse.io "machine learning" "hyderabad", site:jobs.ashbyhq.com "ai engineer" "hyderabad"
+   - intitle queries:   intitle:"ai engineer" OR intitle:"ml engineer" "hyderabad"
+   - Skill-anchored:    (python OR pytorch OR "langchain") ( "ai engineer" OR "ml engineer") "hyderabad"
+   - Seniority-tagged:  "senior ai engineer" 3+ years OR "lead machine learning engineer" "hyderabad"
+   - Freshness-tagged:  "ai engineer" "hyderabad" hiring (careers OR openings OR apply) recent
+2. WHITELIST what to search (each one is a good source — spread queries across them):
+   boards.greenhouse.io · jobs.lever.co · jobs.ashbyhq.com · apply.workable.com · myworkdayjobs.com · careers.smartrecruiters.com · .bamboohr.com/careers · .freshteam.com/jobs · .breezy.hr · linkedin.com/jobs · naukri.com/job-listings · foundit.in/job · company career pages (careers.<company>.com, <company>/careers)
+3. HARD BLOCK (must never appear in queries, even implicitly):
+   - Login-walled aggregators: instahyre.com, aijobs.net, cutshort.io, hirist.com, wellfound.com — NEVER.
+   - Generic boards/bloat: indeed.com, glassdoor.com, monster.com, jobrapido, careerjet, adzuna, jooble, talent.com
+   - Mass-hiring IT services: tcs, infosys, wipro, cognizant, accenture, hcl, tech mahindra, capgemini, ltimindtree, ust, epam — NEVER
+   - Use -site: exclusions sparingly (max 1-2 per query) so you don't bloat the query.
+4. OUTPUT DISCIPLINE: exactly 16 to 20 queries, deduped, each one dramatically different from the others (different pattern AND different source OR angle). At most 2 queries per single site (site: operator). Prefer queries likely to land on ATS boards (greenhouse/lever/ashby/workday) — 60% of the list should be site:/intitle: operator queries.
+5. RELEVANCE FIRST: role title must match the candidate's job family exactly; never generic "developer jobs" — anchor on their actual skill stack (e.g. LLM/GENAI/Python for AI roles).
+6. LOCATION: only candidate cities + an "India remote" variant if the profile allows remote.
+
+First ground yourself in the candidate profile, then respond with ONLY a JSON array of strings: ["query1", "query2", ...]. No markdown, no explanation."""
 
 
 # ---------------------------------------------------------------------------
@@ -62,8 +73,11 @@ async def generate_search_queries(profile: dict, plan: dict) -> list[str]:
         f"Candidate Target Roles: {', '.join(target_roles)}\n"
         f"Top Skills: {', '.join(skills)}\n"
         f"Preferred Locations: {', '.join(locations)}\n"
-        f"Years Experience: {exp_years}\n\n"
-        "Generate 15-20 diverse search queries for DuckDuckGo. Return ONLY a JSON array of strings."
+        f"Years Experience: {exp_years}\n"
+        f"Experience Bucket: {('fresher/entry' if exp_years < 1 else 'junior/1-3y' if exp_years < 3 else 'mid/3-6y' if exp_years < 6 else 'senior/lead')}\n\n"
+        "Craft queries ONLY for these roles, in these cities, at this experience level. "
+        "Skills must steer the query terms (e.g. a Python/LangChain/AI skill set → 'ai engineer'/'ml engineer'/'genai engineer' variants). "
+        "Return ONLY a JSON array of 16-20 query strings."
     )
 
     queries: list[str] = []
@@ -92,14 +106,17 @@ async def generate_search_queries(profile: dict, plan: dict) -> list[str]:
     target_loc = locations[0] if locations else "India"
     target_role = target_roles[0] if target_roles else "Software Engineer"
 
-    # Inject direct multi-source ATS & portal queries (LinkedIn, FoundIt, Naukri, Greenhouse, Lever, Ashby)
+    # Inject direct multi-source ATS & portal queries (ATS boards + verified portals only)
     portal_queries = [
         f'site:boards.greenhouse.io "{target_role}" "{target_loc}"',
         f'site:jobs.lever.co "{target_role}" "{target_loc}"',
         f'site:jobs.ashbyhq.com "{target_role}" "{target_loc}"',
+        f'site:apply.workable.com "{target_role}" "{target_loc}"',
+        f'site:myworkdayjobs.com "{target_role}" "{target_loc}"',
         f'site:linkedin.com/jobs/view "{target_role}" "{target_loc}" India',
         f'site:naukri.com/job-listings "{target_role}" "{target_loc}"',
         f'site:foundit.in/job "{target_role}" "{target_loc}"',
+        f'intitle:"{target_role}" "{target_loc}" (hiring OR careers OR opening)',
     ]
 
     scoped_queries = list(portal_queries)
