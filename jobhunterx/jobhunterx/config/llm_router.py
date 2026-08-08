@@ -19,6 +19,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
+os.environ.setdefault("LITELLM_LOCAL_RESOURCES", "true")
 import litellm
 from tenacity import (
     retry,

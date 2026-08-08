@@ -6,44 +6,46 @@ Initialises database, logging, and serves the API + WebSocket + static frontend.
 
 from __future__ import annotations
 
+# Disable LiteLLM remote network cost-map fetch on import (prevents startup blocking/SSL delays)
+import os
+os.environ["LITELLM_LOCAL_RESOURCES"] = "true"
+
 # Windows: Set ProactorEventLoop policy by default
 import sys
 import asyncio
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-
-
-# Silence legacy langchain_community deprecation warnings on startup
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
-
 try:
-    import langchain_community.chat_models
-    from langchain_ollama import ChatOllama
-    langchain_community.chat_models.ChatOllama = ChatOllama
-    sys.modules['langchain_community.chat_models.ChatOllama'] = ChatOllama
-except Exception:
-    pass
+    # Silence legacy langchain_community deprecation warnings on startup
+    import warnings
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
 
+    try:
+        import langchain_community.chat_models
+        from langchain_ollama import ChatOllama
+        langchain_community.chat_models.ChatOllama = ChatOllama
+        sys.modules['langchain_community.chat_models.ChatOllama'] = ChatOllama
+    except BaseException:
+        pass
 
+    import json
+    from contextlib import asynccontextmanager
+    from pathlib import Path
+    from typing import Any
 
-import json
-import os
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.staticfiles import StaticFiles
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-
-from jobhunterx.config.logging import setup_logging, get_logger
-from jobhunterx.config.settings import get_settings
-from jobhunterx.config.database import set_db_path, init_db
-from jobhunterx.api.routes import router
-from jobhunterx.api.ws import manager
+    from jobhunterx.config.logging import setup_logging, get_logger
+    from jobhunterx.config.settings import get_settings
+    from jobhunterx.config.database import set_db_path, init_db
+    from jobhunterx.api.routes import router
+    from jobhunterx.api.ws import manager
+except KeyboardInterrupt:
+    sys.exit(0)
 
 log = get_logger("main")
 
@@ -85,15 +87,18 @@ async def lifespan(app: FastAPI):
     screencast_mgr_task = asyncio.create_task(_screencast_manager())
 
     log.info("jobhunterx_ready", host=settings.host, port=settings.port)
-    yield
-    
-    # Clean up screencast manager on shutdown
-    screencast_mgr_task.cancel()
     try:
-        await screencast_mgr_task
-    except asyncio.CancelledError:
+        yield
+    except (asyncio.CancelledError, KeyboardInterrupt):
         pass
-    log.info("shutting_down")
+    finally:
+        # Clean up screencast manager on shutdown
+        screencast_mgr_task.cancel()
+        try:
+            await screencast_mgr_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        log.info("shutting_down")
 
 
 # ---------------------------------------------------------------------------
@@ -445,7 +450,7 @@ async def browser_websocket(websocket: WebSocket):
 
             if current_page and await _is_page_usable(current_page):
                 await _forward_input_event(current_page, msg)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     except Exception as exc:
         log.warning("browser_ws_error", error=str(exc))
@@ -586,15 +591,21 @@ def main():
 
     settings = get_settings()
     is_reload = "--reload" in sys.argv
-    uvicorn.run(
-        "jobhunterx.api.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=is_reload if is_reload else (False if sys.platform == "win32" else True),
-        log_level=settings.log_level.lower(),
-    )
+    try:
+        uvicorn.run(
+            "jobhunterx.api.main:app",
+            host=settings.host,
+            port=settings.port,
+            reload=is_reload if is_reload else (False if sys.platform == "win32" else True),
+            log_level=settings.log_level.lower(),
+        )
+    except (KeyboardInterrupt, SystemExit):
+        pass
 
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, SystemExit):
+        sys.exit(0)
