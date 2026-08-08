@@ -330,16 +330,17 @@ class ExaProvider(BaseSearchProvider):
 
     def calculate_worst_case_cost(self, request_params: Dict[str, Any]) -> CostEstimate:
         num_results = request_params.get("numResults", 10)
-        has_contents = request_params.get("contents") is not None
         has_summary = request_params.get("summary") is not None
+        contents_val = request_params.get("contents")
+        has_full_contents = contents_val is True or (isinstance(contents_val, dict) and (contents_val.get("text") or contents_val.get("summary")))
 
-        if has_contents or has_summary or request_params.get("subpages"):
+        if has_summary or has_full_contents or request_params.get("subpages"):
             return CostEstimate(
                 status=CostStatus.UNKNOWN,
                 units=0.0,
                 unit_type="USD",
                 estimated_amount_native=0.0,
-                explanation="Exa contents/summaries/subpages incur variable extra charges; UNKNOWN cost under zero-spend rule",
+                explanation="Exa full text/summaries/subpages incur variable extra charges; UNKNOWN cost under zero-spend rule",
             )
 
         base_usd = 0.007  # $7 per 1,000 requests for numResults <= 10
@@ -376,6 +377,9 @@ class ExaProvider(BaseSearchProvider):
             "query": query,
             "numResults": num_res,
             "type": "auto",
+            "contents": {
+                "highlights": True
+            }
         }
 
         try:
@@ -393,10 +397,12 @@ class ExaProvider(BaseSearchProvider):
                 for r in raw_results[:num_res]:
                     url = r.get("url") or ""
                     if url:
+                        highlights = r.get("highlights") or []
+                        snippet_text = " ".join(highlights) if isinstance(highlights, list) and highlights else (r.get("text", "") or r.get("snippet", ""))
                         items.append(SearchResultItem(
                             url=url,
                             title=r.get("title", ""),
-                            snippet=r.get("text", "") or r.get("snippet", ""),
+                            snippet=snippet_text,
                             provider=self.name,
                         ))
                 return ProviderSearchResponse(

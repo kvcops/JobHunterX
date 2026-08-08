@@ -184,6 +184,10 @@ async def get_settings_masked():
     from jobhunterx.config.settings import get_settings
     s = get_settings()
 
+    gemini_k = s.google_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
+    groq_k = s.groq_api_key or os.environ.get("GROQ_API_KEY") or ""
+    mistral_k = s.mistral_api_key or os.environ.get("MISTRAL_API_KEY") or ""
+
     return {
         "enable_web_search_apis": getattr(s, "enable_web_search_apis", True),
         "search_router_mode": s.search_router_mode,
@@ -199,6 +203,12 @@ async def get_settings_masked():
         "brave_configured": bool(s.brave_api_key),
         "brave_enabled": s.brave_enabled,
         "brave_key_masked": _mask_api_key(s.brave_api_key),
+        "google_configured": bool(gemini_k),
+        "google_key_masked": _mask_api_key(gemini_k),
+        "groq_configured": bool(groq_k),
+        "groq_key_masked": _mask_api_key(groq_k),
+        "mistral_configured": bool(mistral_k),
+        "mistral_key_masked": _mask_api_key(mistral_k),
     }
 
 
@@ -231,7 +241,7 @@ def _persist_to_env_file(env_path: Path, updates: dict) -> None:
 
 @router.post("/settings")
 async def update_settings(payload: dict):
-    """Update search API provider configuration settings."""
+    """Update search and LLM API provider configuration settings."""
     from jobhunterx.config.settings import get_settings, _BASE_DIR
     s = get_settings()
 
@@ -270,6 +280,26 @@ async def update_settings(payload: dict):
         val = bool(payload["brave_enabled"])
         s.brave_enabled = val
         env_updates["BRAVE_ENABLED"] = "true" if val else "false"
+
+    if "gemini_api_key" in payload or "google_api_key" in payload:
+        key = str(payload.get("gemini_api_key") or payload.get("google_api_key")).strip()
+        s.google_api_key = key
+        os.environ["GEMINI_API_KEY"] = key
+        os.environ["GOOGLE_API_KEY"] = key
+        env_updates["GEMINI_API_KEY"] = key
+        env_updates["GOOGLE_API_KEY"] = key
+
+    if "groq_api_key" in payload:
+        key = str(payload["groq_api_key"]).strip()
+        s.groq_api_key = key
+        os.environ["GROQ_API_KEY"] = key
+        env_updates["GROQ_API_KEY"] = key
+
+    if "mistral_api_key" in payload:
+        key = str(payload["mistral_api_key"]).strip()
+        s.mistral_api_key = key
+        os.environ["MISTRAL_API_KEY"] = key
+        env_updates["MISTRAL_API_KEY"] = key
 
     if "primary_search_provider" in payload:
         val = str(payload["primary_search_provider"])

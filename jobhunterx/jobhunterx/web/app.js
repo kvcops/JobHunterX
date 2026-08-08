@@ -84,15 +84,152 @@ async function fetchSettings() {
       const tvInput = document.getElementById("input-tavily-key");
       const exaInput = document.getElementById("input-exa-key");
       const braveInput = document.getElementById("input-brave-key");
+      const geminiInput = document.getElementById("input-gemini-key");
+      const groqInput = document.getElementById("input-groq-key");
+      const mistralInput = document.getElementById("input-mistral-key");
 
       if (tfInput && data.tinyfish_key_masked) tfInput.placeholder = data.tinyfish_key_masked;
       if (tvInput && data.tavily_key_masked) tvInput.placeholder = data.tavily_key_masked;
       if (exaInput && data.exa_key_masked) exaInput.placeholder = data.exa_key_masked;
       if (braveInput && data.brave_key_masked) braveInput.placeholder = data.brave_key_masked;
+      if (geminiInput && data.google_key_masked) geminiInput.placeholder = data.google_key_masked;
+      if (groqInput && data.groq_key_masked) groqInput.placeholder = data.groq_key_masked;
+      if (mistralInput && data.mistral_key_masked) mistralInput.placeholder = data.mistral_key_masked;
+
+      renderSearchProviderBadges(data);
+      updateFlowchartSearchNodes(data);
     }
   } catch (err) {
     console.error("Error fetching settings:", err);
   }
+}
+
+async function saveSearchApiKeys() {
+  const tfKey = document.getElementById("input-tinyfish-key")?.value?.trim();
+  const tvKey = document.getElementById("input-tavily-key")?.value?.trim();
+  const exaKey = document.getElementById("input-exa-key")?.value?.trim();
+  const braveKey = document.getElementById("input-brave-key")?.value?.trim();
+
+  const payload = {};
+  if (tfKey) payload.tinyfish_api_key = tfKey;
+  if (tvKey) payload.tavily_api_key = tvKey;
+  if (exaKey) payload.exa_api_key = exaKey;
+  if (braveKey) payload.brave_api_key = braveKey;
+
+  if (Object.keys(payload).length === 0) {
+    showToast("Please enter at least one Search API key to save.", "info");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      showToast("Search API keys saved & persisted to .env!", "success");
+      fetchSettings();
+    } else {
+      showToast("Failed to save Search API keys.", "error");
+    }
+  } catch (err) {
+    console.error("Error saving Search API keys:", err);
+    showToast("Error saving Search API keys.", "error");
+  }
+}
+
+async function saveLlmApiKeys() {
+  const geminiKey = document.getElementById("input-gemini-key")?.value?.trim();
+  const groqKey = document.getElementById("input-groq-key")?.value?.trim();
+  const mistralKey = document.getElementById("input-mistral-key")?.value?.trim();
+
+  const payload = {};
+  if (geminiKey) payload.gemini_api_key = geminiKey;
+  if (groqKey) payload.groq_api_key = groqKey;
+  if (mistralKey) payload.mistral_api_key = mistralKey;
+
+  if (Object.keys(payload).length === 0) {
+    showToast("Please enter at least one LLM API key to save.", "info");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      showToast("LLM API keys saved & persisted to .env!", "success");
+      fetchSettings();
+      loadModelConfig();
+    } else {
+      showToast("Failed to save LLM API keys.", "error");
+    }
+  } catch (err) {
+    console.error("Error saving LLM API keys:", err);
+    showToast("Error saving LLM API keys.", "error");
+  }
+}
+
+function renderSearchProviderBadges(data) {
+  const container = document.getElementById("search-provider-badges-container");
+  if (!container || !data) return;
+
+  const searchProviders = [
+    { name: "TinyFish", active: data.tinyfish_configured, link: "https://agent.tinyfish.ai/api-keys" },
+    { name: "Tavily", active: data.tavily_configured, link: "https://app.tavily.com/home" },
+    { name: "Exa AI", active: data.exa_configured, link: "https://dashboard.exa.ai/home" },
+    { name: "Brave Search", active: data.brave_configured && data.brave_enabled, link: "https://api-dashboard.search.brave.com/app/keys" },
+    { name: "DDGS Scraper", active: true, link: null, always: true },
+  ];
+
+  container.innerHTML = searchProviders.map(p => {
+    const isOk = p.always || p.active;
+    const bg = isOk ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.12)";
+    const color = isOk ? "#4ade80" : "#fbbf24";
+    const border = isOk ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.3)";
+    const statusText = p.always ? "✓ Ready (Fallback)" : (p.active ? "✓ Active Key" : "✗ Bypassed (No Key)");
+    
+    const content = p.link
+      ? `<a href="${p.link}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;" title="Get ${p.name} API Key">${p.name}: ${statusText} <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>`
+      : `${p.name}: ${statusText}`;
+
+    return `<div style="padding: 6px 12px; border-radius: 6px; font-size: 0.82rem; font-weight: 500; background: ${bg}; color: ${color}; border: 1px solid ${border};">${content}</div>`;
+  }).join("");
+}
+
+function updateFlowchartSearchNodes(data) {
+  if (!data) return;
+  const nodes = [
+    { id: "flow-node-tinyfish", active: data.tinyfish_configured, textId: "flow-node-tinyfish-sub", activeText: "✓ Active · 30 RPM", inactiveText: "Bypassed (No Key)" },
+    { id: "flow-node-tavily", active: data.tavily_configured, textId: "flow-node-tavily-sub", activeText: "✓ Active · 1K Free/Mo", inactiveText: "Bypassed (No Key)" },
+    { id: "flow-node-exa", active: data.exa_configured, textId: "flow-node-exa-sub", activeText: "✓ Active · $10 Credit", inactiveText: "Bypassed (No Key)" },
+    { id: "flow-node-brave", active: data.brave_configured && data.brave_enabled, textId: "flow-node-brave-sub", activeText: "✓ Active · $5 Credit", inactiveText: "Disabled / No Key" },
+    { id: "flow-node-ddgs", active: true, textId: "flow-node-ddgs-sub", activeText: "✓ Ready (0-Key Fallback)", inactiveText: "Ready" },
+  ];
+
+  nodes.forEach(n => {
+    const el = document.getElementById(n.id);
+    const subEl = document.getElementById(n.textId);
+    if (el) {
+      const rect = el.querySelector("rect");
+      if (rect) {
+        if (n.active) {
+          rect.setAttribute("stroke", "#10b981");
+          rect.setAttribute("stroke-width", "2");
+        } else {
+          rect.setAttribute("stroke", "rgba(245, 158, 11, 0.5)");
+          rect.setAttribute("stroke-width", "1.5");
+        }
+      }
+    }
+    if (subEl) {
+      subEl.textContent = n.active ? n.activeText : n.inactiveText;
+      subEl.setAttribute("fill", n.active ? "#10b981" : "#f59e0b");
+    }
+  });
 }
 
 async function toggleWebSearchAPIs(explicitVal) {
@@ -371,13 +508,22 @@ function renderModelConfig(data) {
 
   if (providersContainer) {
     const providers = data.providers || {};
+    const providerLinks = {
+      google: "https://aistudio.google.com/app/api-keys",
+      groq: "https://console.groq.com/keys",
+      mistral: "https://admin.mistral.ai/organization/api-keys",
+    };
     providersContainer.innerHTML = Object.entries(providers).map(([provider, active]) => {
       const name = provider.toUpperCase();
+      const link = providerLinks[provider.toLowerCase()];
       const style = active
         ? "background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3);"
         : "background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2);";
       const statusText = active ? "✓ Active Key" : "✗ Missing Key";
-      return `<div style="padding: 6px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; ${style}">${name}: ${statusText}</div>`;
+      const contentHtml = link
+        ? `<a href="${link}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 5px;" title="Get ${name} API Key">${name}: ${statusText} <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>`
+        : `${name}: ${statusText}`;
+      return `<div style="padding: 6px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; ${style}">${contentHtml}</div>`;
     }).join("");
   }
 

@@ -202,13 +202,17 @@ flowchart TD
         QG2 -->|Insufficient / Error| EXA["3. Exa AI Search API<br/>($10/Mo Free Credit)"]
         EXA --> QG3{"Quality Gate<br/>Pass (≥0.60)?"}
         QG3 -->|Yes| STOP3["STOP Router & Return SERP"]
-        QG3 -->|Insufficient / Error| DDGS_FB["4. DuckDuckGo Scraper Fallback"]
+        QG3 -->|Insufficient / Error| BRV["4. Brave Search API<br/>($5/Mo Free Credit)"]
+        BRV --> QG4{"Quality Gate<br/>Pass (≥0.60)?"}
+        QG4 -->|Yes| STOP4["STOP Router & Return SERP"]
+        QG4 -->|Insufficient / Error| DDGS_FB["5. DuckDuckGo Scraper Fallback"]
     end
 
     DIRECT_SCRAPER --> HYBRID_FETCH
     STOP1 --> HYBRID_FETCH
     STOP2 --> HYBRID_FETCH
     STOP3 --> HYBRID_FETCH
+    STOP4 --> HYBRID_FETCH
     DDGS_FB --> HYBRID_FETCH
 
     subgraph HYBRID_FETCH ["📦 HYBRID FETCH PIPELINE"]
@@ -244,6 +248,20 @@ flowchart TD
 | **Exa AI Search** | `POST https://api.exa.ai/search` | **$10.00 / month recurring credit** | Dynamic 429 backoff | $0.007 / base request (≤10 results). Dynamically checks parameter cost. |
 | **Brave Search** | `GET https://api.search.brave.com/res/v1/web/search` | $5.00 / month recurring credit | 50 QPS capacity | $0.005 / request. **Disabled by default** (`BRAVE_ENABLED=false`) as Brave requires linking a payment card. |
 | **DuckDuckGo** | Python `ddgs` (Local Wrapper) | Unofficial scraper fallback | Adaptive backoff on 429/CAPTCHA | 0 credits. Emergency fallback when API keys are not provided or exhausted. |
+
+---
+
+### 🔑 Official API Key Dashboards & Setup Links
+
+| Provider | Purpose | Free Allowance | Dashboard / API Key Link |
+|:---------|:--------|:---------------|:-------------------------|
+| **TinyFish** | Web Search & JS Page Fetch | Unlimited 0-Credit Utility | [TinyFish API Keys](https://agent.tinyfish.ai/api-keys) |
+| **Tavily** | Primary Web Search API | 1,000 Free Credits / Month | [Tavily Dashboard](https://app.tavily.com/home) |
+| **Exa AI** | Neural Web Search API | $10.00 / Month Recurring Credit | [Exa AI Dashboard](https://dashboard.exa.ai/home) |
+| **Brave Search** | Web Search API | $5.00 / Month Credit | [Brave Search Dashboard](https://api-dashboard.search.brave.com/app/keys) |
+| **Google AI Studio** | Gemini & Gemma LLMs | 14.4k RPD / 30 RPM Free | [Google AI Studio](https://aistudio.google.com/app/api-keys) |
+| **Groq** | Llama 3.3 & DeepSeek LLMs | 14.4k RPD / 30 RPM Free | [Groq Console](https://console.groq.com/keys) |
+| **Mistral AI** | Mistral Large LLM | Free Tier | [Mistral AI Admin](https://admin.mistral.ai/organization/api-keys) |
 
 ---
 

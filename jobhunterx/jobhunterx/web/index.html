@@ -781,17 +781,19 @@
                     <!-- 3. Search Planner -> Search Router -->
                     <path class="flow-path path-search" d="M 855 94 C 855 125, 505 125, 505 150" fill="none" stroke="#10b981" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
 
-                    <!-- 4. Search Router -> 4 Providers -->
-                    <path class="flow-path path-search" d="M 505 204 C 505 230, 145 230, 145 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
-                    <path class="flow-path path-search" d="M 505 204 C 505 230, 385 230, 385 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
-                    <path class="flow-path path-search" d="M 505 204 C 505 230, 615 230, 615 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
-                    <path class="flow-path path-search" d="M 505 204 C 505 230, 855 230, 855 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <!-- 4. Search Router -> 5 Search Engines -->
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 115 230, 115 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 305 230, 305 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 500 230, 500 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 695 230, 695 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 885 230, 885 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
 
-                    <!-- 5. 4 Providers -> SERP Quality Gate -->
-                    <path class="flow-path path-search" d="M 145 304 C 145 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
-                    <path class="flow-path path-search" d="M 385 304 C 385 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
-                    <path class="flow-path path-search" d="M 615 304 C 615 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
-                    <path class="flow-path path-search" d="M 855 304 C 855 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8" marker-end="url(#arr-amber)"/>
+                    <!-- 5. 5 Search Engines -> SERP Quality Gate -->
+                    <path class="flow-path path-search" d="M 115 304 C 115 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
+                    <path class="flow-path path-search" d="M 305 304 C 305 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
+                    <path class="flow-path path-search" d="M 500 304 C 500 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
+                    <path class="flow-path path-search" d="M 695 304 C 695 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
+                    <path class="flow-path path-search" d="M 885 304 C 885 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8" marker-end="url(#arr-amber)"/>
 
                     <!-- 6. SERP Quality Gate -> Hybrid Fetcher -->
                     <path class="flow-path path-search" d="M 505 404 L 505 450" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
@@ -839,31 +841,38 @@
                     </g>
 
                     <!-- Node 5: TinyFish Search -->
-                    <g class="true-flow-node tf-search" transform="translate(60, 250)" onclick="inspectFlowNode('tinyfish_search')">
-                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
-                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">1️⃣ TinyFish Search</text>
-                      <text x="85" y="39" text-anchor="middle" fill="#10b981" font-size="9.5" font-weight="600" font-family="var(--font-mono)">0 Credits · 30 RPM</text>
+                    <g id="flow-node-tinyfish" class="true-flow-node tf-search" transform="translate(40, 250)" onclick="inspectFlowNode('tinyfish_search')">
+                      <rect width="150" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="75" y="23" text-anchor="middle" fill="var(--text)" font-size="11.5" font-weight="700" font-family="var(--font-sans)">1️⃣ TinyFish Search</text>
+                      <text id="flow-node-tinyfish-sub" x="75" y="39" text-anchor="middle" fill="#10b981" font-size="9" font-weight="600" font-family="var(--font-mono)">0 Credits · 30 RPM</text>
                     </g>
 
                     <!-- Node 6: Tavily Search -->
-                    <g class="true-flow-node tf-search" transform="translate(300, 250)" onclick="inspectFlowNode('tavily_search')">
-                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
-                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">2️⃣ Tavily Search</text>
-                      <text x="85" y="39" text-anchor="middle" fill="#10b981" font-size="9.5" font-weight="600" font-family="var(--font-mono)">1K Free Credits/Mo</text>
+                    <g id="flow-node-tavily" class="true-flow-node tf-search" transform="translate(230, 250)" onclick="inspectFlowNode('tavily_search')">
+                      <rect width="150" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="75" y="23" text-anchor="middle" fill="var(--text)" font-size="11.5" font-weight="700" font-family="var(--font-sans)">2️⃣ Tavily Search</text>
+                      <text id="flow-node-tavily-sub" x="75" y="39" text-anchor="middle" fill="#10b981" font-size="9" font-weight="600" font-family="var(--font-mono)">1K Free Credits/Mo</text>
                     </g>
 
                     <!-- Node 7: Exa AI Search -->
-                    <g class="true-flow-node tf-search" transform="translate(530, 250)" onclick="inspectFlowNode('exa_search')">
-                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
-                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">3️⃣ Exa AI Search</text>
-                      <text x="85" y="39" text-anchor="middle" fill="#10b981" font-size="9.5" font-weight="600" font-family="var(--font-mono)">$10/Mo Credit</text>
+                    <g id="flow-node-exa" class="true-flow-node tf-search" transform="translate(425, 250)" onclick="inspectFlowNode('exa_search')">
+                      <rect width="150" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="75" y="23" text-anchor="middle" fill="var(--text)" font-size="11.5" font-weight="700" font-family="var(--font-sans)">3️⃣ Exa AI Search</text>
+                      <text id="flow-node-exa-sub" x="75" y="39" text-anchor="middle" fill="#10b981" font-size="9" font-weight="600" font-family="var(--font-mono)">$10/Mo Credit</text>
                     </g>
 
-                    <!-- Node 8: DDGS Scraper -->
-                    <g class="true-flow-node tf-search" transform="translate(770, 250)" onclick="inspectFlowNode('ddgs_search')">
-                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
-                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">4️⃣ DDGS Scraper</text>
-                      <text x="85" y="39" text-anchor="middle" fill="var(--text-muted)" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Emergency Fallback</text>
+                    <!-- Node 8: Brave Search -->
+                    <g id="flow-node-brave" class="true-flow-node tf-search" transform="translate(620, 250)" onclick="inspectFlowNode('brave_search')">
+                      <rect width="150" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="75" y="23" text-anchor="middle" fill="var(--text)" font-size="11.5" font-weight="700" font-family="var(--font-sans)">4️⃣ Brave Search</text>
+                      <text id="flow-node-brave-sub" x="75" y="39" text-anchor="middle" fill="#10b981" font-size="9" font-weight="600" font-family="var(--font-mono)">$5/Mo Credit</text>
+                    </g>
+
+                    <!-- Node 9: DDGS Scraper -->
+                    <g id="flow-node-ddgs" class="true-flow-node tf-search" transform="translate(810, 250)" onclick="inspectFlowNode('ddgs_search')">
+                      <rect width="150" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="75" y="23" text-anchor="middle" fill="var(--text)" font-size="11.5" font-weight="700" font-family="var(--font-sans)">5️⃣ DDGS Scraper</text>
+                      <text id="flow-node-ddgs-sub" x="75" y="39" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-weight="600" font-family="var(--font-mono)">Emergency Fallback</text>
                     </g>
 
                     <!-- Node 9: SERP Quality Gate -->
@@ -935,33 +944,100 @@
                 <div id="search-api-config-panel">
                   <div class="search-api-form-grid">
                     <div class="search-api-field-group">
-                      <label for="input-tinyfish-key">TinyFish API Key (Search & Fetch Utilities)</label>
+                      <label for="input-tinyfish-key">
+                        <span>TinyFish API Key (Search & Fetch Utilities)</span>
+                        <a href="https://agent.tinyfish.ai/api-keys" target="_blank" rel="noopener noreferrer" class="api-key-link" title="Get TinyFish API Key">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                      </label>
                       <input type="password" id="input-tinyfish-key" placeholder="tf_..." class="search-api-input" autocomplete="off">
                     </div>
                     <div class="search-api-field-group">
-                      <label for="input-tavily-key">Tavily API Key (1,000 Free Credits/Mo)</label>
+                      <label for="input-tavily-key">
+                        <span>Tavily API Key (1,000 Free Credits/Mo)</span>
+                        <a href="https://app.tavily.com/home" target="_blank" rel="noopener noreferrer" class="api-key-link" title="Get Tavily API Key">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                      </label>
                       <input type="password" id="input-tavily-key" placeholder="tvly-..." class="search-api-input" autocomplete="off">
                     </div>
                     <div class="search-api-field-group">
-                      <label for="input-exa-key">Exa AI API Key ($10/Mo Recurring Credit)</label>
+                      <label for="input-exa-key">
+                        <span>Exa AI API Key ($10/Mo Recurring Credit)</span>
+                        <a href="https://dashboard.exa.ai/home" target="_blank" rel="noopener noreferrer" class="api-key-link" title="Get Exa AI API Key">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                      </label>
                       <input type="password" id="input-exa-key" placeholder="exa-..." class="search-api-input" autocomplete="off">
                     </div>
                     <div class="search-api-field-group">
-                      <label for="input-brave-key">Brave Search API Key (Requires Card)</label>
+                      <label for="input-brave-key">
+                        <span>Brave Search API Key (Requires Card)</span>
+                        <a href="https://api-dashboard.search.brave.com/app/keys" target="_blank" rel="noopener noreferrer" class="api-key-link" title="Get Brave Search API Key">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                      </label>
                       <input type="password" id="input-brave-key" placeholder="BSA..." class="search-api-input" autocomplete="off">
                     </div>
                   </div>
+                  
+                  <div id="search-provider-badges-container" style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; margin-bottom: 14px;">
+                    <!-- Dynamically populated Search Provider Status Badges -->
+                  </div>
+
                   <div style="display: flex; justify-content: flex-end;">
                     <button class="cta-btn primary" onclick="saveSearchApiKeys()">💾 Save API Keys</button>
                   </div>
                 </div>
               </div>
 
-              <!-- Providers Overview -->
+              <!-- Providers Overview & LLM API Key Config -->
               <div id="model-providers-status" class="bento-card glass" style="margin-bottom: 20px; padding: 20px;">
-                <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 600;">Configured Providers</h4>
-                <div id="provider-badges-container" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                  <div>
+                    <h4 style="margin: 0 0 4px 0; font-size: 1.05rem; font-weight: 600;">🤖 LLM Model Provider API Keys & Status</h4>
+                    <p style="margin: 0; font-size: 0.82rem; color: var(--text-muted);">
+                      Configure API keys for Google Gemini / Gemma 4, Groq Cloud (Llama 3.3 / DeepSeek), and Mistral AI models.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="search-api-form-grid" style="margin-bottom: 14px;">
+                  <div class="search-api-field-group">
+                    <label for="input-gemini-key">
+                      <span>Google AI Studio Key (Gemini & Gemma 4)</span>
+                      <a href="https://aistudio.google.com/app/api-keys" target="_blank" rel="noopener noreferrer" class="api-key-link" title="Get Google AI Studio Key">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      </a>
+                    </label>
+                    <input type="password" id="input-gemini-key" placeholder="AIzaSy..." class="search-api-input" autocomplete="off">
+                  </div>
+                  <div class="search-api-field-group">
+                    <label for="input-groq-key">
+                      <span>Groq Cloud API Key (Llama 3.3 & GPT-OSS)</span>
+                      <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" class="api-key-link" title="Get Groq Cloud Key">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      </a>
+                    </label>
+                    <input type="password" id="input-groq-key" placeholder="gsk_..." class="search-api-input" autocomplete="off">
+                  </div>
+                  <div class="search-api-field-group">
+                    <label for="input-mistral-key">
+                      <span>Mistral AI API Key (Codestral & Mistral Large)</span>
+                      <a href="https://admin.mistral.ai/organization/api-keys" target="_blank" rel="noopener noreferrer" class="api-key-link" title="Get Mistral AI Key">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                      </a>
+                    </label>
+                    <input type="password" id="input-mistral-key" placeholder="mis_..." class="search-api-input" autocomplete="off">
+                  </div>
+                </div>
+
+                <div id="provider-badges-container" style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;">
                   <!-- Dynamically populated -->
+                </div>
+
+                <div style="display: flex; justify-content: flex-end;">
+                  <button class="cta-btn primary" onclick="saveLlmApiKeys()">💾 Save LLM API Keys</button>
                 </div>
               </div>
 
