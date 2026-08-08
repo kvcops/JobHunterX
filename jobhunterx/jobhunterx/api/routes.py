@@ -202,28 +202,90 @@ async def get_settings_masked():
     }
 
 
+def _persist_to_env_file(env_path: Path, updates: dict) -> None:
+    """Persist updated configuration settings into the .env file."""
+    lines = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    updated_keys = set()
+    new_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in line:
+            k, _ = line.split("=", 1)
+            k = k.strip()
+            if k in updates:
+                new_lines.append(f"{k}={updates[k]}")
+                updated_keys.add(k)
+                continue
+        new_lines.append(line)
+
+    for k, v in updates.items():
+        if k not in updated_keys:
+            new_lines.append(f"{k}={v}")
+
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
 @router.post("/settings")
 async def update_settings(payload: dict):
     """Update search API provider configuration settings."""
-    from jobhunterx.config.settings import get_settings
+    from jobhunterx.config.settings import get_settings, _BASE_DIR
     s = get_settings()
 
+    env_updates = {}
+
     if "enable_web_search_apis" in payload:
-        s.enable_web_search_apis = bool(payload["enable_web_search_apis"])
+        val = bool(payload["enable_web_search_apis"])
+        s.enable_web_search_apis = val
+        env_updates["ENABLE_WEB_SEARCH_APIS"] = "true" if val else "false"
+
     if "tinyfish_api_key" in payload:
-        s.tinyfish_api_key = payload["tinyfish_api_key"]
+        key = str(payload["tinyfish_api_key"]).strip()
+        s.tinyfish_api_key = key
+        os.environ["TINYFISH_API_KEY"] = key
+        env_updates["TINYFISH_API_KEY"] = key
+
     if "tavily_api_key" in payload:
-        s.tavily_api_key = payload["tavily_api_key"]
+        key = str(payload["tavily_api_key"]).strip()
+        s.tavily_api_key = key
+        os.environ["TAVILY_API_KEY"] = key
+        env_updates["TAVILY_API_KEY"] = key
+
     if "exa_api_key" in payload:
-        s.exa_api_key = payload["exa_api_key"]
+        key = str(payload["exa_api_key"]).strip()
+        s.exa_api_key = key
+        os.environ["EXA_API_KEY"] = key
+        env_updates["EXA_API_KEY"] = key
+
     if "brave_api_key" in payload:
-        s.brave_api_key = payload["brave_api_key"]
+        key = str(payload["brave_api_key"]).strip()
+        s.brave_api_key = key
+        os.environ["BRAVE_API_KEY"] = key
+        env_updates["BRAVE_API_KEY"] = key
+
     if "brave_enabled" in payload:
-        s.brave_enabled = bool(payload["brave_enabled"])
+        val = bool(payload["brave_enabled"])
+        s.brave_enabled = val
+        env_updates["BRAVE_ENABLED"] = "true" if val else "false"
+
     if "primary_search_provider" in payload:
-        s.primary_search_provider = str(payload["primary_search_provider"])
+        val = str(payload["primary_search_provider"])
+        s.primary_search_provider = val
+        env_updates["PRIMARY_SEARCH_PROVIDER"] = val
+
     if "strict_zero_spend_protection" in payload:
-        s.strict_zero_spend_protection = bool(payload["strict_zero_spend_protection"])
+        val = bool(payload["strict_zero_spend_protection"])
+        s.strict_zero_spend_protection = val
+        env_updates["STRICT_ZERO_SPEND_PROTECTION"] = "true" if val else "false"
+
+    if env_updates:
+        try:
+            _persist_to_env_file(_BASE_DIR / ".env", env_updates)
+        except Exception as exc:
+            log.warning("failed_to_persist_env_settings", error=str(exc))
 
     return {
         "status": "updated",
