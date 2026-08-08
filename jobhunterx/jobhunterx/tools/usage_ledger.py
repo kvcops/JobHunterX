@@ -113,3 +113,52 @@ async def get_monthly_usage_native(provider: str) -> float:
         ) as cursor:
             row = await cursor.fetchone()
             return float(row[0] or 0.0) if row else 0.0
+
+
+async def get_usage_report() -> dict:
+    """Aggregate per-provider usage stats from the ledger for the Usage dashboard.
+
+    Returns {provider: {calls, calls_this_month, native_units_this_month,
+    estimated_cost, actual_cost, last_used, verdicts: {verdict: count}}}
+    """
+    await init_ledger_db()
+    db_path = get_db_path()
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT provider,
+                   COUNT(*) as calls,
+                   SUM(CASE WHEN timestamp >= datetime('now', 'start of month')
+                       THEN 1 ELSE 0 END) as calls_month,
+                   SUM(CASE WHEN timestamp >= datetime('now', 'start of month')
+                       THEN native_billing_units ELSE 0 END) as units_month,
+                   COALESCE(SUM(estimated_cost_native), 0) as est_cost,
+                   COALESCE(SUM(actual_known_cost_native), 0) as actual_cost,
+                   MAX(timestamp) as last_used
+            FROM search_usage_ledger
+            GROUP BY provider
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+        async with db.execute(
+            "SELECT provider, verdict, COUNT(*) AS n FROM search_usage_ledger GROUP BY provider, verdict"
+        ) as cursor:
+            verdict_rows = await cursor.fetchall()
+
+    verdicts_by_provider: dict[str, dict[str, int]] = {}
+    for vr in verdict_rows:
+        verdicts_by_provider.setdefault(vr["provider"], {})[vr["verdict"]] = vr["n"]
+
+    report: dict[str, dict] = {}
+    for r in rows:
+        report[r["provider"]] = {
+            "calls": int(r["calls"] or 0),
+            "calls_this_month": int(r["calls_month"] or 0),
+            "units_this_month": float(r["units_month"] or 0.0),
+            "est_cost_total": float(r["est_cost"] or 0.0),
+            "actual_cost_total": float(r["actual_cost"] or 0.0),
+            "last_used": r["last_used"] or "",
+            "verdicts": verdicts_by_provider.get(r["provider"], {}),
+        }
+    return report

@@ -12,9 +12,16 @@ def test_direct_job_urls_recognized():
     assert _is_direct_job_url("https://www.indeed.com/viewjob?jk=abcdef123456") is True
     assert _is_direct_job_url("https://www.foundit.in/job/software-engineer-hyderabad-123") is True
     assert _is_direct_job_url("https://www.naukri.com/job-listings-software-engineer-hyderabad-12345") is True
-    assert _is_direct_job_url("https://www.instahyre.com/job/12345-backend-engineer") is True
     assert _is_direct_job_url("https://boards.greenhouse.io/acme/jobs/98765") is True
     assert _is_direct_job_url("https://jobs.lever.co/acme/12345-67890") is True
+
+
+def test_waste_aggregators_never_direct():
+    # Instahyre & AIJobs require login / are login-gated aggregators — must be filtered out everywhere
+    assert _is_direct_job_url("https://www.instahyre.com/job/12345-backend-engineer") is False
+    assert _is_aggregator("https://www.instahyre.com/job/12345-backend-engineer") is True
+    assert _is_direct_job_url("https://aijobs.net/job/senior-ml-engineer") is False
+    assert _is_aggregator("https://aijobs.net/job/senior-ml-engineer") is True
 
 
 def test_aggregator_filter_permits_direct_job_urls():

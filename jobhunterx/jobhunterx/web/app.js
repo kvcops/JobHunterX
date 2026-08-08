@@ -480,8 +480,64 @@ function switchTab(tabName) {
   // Load and render model config when switching to models tab
   if (tabName === "models") {
     loadModelConfig();
+    loadModelUsage();
     setTimeout(drawFlowchartConnectors, 100);
   }
+}
+
+// ---------------------------------------------------------------------------
+// All Models Usage Status (Config tab)
+// ---------------------------------------------------------------------------
+
+async function loadModelUsage() {
+  try {
+    const res = await fetch(`${API_BASE}/usage`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderModelUsage((data.llm && data.llm.rows) || [], (data.llm && data.llm.totals) || {});
+  } catch (err) {
+    console.error("Failed to load model usage", err);
+  }
+}
+
+function renderModelUsage(rows, totals) {
+  const container = document.getElementById("model-usage-container");
+  if (!container) return;
+
+  const note = document.getElementById("model-usage-note");
+  if (note) {
+    const total = totals.calls || 0;
+    note.textContent = `total calls: ${fmtNumber(total)} · ${(totals.total_tokens || 0) ? fmtTokens(totals.total_tokens) + " tokens" : "0 tokens"}`;
+  }
+
+  if (!rows.length) {
+    container.innerHTML = `<div class="empty-state">No usage data yet — run a search to populate.</div>`;
+    return;
+  }
+
+  container.innerHTML = rows.map((m) => {
+    const used = m.calls > 0;
+    const border = used ? "1px solid rgba(34,197,94,0.35)" : "1px solid var(--border)";
+    const bg = used ? "rgba(34,197,94,0.06)" : "var(--bg-inset)";
+    const dot = used ? "#4ade80" : "var(--text-faint)";
+    const statusText = used ? `${fmtNumber(m.calls)} calls` : "0 calls · unused";
+    const statusColor = used ? "#4ade80" : "var(--text-faint)";
+    const limitText = m.limit_value ? `${fmtNumber(m.limit_value)} req/day` : (m.limit_unit || "—");
+    return `
+      <div class="bento-card glass" style="padding: 14px; border: ${border}; background: ${bg};">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: ${dot}; display: inline-block; margin-right: 6px; box-shadow: 0 0 6px ${dot};"></span>
+          <span style="font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: ${statusColor}; font-weight: 600;">${statusText}</span>
+        </div>
+        <h4 style="margin: 0 0 2px 0; font-size: 0.95rem; font-weight: 600;">${escapeHtml(m.label || m.model)}</h4>
+        <p style="margin: 0 0 8px 0; font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(m.model)}</p>
+        <div style="display: flex; gap: 10px; font-size: 0.75rem; color: var(--text-muted); flex-wrap: wrap;">
+          <span><strong style="color: var(--text);">${escapeHtml(m.provider)}</strong></span>
+          <span>⏱ ${limitText}</span>
+          <span>tokens: ${fmtTokens(m.tokens_in || 0)} in / ${fmtTokens(m.tokens_out || 0)} out</span>
+        </div>
+      </div>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -3179,6 +3235,9 @@ window.switchTab = function(tabName) {
     connectBrowserWebSocket();
     if (_browserCanvas) _browserCanvas.focus();
   }
+  if (tabName === "usage") {
+    loadUsageData();
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -3559,3 +3618,137 @@ window.addEventListener("resize", drawFlowchartConnectors);
 document.addEventListener("DOMContentLoaded", () => {
   setTimeout(drawFlowchartConnectors, 300);
 });
+
+// ---------------------------------------------------------------------------
+// Usage Telemetry Tab
+// ---------------------------------------------------------------------------
+
+async function loadUsageData() {
+  const view = document.getElementById("view-usage");
+  if (!view) return;
+  try {
+    const res = await fetch(`${API_BASE}/usage`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderUsageData(data);
+  } catch (err) {
+    console.error("Failed to load usage telemetry:", err);
+    const t = document.getElementById("usage-search-table");
+    if (t) t.innerHTML = `<div class="empty-state" style="color:#f87171">Failed to load usage data.</div>`;
+  }
+}
+
+function renderUsageData(data) {
+  const ws = data.web_search || {};
+  const llm = data.llm || {};
+  const gb = data.gemma_budget || {};
+
+  const setText = (id, txt) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  };
+
+  setText("usage-sum-llm-calls", fmtNumber(llm.total_calls));
+  setText("usage-sum-llm-tokens", fmtTokens((llm.total_tokens_in || 0) + (llm.total_tokens_out || 0)));
+  setText("usage-sum-search-calls", fmtNumber(ws.total_calls_month));
+  setText("usage-sum-search-spend", ws.total_cost_month != null ? `$${Number(ws.total_cost_month).toFixed(3)}` : "$0.000");
+  setText("usage-sum-gemma-today", gb.requests_today != null ? `${fmtNumber(gb.requests_today)} / ${fmtNumber(gb.requests_cap)}` : "—");
+
+  const modePill = document.getElementById("usage-search-mode-pill");
+  if (modePill) {
+    modePill.textContent = ws.enabled ? `ROUTER: ${(ws.primary_provider || "tinyfish").toUpperCase()} ACTIVE` : "WEB SEARCH APIS OFF (DDG ONLY)";
+    modePill.className = "terminal-phase-tag" + (ws.enabled ? "" : "");
+  }
+
+  const st = document.getElementById("usage-search-table");
+  if (st) {
+    const rows = (ws.providers || []).map((p) => usageProviderRow(p)).join("");
+    st.innerHTML = rows
+      ? `<table class="usage-table">
+           <thead><tr><th>Provider</th><th>Key</th><th>Unit</th><th>Quota / month</th><th>Used this month</th><th>Remaining</th><th>Usage</th><th>All-time Calls</th><th>Verdicts</th></tr></thead>
+           <tbody>${rows}</tbody>
+         </table>`
+      : `<div class="empty-state">No search API usage recorded yet.</div>`;
+  }
+
+  const lt = document.getElementById("usage-llm-table");
+  if (lt) {
+    const rows = (llm.rows || []).map((r) => usageLLMRow(r)).join("");
+    lt.innerHTML = rows
+      ? `<table class="usage-table">
+           <thead><tr><th>Model</th><th>Provider</th><th>Limit</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th><th>Total Tokens</th></tr></thead>
+           <tbody>${rows}</tbody>
+         </table>`
+      : `<div class="empty-state">No LLM usage recorded yet.</div>`;
+  }
+}
+
+function usageProviderRow(p) {
+  const pct = p.usage_pct != null ? Math.min(100, Math.round(p.usage_pct * 100)) : 0;
+  const color = pct >= 95 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#10b981";
+  const verdicts = (p.verdicts || []).map((v) => {
+    const cls =
+      v === "SUCCESS" ? "usage-chip usage-chip-ok"
+      : v === "BILLING_SAFETY_BLOCK" || v === "AUTH_ERROR" ? "usage-chip usage-chip-bad"
+      : v === "RATE_LIMITED" ? "usage-chip usage-chip-warn"
+      : "usage-chip";
+    return `<span class="${cls}">${v}</span>`;
+  }).join(" ");
+  const remaining = p.remaining != null ? fmtRemaining(p.remaining) : p.allowance != null ? fmtRemaining(p.allowance) : "∞";
+  const used = p.units_this_month != null ? fmtNumber(p.units_this_month) : p.calls_this_month != null ? fmtNumber(p.calls_this_month) : "0";
+  return `<tr>
+    <td><strong>${p.label || p.name}</strong></td>
+    <td>${p.configured ? `<span class="usage-chip usage-chip-ok">configured</span>` : `<span class="usage-chip usage-chip-warn">no key</span>`}</td>
+    <td style="color: var(--text-muted);">${p.unit || "—"}</td>
+    <td>${p.allowance != null ? fmtNumber(p.allowance) : "∞ / free"}</td>
+    <td>${used}</td>
+    <td>${remaining}</td>
+    <td style="min-width: 110px;">
+      <div class="usage-bar"><div class="usage-bar-fill" style="width:${pct}%; background:${color};"></div></div>
+      <span style="font-size: 0.75rem; color: var(--text-muted);">${pct}%</span>
+    </td>
+    <td>${fmtNumber(p.calls)}</td>
+    <td>${verdicts || "—"}</td>
+  </tr>`;
+}
+
+function usageLLMRow(r) {
+  const health = r.limit ? (r.calls >= r.limit ? ` style="color:#ef4444"` : "") : "";
+  return `<tr>
+    <td><strong>${r.label}</strong><br><span style="font-size:0.75rem; color: var(--text-muted);">${r.model}</span></td>
+    <td>${r.provider}</td>
+    <td${health}>${r.limit ? fmtNumber(r.limit) + " req/day" : "—"}</td>
+    <td>${fmtNumber(r.calls)}</td>
+    <td>${fmtTokens(r.tokens_in)}</td>
+    <td>${fmtTokens(r.tokens_out)}</td>
+    <td>${fmtTokens(r.tokens_total)}</td>
+  </tr>`;
+}
+
+function fmtNumber(n) {
+  if (n == null || isNaN(n)) return "0";
+  return Number(n).toLocaleString("en-US");
+}
+
+function fmtTokens(n) {
+  if (n == null || isNaN(n)) return "0";
+  n = Number(n);
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return String(n);
+}
+
+function fmtRemaining(n) {
+  if (n == null || isNaN(n)) return "—";
+  if (Math.abs(Number(n)) >= 1) return Number(n).toFixed(2);
+  return Number(n).toFixed(6);
+}
+
+window.loadUsageData = loadUsageData;
+
+setInterval(() => {
+  const view = document.getElementById("view-usage");
+  if (view && view.classList.contains("active")) {
+    loadUsageData();
+  }
+}, 15000);

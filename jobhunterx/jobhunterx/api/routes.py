@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -329,6 +331,135 @@ async def get_budget():
     """Gemma budget usage (15k RPD / 30 RPM)."""
     from jobhunterx.config.gemma import budget_status
     return {"budget": budget_status()}
+
+
+@router.get("/usage")
+async def get_usage_report_endpoint():
+    """Complete API usage dashboard: web search providers + LLM providers + budgets.
+
+    Web search usage comes from the SQLite ledger (every provider attempt is
+    recorded); LLM usage comes from the agent_runs telemetry table.
+    """
+    from jobhunterx.tools.usage_ledger import get_usage_report
+    from jobhunterx.config.database import get_token_usage_summary
+    from jobhunterx.config import gemma
+    from jobhunterx.config.settings import get_settings
+
+    s = get_settings()
+
+    search_report = await get_usage_report()
+    provider_meta = {
+        "tinyfish": {
+            "label": "TinyFish Search", "unit": "credits", "allowance": None,
+            "rate": "0 credits / search", "configured": bool(s.tinyfish_api_key),
+            "enabled_in_order": True,
+        },
+        "tavily": {
+            "label": "Tavily", "unit": "credits", "allowance": 1000.0,
+            "rate": "1 credit / search", "configured": bool(s.tavily_api_key),
+            "enabled_in_order": True,
+        },
+        "exa": {
+            "label": "Exa AI", "unit": "USD", "allowance": 10.0,
+            "rate": "$0.007 / search", "configured": bool(s.exa_api_key),
+            "enabled_in_order": True,
+        },
+        "brave": {
+            "label": "Brave Search", "unit": "USD", "allowance": 5.0,
+            "rate": "$0.005 / search", "configured": bool(s.brave_api_key),
+            "enabled_in_order": bool(s.brave_enabled),
+        },
+        "ddgs": {
+            "label": "DuckDuckGo", "unit": "NA", "allowance": None,
+            "rate": "free scraper", "configured": True,
+            "enabled_in_order": True,
+        },
+    }
+    for name, meta in provider_meta.items():
+        stats = search_report.get(name, {})
+        meta["usage"] = stats
+        meta["calls"] = stats.get("calls", 0)
+        meta["calls_this_month"] = stats.get("calls_this_month", 0)
+        meta["units_this_month"] = stats.get("units_this_month", 0.0)
+        meta["last_used"] = stats.get("last_used", "")
+        meta["verdicts"] = sorted(stats.get("verdicts", {}).keys())
+        meta["name"] = name
+        used = stats.get("units_this_month", 0.0)
+        meta["remaining"] = (meta["allowance"] - used) if meta["allowance"] is not None else None
+        meta["usage_pct"] = min(100.0, round(used / meta["allowance"] * 100, 1)) if meta["allowance"] else 0.0
+
+    unit_rate = {"tinyfish": 0.0, "tavily": 0.0, "exa": 0.007, "brave": 0.005, "ddgs": 0.0}
+    total_calls_month = sum(p.get("calls_this_month", 0) for p in provider_meta.values())
+    total_cost_month = sum(
+        p.get("units_this_month", 0.0) * unit_rate.get(name, 0.0)
+        for name, p in provider_meta.items()
+    )
+
+    llm_usage = await get_token_usage_summary()
+    by_model = llm_usage.pop("by_model", {})
+
+    llm_meta = {
+        "gemini/gemma-4-26b-a4b-it": {
+            "label": "Gemma 4 26B (Google)", "provider": "Google AI Studio",
+            "limit_unit": "req/day", "limit_value": s.gemma_daily_requests or 14400,
+        },
+        "gemini/gemini-3.1-flash-lite": {
+            "label": "Gemini 3.1 Flash Lite (Google)", "provider": "Google AI Studio",
+            "limit_unit": "req/day", "limit_value": 500,
+        },
+        "groq/llama-3.3-70b-versatile": {
+            "label": "Llama 3.3 70B (Groq)", "provider": "Groq",
+            "limit_unit": "req/day", "limit_value": 1000,
+        },
+        "groq/llama-3.1-8b-instant": {
+            "label": "Llama 3.1 8B (Groq)", "provider": "Groq",
+            "limit_unit": "req/day", "limit_value": 14400,
+        },
+        "mistral/mistral-small-2603": {
+            "label": "Mistral Small (Mistral)", "provider": "Mistral AI",
+            "limit_unit": "free tier", "limit_value": None,
+        },
+        "mistral/mistral-large-2512": {
+            "label": "Mistral Large (Mistral)", "provider": "Mistral AI",
+            "limit_unit": "free tier", "limit_value": None,
+        },
+        "mistral/codestral-2508": {
+            "label": "Codestral 2508 (Mistral)", "provider": "Mistral AI",
+            "limit_unit": "free tier", "limit_value": None,
+        },
+    }
+    llm_rows = []
+    for model, meta in llm_meta.items():
+        usage = by_model.get(model, {})
+        llm_rows.append({
+            "model": model, "label": meta["label"], "provider": meta["provider"],
+            "limit_unit": meta["limit_unit"], "limit_value": meta["limit_value"],
+            "calls": usage.get("calls", 0), "tokens_in": usage.get("tokens_in", 0),
+            "tokens_out": usage.get("tokens_out", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        })
+    llm_rows.sort(key=lambda r: -r["calls"])
+
+    return {
+        "web_search": {
+            "enabled": getattr(s, "enable_web_search_apis", True),
+            "primary_provider": getattr(s, "primary_search_provider", "tinyfish"),
+            "total_calls_month": total_calls_month,
+            "total_cost_month": round(total_cost_month, 4),
+            "providers": list(provider_meta.values()),
+        },
+        "llm": {
+            "rows": llm_rows,
+            "totals": {
+                "calls": llm_usage.get("total_calls", 0),
+                "tokens_in": llm_usage.get("total_in", 0),
+                "tokens_out": llm_usage.get("total_out", 0),
+                "total_tokens": llm_usage.get("grand_total", 0),
+            },
+        },
+        "gemma_budget": gemma.budget_status(),
+        "now": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------

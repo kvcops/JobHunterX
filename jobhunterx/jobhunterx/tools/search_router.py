@@ -47,7 +47,7 @@ class SearchRouter:
         self.session_disabled: Dict[str, bool] = {}
         self.backoff_until: Dict[str, float] = {}
 
-    def get_priority_order() -> List[str]:
+    def get_priority_order(self) -> List[str]:
         return ["tinyfish", "tavily", "exa", "ddgs"]
 
     async def execute_query(

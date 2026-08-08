@@ -96,7 +96,7 @@ def evaluate_serp_quality(
         src_s = 0.5
         if any(ats in url_low for ats in ["greenhouse.io", "lever.co", "ashbyhq.com", "workable.com", "smartrecruiters.com"]):
             src_s = 1.0
-        elif any(portal in url_low for portal in ["linkedin.com/jobs/view", "naukri.com/job-listings", "foundit.in/job", "instahyre.com/job"]):
+        elif any(portal in url_low for portal in ["linkedin.com/jobs/view", "naukri.com/job-listings", "foundit.in/job"]):
             src_s = 0.9
         source_scores.append(src_s)
 

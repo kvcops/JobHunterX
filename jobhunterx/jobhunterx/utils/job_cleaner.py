@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 PORTAL_DOMAINS = {
     "bayt.com", "bayt", "weekday", "weekdayworks", "hasjob", "greenhouse",
     "lever", "ashby", "ashbyhq", "linkedin", "indeed", "naukri", "monster",
-    "jobgether", "instahyre", "hirect", "apna", "wellfound", "angel",
+    "jobgether", "instahyre", "aijobs", "hirect", "apna", "wellfound", "angel",
     "glassdoor", "simplyhired", "ziprecruiter", "jobsora", "careerjet",
 }
 

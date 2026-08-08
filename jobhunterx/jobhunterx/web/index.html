@@ -75,6 +75,11 @@
             <svg class="dock-tab-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6zm0 10a4 4 0 1 1 4-4 4 4 0 0 1-4 4z"/></svg>
             <span>Config</span>
           </button>
+
+          <button class="dock-tab-btn" id="tab-usage" onclick="switchTab('usage')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <span>Usage</span>
+          </button>
         </nav>
       </div>
 
@@ -269,17 +274,6 @@
                   </div>
                 </div>
                 <span id="stat-outreach" class="telemetry-node-count">0</span>
-              </div>
-
-              <div class="telemetry-node tokens">
-                <div class="telemetry-node-header">
-                  <span class="telemetry-node-label">LLM Tokens</span>
-                  <div class="telemetry-node-icon">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                  </div>
-                </div>
-                <span id="stat-tokens" class="telemetry-node-count">0</span>
-                <span id="stat-tokens-sub" class="telemetry-node-subtext" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">0 in / 0 out</span>
               </div>
             </div>
           </div>
@@ -1045,6 +1039,20 @@
               <div id="model-chains-container" class="bento-cards-grid">
                 <!-- Dynamically populated -->
               </div>
+
+              <!-- All Models Usage Status -->
+              <div class="bento-card glass" style="margin-bottom: 20px; padding: 20px;">
+                <div class="card-title-header" style="margin-bottom: 14px;">
+                  <span>All Models — Usage Status (calls recorded per Agent Run)</span>
+                  <span id="model-usage-note" class="terminal-phase-tag">refreshes on tab open</span>
+                </div>
+                <p style="margin: 0 0 14px 0; font-size: 0.82rem; color: var(--text-muted);">
+                  Every model in the fallback chains is listed below, even if never called yet — unused models simply show a 0 count.
+                </p>
+                <div id="model-usage-container" class="bento-cards-grid" style="grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 12px;">
+                  <div class="empty-state">Loading model usage…</div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1080,6 +1088,64 @@
               </div>
             </div>
           </section>
+
+          <!-- Usage Telemetry View -->
+          <div id="view-usage" class="tab-view">
+            <div class="viewport-section-header flex-header">
+              <div>
+                <h2>API Usage & Quota Telemetry</h2>
+                <p class="viewport-section-sub">Live consumption across web search APIs (TinyFish, Tavily, Exa, Brave, DuckDuckGo) and LLM providers (Google, Groq, Mistral). Quotas reset on the 1st of each month.</p>
+              </div>
+              <button class="flow-filter-btn" id="btn-refresh-usage" onclick="loadUsageData()">↻ Refresh</button>
+            </div>
+
+            <div class="bento-cards-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px;">
+              <div class="bento-card glass" style="padding: 16px;">
+                <div class="feature-node-icon apply-color"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+                <h3 style="font-size: 1.5rem; margin: 6px 0 2px;" id="usage-sum-llm-calls">–</h3>
+                <p style="color: var(--text-muted); font-size: 0.82rem;">LLM Agent Calls (all-time)</p>
+              </div>
+              <div class="bento-card glass" style="padding: 16px;">
+                <div class="feature-node-icon scan-color"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/></svg></div>
+                <h3 style="font-size: 1.5rem; margin: 6px 0 2px;" id="usage-sum-llm-tokens">–</h3>
+                <p style="color: var(--text-muted); font-size: 0.82rem;">Tokens Consumed (in + out)</p>
+              </div>
+              <div class="bento-card glass" style="padding: 16px;">
+                <div class="feature-node-icon match-color"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg></div>
+                <h3 style="font-size: 1.5rem; margin: 6px 0 2px;" id="usage-sum-search-calls">–</h3>
+                <p style="color: var(--text-muted); font-size: 0.82rem;">Search API Queries this month</p>
+              </div>
+              <div class="bento-card glass" style="padding: 16px;">
+                <div class="feature-node-icon rate-color"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6v6l4 2"/></svg></div>
+                <h3 style="font-size: 1.5rem; margin: 6px 0 2px;" id="usage-sum-search-spend">–</h3>
+                <p style="color: var(--text-muted); font-size: 0.82rem;">Search Billing this month</p>
+              </div>
+              <div class="bento-card glass" style="padding: 16px;">
+                <div class="feature-node-icon outreach-color"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></div>
+                <h3 style="font-size: 1.5rem; margin: 6px 0 2px;" id="usage-sum-gemma-today">–</h3>
+                <p style="color: var(--text-muted); font-size: 0.82rem;">Gemma Requests today / cap</p>
+              </div>
+            </div>
+
+            <div class="bento-card glass" style="padding: 20px; margin-bottom: 20px;">
+              <div class="card-title-header" style="margin-bottom: 14px;">
+                <span>Web Search APIs — Monthly Quota Usage</span>
+                <span id="usage-search-mode-pill" class="terminal-phase-tag">—</span>
+              </div>
+              <div id="usage-search-table" class="usage-table-wrap">
+                <div class="empty-state">No search API usage recorded yet.</div>
+              </div>
+            </div>
+
+            <div class="bento-card glass" style="padding: 20px;">
+              <div class="card-title-header" style="margin-bottom: 14px;">
+                <span>LLM Provider Usage — Agent Runs (Gemma, Gemini, Groq, Mistral)</span>
+              </div>
+              <div id="usage-llm-table" class="usage-table-wrap">
+                <div class="empty-state">No LLM usage recorded yet.</div>
+              </div>
+            </div>
+          </div>
         </main>
       </div>
     </div>
@@ -1339,6 +1405,6 @@
   <!-- Toast Notification Container -->
   <div id="toast-container" class="toast-container"></div>
 
-  <script src="app.js?v=20260807_v1"></script>
+  <script src="app.js?v=20260808_v3"></script>
 </body>
 </html>

@@ -92,7 +92,7 @@ async def generate_search_queries(profile: dict, plan: dict) -> list[str]:
     target_loc = locations[0] if locations else "India"
     target_role = target_roles[0] if target_roles else "Software Engineer"
 
-    # Inject direct multi-source ATS & portal queries (LinkedIn, FoundIt, Naukri, Instahyre, Greenhouse, Lever, Ashby)
+    # Inject direct multi-source ATS & portal queries (LinkedIn, FoundIt, Naukri, Greenhouse, Lever, Ashby)
     portal_queries = [
         f'site:boards.greenhouse.io "{target_role}" "{target_loc}"',
         f'site:jobs.lever.co "{target_role}" "{target_loc}"',
@@ -100,7 +100,6 @@ async def generate_search_queries(profile: dict, plan: dict) -> list[str]:
         f'site:linkedin.com/jobs/view "{target_role}" "{target_loc}" India',
         f'site:naukri.com/job-listings "{target_role}" "{target_loc}"',
         f'site:foundit.in/job "{target_role}" "{target_loc}"',
-        f'site:instahyre.com/job "{target_role}" "{target_loc}"',
     ]
 
     scoped_queries = list(portal_queries)
@@ -110,6 +109,13 @@ async def generate_search_queries(profile: dict, plan: dict) -> list[str]:
             q = f"{q} {target_loc}"
         if q not in scoped_queries:
             scoped_queries.append(q)
+
+    # Hard-block queries targeting login-gated/waste aggregators (never search these)
+    BLOCKED_QUERY_DOMAINS = ("instahyre", "aijobs")
+    scoped_queries = [
+        q for q in scoped_queries
+        if not any(b in q.lower() for b in BLOCKED_QUERY_DOMAINS)
+    ]
 
     return scoped_queries[:25]
 
@@ -209,6 +215,8 @@ async def run_multi_agent_search(
 
     summary = {
         "queries_run": 0,
+        "queries_web_api": 0,
+        "queries_ddg_fallback": 0,
         "results_found": 0,
         "jobs_scraped": 0,
         "jobs_stored": 0,
@@ -235,6 +243,38 @@ async def run_multi_agent_search(
     # Load seen URL hashes to prevent re-discovering cleared jobs
     seen_hashes = await db.get_seen_url_hashes()
 
+    # --- Web Search API mode: build router config + quality-gate context ---
+    from jobhunterx.config.settings import get_settings
+    from jobhunterx.tools.quality_gate import SearchContext
+
+    _s = get_settings()
+    web_apis_enabled = bool(getattr(_s, "enable_web_search_apis", True))
+    search_cfg = {
+        "SEARCH_ROUTER_MODE": _s.search_router_mode,
+        "PRIMARY_SEARCH_PROVIDER": _s.primary_search_provider,
+        "STRICT_ZERO_SPEND_PROTECTION": _s.strict_zero_spend_protection,
+        "QUALITY_SCORE_THRESHOLD": _s.quality_score_threshold,
+        "TINYFISH_API_KEY": _s.tinyfish_api_key,
+        "TAVILY_API_KEY": _s.tavily_api_key,
+        "EXA_API_KEY": _s.exa_api_key,
+        "BRAVE_API_KEY": _s.brave_api_key,
+        "BRAVE_ENABLED": _s.brave_enabled,
+        "TAVILY_SEARCH_DEPTH": _s.tavily_search_depth,
+        "EXA_SEARCH_NUM_RESULTS": _s.exa_search_num_results,
+    }
+    plan_locations = plan.get("locations") or ["India"]
+    search_context = SearchContext(
+        target_role=(plan.get("target_roles") or ["Software Engineer"])[0],
+        target_location=plan_locations[0],
+        experience_level=float(plan.get("years_experience") or 0),
+        remote_preference=profile.get("work_type", "hybrid"),
+        freshness_requirement="recent",
+    )
+    await emit(
+        "progress",
+        f"Web Search APIs: {'ON — TinyFish -> Tavily -> Exa -> DDGS router active' if web_apis_enabled else 'OFF — direct scraper mode'}.", {}
+    )
+
     # 3. Agent 2 & Agent 3 Pipeline: Search -> Scrape -> Stream Job -> Batch Score -> Stream Score
     scrape_sem = asyncio.Semaphore(5)
     seen_urls_in_run: set[str] = set()
@@ -244,7 +284,15 @@ async def run_multi_agent_search(
 
     for idx, query in enumerate(queries):
         await emit("progress", f"[{idx + 1}/{len(queries)}] Web Scout searching: '{query[:50]}'...", {})
-        results = await job_discovery.search_ddg(query, max_results=12)
+        if web_apis_enabled:
+            results = await job_discovery.search_via_router(query, search_context, config=search_cfg)
+            summary["queries_web_api"] += 1
+            if not results:
+                # Router yielded nothing (all providers failed/rate-limited) — pull DDG direct as safety net
+                summary["queries_ddg_fallback"] += 1
+                results = await job_discovery.search_ddg(query, max_results=12)
+        else:
+            results = await job_discovery.search_ddg(query, max_results=12)
         summary["results_found"] += len(results)
 
         for res in results:

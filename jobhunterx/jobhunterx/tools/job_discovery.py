@@ -68,6 +68,7 @@ AGGREGATOR_DOMAINS = {
     "jobserf.com", "postjobfree.com", "bebee.com", "careerbuilder.com",
     "lensa.com", "jobisite.com", "jobisjob.com", "jora.com", "jobindex.dk",
     "trovit.com", "careerarc.com", "snagajob.com", "jobtarget.com",
+    "aijobs.net", "aijobs.dev",
 }
 
 CAREER_PAGE_PATTERNS = [
@@ -111,7 +112,6 @@ _DIRECT_JOB_URL_PATTERNS = [
     r"indeed\.(?:com|co\.in)/(?:viewjob|job)",
     r"foundit\.in/job",
     r"naukri\.com/job-listings",
-    r"instahyre\.com/job",
     r"hirist\.(?:com|tech)/j/",
     r"cutshort\.io/job",
     r"wellfound\.com/jobs",
@@ -389,6 +389,53 @@ async def search_ddg(query: str, max_results: int = 15) -> list[SearchResult]:
     return results
 
 
+async def search_via_router(
+    query: str,
+    context,
+    config: dict | None = None,
+) -> list[SearchResult]:
+    """Run a single query through the sequential search router.
+
+    Router priority: TinyFish (0 credits) -> Tavily (1 credit) -> Exa ($0.007)
+    -> DDGS (0 credits), halted early by the context-aware Quality Gate.
+    Results are normalized with the same aggregator/blacklist filters as
+    search_ddg(). Returns [] if the router yields nothing usable.
+    """
+    from jobhunterx.tools.search_router import route_search_queries
+
+    cfg = config or {}
+    if not cfg.get("MAX_SEARCH_QUERIES_PER_RUN"):
+        cfg = {**cfg, "MAX_SEARCH_QUERIES_PER_RUN": 1}
+    try:
+        items = await route_search_queries([query], context=context, config=cfg)
+    except Exception as exc:
+        log.warning("router_search_failed", query=query[:60], error=str(exc)[:120])
+        return []
+
+    results = []
+    for it in items:
+        url = (it.url or "").strip()
+        title = it.title or ""
+        if not url or _is_aggregator(url):
+            continue
+        company = _extract_company_from_url(url) or _extract_company_from_title(title)
+        if _is_blacklisted_company(company) or _is_blacklisted_company(title):
+            continue
+        is_job = _looks_like_job_url(url) or any(
+            kw in title.lower() for kw in
+            ["hiring", "job", "career", "opening", "apply", "position", "vacancy",
+             "engineer", "developer", "analyst", "designer", "intern"]
+        )
+        results.append(SearchResult(
+            title=title,
+            url=url,
+            snippet=it.snippet or "",
+            company=company,
+            is_job_posting=is_job,
+        ))
+    return results
+
+
 async def scrape_job_page(url: str) -> dict:
     """Scrape a job posting URL to extract structured data.
 
@@ -522,14 +569,6 @@ async def scrape_job_page(url: str) -> dict:
             if comp_el and not data.get("company"):
                 data["company"] = comp_el.get_text(strip=True)[:100]
             loc_el = soup.find(class_=re.compile(r"location|loc", re.I))
-            if loc_el and not data.get("location"):
-                data["location"] = loc_el.get_text(strip=True)[:100]
-
-        elif "instahyre.com" in low_url:
-            comp_el = soup.find(class_=re.compile(r"company-name|employer", re.I))
-            if comp_el and not data.get("company"):
-                data["company"] = comp_el.get_text(strip=True)[:100]
-            loc_el = soup.find(class_=re.compile(r"location|job-location", re.I))
             if loc_el and not data.get("location"):
                 data["location"] = loc_el.get_text(strip=True)[:100]
 

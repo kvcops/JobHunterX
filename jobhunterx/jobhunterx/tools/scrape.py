@@ -37,6 +37,7 @@ NON_JOB_LINK_TEXTS = {
 BAD_AGGREGATOR_DOMAINS = {
     "12indiajobs", "12jobsindia", "winit", "jooble",
     "careerjet", "jobrapido", "adzuna", "jora", "talent",
+    "instahyre", "aijobs",
 }
 
 
