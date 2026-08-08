@@ -73,18 +73,13 @@
 
           <button class="dock-tab-btn" id="tab-models" onclick="switchTab('models')">
             <svg class="dock-tab-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6zm0 10a4 4 0 1 1 4-4 4 4 0 0 1-4 4z"/></svg>
-            <span>Models</span>
+            <span>Config</span>
           </button>
         </nav>
       </div>
 
       <!-- Right Header Actions Island -->
       <div class="header-actions-area glass-pill-island">
-        <button id="header-search-api-toggle-btn" class="compact-mode-pill search-toggle" onclick="toggleWebSearchAPIs()" title="Toggle Web Search APIs (TinyFish, Tavily, Exa, Brave) vs Direct Scraper Mode">
-          <span class="mode-pulse-dot automatic" id="search-api-pulse-dot"></span>
-          <span id="header-search-api-text" class="mode-text">Web APIs: ON</span>
-        </button>
-
         <button id="header-mode-toggle-btn" class="compact-mode-pill auto" onclick="togglePipelineMode()" title="Execution Mode: Automatic. Click to switch to Manual mode.">
           <span class="mode-pulse-dot automatic" id="mode-pulse-dot"></span>
           <span id="header-mode-text" class="mode-text">Auto Mode</span>
@@ -725,8 +720,238 @@
             <div id="view-models" class="tab-view">
               <div class="viewport-section-header flex-header">
                 <div>
-                  <h2>Model Selection & LLM Settings</h2>
-                  <p class="viewport-section-sub">Configure primary models and fallback chains for each agent component.</p>
+                  <h2>System Configuration & Models</h2>
+                  <p class="viewport-section-sub">Configure search provider APIs, zero-spend protections, and LLM fallback chains.</p>
+                </div>
+              </div>
+
+              <!-- True Flowchart Mindmap Card -->
+              <div class="bento-card glass true-flowchart-card" style="margin-bottom: 24px; padding: 24px;">
+                <div class="architecture-header flex-header" style="margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+                  <div>
+                    <h3 class="search-api-title" style="font-size: 1.2rem; color: var(--text);">
+                      <span>🗺️ System Architecture Flowchart Mindmap</span>
+                    </h3>
+                    <p class="search-api-sub">
+                      Connected vector flowchart visualizing the 6 AI Agents, Multi-Provider Search Router, Quality Gate, and Execution Pipeline. Click any node to inspect details.
+                    </p>
+                  </div>
+                  <div class="flow-filter-tabs" style="display: flex; gap: 6px; background: var(--bg-widget); padding: 4px; border-radius: 8px; border: 1px solid var(--border);">
+                    <button class="flow-filter-btn active" onclick="filterTrueFlowchart('all', this)">All Architecture</button>
+                    <button class="flow-filter-btn" onclick="filterTrueFlowchart('agents', this)">6 AI Agents</button>
+                    <button class="flow-filter-btn" onclick="filterTrueFlowchart('search', this)">Search Router & Fetch</button>
+                    <button class="flow-filter-btn" onclick="filterTrueFlowchart('llm', this)">LLM Providers</button>
+                  </div>
+                </div>
+
+                <!-- Interactive Vector Flowchart SVG Canvas Container -->
+                <div class="true-flowchart-wrapper" style="position: relative; width: 100%; overflow-x: auto; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 14px; padding: 18px;">
+                  <svg id="true-architecture-flowchart-svg" viewBox="0 0 1000 860" style="width: 100%; min-width: 900px; height: auto; display: block;">
+                    <defs>
+                      <pattern id="flow-grid-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+                        <circle cx="2" cy="2" r="1.2" fill="var(--border)" opacity="0.7"/>
+                      </pattern>
+
+                      <marker id="arr-purple" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#a855f7" />
+                      </marker>
+                      <marker id="arr-emerald" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+                      </marker>
+                      <marker id="arr-amber" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
+                      </marker>
+                      <marker id="arr-blue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6" />
+                      </marker>
+                    </defs>
+
+                    <!-- Grid Background -->
+                    <rect width="100%" height="100%" fill="url(#flow-grid-dots)"/>
+
+                    <!-- VECTOR FLOWCHART CONNECTING ARROWS (stroke-dasharray animation with fill="none") -->
+                    <!-- 1. Resume PDF -> Profile Extractor -->
+                    <path class="flow-path path-agents" d="M 230 67 L 420 67" fill="none" stroke="#a855f7" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-purple)"/>
+
+                    <!-- 2. Profile Extractor -> Search Planner -->
+                    <path class="flow-path path-agents" d="M 590 67 L 770 67" fill="none" stroke="#a855f7" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-purple)"/>
+
+                    <!-- 3. Search Planner -> Search Router -->
+                    <path class="flow-path path-search" d="M 855 94 C 855 125, 505 125, 505 150" fill="none" stroke="#10b981" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+
+                    <!-- 4. Search Router -> 4 Providers -->
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 145 230, 145 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 385 230, 385 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 615 230, 615 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+                    <path class="flow-path path-search" d="M 505 204 C 505 230, 855 230, 855 250" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+
+                    <!-- 5. 4 Providers -> SERP Quality Gate -->
+                    <path class="flow-path path-search" d="M 145 304 C 145 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
+                    <path class="flow-path path-search" d="M 385 304 C 385 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
+                    <path class="flow-path path-search" d="M 615 304 C 615 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8"/>
+                    <path class="flow-path path-search" d="M 855 304 C 855 330, 505 330, 505 350" fill="none" stroke="#10b981" stroke-width="1.8" marker-end="url(#arr-amber)"/>
+
+                    <!-- 6. SERP Quality Gate -> Hybrid Fetcher -->
+                    <path class="flow-path path-search" d="M 505 404 L 505 450" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-emerald)"/>
+
+                    <!-- 7. Hybrid Fetcher -> Eligibility Gate -->
+                    <path class="flow-path path-search" d="M 505 504 L 505 550" fill="none" stroke="#10b981" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-amber)"/>
+
+                    <!-- 8. Eligibility Gate -> Job Evaluator -->
+                    <path class="flow-path path-agents" d="M 505 604 L 505 630" fill="none" stroke="#a855f7" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-purple)"/>
+
+                    <!-- 9. Job Evaluator -> Resume Tailor -->
+                    <path class="flow-path path-agents" d="M 505 684 L 505 710" fill="none" stroke="#a855f7" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-purple)"/>
+
+                    <!-- 10. Resume Tailor -> Stealth Browser Agent -->
+                    <path class="flow-path path-agents" d="M 505 764 L 505 790" fill="none" stroke="#a855f7" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arr-blue)"/>
+
+
+                    <!-- VECTOR FLOWCHART NODES -->
+                    <!-- Node 1: Resume PDF Input -->
+                    <g class="true-flow-node tf-agents" transform="translate(60, 40)" onclick="inspectFlowNode('resume_pdf')">
+                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#a855f7" stroke-width="1.8" class="node-box"/>
+                      <text x="85" y="24" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">📄 Resume PDF</text>
+                      <text x="85" y="40" text-anchor="middle" fill="var(--text-muted)" font-size="10" font-family="var(--font-mono)">Input Source</text>
+                    </g>
+
+                    <!-- Node 2: Agent 1 - Profile Extractor -->
+                    <g class="true-flow-node tf-agents tf-llm" transform="translate(420, 40)" onclick="inspectFlowNode('profile_extractor')">
+                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#a855f7" stroke-width="2" class="node-box"/>
+                      <text x="85" y="23" text-anchor="middle" fill="var(--primary)" font-size="12" font-weight="700" font-family="var(--font-sans)">🧬 Profile Extractor</text>
+                      <text x="85" y="39" text-anchor="middle" fill="#a855f7" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Gemma 4 26B ➔ Flash</text>
+                    </g>
+
+                    <!-- Node 3: Agent 2 - Search Planner -->
+                    <g class="true-flow-node tf-agents tf-llm" transform="translate(770, 40)" onclick="inspectFlowNode('search_planner')">
+                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#a855f7" stroke-width="2" class="node-box"/>
+                      <text x="85" y="23" text-anchor="middle" fill="var(--primary)" font-size="12" font-weight="700" font-family="var(--font-sans)">🗺️ Search Planner</text>
+                      <text x="85" y="39" text-anchor="middle" fill="#a855f7" font-size="9.5" font-weight="600" font-family="var(--font-mono)">5 Targeted Queries</text>
+                    </g>
+
+                    <!-- Node 4: Web Search Router -->
+                    <g class="true-flow-node tf-search" transform="translate(415, 150)" onclick="inspectFlowNode('search_router')">
+                      <rect width="180" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="2" class="node-box"/>
+                      <text x="90" y="23" text-anchor="middle" fill="#10b981" font-size="12" font-weight="700" font-family="var(--font-sans)">⚡ Search Router</text>
+                      <text x="90" y="39" text-anchor="middle" fill="#10b981" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Zero-Spend Protection</text>
+                    </g>
+
+                    <!-- Node 5: TinyFish Search -->
+                    <g class="true-flow-node tf-search" transform="translate(60, 250)" onclick="inspectFlowNode('tinyfish_search')">
+                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">1️⃣ TinyFish Search</text>
+                      <text x="85" y="39" text-anchor="middle" fill="#10b981" font-size="9.5" font-weight="600" font-family="var(--font-mono)">0 Credits · 30 RPM</text>
+                    </g>
+
+                    <!-- Node 6: Tavily Search -->
+                    <g class="true-flow-node tf-search" transform="translate(300, 250)" onclick="inspectFlowNode('tavily_search')">
+                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">2️⃣ Tavily Search</text>
+                      <text x="85" y="39" text-anchor="middle" fill="#10b981" font-size="9.5" font-weight="600" font-family="var(--font-mono)">1K Free Credits/Mo</text>
+                    </g>
+
+                    <!-- Node 7: Exa AI Search -->
+                    <g class="true-flow-node tf-search" transform="translate(530, 250)" onclick="inspectFlowNode('exa_search')">
+                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">3️⃣ Exa AI Search</text>
+                      <text x="85" y="39" text-anchor="middle" fill="#10b981" font-size="9.5" font-weight="600" font-family="var(--font-mono)">$10/Mo Credit</text>
+                    </g>
+
+                    <!-- Node 8: DDGS Scraper -->
+                    <g class="true-flow-node tf-search" transform="translate(770, 250)" onclick="inspectFlowNode('ddgs_search')">
+                      <rect width="170" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="1.8" class="node-box"/>
+                      <text x="85" y="23" text-anchor="middle" fill="var(--text)" font-size="12" font-weight="700" font-family="var(--font-sans)">4️⃣ DDGS Scraper</text>
+                      <text x="85" y="39" text-anchor="middle" fill="var(--text-muted)" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Emergency Fallback</text>
+                    </g>
+
+                    <!-- Node 9: SERP Quality Gate -->
+                    <g class="true-flow-node tf-search" transform="translate(415, 350)" onclick="inspectFlowNode('quality_gate')">
+                      <rect width="180" height="54" rx="10" fill="var(--bg-surface)" stroke="#f59e0b" stroke-width="2" class="node-box"/>
+                      <text x="90" y="23" text-anchor="middle" fill="#f59e0b" font-size="12" font-weight="700" font-family="var(--font-sans)">⚖️ Quality Gate</text>
+                      <text x="90" y="39" text-anchor="middle" fill="var(--text-muted)" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Score ≥ 0.60 PASS</text>
+                    </g>
+
+                    <!-- Node 10: Hybrid Fetcher -->
+                    <g class="true-flow-node tf-search" transform="translate(415, 450)" onclick="inspectFlowNode('fetch_pipeline')">
+                      <rect width="180" height="54" rx="10" fill="var(--bg-surface)" stroke="#10b981" stroke-width="2" class="node-box"/>
+                      <text x="90" y="23" text-anchor="middle" fill="#10b981" font-size="12" font-weight="700" font-family="var(--font-sans)">📦 Hybrid Fetcher</text>
+                      <text x="90" y="39" text-anchor="middle" fill="var(--text-muted)" font-size="9.5" font-weight="600" font-family="var(--font-mono)">TinyFish Fetch API</text>
+                    </g>
+
+                    <!-- Node 11: Zero-Token Eligibility Gate -->
+                    <g class="true-flow-node tf-agents" transform="translate(415, 550)" onclick="inspectFlowNode('eligibility_gate')">
+                      <rect width="180" height="54" rx="10" fill="var(--bg-surface)" stroke="#f59e0b" stroke-width="2" class="node-box"/>
+                      <text x="90" y="23" text-anchor="middle" fill="#f59e0b" font-size="12" font-weight="700" font-family="var(--font-sans)">🛡️ Eligibility Gate</text>
+                      <text x="90" y="39" text-anchor="middle" fill="#f59e0b" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Zero-Token Strict Filter</text>
+                    </g>
+
+                    <!-- Node 12: Job Evaluator & Scorer -->
+                    <g class="true-flow-node tf-agents tf-llm" transform="translate(415, 630)" onclick="inspectFlowNode('job_scorer')">
+                      <rect width="180" height="54" rx="10" fill="var(--bg-surface)" stroke="#a855f7" stroke-width="2" class="node-box"/>
+                      <text x="90" y="23" text-anchor="middle" fill="var(--primary)" font-size="12" font-weight="700" font-family="var(--font-sans)">🎯 Job Evaluator</text>
+                      <text x="90" y="39" text-anchor="middle" fill="#a855f7" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Gemma Batch Scoring</text>
+                    </g>
+
+                    <!-- Node 13: Resume Tailor & Validator -->
+                    <g class="true-flow-node tf-agents tf-llm" transform="translate(415, 710)" onclick="inspectFlowNode('validator_tailor')">
+                      <rect width="180" height="54" rx="10" fill="var(--bg-surface)" stroke="#a855f7" stroke-width="2" class="node-box"/>
+                      <text x="90" y="23" text-anchor="middle" fill="var(--primary)" font-size="12" font-weight="700" font-family="var(--font-sans)">✨ Resume Tailor</text>
+                      <text x="90" y="39" text-anchor="middle" fill="#a855f7" font-size="9.5" font-weight="600" font-family="var(--font-mono)">XYZ Formula PDF</text>
+                    </g>
+
+                    <!-- Node 14: Stealth Browser Agent -->
+                    <g class="true-flow-node tf-agents tf-llm" transform="translate(415, 790)" onclick="inspectFlowNode('browser_agent')">
+                      <rect width="180" height="54" rx="10" fill="var(--bg-surface)" stroke="#3b82f6" stroke-width="2.2" class="node-box"/>
+                      <text x="90" y="23" text-anchor="middle" fill="#3b82f6" font-size="12" font-weight="700" font-family="var(--font-sans)">🥷 Stealth Browser</text>
+                      <text x="90" y="39" text-anchor="middle" fill="#3b82f6" font-size="9.5" font-weight="600" font-family="var(--font-mono)">Playwright + HITL</text>
+                    </g>
+
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Web Search APIs & Routing Engine Card -->
+              <div class="bento-card glass search-api-card">
+                <div class="search-api-card-header">
+                  <div>
+                    <h3 class="search-api-title">
+                      <span>🌐 Web Search APIs & Routing Engine</span>
+                    </h3>
+                    <p class="search-api-sub">
+                      Configure multi-provider search (TinyFish, Tavily, Exa AI, Brave Search) or toggle to Direct Scraper mode.
+                    </p>
+                  </div>
+                  <div class="search-toggle-switch-wrapper">
+                    <span class="search-toggle-label" id="search-toggle-label">Web Search APIs:</span>
+                    <label class="search-switch-label">
+                      <input type="checkbox" id="web-search-api-switch" onchange="toggleWebSearchAPIs(this.checked)" checked>
+                      <span class="search-slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="search-api-config-panel">
+                  <div class="search-api-form-grid">
+                    <div class="search-api-field-group">
+                      <label for="input-tinyfish-key">TinyFish API Key (Search & Fetch Utilities)</label>
+                      <input type="password" id="input-tinyfish-key" placeholder="tf_..." class="search-api-input" autocomplete="off">
+                    </div>
+                    <div class="search-api-field-group">
+                      <label for="input-tavily-key">Tavily API Key (1,000 Free Credits/Mo)</label>
+                      <input type="password" id="input-tavily-key" placeholder="tvly-..." class="search-api-input" autocomplete="off">
+                    </div>
+                    <div class="search-api-field-group">
+                      <label for="input-exa-key">Exa AI API Key ($10/Mo Recurring Credit)</label>
+                      <input type="password" id="input-exa-key" placeholder="exa-..." class="search-api-input" autocomplete="off">
+                    </div>
+                    <div class="search-api-field-group">
+                      <label for="input-brave-key">Brave Search API Key (Requires Card)</label>
+                      <input type="password" id="input-brave-key" placeholder="BSA..." class="search-api-input" autocomplete="off">
+                    </div>
+                  </div>
+                  <div style="display: flex; justify-content: flex-end;">
+                    <button class="cta-btn primary" onclick="saveSearchApiKeys()">💾 Save API Keys</button>
+                  </div>
                 </div>
               </div>
 
@@ -783,6 +1008,57 @@
   </div>
 
   <!-- Modals -->
+  <!-- Flowchart Node Inspection Modal -->
+  <div id="flowchart-node-modal" class="modal-overlay hidden" onclick="if(event.target === this) closeFlowNodeModal()">
+    <div class="modal-container glass" style="max-width: 540px; padding: 24px; border-radius: 16px;">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px;">
+        <h3 id="flow-modal-title" style="margin: 0; font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+          <span>Node Details</span>
+        </h3>
+        <button class="close-modal-btn" onclick="closeFlowNodeModal()" style="background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 4px 0;">
+        <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;" id="flow-modal-badges">
+          <!-- Filled dynamically -->
+        </div>
+        <p id="flow-modal-desc" style="color: var(--text); font-size: 0.9rem; line-height: 1.5; margin-bottom: 16px;">
+          <!-- Filled dynamically -->
+        </p>
+        <div id="flow-modal-tech-specs" style="background: var(--bg-inset); padding: 14px; border-radius: 10px; border: 1px solid var(--border); font-size: 0.83rem; line-height: 1.6; color: var(--text-muted);">
+          <!-- Filled dynamically -->
+        </div>
+      </div>
+      <div class="modal-actions" style="display: flex; justify-content: flex-end; margin-top: 18px;">
+        <button class="cta-btn secondary" onclick="closeFlowNodeModal()">Close Inspector</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Web Search Execution Mode Popup Modal -->
+  <div id="search-mode-modal" class="modal-overlay hidden" onclick="if(event.target === this) closeSearchModeModal()">
+    <div class="modal-container glass" style="max-width: 480px; padding: 24px; border-radius: 16px;">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px;">
+        <h3 id="search-mode-modal-title" style="margin: 0; font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+          <span>🌐 Search Execution Mode</span>
+        </h3>
+        <button class="close-modal-btn" onclick="closeSearchModeModal()" style="background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--text-muted);">&times;</button>
+      </div>
+      <div class="modal-body text-center" style="padding: 8px 0;">
+        <div id="search-mode-modal-icon" style="font-size: 2.5rem; margin-bottom: 12px;">⚡</div>
+        <p id="search-mode-modal-desc" style="color: var(--text); font-size: 0.92rem; line-height: 1.5; margin-bottom: 16px;">
+          Mode updated successfully.
+        </p>
+        <div id="search-mode-modal-details" style="background: var(--bg-inset); padding: 12px; border-radius: 8px; font-size: 0.82rem; color: var(--text-muted); text-align: left; margin-bottom: 16px;">
+          <!-- Filled dynamically -->
+        </div>
+      </div>
+      <div class="modal-actions" style="display: flex; justify-content: flex-end; gap: 10px;">
+        <button class="cta-btn secondary" onclick="closeSearchModeModal()">Got it!</button>
+        <button id="search-mode-config-btn" class="cta-btn primary hidden" onclick="closeSearchModeModal(); switchTab('models');">Configure Keys</button>
+      </div>
+    </div>
+  </div>
+
   <div id="outreach-modal" class="modal-overlay hidden">
     <div class="modal-container glass outreach-modal-container">
       <div class="modal-header">

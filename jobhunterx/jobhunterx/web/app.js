@@ -79,21 +79,31 @@ async function fetchSettings() {
       const data = await res.json();
       enableWebSearchAPIs = data.enable_web_search_apis !== false;
       updateWebSearchAPIsUI();
+
+      const tfInput = document.getElementById("input-tinyfish-key");
+      const tvInput = document.getElementById("input-tavily-key");
+      const exaInput = document.getElementById("input-exa-key");
+      const braveInput = document.getElementById("input-brave-key");
+
+      if (tfInput && data.tinyfish_key_masked) tfInput.placeholder = data.tinyfish_key_masked;
+      if (tvInput && data.tavily_key_masked) tvInput.placeholder = data.tavily_key_masked;
+      if (exaInput && data.exa_key_masked) exaInput.placeholder = data.exa_key_masked;
+      if (braveInput && data.brave_key_masked) braveInput.placeholder = data.brave_key_masked;
     }
   } catch (err) {
     console.error("Error fetching settings:", err);
   }
 }
 
-async function toggleWebSearchAPIs() {
-  enableWebSearchAPIs = !enableWebSearchAPIs;
+async function toggleWebSearchAPIs(explicitVal) {
+  if (typeof explicitVal === "boolean") {
+    enableWebSearchAPIs = explicitVal;
+  } else {
+    enableWebSearchAPIs = !enableWebSearchAPIs;
+  }
   updateWebSearchAPIsUI();
-  showToast(
-    enableWebSearchAPIs
-      ? "Web Search APIs Enabled (TinyFish, Tavily, Exa, Brave)"
-      : "Web Search APIs Disabled (Direct Scraper Mode Only)",
-    enableWebSearchAPIs ? "success" : "info"
-  );
+  openSearchModeModal(enableWebSearchAPIs);
+
   try {
     await fetch("/api/settings", {
       method: "POST",
@@ -109,18 +119,95 @@ function updateWebSearchAPIsUI() {
   const btn = document.getElementById("header-search-api-toggle-btn");
   const text = document.getElementById("header-search-api-text");
   const dot = document.getElementById("search-api-pulse-dot");
-  if (!btn || !text || !dot) return;
+  const switchInput = document.getElementById("web-search-api-switch");
 
-  if (enableWebSearchAPIs) {
-    btn.className = "compact-mode-pill search-toggle active";
-    text.textContent = "Web APIs: ON";
-    dot.className = "mode-pulse-dot automatic";
-    btn.title = "Web Search APIs Enabled. Click to toggle OFF for direct scraper mode.";
+  if (switchInput) {
+    switchInput.checked = enableWebSearchAPIs;
+  }
+
+  if (btn && text && dot) {
+    if (enableWebSearchAPIs) {
+      btn.className = "compact-mode-pill search-toggle active";
+      text.textContent = "Web APIs: ON";
+      dot.className = "mode-pulse-dot automatic";
+      btn.title = "Web Search APIs Enabled. Click to toggle OFF for direct scraper mode.";
+    } else {
+      btn.className = "compact-mode-pill search-toggle disabled";
+      text.textContent = "Web APIs: OFF";
+      dot.className = "mode-pulse-dot manual";
+      btn.title = "Web Search APIs Disabled. Using direct scraper mode. Click to toggle ON.";
+    }
+  }
+}
+
+function openSearchModeModal(isON) {
+  const modal = document.getElementById("search-mode-modal");
+  const title = document.getElementById("search-mode-modal-title");
+  const icon = document.getElementById("search-mode-modal-icon");
+  const desc = document.getElementById("search-mode-modal-desc");
+  const details = document.getElementById("search-mode-modal-details");
+  const configBtn = document.getElementById("search-mode-config-btn");
+
+  if (!modal) return;
+
+  if (isON) {
+    icon.textContent = "⚡";
+    title.innerHTML = "<span>⚡ Web Search APIs Mode Activated</span>";
+    desc.textContent = "Multi-provider Search Engine Routing is active.";
+    details.innerHTML = `
+      <strong>Active Priority Chain:</strong> TinyFish Search ➔ Tavily Search ➔ Exa AI ➔ DuckDuckGo<br/>
+      <strong>Features:</strong> Context-Aware SERP Quality Gate, 2-Tier Zero-Spend Protection, and TinyFish ATS Fetching.
+    `;
+    if (configBtn) configBtn.classList.remove("hidden");
   } else {
-    btn.className = "compact-mode-pill search-toggle disabled";
-    text.textContent = "Web APIs: OFF";
-    dot.className = "mode-pulse-dot manual";
-    btn.title = "Web Search APIs Disabled. Using direct scraper mode. Click to toggle ON.";
+    icon.textContent = "🌐";
+    title.innerHTML = "<span>🌐 Direct Scraper Mode Activated</span>";
+    desc.textContent = "Bypassing all commercial Search APIs.";
+    details.innerHTML = `
+      <strong>Fallback Behavior:</strong> Queries run directly via unauthenticated search scrapers + BeautifulSoup parser.<br/>
+      <strong>Cost:</strong> 0 API Keys required. 0 Cost.
+    `;
+    if (configBtn) configBtn.classList.add("hidden");
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function closeSearchModeModal() {
+  const modal = document.getElementById("search-mode-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+async function saveSearchApiKeys() {
+  const tfInput = document.getElementById("input-tinyfish-key");
+  const tvInput = document.getElementById("input-tavily-key");
+  const exaInput = document.getElementById("input-exa-key");
+  const braveInput = document.getElementById("input-brave-key");
+
+  const payload = {};
+  if (tfInput && tfInput.value.trim()) payload.tinyfish_api_key = tfInput.value.trim();
+  if (tvInput && tvInput.value.trim()) payload.tavily_api_key = tvInput.value.trim();
+  if (exaInput && exaInput.value.trim()) payload.exa_api_key = exaInput.value.trim();
+  if (braveInput && braveInput.value.trim()) payload.brave_api_key = braveInput.value.trim();
+
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      showToast("Search API Keys saved successfully!", "success");
+      if (tfInput) tfInput.value = "";
+      if (tvInput) tvInput.value = "";
+      if (exaInput) exaInput.value = "";
+      if (braveInput) braveInput.value = "";
+      fetchSettings();
+    } else {
+      showToast("Failed to save API keys", "error");
+    }
+  } catch (err) {
+    showToast("Error saving settings: " + err.message, "error");
   }
 }
 
@@ -256,6 +343,7 @@ function switchTab(tabName) {
   // Load and render model config when switching to models tab
   if (tabName === "models") {
     loadModelConfig();
+    setTimeout(drawFlowchartConnectors, 100);
   }
 }
 
@@ -2986,3 +3074,343 @@ function handleSystemReset() {
   if (container) container.innerHTML = `<div class="empty-state">Queue reset. Ready for new search.</div>`;
   loadInitialData();
 }
+
+/* --------------------------------------------------------------------------
+   Interactive SVG Architecture Mindmap & Inspector Logic
+   -------------------------------------------------------------------------- */
+const FLOW_NODES_DATA = {
+  resume_pdf: {
+    title: "📄 Candidate Resume PDF",
+    badges: ['<span class="badge purple">Input Data</span>', '<span class="badge blue">PDF Document</span>'],
+    desc: "Your master PDF resume uploaded via the JobHunterX dashboard. Serves as the ground-truth document for skill extraction, target role matching, and resume tailoring.",
+    specs: `
+      <strong>Source File:</strong> PyMuPDF / PDF Reader<br/>
+      <strong>Outputs:</strong> Raw extracted text, structural blocks, contact info.<br/>
+      <strong>Usage:</strong> Input to Agent 1 (Profile Extractor).
+    `
+  },
+  profile_extractor: {
+    title: "🧬 Agent 1: Candidate Profile Extractor",
+    badges: ['<span class="badge purple">AI Agent 1</span>', '<span class="badge blue">Gemma 4 26B</span>', '<span class="badge green">Flash Fallback</span>'],
+    desc: "Parses your resume PDF, extracts structured skills, experience, education, projects, and contact links into a validated CandidateProfile schema.",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/agents/extractor.py</code><br/>
+      <strong>Primary Model:</strong> Gemma 4 26B (Google AI Studio)<br/>
+      <strong>Fallback Chain:</strong> Gemini 3.1 Flash Lite<br/>
+      <strong>Daily Budget:</strong> Cap 14.4K requests/day (0-cost free tier).
+    `
+  },
+  search_planner: {
+    title: "🗺️ Agent 2: Search Planner & Query Strategist",
+    badges: ['<span class="badge purple">AI Agent 2</span>', '<span class="badge blue">Gemma 4 26B</span>', '<span class="badge amber">Query Optimization</span>'],
+    desc: "Analyzes candidate profile, target location, and seniority ceiling. Generates 5 precision search queries targeting ATS company boards while filtering out IT service spam.",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/agents/search_planner.py</code><br/>
+      <strong>Primary Model:</strong> Gemma 4 26B<br/>
+      <strong>Outputs:</strong> <code>SearchPlan</code> (seniority ceiling, target locations, 5 queries).<br/>
+      <strong>Role Filters:</strong> Excludes non-dev titles (sales, HR, marketing).
+    `
+  },
+  search_router: {
+    title: "⚡ Sequential Search Engine Router",
+    badges: ['<span class="badge green">Multi-Engine Router</span>', '<span class="badge amber">Zero-Spend Circuit Breaker</span>'],
+    desc: "Sequential execution router that dispatches queries across commercial Search APIs with $0 spend guarantees and context-aware Quality Gate evaluation.",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/tools/search_router.py</code><br/>
+      <strong>Priority Sequence:</strong> TinyFish Search ➔ Tavily Search ➔ Exa AI ➔ DDGS Scraper<br/>
+      <strong>Zero-Spend Circuit Breaker:</strong> Tier A Hard Check & Tier B 95% Soft Cap.<br/>
+      <strong>Switchable Mode:</strong> Web APIs ON (Sequential Router) vs Web APIs OFF (Direct Scrapers).
+    `
+  },
+  tinyfish_search: {
+    title: "1️⃣ TinyFish Search API (Primary Provider)",
+    badges: ['<span class="badge green">0 Credits Utility</span>', '<span class="badge blue">30 RPM Default</span>'],
+    desc: "Primary search provider utilizing TinyFish's 0-credit search endpoint for high-relevance tech job discovery.",
+    specs: `
+      <strong>Endpoint:</strong> <code>GET https://api.search.tinyfish.ai</code><br/>
+      <strong>Credit Cost:</strong> 0 Credits / $0.00 (Free Utility)<br/>
+      <strong>Rate Limit:</strong> 30 RPM default (dynamic 429 backoff).
+    `
+  },
+  tavily_search: {
+    title: "2️⃣ Tavily Search API (Secondary Engine)",
+    badges: ['<span class="badge green">1,000 Free Credits/Mo</span>', '<span class="badge blue">100 RPM</span>'],
+    desc: "Secondary search provider queried if TinyFish results are insufficient. Evaluates search depth basic.",
+    specs: `
+      <strong>Endpoint:</strong> <code>POST https://api.tavily.com/search</code><br/>
+      <strong>Credit Cost:</strong> 1 credit per request (basic depth)<br/>
+      <strong>Safety Rule:</strong> <code>auto_parameters=False</code> strictly enforced to prevent 2-credit upgrades.
+    `
+  },
+  exa_search: {
+    title: "3️⃣ Exa AI Search (Tertiary Engine)",
+    badges: ['<span class="badge green">$10/Mo Credit</span>', '<span class="badge blue">Neural Search</span>'],
+    desc: "Neural semantic search provider queried when preceding engines require additional recall.",
+    specs: `
+      <strong>Endpoint:</strong> <code>POST https://api.exa.ai/search</code><br/>
+      <strong>Cost Model:</strong> $0.007 per base request (≤10 results)<br/>
+      <strong>Safety Rule:</strong> Dynamically calculates result parameter cost before dispatch.
+    `
+  },
+  ddgs_search: {
+    title: "4️⃣ DuckDuckGo Scraper (Emergency Fallback)",
+    badges: ['<span class="badge green">0 Cost / Local</span>', '<span class="badge gray">Unauthenticated</span>'],
+    desc: "Local python scraping wrapper used as an emergency fallback when API keys are absent or rate limits are reached.",
+    specs: `
+      <strong>Wrapper:</strong> <code>ddgs</code> Python Library<br/>
+      <strong>Cost:</strong> 0 Credits / $0.00<br/>
+      <strong>Backoff:</strong> Exponential retry backoff on 429 or anti-bot blocks.
+    `
+  },
+  quality_gate: {
+    title: "⚖️ SERP Quality Gate",
+    badges: ['<span class="badge amber">Weighted Quality Evaluator</span>', '<span class="badge purple">0 LLM Tokens</span>'],
+    desc: "Context-aware quality scoring gate that checks SERP items against candidate profile target roles, locations, and freshness before calling the next provider.",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/tools/quality_gate.py</code><br/>
+      <strong>Quality Formula:</strong> 0.30 Relevance + 0.25 Location + 0.20 Freshness + 0.15 Source + 0.10 Uniqueness<br/>
+      <strong>Threshold:</strong> Score ≥ 0.60 returns PASS and halts router immediately to conserve API calls.
+    `
+  },
+  fetch_pipeline: {
+    title: "📦 Hybrid Fetch Pipeline & TinyFish Fetch API",
+    badges: ['<span class="badge green">Hybrid Fetcher</span>', '<span class="badge blue">TinyFish Fetch API</span>'],
+    desc: "Two-stage URL fetcher: Direct async HTTP with BeautifulSoup parser for static pages, escalating to TinyFish Fetch API for JS-heavy ATS shells (Greenhouse, Lever, Ashby).",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/tools/fetch_pipeline.py</code><br/>
+      <strong>Batching:</strong> Batches up to 10 URLs per <code>POST https://api.fetch.tinyfish.ai</code> request.<br/>
+      <strong>Tracking Stripper:</strong> Strips <code>utm_*</code>, <code>ref</code>, <code>source</code>, <code>gclid</code> parameters.<br/>
+      <strong>Deduplication:</strong> 3-tier identity hash (job_id ➔ canonical_url ➔ company+title+location).
+    `
+  },
+  eligibility_gate: {
+    title: "🛡️ Agent 3: Eligibility & Zero-Token Filter",
+    badges: ['<span class="badge amber">Strict Eligibility Gate</span>', '<span class="badge green">0 Tokens Cost</span>'],
+    desc: "Zero-token strict filter running before LLM scoring. Rejects foreign locations, non-dev roles (sales, HR, marketing), and senior experience mismatches.",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/tools/eligibility.py</code><br/>
+      <strong>Token Cost:</strong> 0 Tokens (Pure Python regex & dictionary matching)<br/>
+      <strong>Rules:</strong> Rejects US/EU/UK locations for India-based search plans, catches 7+ yrs experience requirements for fresher profile.
+    `
+  },
+  job_scorer: {
+    title: "🎯 Agent 4: Job Evaluator & Match Scorer",
+    badges: ['<span class="badge purple">AI Agent 4</span>', '<span class="badge blue">Gemma 4 26B</span>', '<span class="badge green">2-Stage Batch Scoring</span>'],
+    desc: "Two-stage scoring engine: (1) Deterministic keyword pre-filter (skill overlap 55%, role match 20%, location 10%). (2) Gemma batch scoring (groups top jobs into batches of 10 for multi-dimensional fit scoring).",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/agents/job_scorer.py</code><br/>
+      <strong>Primary Model:</strong> Gemma 4 26B (Budget-aware daily cap)<br/>
+      <strong>Outputs:</strong> Fit score (0.0 to 1.0), match breakdown, and candidate gap analysis.
+    `
+  },
+  validator_tailor: {
+    title: "✨ Agent 5: Resume Validator & Tailor",
+    badges: ['<span class="badge purple">AI Agent 5</span>', '<span class="badge blue">Gemma 4 26B</span>', '<span class="badge green">Anti-Hallucination</span>'],
+    desc: "Evaluates match score, validates job URL freshness, rewrites experience bullets using Google's XYZ action-led formula, and renders a pixel-perfect 1-page ATS PDF resume.",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/agents/validator_tailor.py</code><br/>
+      <strong>PDF Engine:</strong> Jinja2 + xhtml2pdf (Iterative shrink profiles: 100%, 94%, 88%, 82%)<br/>
+      <strong>Anti-Hallucination Guard:</strong> Strips bracketed tokens, fake percentages, and unverified skill metrics.
+    `
+  },
+  browser_agent: {
+    title: "🥷 Agent 6: Stealth Browser Agent & Form Filler",
+    badges: ['<span class="badge blue">AI Agent 6</span>', '<span class="badge purple">Playwright Browser</span>', '<span class="badge amber">HITL Takeover</span>'],
+    desc: "Opens persistent Chrome profile with anti-detection headers. Fills candidate personal details, education, work history, Q&A memory, uploads tailored PDF, and applies. Hands over keyboard on CAPTCHA/MFA.",
+    specs: `
+      <strong>Source Code:</strong> <code>jobhunterx/agents/browser_agent.py</code><br/>
+      <strong>LLM Cascade:</strong> Gemini 3.1 Flash Lite ➔ Groq Llama 3.3 70B ➔ Mistral Large<br/>
+      <strong>Streaming:</strong> Real-time browser canvas streaming via Chrome DevTools Protocol (CDP WebSocket).<br/>
+      <strong>Human-In-The-Loop:</strong> Auto-pauses and notifies dashboard on CAPTCHA or MFA walls.
+    `
+  }
+};
+
+function inspectFlowNode(nodeId) {
+  const data = FLOW_NODES_DATA[nodeId];
+  if (!data) return;
+
+  const modal = document.getElementById("flowchart-node-modal");
+  const title = document.getElementById("flow-modal-title");
+  const desc = document.getElementById("flow-modal-desc");
+  const badges = document.getElementById("flow-modal-badges");
+  const specs = document.getElementById("flow-modal-tech-specs");
+
+  if (!modal) return;
+
+  title.innerHTML = `<span>${data.title}</span>`;
+  desc.textContent = data.desc;
+  badges.innerHTML = data.badges.join("");
+  specs.innerHTML = data.specs;
+
+  modal.classList.remove("hidden");
+}
+
+function closeFlowNodeModal() {
+  const modal = document.getElementById("flowchart-node-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function filterTrueFlowchart(category, btnElement) {
+  const buttons = document.querySelectorAll(".flow-filter-btn");
+  buttons.forEach(btn => btn.classList.remove("active"));
+  if (btnElement) btnElement.classList.add("active");
+
+  const nodes = document.querySelectorAll(".true-flow-node");
+  const paths = document.querySelectorAll(".flow-path");
+
+  if (category === "all") {
+    nodes.forEach(n => n.style.opacity = "1");
+    paths.forEach(p => p.style.opacity = "1");
+    return;
+  }
+
+  nodes.forEach(node => {
+    if (category === "agents" && node.classList.contains("tf-agents")) {
+      node.style.opacity = "1";
+    } else if (category === "search" && node.classList.contains("tf-search")) {
+      node.style.opacity = "1";
+    } else if (category === "llm" && node.classList.contains("tf-llm")) {
+      node.style.opacity = "1";
+    } else {
+      node.style.opacity = "0.2";
+    }
+  });
+
+  paths.forEach(path => {
+    if (category === "agents" && path.classList.contains("path-agents")) {
+      path.style.opacity = "1";
+    } else if (category === "search" && path.classList.contains("path-search")) {
+      path.style.opacity = "1";
+    } else {
+      path.style.opacity = "0.15";
+    }
+  });
+}
+
+function simulatePipelineFlow(btn) {
+  if (!btn) return;
+  btn.disabled = true;
+  btn.style.opacity = "0.7";
+  btn.innerHTML = `<span class="sim-icon">⏳</span> Simulating Flow...`;
+
+  const cards = document.querySelectorAll(".pipeline-phase-card");
+  const tracker = document.getElementById("sim-tracker-bar");
+  
+  cards.forEach(c => c.classList.remove("simulating-active"));
+  if (tracker) tracker.style.width = "0%";
+
+  let step = 0;
+  const interval = setInterval(() => {
+    if (step < cards.length) {
+      cards.forEach((c, idx) => {
+        if (idx === step) {
+          c.classList.add("simulating-active");
+        } else {
+          c.classList.remove("simulating-active");
+        }
+      });
+
+      if (tracker) {
+        tracker.style.width = `${((step + 1) / cards.length) * 100}%`;
+      }
+      step++;
+    } else {
+      clearInterval(interval);
+      cards.forEach(c => c.classList.remove("simulating-active"));
+      if (tracker) tracker.style.width = "100%";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.innerHTML = `<span class="sim-icon">✅</span> Simulation Complete!`;
+      setTimeout(() => {
+        btn.innerHTML = `<span class="sim-icon">⚡</span> Run Flow Simulation`;
+        if (tracker) tracker.style.width = "0%";
+      }, 2500);
+    }
+  }, 900);
+}
+
+/* --------------------------------------------------------------------------
+   Dynamic Bezier Connector Generator for Architecture Flowchart
+   -------------------------------------------------------------------------- */
+function drawFlowchartConnectors() {
+  const svg = document.getElementById("dynamic-flowchart-svg");
+  const container = document.getElementById("flowchart-workspace");
+  if (!svg || !container) return;
+
+  const containerRect = container.getBoundingClientRect();
+  if (containerRect.width === 0 || containerRect.height === 0) return;
+
+  svg.setAttribute("width", containerRect.width);
+  svg.setAttribute("height", containerRect.height);
+
+  const connections = [
+    // Column 1 Stream
+    { from: "p-resume-out", to: "p-extractor-in", color: "#a855f7" },
+    { from: "p-extractor-out", to: "p-planner-in", color: "#a855f7" },
+    
+    // Column 1 -> Column 2
+    { from: "p-planner-out", to: "p-router-in", color: "#10b981" },
+    
+    // Column 2 Search Router -> 4 Providers Stack
+    { from: "p-router-out-1", to: "p-tinyfish-in", color: "#10b981" },
+    { from: "p-router-out-2", to: "p-tavily-in", color: "#10b981" },
+    { from: "p-router-out-3", to: "p-exa-in", color: "#10b981" },
+    { from: "p-router-out-4", to: "p-ddgs-in", color: "#10b981" },
+
+    // Column 2 4 Providers -> Column 3 Quality Gate
+    { from: "p-tinyfish-out", to: "p-quality-in-1", color: "#10b981" },
+    { from: "p-tavily-out", to: "p-quality-in-2", color: "#10b981" },
+    { from: "p-exa-out", to: "p-quality-in-3", color: "#10b981" },
+    { from: "p-ddgs-out", to: "p-quality-in-4", color: "#10b981" },
+
+    // Column 3 Quality Gate -> Hybrid Fetcher
+    { from: "p-quality-out", to: "p-fetcher-in", color: "#f59e0b" },
+
+    // Column 3 Hybrid Fetcher -> Column 4 Eligibility Gate
+    { from: "p-fetcher-out", to: "p-eligibility-in", color: "#10b981" },
+
+    // Column 4 Execution Stream
+    { from: "p-eligibility-out", to: "p-scorer-in", color: "#a855f7" },
+    { from: "p-scorer-out", to: "p-tailor-in", color: "#a855f7" },
+    { from: "p-tailor-out", to: "p-browser-in", color: "#3b82f6" }
+  ];
+
+  let pathHtml = `<defs>
+    <marker id="flow-arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#a855f7"/></marker>
+    <marker id="flow-arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981"/></marker>
+    <marker id="flow-arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/></marker>
+    <marker id="flow-arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/></marker>
+  </defs>`;
+
+  connections.forEach(conn => {
+    const elFrom = document.getElementById(conn.from);
+    const elTo = document.getElementById(conn.to);
+    if (!elFrom || !elTo) return;
+
+    const r1 = elFrom.getBoundingClientRect();
+    const r2 = elTo.getBoundingClientRect();
+
+    const x1 = r1.left + r1.width / 2 - containerRect.left;
+    const y1 = r1.top + r1.height / 2 - containerRect.top;
+    const x2 = r2.left + r2.width / 2 - containerRect.left;
+    const y2 = r2.top + r2.height / 2 - containerRect.top;
+
+    const dx = Math.abs(x2 - x1) * 0.45;
+
+    let markerId = "flow-arrow-purple";
+    if (conn.color === "#10b981") markerId = "flow-arrow-emerald";
+    if (conn.color === "#f59e0b") markerId = "flow-arrow-amber";
+    if (conn.color === "#3b82f6") markerId = "flow-arrow-blue";
+
+    const pathData = `M ${x1},${y1} C ${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+    pathHtml += `<path d="${pathData}" fill="none" stroke="${conn.color}" stroke-width="2.2" stroke-dasharray="6 4" class="animated-flow-connector" marker-end="url(#${markerId})"/>`;
+  });
+
+  svg.innerHTML = pathHtml;
+}
+
+window.addEventListener("resize", drawFlowchartConnectors);
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(drawFlowchartConnectors, 300);
+});
