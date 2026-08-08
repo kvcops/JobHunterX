@@ -439,6 +439,29 @@ async def call_llm(
     """
     _ensure_api_keys()
 
+    # Inject current date system prompt for all agent calls
+    from datetime import datetime
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    date_prefix = (
+        f"CRITICAL SYSTEM CONTEXT: Today's date is {today_str}. "
+        "You are an active real-time AI agent. Do NOT rely on static trained memory or knowledge cutoff. "
+        f"Always evaluate job openings, query strategies, and data with respect to today's date ({today_str}).\n\n"
+    )
+
+    has_system = False
+    formatted_messages = []
+    for m in messages:
+        if m.get("role") == "system":
+            has_system = True
+            content = m.get("content", "")
+            if "Today's date is" not in content:
+                m = {**m, "content": date_prefix + content}
+        formatted_messages.append(m)
+
+    if not has_system:
+        formatted_messages.insert(0, {"role": "system", "content": date_prefix.strip()})
+    messages = formatted_messages
+
     # --- Cache check ---
     ck = _cache_key(model, messages, kwargs) if use_cache else None
     if use_cache and ck:

@@ -64,7 +64,8 @@ async def test_call_gemma_builds_prompt_and_returns_text(monkeypatch):
     assert result == "hello world"
     model, contents, config = FakeClient.calls[-1]
     assert model == g.MODEL
-    assert "SYSTEM INSTRUCTIONS:\nbe strict" in contents
+    assert "SYSTEM INSTRUCTIONS:" in contents
+    assert "be strict" in contents
     assert "rank these jobs" in contents
     assert config["max_output_tokens"] == 1024
 

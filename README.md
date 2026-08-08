@@ -428,12 +428,6 @@ jobhunterx/
 │
 ├── 📂 assets/                          # README images & visual assets
 │
-├── 📂 company-data/                    # Regional IT company databases
-│   ├── IT_Companies_By_City.txt        # Master list across all hubs
-│   ├── merge_companies.py              # Deduplication & ATS slug compiler
-│   ├── {city}-it-companies.txt         # Per-city company lists
-│   └── verify_counts.py               # Database integrity checker
-│
 ├── 📂 data/                            # Runtime storage (gitignored)
 │
 ├── 📂 jobhunterx/                       # Main Python package

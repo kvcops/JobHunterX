@@ -529,12 +529,11 @@ function renderCustomLocationOptions(locs, activeKey) {
     item.className = `custom-select-option ${isActive ? 'active' : ''}`;
     item.innerHTML = `
       <span class="option-label">${escapeHtml(loc.label)}</span>
-      <span class="option-badge">${loc.company_count} Companies</span>
     `;
     item.onclick = (e) => {
       e.stopPropagation();
       if (hiddenInput) hiddenInput.value = loc.key;
-      if (triggerText) triggerText.innerText = `${loc.label} (${loc.company_count} Companies)`;
+      if (triggerText) triggerText.innerText = loc.label;
       if (popover) popover.classList.add("hidden");
       if (trigger) trigger.classList.remove("open");
       renderCustomLocationOptions(allLocations, loc.key);
@@ -542,7 +541,7 @@ function renderCustomLocationOptions(locs, activeKey) {
     optionsList.appendChild(item);
 
     if (isActive && triggerText) {
-      triggerText.innerText = `${loc.label} (${loc.company_count} Companies)`;
+      triggerText.innerText = loc.label;
     }
   });
 }

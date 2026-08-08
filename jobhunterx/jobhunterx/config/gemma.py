@@ -118,6 +118,16 @@ async def call_gemma(
     Enforces per-provider spacing (30 RPM) and daily request cap (14,400 RPD) in-memory.
     Raises RuntimeError('gemma_budget_exhausted') when the RPD cap is hit.
     """
+    from datetime import datetime
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    date_prefix = (
+        f"CRITICAL SYSTEM CONTEXT: Today's date is {today_str}. "
+        "You are an active real-time AI agent. Do NOT rely on static trained memory or knowledge cutoff. "
+        f"Always evaluate job openings, query strategies, and data with respect to today's date ({today_str}).\n\n"
+    )
+    if "Today's date is" not in system:
+        system = date_prefix + system
+
     global _last_request_mono, _tokens_used, _requests_today, _genai_client
     settings = get_settings()
     api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")

@@ -145,8 +145,6 @@ async def sync_companies():
 @router.get("/locations")
 async def list_locations():
     """Supported target locations for the frontend dropdown."""
-    companies = await db.get_companies()
-    
     SUPPORTED_LOCS = [
         ("bengaluru", "Bengaluru"),
         ("hyderabad", "Hyderabad"),
@@ -165,26 +163,8 @@ async def list_locations():
         ("lucknow", "Lucknow"),
         ("remote", "Remote"),
     ]
-    
-    counts = {}
-    for c in companies:
-        hub = (c.get("hub") or "").lower().strip()
-        if not hub:
-            continue
-        if "bangalore" in hub or "bengaluru" in hub:
-            counts["bengaluru"] = counts.get("bengaluru", 0) + 1
-        elif "secunderabad" in hub or "hyderabad" in hub:
-            counts["hyderabad"] = counts.get("hyderabad", 0) + 1
-        elif "delhi" in hub or "ncr" in hub or "noida" in hub or "gurgaon" in hub or "gurugram" in hub:
-            counts["delhi ncr"] = counts.get("delhi ncr", 0) + 1
-        else:
-            for k, _ in SUPPORTED_LOCS:
-                if k in hub:
-                    counts[k] = counts.get(k, 0) + 1
-                    break
-                    
     return {"locations": [
-        {"key": key, "label": label, "company_count": counts.get(key, 0)}
+        {"key": key, "label": label}
         for key, label in SUPPORTED_LOCS
     ]}
 
