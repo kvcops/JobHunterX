@@ -3663,12 +3663,15 @@ function renderUsageData(data) {
   const st = document.getElementById("usage-search-table");
   if (st) {
     const rows = (ws.providers || []).map((p) => usageProviderRow(p)).join("");
+    const note = ws.exa_rate_note
+      ? `<div style="margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); font-family: var(--font-mono);">ℹ ${ws.exa_rate_note}</div>`
+      : "";
     st.innerHTML = rows
       ? `<table class="usage-table">
-           <thead><tr><th>Provider</th><th>Key</th><th>Unit</th><th>Quota / month</th><th>Used this month</th><th>Remaining</th><th>Usage</th><th>All-time Calls</th><th>Verdicts</th></tr></thead>
+           <thead><tr><th>Provider</th><th>Key</th><th>Rate</th><th>Quota / month</th><th>Used this month</th><th>Remaining</th><th>Usage</th><th>All-time Calls</th><th>Verdicts</th></tr></thead>
            <tbody>${rows}</tbody>
-         </table>`
-      : `<div class="empty-state">No search API usage recorded yet.</div>`;
+         </table>${note}`
+      : `<div class="empty-state">No search API usage recorded yet.</div>${note}`;
   }
 
   const lt = document.getElementById("usage-llm-table");
@@ -3697,9 +3700,13 @@ function usageProviderRow(p) {
   const remaining = p.remaining != null ? fmtRemaining(p.remaining) : p.allowance != null ? fmtRemaining(p.allowance) : "∞";
   const used = p.units_this_month != null ? fmtNumber(p.units_this_month) : p.calls_this_month != null ? fmtNumber(p.calls_this_month) : "0";
   return `<tr>
-    <td><strong>${p.label || p.name}</strong></td>
+    <td><strong>${p.label || p.name}</strong>${
+      p.allowance_desc || p.allowance_extra
+        ? `<br><span style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(p.allowance_desc || "")}${p.allowance_extra ? `<br>${escapeHtml(p.allowance_extra)}` : ""}</span>`
+        : ""
+    }</td>
     <td>${p.configured ? `<span class="usage-chip usage-chip-ok">configured</span>` : `<span class="usage-chip usage-chip-warn">no key</span>`}</td>
-    <td style="color: var(--text-muted);">${p.unit || "—"}</td>
+    <td style="color: var(--text-muted);">${p.rate || p.unit || "—"}</td>
     <td>${p.allowance != null ? fmtNumber(p.allowance) : "∞ / free"}</td>
     <td>${used}</td>
     <td>${remaining}</td>

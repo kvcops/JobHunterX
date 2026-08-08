@@ -361,8 +361,11 @@ async def get_usage_report_endpoint():
         },
         "exa": {
             "label": "Exa AI", "unit": "USD", "allowance": 10.0,
-            "rate": "$0.007 / search", "configured": bool(s.exa_api_key),
+            "rate": "$7 / 1,000 searches (~$0.007 each)",
+            "configured": bool(s.exa_api_key),
             "enabled_in_order": True,
+            "allowance_desc": "$10.00 / month ≈ 1,428 searches",
+            "allowance_extra": "$20 one-time signup credit ≈ 2,800 extra searches (new accounts)",
         },
         "brave": {
             "label": "Brave Search", "unit": "USD", "allowance": 5.0,
@@ -446,6 +449,7 @@ async def get_usage_report_endpoint():
             "primary_provider": getattr(s, "primary_search_provider", "tinyfish"),
             "total_calls_month": total_calls_month,
             "total_cost_month": round(total_cost_month, 4),
+            "exa_rate_note": "$7 / 1,000 searches — $10/mo free credit ≈ 1,428 searches/mo; new accounts +$20 signup ≈ 2,800 extra.",
             "providers": list(provider_meta.values()),
         },
         "llm": {

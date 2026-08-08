@@ -199,7 +199,7 @@ flowchart TD
         QG1 -->|Insufficient / Error| TAV["2. Tavily Search API<br/>(1,000 Free Credits/Mo)"]
         TAV --> QG2{"Quality Gate<br/>Pass (≥0.60)?"}
         QG2 -->|Yes| STOP2["STOP Router & Return SERP"]
-        QG2 -->|Insufficient / Error| EXA["3. Exa AI Search API<br/>($10/Mo Free Credit)"]
+        QG2 -->|Insufficient / Error| EXA["3. Exa AI Search API<br/>($7 / 1K searches; $10/mo ≈ 1,428/mo<br/>+ $20 new-account signup credit)"]
         EXA --> QG3{"Quality Gate<br/>Pass (≥0.60)?"}
         QG3 -->|Yes| STOP3["STOP Router & Return SERP"]
         QG3 -->|Insufficient / Error| BRV["4. Brave Search API<br/>($5/Mo Free Credit)"]
@@ -230,7 +230,7 @@ flowchart TD
 | Feature / Behavior | Mode 1: Web Search APIs Mode (ON) | Mode 2: Direct Scraper Mode (OFF) |
 |:-------------------|:----------------------------------|:-----------------------------------|
 | **Toggle Control** | Header Button: **`Web APIs: ON`** / `.env`: `ENABLE_WEB_SEARCH_APIS=true` | Header Button: **`Web APIs: OFF`** / `.env`: `ENABLE_WEB_SEARCH_APIS=false` |
-| **Search Engines Used** | **TinyFish** $\rightarrow$ **Tavily** $\rightarrow$ **Exa AI** $\rightarrow$ **DDGS** (Optional: **Brave**) | Direct unauthenticated search scrapers + BeautifulSoup parser |
+| **Search Engines Used** | **Rotating router**: TinyFish / Tavily / Exa (provider chosen per query, both 1-2 paid requests each per run via caps) + **DDGS** safety net (Optional: **Brave**) | Direct unauthenticated search scrapers + BeautifulSoup parser |
 | **API Keys Required** | Optional (degrades gracefully per provider) | **0 API Keys Required** |
 | **Quality Gate** | **Context-Aware Weighted SERP Quality Gate** (evaluates SERP score before calling next provider) | Direct scraping & pre-filter |
 | **JS Rendering Engine** | **TinyFish Fetch API** (batching up to 10 URLs/request for Greenhouse/Lever/Ashby) | Direct HTTP parser |
@@ -245,7 +245,7 @@ flowchart TD
 | **TinyFish Search** | `GET https://api.search.tinyfish.ai` | **Unlimited 0-credit search utility** | 30 RPM default (configurable, dynamic 429 backoff) | 0 credits. Zero cost. |
 | **TinyFish Fetch** | `POST https://api.fetch.tinyfish.ai` | **Unlimited 0-credit fetch utility** | 150 URLs/min (max 10 URLs per batch payload) | 0 credits. Zero cost. Used for JS-heavy ATS pages. |
 | **Tavily Search** | `POST https://api.tavily.com/search` | **1,000 free API credits / month** | 100 RPM limit | 1 credit (`search_depth="basic"`). `auto_parameters` is strictly disabled under zero-spend protection. |
-| **Exa AI Search** | `POST https://api.exa.ai/search` | **$10.00 / month recurring credit** | Dynamic 429 backoff | $0.007 / base request (≤10 results). Dynamically checks parameter cost. |
+| **Exa AI Search** | `POST https://api.exa.ai/search` | **$10.00 / month recurring credit** ≈ **1,428 searches/month** at $7 / 1,000 searches ($0.007 each); **new accounts get a one-time $20 signup credit** ≈ **2,800 extra searches** | Dynamic 429 backoff | $0.007 / base request (≤10 results). Dynamically checks parameter cost. |
 | **Brave Search** | `GET https://api.search.brave.com/res/v1/web/search` | $5.00 / month recurring credit | 50 QPS capacity | $0.005 / request. **Disabled by default** (`BRAVE_ENABLED=false`) as Brave requires linking a payment card. |
 | **DuckDuckGo** | Python `ddgs` (Local Wrapper) | Unofficial scraper fallback | Adaptive backoff on 429/CAPTCHA | 0 credits. Emergency fallback when API keys are not provided or exhausted. |
 
@@ -257,7 +257,7 @@ flowchart TD
 |:---------|:--------|:---------------|:-------------------------|
 | **TinyFish** | Web Search & JS Page Fetch | Unlimited 0-Credit Utility | [TinyFish API Keys](https://agent.tinyfish.ai/api-keys) |
 | **Tavily** | Primary Web Search API | 1,000 Free Credits / Month | [Tavily Dashboard](https://app.tavily.com/home) |
-| **Exa AI** | Neural Web Search API | $10.00 / Month Recurring Credit | [Exa AI Dashboard](https://dashboard.exa.ai/home) |
+| **Exa AI** | Neural Web Search API | $10.00 / Month ≈ 1,428 searches (+ $20 one-time signup ≈ 2,800 more for new accounts) | [Exa AI Dashboard](https://dashboard.exa.ai/home) |
 | **Brave Search** | Web Search API | $5.00 / Month Credit | [Brave Search Dashboard](https://api-dashboard.search.brave.com/app/keys) |
 | **Google AI Studio** | Gemini & Gemma LLMs | 14.4k RPD / 30 RPM Free | [Google AI Studio](https://aistudio.google.com/app/api-keys) |
 | **Groq** | Llama 3.3 & DeepSeek LLMs | 14.4k RPD / 30 RPM Free | [Groq Console](https://console.groq.com/keys) |
