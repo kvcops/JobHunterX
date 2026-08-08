@@ -70,6 +70,11 @@
             <span>Intervention</span>
             <span class="dock-tab-count-badge warning" id="tab-count-intervention">0</span>
           </button>
+
+          <button class="dock-tab-btn" id="tab-models" onclick="switchTab('models')">
+            <svg class="dock-tab-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/><path d="M12 6a6 6 0 1 0 6 6 6 6 0 0 0-6-6zm0 10a4 4 0 1 1 4-4 4 4 0 0 1-4 4z"/></svg>
+            <span>Models</span>
+          </button>
         </nav>
       </div>
 
@@ -708,6 +713,29 @@
                   <h3>No pending interventions</h3>
                   <p>When the browser agent encounters a login, CAPTCHA, or OTP it can't solve, the session will appear here for you to continue manually.</p>
                 </div>
+              </div>
+            </div>
+
+            <!-- Model Selection & LLM Provider Configuration -->
+            <div id="view-models" class="tab-view">
+              <div class="viewport-section-header flex-header">
+                <div>
+                  <h2>Model Selection & LLM Settings</h2>
+                  <p class="viewport-section-sub">Configure primary models and fallback chains for each agent component.</p>
+                </div>
+              </div>
+
+              <!-- Providers Overview -->
+              <div id="model-providers-status" class="bento-card glass" style="margin-bottom: 20px; padding: 20px;">
+                <h4 style="margin: 0 0 12px 0; font-size: 0.95rem; font-weight: 600;">Configured Providers</h4>
+                <div id="provider-badges-container" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                  <!-- Dynamically populated -->
+                </div>
+              </div>
+
+              <!-- Chains Configuration Grid -->
+              <div id="model-chains-container" class="bento-cards-grid">
+                <!-- Dynamically populated -->
               </div>
             </div>
           </div>

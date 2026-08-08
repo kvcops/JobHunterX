@@ -47,7 +47,7 @@ MASS_HIRING_BLACKLIST = {
 AGGREGATOR_DOMAINS = {
     "linkedin.com", "indeed.com", "indeed.co.in",
     "glassdoor.com", "glassdoor.co.in", "glassdoor.co.uk",
-    "naukri.com", "monster.com", "monster.co.in",
+    "naukri.com", "monster.com", "monster.co.in", "monsterindia.com",
     "shine.com", "timesjobs.com", "foundit.in",
     "instahyre.com", "hirist.com", "cutshort.io",
     "ziprecruiter.com", "simplyhired.com", "simplyhired.co.in",
@@ -61,6 +61,13 @@ AGGREGATOR_DOMAINS = {
     "talent.com", "6figr.com", "ambitionbox.com",
     "wellfound.com", "angel.co",
     "boringdude.in", "indiabharti.in",
+    "remoterocketship.com", "dailyremote.com", "jobtogether.com", "jobgether.com",
+    "startup.jobs", "startupjobs.com", "remoteco.com", "remote.co",
+    "weworkremotely.com", "remoteok.com", "remoteok.io", "jobspresso.co",
+    "himalayas.app", "flexjobs.com", "workingnomads.co", "workingnomads.com",
+    "jobserf.com", "postjobfree.com", "bebee.com", "careerbuilder.com",
+    "lensa.com", "jobisite.com", "jobisjob.com", "jora.com", "jobindex.dk",
+    "trovit.com", "careerarc.com", "snagajob.com", "jobtarget.com",
 }
 
 CAREER_PAGE_PATTERNS = [
@@ -128,6 +135,8 @@ def _extract_company_from_url(url: str) -> str:
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
         domain = re.sub(r"^www\.", "", domain)
+
+        # 1. Known ATS board URL patterns (where path contains company name)
         if "greenhouse.io" in domain:
             m = re.search(r"boards\.greenhouse\.io/(\w+)", url)
             return m.group(1).title() if m else ""
@@ -137,27 +146,75 @@ def _extract_company_from_url(url: str) -> str:
         if "ashbyhq.com" in domain:
             m = re.search(r"jobs\.ashbyhq\.com/(\w[\w-]*)", url)
             return m.group(1).replace("-", " ").title() if m else ""
+        if "workable.com" in domain:
+            m = re.search(r"apply\.workable\.com/(\w[\w-]*)", url)
+            return m.group(1).replace("-", " ").title() if m else ""
+
+        # 2. Skip aggregator or job board domains — do NOT treat job board domain as company name
+        if _is_aggregator(url):
+            return ""
+
+        domain_low = domain.lower()
+        if any(kw in domain_low for kw in ["job", "career", "hiring", "recruit", "work", "apply", "talent", "search", "board", "portal"]):
+            return ""
+
+        # 3. Direct company site domain name (e.g. zimperium.com -> Zimperium, splitero.com -> Splitero)
         parts = domain.split(".")
         if len(parts) >= 2:
-            return parts[-2].replace("-", " ").title()
+            comp = parts[-2].replace("-", " ").title()
+            if len(comp) >= 3 and len(comp) < 30:
+                return comp
     except Exception:
         pass
     return ""
 
 
+GARBAGE_COMPANY_WORDS = {
+    "вакансии", "ищет", "команду", "кнопка", "откликнуться",
+    "careers", "jobs", "hiring", "openings", "apply", "job board", "portal",
+    "top 2025", "fresher", "freshers", "overview", "home", "index", "about us",
+    "freelancer", "freelance", "contract", "salary", "reviews", "salaries",
+    "workfromhome", "remote jobs", "software engineer", "ai engineer", "developer",
+}
+
+def _clean_company_name(name: str) -> str:
+    if not name:
+        return ""
+    name_clean = re.sub(r"\s+", " ", name).strip()
+    # If contains non-Latin scripts that indicate foreign garbage search results (e.g. Cyrillic)
+    if re.search(r"[\u0400-\u04FF]", name_clean):
+        return ""
+    # Strip common trailing noisy suffixes
+    name_clean = re.sub(r"\s*[-|·—].*$", "", name_clean).strip()
+    name_clean = re.sub(r"\b(Inc|LLC|Ltd|Pvt|Private|Limited|Corp|Corporation|Co)\.?$", "", name_clean, flags=re.I).strip()
+    
+    low = name_clean.lower()
+    if any(g in low for g in ["hiring at", "fresher jobs", "vacancies", "freelancer"]):
+        return ""
+    if len(name_clean) < 2 or len(name_clean) > 40:
+        return ""
+    return name_clean
+
+
 def _extract_company_from_title(title: str) -> str:
+    if not title:
+        return ""
+    # Reject non-English / Cyrillic titles outright
+    if re.search(r"[\u0400-\u04FF]", title):
+        return ""
+
     patterns = [
-        r"(?:at|@)\s+(.+?)(?:\s*[-|·—]|$)",
-        r"[-|·—]\s*(.+?)(?:\s*[-|·—]|$)",
-        r"(.+?)\s+(?:is hiring|careers|jobs|openings)",
+        r"(?:at|@)\s+([A-Za-z0-9\s&\.\-]{2,35})(?:\s*[-|·—]|$)",
+        r"^([A-Za-z0-9\s&\.]{2,30})\s+(?:is hiring|careers|jobs|openings|hiring)",
+        r"^([A-Za-z0-9\s&\.]{2,30})\s*[-|·—]\s*(?:Software|AI|Backend|Frontend|Full|Data|Machine|ML|DevOps)",
     ]
     for pat in patterns:
         m = re.search(pat, title, re.IGNORECASE)
         if m:
-            company = m.group(1).strip()
-            company = re.sub(r"\s*\|.*$", "", company).strip()
-            if len(company) > 2 and len(company) < 60:
-                return company
+            candidate = m.group(1).strip()
+            candidate = _clean_company_name(candidate)
+            if candidate and candidate.lower() not in GARBAGE_COMPANY_WORDS:
+                return candidate
     return ""
 
 

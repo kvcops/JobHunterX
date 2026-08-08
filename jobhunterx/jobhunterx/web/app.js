@@ -197,6 +197,101 @@ function switchTab(tabName) {
   if (tabName === "intervention") {
     renderInterventionCards();
   }
+
+  // Load and render model config when switching to models tab
+  if (tabName === "models") {
+    loadModelConfig();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Model Selection & LLM Settings
+// ---------------------------------------------------------------------------
+let currentModelConfig = null;
+
+async function loadModelConfig() {
+  try {
+    const res = await fetch(`${API_BASE}/models`);
+    if (!res.ok) return;
+    const data = await res.json();
+    currentModelConfig = data;
+    renderModelConfig(data);
+  } catch (err) {
+    console.error("Failed to load model config", err);
+  }
+}
+
+function renderModelConfig(data) {
+  if (!data) return;
+  const providersContainer = document.getElementById("provider-badges-container");
+  const chainsContainer = document.getElementById("model-chains-container");
+
+  if (providersContainer) {
+    const providers = data.providers || {};
+    providersContainer.innerHTML = Object.entries(providers).map(([provider, active]) => {
+      const name = provider.toUpperCase();
+      const style = active
+        ? "background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3);"
+        : "background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2);";
+      const statusText = active ? "✓ Active Key" : "✗ Missing Key";
+      return `<div style="padding: 6px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; ${style}">${name}: ${statusText}</div>`;
+    }).join("");
+  }
+
+  if (chainsContainer) {
+    const chains = data.chains || {};
+    const allModels = data.all_models || [];
+    const chainDescriptions = {
+      fast: "Query Strategist & Search Filtering",
+      reasoning: "Job Evaluation & Seniority Scoring",
+      tailoring: "ATS Resume & Bullet Customization",
+      extraction: "Profile Parsing & Candidate Extraction",
+      browser: "Form Filling Automation Browser Agent",
+    };
+
+    chainsContainer.innerHTML = Object.entries(chains).map(([chainKey, chainInfo]) => {
+      const optionsHtml = allModels.map(m => {
+        const isSelected = m.id === chainInfo.selected ? "selected" : "";
+        const isProvActive = data.providers[m.provider];
+        const label = `${m.name} ${!isProvActive ? "(No API Key)" : ""}`;
+        return `<option value="${m.id}" ${isSelected}>${escapeHtml(label)}</option>`;
+      }).join("");
+
+      return `
+        <div class="bento-card glass" style="padding: 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 style="margin: 0; font-size: 1.05rem; font-weight: 600;">${escapeHtml(chainInfo.name)} Agent</h4>
+            <span style="font-size: 0.75rem; padding: 2px 8px; border-radius: 4px; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3);">Chain</span>
+          </div>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0 0 14px 0;">${chainDescriptions[chainKey] || "Agent Component Pipeline"}</p>
+          <div class="glow-form-group" style="margin: 0;">
+            <label style="font-size: 0.78rem; font-weight: 500;">Active Model:</label>
+            <select style="width: 100%; padding: 8px; border-radius: 6px; background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-color);" onchange="updateModelChain('${chainKey}', this.value)">
+              ${optionsHtml}
+            </select>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+}
+
+async function updateModelChain(chainKey, modelId) {
+  try {
+    const res = await fetch(`${API_BASE}/models`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chain: chainKey, model_id: modelId }),
+    });
+    if (res.ok) {
+      showToast(`Updated model for ${chainKey} agent`, "success");
+      logEvent("system", `Changed ${chainKey} agent model to ${modelId}`);
+      loadModelConfig();
+    }
+  } catch (err) {
+    console.error("Failed to update model chain", err);
+    showToast("Failed to change model", "error");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +471,9 @@ async function loadInitialData() {
     } catch (intvErr) {
       // Silently fail — intervention tab works via WebSocket events
     }
+
+    // Load model selection configuration
+    loadModelConfig();
 
   } catch (err) {
     console.error("Error loading initial dashboard data", err);
@@ -641,7 +739,12 @@ function handleSocketMessage(msg) {
     const job = jobs.find(j => j.id === msg.data.job_id);
     if (job) {
       job.status = msg.data.status;
-      renderJobs();
+      // Reload from API when status indicates PDF may have been generated
+      if (msg.data.status === "matched" || msg.data.status === "applied") {
+        loadInitialData();
+      } else {
+        renderJobs();
+      }
     } else {
       loadInitialData();
     }
@@ -736,11 +839,32 @@ function renderInterventionCards() {
   }).join("");
 }
 
-function continueIntervention(idx) {
+async function continueIntervention(idx) {
   const session = interventionSessions[idx];
   if (!session) return;
-  // Open a new window to the browser URL using the persistent profile
-  window.open(session.url, "_blank");
+
+  // Signal takeover so URL streaming pauses and Chrome is focused
+  if (session.job_id) {
+    try {
+      await fetch(`${API_BASE}/browser/takeover?job_id=${encodeURIComponent(session.job_id)}`, {
+        method: "POST",
+      });
+      await fetch(`${API_BASE}/interventions/${session.job_id}/focus`, {
+        method: "POST",
+      });
+    } catch (e) {
+      console.warn("Failed to focus intervention browser session:", e);
+    }
+  }
+
+  // Switch to Browser Agent live view tab
+  switchTab("browser");
+
+  showToast(`Focused browser session for ${session.company || session.role || "job"}.`, "info");
+  logEvent(
+    "browser_agent",
+    `Active Chrome session focused for ${session.company || session.role || "job"}. Complete the prompt in Chrome window or remote view, then click Resolve.`
+  );
 }
 
 async function resolveIntervention(idx) {
@@ -920,7 +1044,7 @@ function renderJobs() {
         <div class="clean-footer-actions">
           <button class="clean-btn sec" onclick="openJobDetailsModal('${job.id}')">Details</button>
           <a href="${escapeHtml(applyUrl)}" target="_blank" rel="noopener noreferrer" class="clean-btn icon-link" title="Open Application Link">↗</a>
-          ${effectiveStatus === 'matched' || effectiveStatus === 'applied' || job.tailored_pdf ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
+          ${job.has_tailored_pdf ? `<button class="clean-btn sec" onclick="downloadResume('${job.id}')">CV</button>` : ''}
           ${effectiveStatus === 'applying' || effectiveStatus === 'validating' ? `<span class="clean-btn applying">Applying...</span>` : ''}
           ${effectiveStatus === 'applied' || effectiveStatus === 'force_applied' ? `<span class="clean-btn applied" style="background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); font-size: 0.78rem; padding: 3px 8px; border-radius: 4px;">Applied ✓</span>` : ''}
           ${effectiveStatus === 'needs_attention' ? `<button class="clean-btn warn" onclick="triggerHitlResume('${job.id}')">Solve Block</button><button class="clean-btn prim" onclick="applyToJob(event, '${job.id}')">Retry Apply</button>` : ''}
@@ -979,11 +1103,7 @@ function renderResumes() {
   const container = document.getElementById("resumes-container");
   if (!container) return;
 
-  const matchedJobs = jobs.filter(j => {
-    const st = j.status || 'discovered';
-    const score = getMatchScorePercent(j);
-    return st === 'matched' || st === 'applied' || st === 'applying' || st === 'needs_attention' || (st === 'discovered' && score >= 60);
-  });
+  const matchedJobs = jobs.filter(j => j.has_tailored_pdf);
 
   const cvBadge = document.getElementById("tab-count-resumes");
   if (cvBadge) {
@@ -1480,11 +1600,16 @@ function clearLogs() {
 // ---------------------------------------------------------------------------
 // HITL Intervention - now handled via intervention tab cards
 // ---------------------------------------------------------------------------
-function triggerHitlResume(jobId) {
+async function triggerHitlResume(jobId) {
   const job = jobs.find(j => j.id === jobId);
   if (job) {
-    const url = job.apply_url || job.career_page_url;
-    if (url) window.open(url, "_blank");
+    try {
+      await fetch(`${API_BASE}/browser/takeover?job_id=${encodeURIComponent(jobId)}`, { method: "POST" });
+      await fetch(`${API_BASE}/interventions/${jobId}/focus`, { method: "POST" });
+    } catch (e) {
+      console.warn("Failed to focus intervention:", e);
+    }
+    switchTab("intervention");
   }
 }
 

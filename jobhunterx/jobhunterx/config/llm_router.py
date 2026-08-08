@@ -83,6 +83,51 @@ FALLBACK_CHAINS: Dict[str, List[str]] = {
     ],
 }
 
+_USER_MODEL_OVERRIDES: Dict[str, str] = {}
+
+
+def get_model_config() -> Dict[str, Any]:
+    """Return model config for UI including available providers, active selections, and available choices."""
+    settings = get_settings()
+    providers = {
+        "google": bool(settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")),
+        "groq": bool(settings.groq_api_key or os.getenv("GROQ_API_KEY")),
+        "mistral": bool(settings.mistral_api_key or os.getenv("MISTRAL_API_KEY")),
+    }
+
+    all_models = [
+        {"id": "gemini/gemma-4-26b-a4b-it", "name": "Gemma 4 26B (Google)", "provider": "google"},
+        {"id": "gemini/gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite (Google)", "provider": "google"},
+        {"id": "groq/llama-3.3-70b-versatile", "name": "Llama 3.3 70B (Groq)", "provider": "groq"},
+        {"id": "groq/llama-3.1-8b-instant", "name": "Llama 3.1 8B (Groq)", "provider": "groq"},
+        {"id": "mistral/mistral-small-2603", "name": "Mistral Small (Mistral)", "provider": "mistral"},
+        {"id": "mistral/mistral-large-2512", "name": "Mistral Large (Mistral)", "provider": "mistral"},
+        {"id": "mistral/codestral-2508", "name": "Codestral 2508 (Mistral)", "provider": "mistral"},
+    ]
+
+    chains_res = {}
+    for chain_key, default_list in FALLBACK_CHAINS.items():
+        selected = _USER_MODEL_OVERRIDES.get(chain_key) or default_list[0]
+        chains_res[chain_key] = {
+            "name": chain_key.title(),
+            "selected": selected,
+            "default": default_list[0],
+            "options": default_list,
+        }
+
+    return {
+        "providers": providers,
+        "chains": chains_res,
+        "all_models": all_models,
+    }
+
+
+def set_model_config(chain_key: str, model_id: str) -> None:
+    """Override preferred primary model for a specific agent chain."""
+    if chain_key in FALLBACK_CHAINS:
+        _USER_MODEL_OVERRIDES[chain_key] = model_id
+        log.info("model_override_updated", chain=chain_key, selected_model=model_id)
+
 
 # ---------------------------------------------------------------------------
 # Concurrency semaphores — per-provider
@@ -547,7 +592,13 @@ async def call_llm_with_fallback(
     Raises:
         Exception: If all models in the chain fail.
     """
-    chain = FALLBACK_CHAINS.get(chain_name, FALLBACK_CHAINS["fast"])
+    chain = list(FALLBACK_CHAINS.get(chain_name, FALLBACK_CHAINS["fast"]))
+    override_model = _USER_MODEL_OVERRIDES.get(chain_name)
+    if override_model:
+        if override_model in chain:
+            chain.remove(override_model)
+        chain.insert(0, override_model)
+        
     settings = get_settings()
     last_err: Exception | None = None
 

@@ -185,8 +185,10 @@ async def _is_page_usable(page: Any) -> bool:
     """Check whether a Playwright page is still attached and usable."""
     if page is None:
         return False
+    from jobhunterx.agents.browser_agent import _get_raw_playwright_page
+    pw_page = _get_raw_playwright_page(page)
     try:
-        closed = getattr(page, "is_closed", None)
+        closed = getattr(pw_page, "is_closed", getattr(page, "is_closed", None))
         if callable(closed):
             try:
                 if closed():
@@ -196,7 +198,7 @@ async def _is_page_usable(page: Any) -> bool:
     except Exception:
         return False
     try:
-        client = getattr(page, "_client", None)
+        client = getattr(pw_page, "_client", getattr(page, "_client", None))
         if client is not None:
             if getattr(client, "_disconnected", False):
                 return False
@@ -465,6 +467,40 @@ def _stop_screencast():
         _browser_screencast_task = None
 
 
+async def _get_page_mouse(page: Any) -> Any:
+    """Safely obtain the mouse object from a Playwright or wrapper page."""
+    try:
+        mouse = await _safe_call(page, lambda: getattr(page, "mouse", None))
+        if asyncio.iscoroutine(mouse):
+            mouse = await mouse
+        elif callable(mouse) and not hasattr(mouse, "click"):
+            res = mouse()
+            if asyncio.iscoroutine(res):
+                mouse = await res
+            else:
+                mouse = res
+        return mouse
+    except Exception:
+        return getattr(page, "mouse", None)
+
+
+async def _get_page_keyboard(page: Any) -> Any:
+    """Safely obtain the keyboard object from a Playwright or wrapper page."""
+    try:
+        kb = await _safe_call(page, lambda: getattr(page, "keyboard", None))
+        if asyncio.iscoroutine(kb):
+            kb = await kb
+        elif callable(kb) and not hasattr(kb, "down"):
+            res = kb()
+            if asyncio.iscoroutine(res):
+                kb = await res
+            else:
+                kb = res
+        return kb
+    except Exception:
+        return getattr(page, "keyboard", None)
+
+
 async def _forward_input_event(page: Any, msg: dict):
     """Forward mouse/keyboard input events from the client to the browser page."""
     event_type = msg.get("type")
@@ -482,7 +518,10 @@ async def _forward_input_event(page: Any, msg: dict):
             button = msg.get("button", 0)
             pw_button = "left" if button == 0 else "right" if button == 2 else "middle"
 
-            mouse = page.mouse
+            mouse = await _get_page_mouse(page)
+            if mouse is None:
+                return
+
             if action == "click":
                 await _safe_call(page, lambda: mouse.click(x, y, button=pw_button))
             elif action == "down":
@@ -494,32 +533,38 @@ async def _forward_input_event(page: Any, msg: dict):
             elif action == "dblclick":
                 await _safe_call(page, lambda: mouse.click(x, y, button=pw_button, click_count=2))
 
-        elif event_type == "wheel":
+        elif event_type in ("wheel", "scroll"):
             delta_x = msg.get("deltaX", 0)
             delta_y = msg.get("deltaY", 0)
-            mouse = page.mouse
-            await _safe_call(page, lambda: mouse.scroll(delta_x=delta_x, delta_y=delta_y))
+            mouse = await _get_page_mouse(page)
+            if mouse is None:
+                return
+
+            def _do_scroll():
+                if hasattr(mouse, "wheel"):
+                    return mouse.wheel(delta_x, delta_y)
+                elif hasattr(mouse, "scroll"):
+                    return mouse.scroll(delta_x=delta_x, delta_y=delta_y)
+                elif hasattr(page, "evaluate"):
+                    return page.evaluate(f"window.scrollBy({delta_x}, {delta_y})")
+
+            await _safe_call(page, _do_scroll)
 
         elif event_type == "keyboard":
             action = msg.get("action")
             key = msg.get("key", "")
-            code = msg.get("code", "")
             text = msg.get("text", "")
 
-            keyboard = page.keyboard
+            keyboard = await _get_page_keyboard(page)
+            if keyboard is None:
+                return
+
             if action == "keyDown":
                 await _safe_call(page, lambda: keyboard.down(key))
                 if text:
                     await _safe_call(page, lambda: keyboard.insert_text(text))
             elif action == "keyUp":
                 await _safe_call(page, lambda: keyboard.up(key))
-
-        elif event_type == "scroll":
-            x = msg.get("x", 0)
-            y = msg.get("y", 0)
-            delta_y = msg.get("deltaY", 0)
-            mouse = page.mouse
-            await _safe_call(page, lambda: mouse.scroll(x=x, y=y, delta_y=delta_y))
 
     except Exception as exc:
         log.warning("input_forward_error", error=str(exc), type=event_type)

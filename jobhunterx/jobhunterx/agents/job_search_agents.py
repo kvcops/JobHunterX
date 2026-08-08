@@ -256,6 +256,16 @@ async def run_multi_agent_search(
                 "source": "multi_agent_ddg",
             }
 
+            # Run Job Validator Agent: clean company name, sanitize title, reject non-job noise
+            from jobhunterx.agents import job_validator_agent
+            val_res = await job_validator_agent.validate_and_clean_job(raw_job)
+            if not val_res.get("is_valid_job"):
+                summary["jobs_rejected_gate"] += 1
+                continue
+            
+            raw_job["company"] = val_res.get("clean_company") or raw_job["company"]
+            raw_job["role"] = val_res.get("clean_role") or raw_job["role"]
+
             # Check Eligibility Gate
             passed, rejected = eligibility.filter_jobs([raw_job], plan)
             if not passed:

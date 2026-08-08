@@ -398,6 +398,7 @@ async def list_jobs(status: str = "", limit: int = 100, include_closed: bool = F
         jobs = await db.get_jobs(status=status or None, limit=limit)
     # Don't send PDF blob in list response; parse validation_json
     for j in jobs:
+        j["has_tailored_pdf"] = bool(j.get("tailored_pdf"))
         j.pop("tailored_pdf", None)
         # Parse freshness_json (eligibility gate + liveness)
         fj = j.get("freshness_json")
@@ -435,6 +436,7 @@ async def get_job(job_id: str):
     if not job:
         raise HTTPException(404, "Job not found")
     # Don't send binary PDF in JSON
+    job["has_tailored_pdf"] = bool(job.get("tailored_pdf"))
     job.pop("tailored_pdf", None)
     fj = job.get("freshness_json")
     if fj and isinstance(fj, str):
@@ -599,6 +601,32 @@ async def pipeline_mode_endpoint(mode: str | None = None):
     return {"mode": _pipeline_mode}
 
 
+class ModelSelectionInput(BaseModel):
+    chain: str
+    model_id: str
+
+
+@router.get("/models")
+async def get_models_endpoint():
+    """Get model configuration, active chain models, and provider statuses."""
+    from jobhunterx.config.llm_router import get_model_config
+    return get_model_config()
+
+
+@router.post("/models")
+async def set_model_endpoint(input_data: ModelSelectionInput):
+    """Set model selection for a specific agent chain."""
+    from jobhunterx.config.llm_router import set_model_config, get_model_config
+    set_model_config(input_data.chain, input_data.model_id)
+    await ws_manager.broadcast({
+        "agent": "system",
+        "event_type": "model_config_updated",
+        "message": f"Model for agent '{input_data.chain}' changed to: {input_data.model_id}",
+        "data": {"chain": input_data.chain, "model_id": input_data.model_id},
+    })
+    return {"status": "ok", "config": get_model_config()}
+
+
 
 @router.post("/reset")
 async def reset_system():
@@ -715,9 +743,22 @@ async def get_interventions():
 
 @router.post("/interventions/{session_id}/resolve")
 async def resolve_intervention(session_id: int, status: str = "resolved"):
-    """Mark an intervention session as resolved."""
+    """Mark an intervention session as resolved and clean up paused session."""
+    from jobhunterx.agents import browser_agent as ba
+    sessions = await db.get_pending_interventions()
+    target = next((s for s in sessions if s.get("id") == session_id), None)
+    if target and target.get("job_id"):
+        await ba.clear_paused_session(target["job_id"])
     await db.resolve_intervention(session_id, status)
     return {"status": "ok"}
+
+
+@router.post("/interventions/{job_id}/focus")
+async def focus_intervention_browser(job_id: str):
+    """Bring active browser window/tab for job_id to the front for manual intervention."""
+    from jobhunterx.agents import browser_agent as ba
+    focused = await ba.focus_browser_session(job_id)
+    return {"status": "ok", "focused": focused}
 
 
 @router.get("/screenshots/{job_id}")

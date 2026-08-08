@@ -139,7 +139,7 @@ def _build_stealth_profile(settings: Settings) -> Any:
         enable_default_extensions=False,  # DISABLED: extension downloads from Chrome Web Store hang on Windows, blocking CDP
         disable_security=False,
         captcha_solver=False,  # DISABLED: cloud-only feature that adds startup overhead locally
-        keep_alive=False,
+        keep_alive=True,  # KEEP ALIVE: Keep Chrome window open for HITL intervention
         args=[
             "--disable-blink-features=AutomationControlled",
             "--disable-features=IsolateOrigins,site-per-process,AutomationControlled",
@@ -270,8 +270,18 @@ def get_active_cdp_url() -> str:
     return ""
 
 
-def get_active_browser_session() -> Any:
-    """Return the active BrowserSession object, or None."""
+def get_active_browser_session(job_id: str = "") -> Any:
+    """Return the active BrowserSession object for job_id, or any active session."""
+    if job_id and job_id in _paused_sessions:
+        sess = _paused_sessions[job_id].get("session")
+        if sess is not None:
+            return sess
+
+    for paused in _paused_sessions.values():
+        sess = paused.get("session")
+        if sess is not None:
+            return sess
+
     for agent in _active_sessions:
         sess = getattr(agent, "browser_session", None)
         if sess is not None:
@@ -279,9 +289,9 @@ def get_active_browser_session() -> Any:
     return None
 
 
-async def get_active_page() -> Any:
-    """Return the current Playwright Page of the active browser, or None."""
-    sess = get_active_browser_session()
+async def get_active_page(job_id: str = "") -> Any:
+    """Return the current Playwright Page of the active browser (or paused session), or None."""
+    sess = get_active_browser_session(job_id)
     if sess is None:
         return None
     try:
@@ -304,6 +314,68 @@ async def get_active_page() -> Any:
         return await asyncio.wrap_future(fut)
     except Exception:
         return None
+
+
+def _get_raw_playwright_page(page: Any) -> Any:
+    """Unwrap raw Playwright Page from browser-use wrappers if nested."""
+    if page is None:
+        return None
+    for attr in ("_page", "page", "playwright_page", "_pw_page"):
+        target = getattr(page, attr, None)
+        if target is not None and (hasattr(target, "bring_to_front") or hasattr(target, "screenshot")):
+            return target
+    return page
+
+
+def _is_page_closed(page: Any) -> bool:
+    """Safely check if a Playwright or wrapper page is closed."""
+    if page is None:
+        return True
+    pw_page = _get_raw_playwright_page(page)
+    try:
+        closed = getattr(pw_page, "is_closed", getattr(page, "is_closed", None))
+        if callable(closed):
+            return bool(closed())
+        elif closed is not None:
+            return bool(closed)
+    except Exception:
+        pass
+    return False
+
+
+async def focus_browser_session(job_id: str = "") -> bool:
+    """Bring the active browser window/tab to the front for manual user intervention."""
+    page = await get_active_page(job_id)
+    brought_to_front = False
+    if page is not None:
+        try:
+            from jobhunterx.api.main import _safe_call, _is_page_usable
+            pw_page = _get_raw_playwright_page(page)
+            if await _is_page_usable(pw_page):
+                def _do_bring_to_front():
+                    if hasattr(pw_page, "bring_to_front"):
+                        return pw_page.bring_to_front()
+                    elif hasattr(page, "bring_to_front"):
+                        return page.bring_to_front()
+
+                await _safe_call(pw_page, _do_bring_to_front)
+                brought_to_front = True
+                log.info("browser_session_brought_to_front", job_id=job_id)
+        except Exception as exc:
+            log.warning("bring_to_front_failed", job_id=job_id, error=str(exc))
+    
+    # Also attempt OS level focus on Windows
+    try:
+        from jobhunterx.api.routes import _focus_chrome_window
+        _focus_chrome_window()
+    except Exception:
+        pass
+
+    # If we have a registered paused session or active agent, return True so frontend knows browser exists
+    if job_id in _paused_sessions or len(_active_sessions) > 0 or page is not None:
+        return True
+
+    return brought_to_front
 
 
 async def stop_all_active_browsers():
@@ -329,14 +401,18 @@ async def stop_all_active_browsers():
     _paused_sessions.clear()
 
 
-
-def save_paused_session(job_id: str, reason: str, url: str = "") -> None:
+def save_paused_session(job_id: str, reason: str, url: str = "", agent: Any = None) -> None:
     """Save a browser session as paused when CAPTCHA/login/MFA is detected.
     
     The session stays alive — the browser window remains open for the user
     to manually intervene. The agent stops executing steps.
     """
+    session = getattr(agent, "browser_session", None) if agent else None
+    if agent and agent not in _active_sessions:
+        _active_sessions.append(agent)
     _paused_sessions[job_id] = {
+        "agent": agent,
+        "session": session,
         "reason": reason,
         "url": url,
         "status": "paused",
@@ -349,9 +425,20 @@ def get_paused_sessions() -> dict[str, dict]:
     return dict(_paused_sessions)
 
 
-def clear_paused_session(job_id: str) -> None:
-    """Remove a paused session entry after the user resolves it."""
-    _paused_sessions.pop(job_id, None)
+async def clear_paused_session(job_id: str) -> None:
+    """Remove a paused session entry and close its browser session cleanly after resolution."""
+    paused = _paused_sessions.pop(job_id, None)
+    if paused:
+        agent = paused.get("agent")
+        if agent and agent in _active_sessions:
+            _active_sessions.remove(agent)
+        sess = paused.get("session")
+        if sess:
+            try:
+                from jobhunterx.api.main import _safe_call
+                await _safe_call(sess, lambda: sess.close())
+            except Exception:
+                pass
 
 
 async def run(state: dict) -> dict:
@@ -999,8 +1086,6 @@ ERROR DETECTION — STOP AND REPORT:
                 await streamer_task
             except asyncio.CancelledError:
                 pass
-            if agent in _active_sessions:
-                _active_sessions.remove(agent)
             _takeover_gates.pop(job_id, None)
 
         # --- Analyse result for HITL needs ---
@@ -1020,7 +1105,9 @@ ERROR DETECTION — STOP AND REPORT:
             hitl_type = HITLType.MANUAL_FORM
 
         if hitl_type is None:
-            # Success!
+            # Success! Clean up active browser session
+            if agent in _active_sessions:
+                _active_sessions.remove(agent)
             await db.update_job(job_id, status="applied")
             events.append(AgentEvent(
                 agent="browser_agent",
@@ -1040,7 +1127,7 @@ ERROR DETECTION — STOP AND REPORT:
                 "errors": errors,
             }
         else:
-            # HITL needed — save session as intervention card (non-blocking)
+            # HITL needed — keep session active & registered in _paused_sessions
             await db.update_job(job_id, status="needs_attention")
             events.append(AgentEvent(
                 agent="browser_agent",
@@ -1048,7 +1135,7 @@ ERROR DETECTION — STOP AND REPORT:
                 job_id=job_id,
                 data={"status": "needs_attention"},
             ).model_dump(mode="json"))
-            save_paused_session(job_id, reason=hitl_type.value, url=apply_url)
+            save_paused_session(job_id, reason=hitl_type.value, url=apply_url, agent=agent)
 
             # Create intervention session in DB
             db_id = None
@@ -1072,8 +1159,10 @@ ERROR DETECTION — STOP AND REPORT:
                 # Try to get screenshot from agent's browser session
                 if hasattr(agent, 'browser_session') and agent.browser_session:
                     page = await agent.browser_session.get_current_page()
-                    if page and not page.is_closed():
-                        await page.screenshot(path=screenshot_path, full_page=False)
+                    pw_page = _get_raw_playwright_page(page)
+                    if pw_page and not _is_page_closed(pw_page):
+                        from jobhunterx.api.main import _safe_call
+                        await _safe_call(pw_page, lambda: pw_page.screenshot(path=screenshot_path, full_page=False))
                     else:
                         screenshot_path = None
                 else:
