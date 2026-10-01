@@ -102,7 +102,7 @@ def _skip_reason(model: str) -> str | None:
         return "provider turned off"
     if M.is_listed(model) is False:
         return "not available on this account"
-    return M.budget(model).exhausted()
+    return M.budget(model).exhausted() or M.resting(model)
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +344,8 @@ async def _call_google_genai(
     raw_model = model_name.split("/", 1)[-1] if "/" in model_name else model_name
 
     from google import genai
-    client = genai.Client(api_key=api_key)
+    from google.genai import types
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=120_000))
 
     system_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
     user_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") != "system")
@@ -355,7 +356,7 @@ async def _call_google_genai(
     contents.append(f"USER:\n{user_content}")
     prompt_str = "\n\n".join(contents)
 
-    cfg: Dict[str, Any] = {}
+    cfg: Dict[str, Any] = {"automatic_function_calling": {"disable": True}}   # no tools; also stops the "AFC is enabled" log
     max_tokens = kwargs.get("max_tokens") or kwargs.get("max_output_tokens")
     if max_tokens:
         cfg["max_output_tokens"] = max_tokens
@@ -366,7 +367,7 @@ async def _call_google_genai(
         return client.models.generate_content(
             model=raw_model,
             contents=prompt_str,
-            config=cfg if cfg else None,
+            config=cfg,
         )
 
     response = await asyncio.to_thread(_sync_generate)
@@ -597,11 +598,14 @@ async def call_llm_with_fallback(
             pass
     last_err: Exception | None = None
     skipped: list[str] = []
+    rested: list[str] = []
 
     for model in chain:
         reason = _skip_reason(model)
         if reason:
             skipped.append(f"{model} ({reason})")
+            if reason.startswith("resting"):
+                rested.append(model)
             continue
 
         # Skip providers currently in rate-limit cooldown
@@ -612,9 +616,21 @@ async def call_llm_with_fallback(
             continue
 
         try:
-            return await call_llm(model, messages, **kwargs)
+            result = await call_llm(model, messages, **kwargs)
+            M.mark_success(model)
+            return result
         except Exception as exc:
-            log.warning("llm_fallback", model=model, error=str(exc))
+            rest = M.mark_failure(model, str(exc))
+            log.warning("llm_fallback", model=model, error=str(exc)[:200], next_try_in_s=int(rest) if rest else None)
+            last_err = exc
+
+    for model in rested if last_err is None else []:   # everything is resting: better to try than to fail
+        try:
+            result = await call_llm(model, messages, **kwargs)
+            M.mark_success(model)
+            return result
+        except Exception as exc:
+            M.mark_failure(model, str(exc))
             last_err = exc
 
     if last_err is None:

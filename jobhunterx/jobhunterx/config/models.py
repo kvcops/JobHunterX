@@ -241,3 +241,50 @@ def budget(model: str) -> _ModelBudget:
 
 def budgets_status() -> dict[str, dict[str, Any]]:
     return {m: b.status() for m, b in _budgets.items()}
+
+
+# ---------------------------------------------------------------------------
+# Model health: rest a model for a while after server errors (per model, not per provider)
+# ---------------------------------------------------------------------------
+# Google's free Gemma endpoint can answer "500 INTERNAL" for minutes at a time. Without this, every
+# call would first wait on Gemma before falling back. With it, the first failure rests only that model
+# (other Google models keep working), and the rest grows if it keeps failing: 2 → 4 → 8 → 16 → 30 min.
+
+_SERVER_ERR = ("500", "502", "503", "504", "internal", "unavailable", "deadline", "overloaded", "timed out", "timeout",
+               "having trouble")
+_RATE_ERR = ("429", "resource_exhausted", "rate limit", "rate_limit", "quota")
+_health: dict[str, dict[str, Any]] = {}
+
+
+def mark_success(model: str) -> None:
+    _health.pop(model, None)
+
+
+def mark_failure(model: str, error: str) -> Optional[float]:
+    """Record a failed call. Returns the rest period in seconds (None if the error is not the model's fault)."""
+    e = (error or "").lower()
+    if any(k in e for k in _RATE_ERR):
+        rest = 60.0
+    elif any(k in e for k in _SERVER_ERR):
+        h = _health.get(model, {})
+        trips = h.get("trips", 0) + 1
+        rest = min(1800.0, 120.0 * 2 ** (trips - 1))
+        _health[model] = {"trips": trips, "until": time.monotonic() + rest, "why": "Google server errors" if model.startswith("gemini/") else "server errors"}
+        log.warning("model_resting", model=model, rest_s=int(rest), trips=trips)
+        return rest
+    else:
+        return None
+    _health[model] = {**_health.get(model, {}), "until": time.monotonic() + rest, "why": "rate limited"}
+    log.warning("model_resting", model=model, rest_s=int(rest), reason="rate limited")
+    return rest
+
+
+def resting(model: str) -> Optional[str]:
+    """Why this model is being skipped right now, e.g. 'resting 3 min after Google server errors'."""
+    h = _health.get(model)
+    if not h:
+        return None
+    left = h["until"] - time.monotonic()
+    if left <= 0:
+        return None          # rest is over: try it again (trips are kept, so a new failure rests it longer)
+    return f"resting {max(1, round(left / 60))} min after {h['why']}"

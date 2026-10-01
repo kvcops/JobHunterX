@@ -4,7 +4,13 @@ JobHunterX — Gemma direct calling + budget tracker (Google AI Studio)
 Gemma runs on the Gemini API (see Google's "Gemma on Gemini API" guide). It has
 no system role, so instructions are sent inline. Calls go through `google.genai`
 directly; the router spaces requests to the model's RPM (config/models.py) and
-this module tracks the daily request budget and retries transient 5xx errors.
+this module tracks the daily request budget.
+
+Google's free Gemma endpoint sometimes answers "500 INTERNAL" for a while. We
+retry once (without the thinking setting, which is a common trigger), then give
+up fast so the router can move to the next model; the router also rests Gemma
+for a few minutes after repeated errors (config/models.py → model health), so
+one bad spell never slows a whole search down.
 
 Default model: gemma-4-31b-it (override with GEMMA_MODEL in .env).
 """
@@ -30,7 +36,8 @@ DEFAULT_RPM = 15
 
 # Spacing is enforced by the router's per-model budget; this is only a floor between retries.
 _MIN_INTERVAL_S = 0.5
-_TRANSIENT = ("500", "502", "503", "504", "429", "RESOURCE_EXHAUSTED", "INTERNAL", "UNAVAILABLE", "DEADLINE", "overloaded")
+_SERVER_ERRORS = ("500", "502", "503", "504", "INTERNAL", "UNAVAILABLE", "DEADLINE", "overloaded", "timed out", "Timeout")
+_TIMEOUT_S = float(os.getenv("GEMMA_TIMEOUT_S", "150"))     # a slow answer is better than none, but not forever
 
 _tokens_used = 0
 _requests_today = 0
@@ -142,66 +149,58 @@ async def call_gemma(
 
     if _genai_client is None:
         from google import genai
-        _genai_client = genai.Client(api_key=api_key)
+        from google.genai import types
+        _genai_client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=int(_TIMEOUT_S * 1000)))
 
     model = model or MODEL
-    cfg = {"thinkingConfig": {"thinkingLevel": thinking_level}}
+    # automatic_function_calling off: we never pass tools (also silences "AFC is enabled…" on every call)
+    cfg: dict[str, Any] = {"thinkingConfig": {"thinkingLevel": thinking_level}, "automatic_function_calling": {"disable": True}}
     if temperature is not None:
         cfg["temperature"] = temperature
     if max_tokens:
         cfg["max_output_tokens"] = max_tokens
 
+    def _sync_call() -> tuple[str, int, int]:
+        response = _genai_client.models.generate_content(
+            model=model,
+            contents=f"SYSTEM INSTRUCTIONS:\n{system}\n\nUSER:\n{user}",
+            config=cfg,
+        )
+        text = getattr(response, "text", "") or ""
+        usage_meta = getattr(response, "usage_metadata", None)
+        t_in = getattr(usage_meta, "prompt_token_count", 0) if usage_meta else 0
+        t_out = getattr(usage_meta, "candidates_token_count", 0) if usage_meta else 0
+        if not t_in and not t_out:
+            t_in = max(1, (len(system) + len(user)) // 4)
+            t_out = max(1, len(text) // 4)
+        return text, int(t_in or 0), int(t_out or 0)
+
     async def _run_with_ratelimit() -> tuple[str, int, int]:
         global _last_request_mono
-        max_retries = 4
-        backoff = 2.0
-
-        for attempt in range(max_retries):
-            async with _rate_lock_():
-                now = time.monotonic()
-                wait = (_last_request_mono + _MIN_INTERVAL_S) - now
+        import random
+        retried = False
+        for _ in range(3):                            # one quick retry on a server error, then let the router fall back
+            async with _rate_lock_():                 # the lock only spaces requests; it is never held while waiting on Google
+                wait = (_last_request_mono + _MIN_INTERVAL_S) - time.monotonic()
                 if wait > 0:
                     await asyncio.sleep(wait)
                 _last_request_mono = time.monotonic()
-
-                def _sync_call() -> tuple[str, int, int]:
-                    response = _genai_client.models.generate_content(
-                        model=model,
-                        contents=f"SYSTEM INSTRUCTIONS:\n{system}\n\nUSER:\n{user}",
-                        config=cfg,
-                    )
-                    text = getattr(response, "text", "") or ""
-                    
-                    # Extract usage metadata from GenAI response if present
-                    usage_meta = getattr(response, "usage_metadata", None)
-                    t_in = getattr(usage_meta, "prompt_token_count", 0) if usage_meta else 0
-                    t_out = getattr(usage_meta, "candidates_token_count", 0) if usage_meta else 0
-
-                    if not t_in and not t_out:
-                        t_in = max(1, (len(system) + len(user)) // 4)
-                        t_out = max(1, len(text) // 4)
-
-                    return text, int(t_in or 0), int(t_out or 0)
-
-                try:
-                    return await asyncio.to_thread(_sync_call)
-                except Exception as exc:
-                    err_str = str(exc)
-                    if "thinking" in err_str.lower() and "thinkingConfig" in cfg:
-                        cfg.pop("thinkingConfig", None)        # model doesn't accept a thinking level: retry without it
-                        continue
-                    is_transient = any(code in err_str for code in _TRANSIENT)
-                    if is_transient and attempt < max_retries - 1:
-                        # Google's 500 INTERNAL on Gemma is usually momentary; back off with jitter and retry.
-                        import random
-                        delay = backoff + random.uniform(0, backoff / 2)
-                        log.warning("gemma_transient_error_retry", attempt=attempt + 1, error=err_str[:120], backoff_s=round(delay, 1))
-                        await asyncio.sleep(delay)
-                        backoff *= 2
-                        continue
-                    raise
-
-        return "", 0, 0
+            try:
+                return await asyncio.to_thread(_sync_call)
+            except Exception as exc:
+                err = str(exc)
+                if "thinking" in err.lower() and "thinkingConfig" in cfg:
+                    cfg.pop("thinkingConfig", None)    # this model doesn't take a thinking level
+                    continue
+                if not retried and any(code in err for code in _SERVER_ERRORS):
+                    retried = True
+                    cfg.pop("thinkingConfig", None)    # Google's 500s on Gemma often go away without thinking
+                    delay = 1.5 + random.uniform(0, 1.5)
+                    log.warning("gemma_server_error_retry", error=err[:100], retry_in_s=round(delay, 1))
+                    await asyncio.sleep(delay)
+                    continue
+                raise RuntimeError(f"Gemma is having trouble on Google's side ({err[:140]})") from exc
+        raise RuntimeError("Gemma did not answer")
 
     t0 = time.monotonic()
     content, tokens_in, tokens_out = await _run_with_ratelimit()

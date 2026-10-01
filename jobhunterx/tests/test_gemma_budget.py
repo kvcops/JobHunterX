@@ -29,7 +29,7 @@ def _install_fake_client(monkeypatch, text="hello world", raise_exc=None):
     class FakeClient:
         calls = []
 
-        def __init__(self, api_key=None):
+        def __init__(self, api_key=None, http_options=None):
             pass
 
         @property

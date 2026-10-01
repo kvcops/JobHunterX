@@ -394,8 +394,11 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
 
 > [!NOTE]
-> **Why you may see `500 INTERNAL` from Gemma:** Google occasionally returns a momentary internal error. The Gemma client
-> (`config/gemma.py`) retries with exponential backoff and jitter; if it keeps failing, the chain moves to the next model.
+> **Why you may see `500 INTERNAL` from Gemma:** that error comes from Google's servers — the free Gemma endpoint
+> sometimes has a bad spell. JobHunterX now handles it calmly: one quick retry (without "thinking", a common trigger),
+> then it moves on to the next model straight away. Gemma then **rests for 2 minutes** (4, 8… up to 30 if it keeps
+> failing) while Gemini 3.5 Flash Lite and the others keep working. Settings → AI providers shows "resting N min" next
+> to it. A call never waits more than `GEMMA_TIMEOUT_S` (150 s).
 > Resume upload runs in the background with live progress, so a slow free-tier call never times out the page.
 
 <br/>
