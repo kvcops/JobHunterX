@@ -136,3 +136,9 @@ def test_ssrf_guard_blocks_private_addresses():
     for url in ("http://127.0.0.1:8000/api/reset", "http://169.254.169.254/latest/meta-data", "file:///etc/passwd"):
         res = asyncio.new_event_loop().run_until_complete(net.fetch(url))
         assert not res.ok and res.error
+
+
+def test_cross_site_writes_are_blocked(client):
+    r = client.post("/api/reset", headers={"origin": "https://evil.example"})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "forbidden"
+    assert client.get("/api/meta", headers={"origin": "https://evil.example"}).status_code == 200

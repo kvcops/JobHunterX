@@ -17,16 +17,10 @@ import hashlib
 import json
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 os.environ.setdefault("LITELLM_LOCAL_RESOURCES", "true")
 import litellm
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
@@ -444,9 +438,7 @@ async def call_llm(
     from datetime import datetime
     today_str = datetime.now().strftime("%Y-%m-%d")
     date_prefix = (
-        f"CRITICAL SYSTEM CONTEXT: Today's date is {today_str}. "
-        "You are an active real-time AI agent. Do NOT rely on static trained memory or knowledge cutoff. "
-        f"Always evaluate job openings, query strategies, and data with respect to today's date ({today_str}).\n\n"
+        f"Today's date is {today_str}. Judge dates, freshness and deadlines relative to it.\n\n"
     )
 
     has_system = False

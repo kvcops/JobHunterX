@@ -10,7 +10,7 @@ Every non-2xx response has this body:
 { "error": { "code": "not_found", "message": "Job not found", "details": null } }
 ```
 
-Codes: `bad_request` (400), `not_found` (404), `conflict` (409), `validation_error` (422),
+Codes: `bad_request` (400), `forbidden` (403 — cross-site write blocked), `not_found` (404), `conflict` (409), `validation_error` (422),
 `payload_too_large` (413), `upstream_error` (502), `internal_error` (500).
 
 ---

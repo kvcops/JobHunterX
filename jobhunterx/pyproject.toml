@@ -38,7 +38,6 @@ dependencies = [
     "aiosqlite>=0.22.0",
 
     # --- Resilience & Caching ---
-    "tenacity>=9.1.0",
     "diskcache>=5.6.0",
 
     # --- Observability & System ---

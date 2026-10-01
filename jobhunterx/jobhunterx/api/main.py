@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -115,7 +115,18 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-_CODES = {400: "bad_request", 404: "not_found", 405: "bad_request", 409: "conflict", 413: "payload_too_large",
+@app.middleware("http")
+async def _block_cross_site_writes(request: Request, call_next):
+    """CSRF guard: browsers attach Origin to cross-site POST/PUT/PATCH/DELETE (including plain
+    form posts that CORS does not block). Only our own origin may change state."""
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        if origin and urlparse(origin).netloc != request.headers.get("host", "") and origin not in _allowed_origins():
+            return _error(403, "Cross-site request blocked.")
+    return await call_next(request)
+
+
+_CODES = {400: "bad_request", 403: "forbidden", 404: "not_found", 405: "bad_request", 409: "conflict", 413: "payload_too_large",
           422: "validation_error", 502: "upstream_error"}
 
 

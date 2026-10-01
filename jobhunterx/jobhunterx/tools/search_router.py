@@ -8,7 +8,6 @@ and returns the first provider's non-empty result set.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import Any, Dict, List, Optional
 
@@ -16,7 +15,6 @@ from jobhunterx.config.logging import get_logger
 from jobhunterx.tools.search_providers import (
     BaseSearchProvider,
     BraveProvider,
-    CostStatus,
     DDGSProvider,
     ExaProvider,
     ProviderSearchResponse,
@@ -99,7 +97,6 @@ class SearchRouter:
                 continue
 
             # 3. Transport Execution
-            start_t = time.time()
             resp: ProviderSearchResponse = await provider.search(query, max_results=max_results, config=self.config)
 
             # Record attempt in SQLite ledger

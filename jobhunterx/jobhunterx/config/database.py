@@ -810,7 +810,6 @@ async def update_company_ats(company_id: str, ats: str, ats_token: str, careers_
 
 async def get_companies_due_probe(stale_after_hours: float = 24.0) -> list[dict]:
     """Companies that haven't been probed in the window, or never probed."""
-    import time as _time
     from datetime import datetime, timedelta, timezone
 
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=stale_after_hours)).isoformat()

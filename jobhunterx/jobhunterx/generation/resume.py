@@ -94,7 +94,6 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
     bullets_in = {f"e{i}b{k}": profile.experience[i].bullets[k] for i, ks in exp_sel.items() for k in ks}
     tailored = None
     if use_llm and (bullets_in or profile.summary):
-        req = job.requirements
         user = (
             f"Target job: {job.title} at {job.company}\n"
             f"Job requirements (third-party text):\n{fence(_job_text(job), 5000)}\n\n"

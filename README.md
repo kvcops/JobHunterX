@@ -7,17 +7,16 @@
 <img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=120&section=header&text=&fontSize=0" width="100%"/>
 
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=800&size=30&duration=3000&pause=1000&color=A855F7&center=true&vCenter=true&width=700&height=60&lines=%E2%9A%A1+JOBHUNTERX+%E2%80%94+AI+CAREER+HUNTER;Hunts%2C+Matches%2C+Tailors+%26+Applies;Stealth+Form+Auto-Fill+While+You+Sleep;6+AI+Agents+%C2%B7+3+LLM+Providers+%C2%B7+6+ATS+Boards" alt="Typing SVG" />
+  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=800&size=30&duration=3000&pause=1000&color=A855F7&center=true&vCenter=true&width=700&height=60&lines=%E2%9A%A1+JOBHUNTERX+%E2%80%94+AI+CAREER+HUNTER;Understands+Your+Career;Finds+%26+Verifies+Real+Jobs;Explains+Every+Match;Honest+Resume+%C2%B7+CV+%C2%B7+Cover+Letter" alt="Typing SVG" />
 </p>
 
-<h3 align="center">🚀 Your Autonomous AI Career Intelligence Agent That Hunts, Matches, Tailors, and Applies — While You Sleep</h3>
+<h3 align="center">🚀 AI career intelligence: understands your career, finds roles that genuinely fit, explains every match, and prepares honest application material</h3>
 
 <br/>
 
 <p align="center">
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" /></a>
   <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-0.140+-009688?style=for-the-badge&logo=fastapi&logoColor=white" /></a>
-  <a href="https://langchain-ai.github.io/langgraph/"><img src="https://img.shields.io/badge/LangGraph-State_Machine-7C3AED?style=for-the-badge&logo=langchain&logoColor=white" /></a>
   <a href="https://playwright.dev"><img src="https://img.shields.io/badge/Playwright-Stealth_Browser-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" /></a>
 </p>
 
@@ -25,14 +24,14 @@
   <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemma_4_26B-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
   <a href="https://groq.com"><img src="https://img.shields.io/badge/Llama_3.3_70B-Groq-F55036?style=for-the-badge&logo=meta&logoColor=white" /></a>
   <a href="https://mistral.ai"><img src="https://img.shields.io/badge/Mistral_Large-Mistral-FF7000?style=for-the-badge&logo=mistral&logoColor=white" /></a>
-  <img src="https://img.shields.io/badge/Tests-85%20Passed-10B981?style=for-the-badge&logo=pytest&logoColor=white" />
+  
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/AI_Agents-6_Specialized-A855F7?style=flat-square&logo=openai&logoColor=white&labelColor=1e1b2e" />
+  
   <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Groq_·_Mistral-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
   <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_SmartRecruiters-10B981?style=flat-square&labelColor=1e1b2e" />
-  <img src="https://img.shields.io/badge/Indian_Tech_Hubs-16_Cities_·_4000+_Companies-F59E0B?style=flat-square&labelColor=1e1b2e" />
+  
 </p>
 
 <p align="center">
@@ -61,7 +60,7 @@
 <br/>
 
 <a href="#-quickstart"><img src="https://img.shields.io/badge/🚀_Get_Started-A855F7?style=for-the-badge&logoColor=white" /></a>
-<a href="#-the-6-agent-pipeline"><img src="https://img.shields.io/badge/🧠_How_It_Works-06B6D4?style=for-the-badge&logoColor=white" /></a>
+<a href="#-how-it-works--career-intelligence-not-keyword-search"><img src="https://img.shields.io/badge/🧠_How_It_Works-06B6D4?style=for-the-badge&logoColor=white" /></a>
 <a href="#-api-reference"><img src="https://img.shields.io/badge/🔌_API_Docs-10B981?style=for-the-badge&logoColor=white" /></a>
 <a href="#-testing"><img src="https://img.shields.io/badge/🧪_Tests-F59E0B?style=for-the-badge&logoColor=white" /></a>
 
@@ -81,16 +80,15 @@
 
 - [🖥️ Dashboard Preview](#️-dashboard-preview)
 - [✨ Browser Agent Preview](#-browser-agent-preview)
-- [🧠 The 6-Agent Pipeline](#-the-6-agent-pipeline)
+- [🧠 How It Works](#-how-it-works--career-intelligence-not-keyword-search)
 - [🤖 LLM Models & Provider Architecture](#-llm-models--provider-architecture)
-- [🌐 Web Search Architecture](#-web-search-architecture--provider-modes)
+- [🌐 Job Sources & Verification](#-job-sources--verification)
 - [🔄 Pipeline Modes](#-pipeline-modes-automatic-vs-manual)
 - [🛡️ Human-in-the-Loop System](#️-human-in-the-loop-hitl-system)
-- [🌐 ATS Platform Support](#-ats-platform-support)
-- [📐 Full System Architecture](#-full-system-architecture)
-- [📁 Project Structure](#-project-structure)
+- [📐 Architecture](#-architecture)
 - [⚡ Quickstart](#-quickstart)
 - [🔌 API Reference](#-api-reference)
+- [🧪 Testing](#-testing)
 - [🛡️ Stealth Browser Architecture](#️-stealth-browser-architecture)
 - [📜 License](#-license)
 
@@ -122,78 +120,57 @@
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
 
-## 🧠 The 6-Agent Pipeline
+## 🧠 How It Works — Career Intelligence, Not Keyword Search
 
-JobHunterX isn't one monolithic script. It's a **team of 6 specialized AI agents**, orchestrated by a **LangGraph state machine**, each doing what it does best — like a Formula 1 pit crew, but for your career.
+JobHunterX does not search for "Python + AI" and rank pages by how many keywords they share.
+It **understands the candidate**, **finds and verifies real postings**, **reads each job**, and
+**explains** whether it genuinely fits — then prepares honest, job-specific application material.
 
-<div align="center">
-<img src="assets/agent_pipeline.jpg" alt="JobHunterX — 6-Stage AI Agent Pipeline" width="90%"/>
-</div>
+Every search run shows these stages live in the UI:
 
-<br/>
+| # | Stage | What happens | Where |
+|---|-------|--------------|-------|
+| 1 | **Understand** | The AI reads your profile into a validated structure: career tracks (with how close adjacent tracks are), realistic titles, skills with *evidence* (used at work / in projects / only listed), normalized locations. Years of experience are **computed from your dates** (overlaps merged, internships separate). Every AI claim is checked against your profile — invented skills are dropped. | `intelligence/candidate.py` |
+| 2 | **Plan** | Diverse queries from your own titles and places, anchored on employers' own hiring systems (`site:` Greenhouse / Lever / Ashby / …). | `discovery/search.py` |
+| 3 | **Discover** | Web search results are treated as *leads only*. Employer job boards found in results are expanded via their public APIs. | `discovery/search.py`, `discovery/ats.py` |
+| 4 | **Normalize** | Every lead becomes one `JobPosting`: ATS API → schema.org JSON-LD → page text, in that order of trust. | `discovery/page.py` |
+| 5 | **Dedupe** | Same job from many places is merged (ATS id, canonical URL, company+title+place, near-identical text); the first-party source wins and all sources are kept. | `discovery/dedupe.py` |
+| 6 | **Validate** | Is it real, reachable, current, open? Per-field status: *verified / inferred / unverified / unknown / failed*. Unknown stays unknown. | `discovery/validate.py` |
+| 7 | **Extract** | The AI reads the JD into a schema (required vs nice-to-have vs mandatory skills, experience, education, notice period, salary…). A skill is accepted only if it appears in the JD; experience/salary only with a verbatim quote that contains the number. Cached per JD. | `intelligence/job.py` |
+| 8 | **Match** | Hard constraints first (career track, experience gap, seniority, location/work mode, mandatory skills, education, job open, notice, salary, excluded companies). **A failed hard constraint caps the score** — keyword overlap can never lift an incompatible job. Then weighted components (role, required/preferred skills by evidence strength, experience fit, responsibility overlap, seniority, location). | `intelligence/matching.py`, `intelligence/policy.py` |
+| 9 | **Rank & explain** | Score 0–100, verdict (strong / good / stretch / weak / incompatible), strengths, gaps, unknowns and the exact reason a job was rejected. | UI: job drawer → "Why this score" |
 
-### Agent Breakdown
+> [!NOTE]
+> **No hardcoded vocabularies.** There are no fixed lists of skills, job titles, cities or companies in the code.
+> Knowledge comes from the AI (schema-validated and verified against the source text); the code only compares and checks.
+> Scoring weights and tolerances live in one tunable place: `intelligence/policy.py` (override with `MATCH_POLICY_JSON`).
 
-<table>
-<thead>
-<tr>
-<th align="center">#</th>
-<th align="left">Agent</th>
-<th align="left">Codename</th>
-<th align="left">What It Does</th>
-<th align="left">Powered By</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td align="center">🧬</td>
-<td><b>Profile Extractor</b></td>
-<td><code>extractor.py</code></td>
-<td>Parses your resume PDF (via PyMuPDF), extracts skills, experience, education, projects, LinkedIn/GitHub URLs, and builds a structured <code>CandidateProfile</code> — the ground truth that powers everything downstream.</td>
-<td><b>Gemma 4 26B</b> → Gemini 3.1 Flash Lite</td>
-</tr>
-<tr>
-<td align="center">🗺️</td>
-<td><b>Search Planner</b></td>
-<td><code>search_planner.py</code></td>
-<td>Reads your profile and generates a smart <code>search_plan</code>: seniority ceiling, target roles, reject terms, and location preferences. In multi-agent mode, crafts 15–20 precision DuckDuckGo queries targeting startups and product companies while filtering out mass-hiring IT service spam.</td>
-<td><b>Gemma 4 26B</b> (direct Google GenAI)</td>
-</tr>
-<tr>
-<td align="center">🕵️</td>
-<td><b>Web Scout & ATS Scraper</b></td>
-<td><code>job_search_agents.py</code> + <code>ats_client.py</code></td>
-<td>Executes search queries, scrapes ATS boards (Greenhouse, Ashby, Lever, Recruitee, SmartRecruiters, BambooHR), blacklists aggregators (LinkedIn, Indeed, Naukri, Glassdoor), deduplicates via <code>seen_job_urls</code>, runs the zero-token Eligibility Gate, and streams <code>job_found</code> events live.</td>
-<td><b>Zero-token</b> (pure async Python + HTTP)</td>
-</tr>
-<tr>
-<td align="center">🎯</td>
-<td><b>Job Evaluator</b></td>
-<td><code>job_scorer.py</code></td>
-<td>Two-stage scoring: (1) <b>Deterministic keyword pre-filter</b> — skill overlap 55%, role match 20%, location 10%, freshness 5%. (2) <b>Gemma batch scoring</b> — groups top jobs into batches of 10, scores multi-dimensionally (skill fit, seniority, location, experience), and generates match reasons.</td>
-<td><b>Gemma 4 26B</b> (budget-aware, 15K tokens/day)</td>
-</tr>
-<tr>
-<td align="center">✨</td>
-<td><b>Resume Validator & Tailor</b></td>
-<td><code>validator_tailor.py</code></td>
-<td>Validates freshness (URL/header checks), evaluates match score, then generates a tailored Executive Summary and transforms experience bullets using Google's XYZ action-led formula. Includes <b>anti-hallucination sanitizers</b> — no fabricated skills or made-up metrics. Renders a single-page ATS-optimized PDF via Jinja2 + xhtml2pdf with 4 iterative shrink profiles.</td>
-<td><b>Gemma 4 26B</b> → Gemini 3.1 Flash Lite</td>
-</tr>
-<tr>
-<td align="center">🥷</td>
-<td><b>Stealth Browser Agent</b></td>
-<td><code>browser_agent.py</code></td>
-<td>The closer. Opens a persistent Chrome profile with anti-detection headers, fills personal details, education, work history, Q&A memory (salary, notice period, work auth), uploads the tailored PDF, and submits. Streams every browser frame live via CDP WebSocket. When it hits a login wall, CAPTCHA, or MFA — it pauses and hands you the keyboard.</td>
-<td><b>Gemini 3.1 Flash Lite</b> → Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B</td>
-</tr>
-</tbody>
-</table>
+### Example: one candidate, five jobs
 
-<br/>
+Candidate: ~1.5 years professional AI/ML experience, Hyderabad, not relocating.
 
-> [!TIP]
-> **The Eligibility Gate** (`eligibility.py`) runs between Agents 3 and 4 as a zero-token strict filter. It rejects non-dev roles (sales, HR, marketing), foreign locations, and seniority mismatches — all without spending a single API token.
+| Job | Result | Why |
+|-----|--------|-----|
+| AI Engineer · 0–2 yrs · Python/LLM/RAG · Hyderabad | **Strong match** | Same track, experience fits, all required skills demonstrated |
+| Senior AI Engineer · 6+ yrs · same skills | **Incompatible** | "Requires 6+ years; you have ~1.6" — identical skills do not help |
+| Frontend Engineer · React/TypeScript | **Incompatible** | Different career track |
+| AI Engineer · 1–3 yrs · Berlin on-site | **Incompatible** | Not one of your locations |
+| AI Engineer · mandatory Kubernetes | **Incompatible** | "Mandatory: Kubernetes — not found in your profile" |
+
+This exact scenario runs in the test suite (`tests/test_scenarios.py`).
+
+### Resume vs CV vs cover letter — three different documents
+
+| | **Resume** | **CV** | **Cover letter** |
+|---|---|---|---|
+| Scope | One job | Whole career | One job |
+| Length | One page (typography shrinks, then least-relevant items are trimmed) | Multi-page | < 300 words |
+| Content | Most relevant bullets/projects for *this* JD, rewritten to foreground what it asks for | Every role with all bullets, every project with links and tech, education, certifications, achievements, competitions, languages | Ties your real evidence to the job's requirements; does not claim gaps |
+| Code | `generation/resume.py` | `generation/cv.py` | `generation/cover_letter.py` |
+
+**Evidence-based:** every AI-written line is fact-checked (`generation/evidence.py`). A rewrite that adds a number,
+tool, employer or claim that is not in your profile — or attaches a job keyword to an experience that never mentioned it —
+is rejected and your original text is kept. The Documents view shows each change (accepted or rejected, and why).
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -302,106 +279,24 @@ graph LR
 <br/>
 
 > [!NOTE]
-> **Gemma Budget System** (`gemma.py`): Enforces a hard daily cap of **14,400 requests/day** (14.4K RPD) and 30 RPM on `gemma-4-26b-a4b-it` to stay strictly within Google AI Studio's free tier. State is tracked in-memory. When the budget is exhausted, scoring gracefully degrades to the zero-token keyword pre-filter.
+> **Gemma Budget System** (`gemma.py`): Enforces a hard daily cap of **14,400 requests/day** (14.4K RPD) and 30 RPM on `gemma-4-26b-a4b-it` to stay strictly within Google AI Studio's free tier. State is tracked in-memory. When the budget is exhausted, the other models in each chain take over; if no model is available, analysis falls back to the candidate's own data and is clearly marked as partial in the UI.
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
 
-## 🌐 Web Search Architecture & Provider Modes
+## 🌐 Job Sources & Verification
 
-JobHunterX features a multi-provider web search architecture designed for high-precision job discovery, zero accidental billing, and request conservation. It supports two switchable search execution modes, controllable via the UI header toggle button (**`Web APIs: ON / OFF`**) or the `.env` configuration file (`ENABLE_WEB_SEARCH_APIS=true/false`).
+| Source | Trust | How it is used |
+|--------|-------|----------------|
+| **Employer ATS APIs** — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable | First-party, **verified** | Structured postings; re-verified live by job id (a closed job disappears from the board / returns 404) |
+| **schema.org JobPosting** on a page | Verified when the hiring organisation's site is the page's site; otherwise inferred | Title, company, location, dates, `validThrough`, remote eligibility, salary |
+| **Other pages** (job boards, aggregators) | Unverified | Text only; if the page links to a supported ATS posting, that posting is used instead |
+| **Web search** — TinyFish → Tavily → Exa → Brave → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
 
-```mermaid
-flowchart TD
-    SEARCH_REQ([🔍 User Job Search Query]) --> MODE_CHECK{"Web Search APIs Mode?"}
-
-    MODE_CHECK -->|"ON (ENABLE_WEB_SEARCH_APIS=true)"| ROUTER["Intelligent Sequential Search Router"]
-    MODE_CHECK -->|"OFF (ENABLE_WEB_SEARCH_APIS=false)"| DIRECT_SCRAPER["Direct Scraper Fallback Engine<br/>(0 API Keys Required)"]
-
-    subgraph API_ROUTER ["⚡ SEQUENTIAL ROUTER PRIORITY"]
-        ROUTER --> TF["1. TinyFish Search API<br/>(0 Credits Free Utility)"]
-        TF --> QG1{"Quality Gate<br/>Pass (≥0.60)?"}
-        QG1 -->|Yes| STOP1["STOP Router & Return SERP"]
-        QG1 -->|Insufficient / Error| TAV["2. Tavily Search API<br/>(1,000 Free Credits/Mo)"]
-        TAV --> QG2{"Quality Gate<br/>Pass (≥0.60)?"}
-        QG2 -->|Yes| STOP2["STOP Router & Return SERP"]
-        QG2 -->|Insufficient / Error| EXA["3. Exa AI Search API<br/>($7 / 1K searches; $10/mo ≈ 1,428/mo<br/>+ $20 new-account signup credit)"]
-        EXA --> QG3{"Quality Gate<br/>Pass (≥0.60)?"}
-        QG3 -->|Yes| STOP3["STOP Router & Return SERP"]
-        QG3 -->|Insufficient / Error| BRV["4. Brave Search API<br/>($5/Mo Free Credit)"]
-        BRV --> QG4{"Quality Gate<br/>Pass (≥0.60)?"}
-        QG4 -->|Yes| STOP4["STOP Router & Return SERP"]
-        QG4 -->|Insufficient / Error| DDGS_FB["5. DuckDuckGo Scraper Fallback"]
-    end
-
-    DIRECT_SCRAPER --> HYBRID_FETCH
-    STOP1 --> HYBRID_FETCH
-    STOP2 --> HYBRID_FETCH
-    STOP3 --> HYBRID_FETCH
-    STOP4 --> HYBRID_FETCH
-    DDGS_FB --> HYBRID_FETCH
-
-    subgraph HYBRID_FETCH ["📦 HYBRID FETCH PIPELINE"]
-        STEP1["Safe URL Normalization<br/>(Strips utm_*, ref, source, gclid)"] --> STEP2["Lightweight Async Direct HTTP"]
-        STEP2 -->|Static HTML| BS4["BeautifulSoup Local Parser"]
-        STEP2 -->|JS Shell / Blocked ATS| TF_FETCH["TinyFish Fetch API<br/>(POST https://api.fetch.tinyfish.ai)"]
-    end
-
-    HYBRID_FETCH --> DEDUPE["Semantic Identity Deduplication<br/>(job_id ➔ canonical_url ➔ company+title+location)"]
-    DEDUPE --> SCORE["🎯 Job Evaluator (Gemma Scoring)"]
-```
-
-### 1. Mode Comparison
-
-| Feature / Behavior | Mode 1: Web Search APIs Mode (ON) | Mode 2: Direct Scraper Mode (OFF) |
-|:-------------------|:----------------------------------|:-----------------------------------|
-| **Toggle Control** | Header Button: **`Web APIs: ON`** / `.env`: `ENABLE_WEB_SEARCH_APIS=true` | Header Button: **`Web APIs: OFF`** / `.env`: `ENABLE_WEB_SEARCH_APIS=false` |
-| **Search Engines Used** | **Rotating router**: TinyFish / Tavily / Exa (provider chosen per query, both 1-2 paid requests each per run via caps) + **DDGS** safety net (Optional: **Brave**) | Direct unauthenticated search scrapers + BeautifulSoup parser |
-| **API Keys Required** | Optional (degrades gracefully per provider) | **0 API Keys Required** |
-| **Quality Gate** | **Context-Aware Weighted SERP Quality Gate** (evaluates SERP score before calling next provider) | Direct scraping & pre-filter |
-| **JS Rendering Engine** | **TinyFish Fetch API** (batching up to 10 URLs/request for Greenhouse/Lever/Ashby) | Direct HTTP parser |
-| **Zero-Spend Protection** | Enforces 2-tier zero-spend circuit breaker | 100% Free / Unauthenticated |
-
-<br/>
-
-### 2. Search Provider Breakdown
-
-| Provider | API Endpoint & Method | Free Monthly Allowance | Rate Limits & Capacity | Cost Model & Safety Rules |
-|:---------|:----------------------|:-----------------------|:-----------------------|:--------------------------|
-| **TinyFish Search** | `GET https://api.search.tinyfish.ai` | **Unlimited 0-credit search utility** | 30 RPM default (configurable, dynamic 429 backoff) | 0 credits. Zero cost. |
-| **TinyFish Fetch** | `POST https://api.fetch.tinyfish.ai` | **Unlimited 0-credit fetch utility** | 150 URLs/min (max 10 URLs per batch payload) | 0 credits. Zero cost. Used for JS-heavy ATS pages. |
-| **Tavily Search** | `POST https://api.tavily.com/search` | **1,000 free API credits / month** | 100 RPM limit | 1 credit (`search_depth="basic"`). `auto_parameters` is strictly disabled under zero-spend protection. |
-| **Exa AI Search** | `POST https://api.exa.ai/search` | **$10.00 / month recurring credit** ≈ **1,428 searches/month** at $7 / 1,000 searches ($0.007 each); **new accounts get a one-time $20 signup credit** ≈ **2,800 extra searches** | Dynamic 429 backoff | $0.007 / base request (≤10 results). Dynamically checks parameter cost. |
-| **Brave Search** | `GET https://api.search.brave.com/res/v1/web/search` | $5.00 / month recurring credit | 50 QPS capacity | $0.005 / request. **Disabled by default** (`BRAVE_ENABLED=false`) as Brave requires linking a payment card. |
-| **DuckDuckGo** | Python `ddgs` (Local Wrapper) | Unofficial scraper fallback | Adaptive backoff on 429/CAPTCHA | 0 credits. Emergency fallback when API keys are not provided or exhausted. |
-
-<br/>
-
-### 🔑 Official API Key Dashboards & Setup Links
-
-| Provider | Purpose | Free Allowance | Dashboard / API Key Link |
-|:---------|:--------|:---------------|:-------------------------|
-| **TinyFish** | Web Search & JS Page Fetch | Unlimited 0-Credit Utility | [TinyFish API Keys](https://agent.tinyfish.ai/api-keys) |
-| **Tavily** | Primary Web Search API | 1,000 Free Credits / Month | [Tavily Dashboard](https://app.tavily.com/home) |
-| **Exa AI** | Neural Web Search API | $10.00 / Month ≈ 1,428 searches (+ $20 one-time signup ≈ 2,800 more for new accounts) | [Exa AI Dashboard](https://dashboard.exa.ai/home) |
-| **Brave Search** | Web Search API | $5.00 / Month Credit | [Brave Search Dashboard](https://api-dashboard.search.brave.com/app/keys) |
-| **Google AI Studio** | Gemini & Gemma LLMs | 14.4k RPD / 30 RPM Free | [Google AI Studio](https://aistudio.google.com/app/api-keys) |
-| **Groq** | Llama 3.3 & DeepSeek LLMs | 14.4k RPD / 30 RPM Free | [Groq Console](https://console.groq.com/keys) |
-| **Mistral AI** | Mistral Large LLM | Free Tier | [Mistral AI Admin](https://admin.mistral.ai/organization/api-keys) |
-
-<br/>
-
-### 3. Agent Responsibilities by Scenario
-
-| Agent Module | Primary Role in Search & Fetch | Behavior when Web APIs = ON | Behavior when Web APIs = OFF |
-|:-------------|:-------------------------------|:----------------------------|:-----------------------------|
-| 🗺️ **Search Planner** (`search_planner.py`) | Query Strategist | Generates 5 targeted job search queries scoped by role & location. | Generates 5 targeted job search queries scoped by role & location. |
-| 🕵️ **Web Scout & Discovery** (`job_discovery.py`) | Search Router & Orchestrator | Delegates queries to `SearchRouter` & `QualityGate`. Runs `execute_fetch_pipeline()`. | Skips Search Router. Calls direct unauthenticated scrapers & BeautifulSoup parser. |
-| 🛡️ **Zero-Spend Circuit Breaker** (`zero_spend.py`) | Safety Enforcement | Evaluates `remaining_free_balance` − `worst_case_cost` ≥ 0. Blocks request if cost is `UNKNOWN`. | Inactive (0-cost mode). |
-| ⚖️ **Quality Gate** (`quality_gate.py`) | SERP Quality Evaluator | Scores SERP items (0.30 Rel + 0.25 Loc + 0.20 Fresh + 0.15 Src + 0.10 Uniq). Halts router when score ≥ 0.60. | Inactive. |
-| 📊 **Usage Ledger** (`usage_ledger.py`) | Ledger Tracker | Records every search and fetch attempt, native billing units, and error status in SQLite. | Records scraper fetch attempts in SQLite. |
-| 🎯 **Job Evaluator** (`job_scorer.py`) | Match Scoring | Scores extracted job descriptions against skills using local Gemma LLM. | Scores extracted job descriptions against skills using local Gemma LLM. |
+Search providers are tried in priority order (primary first, DuckDuckGo last) with zero-spend protection
+(`tools/zero_spend.py`) and a usage ledger. All fetching of untrusted URLs goes through an SSRF-safe client
+(`discovery/net.py`: public addresses only, checked on every redirect, size and time limits).
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -494,167 +389,34 @@ stateDiagram-v2
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
 
-## 🌐 ATS Platform Support
-
-The Web Scout agent directly scrapes these **Applicant Tracking Systems** without needing any API keys:
-
-| Platform | Method | What It Fetches |
-|:---------|:-------|:----------------|
-| **Greenhouse** | Public JSON board API | Jobs with titles, locations, departments |
-| **Ashby** | Public JSON board API | Full listings with descriptions |
-| **Lever** | Public JSON board API | Postings with team & location data |
-| **Recruitee** | Public board scraping | Career page job listings |
-| **SmartRecruiters** | Public JSON API | Jobs with detailed descriptions |
-| **BambooHR** | Public board API | Open positions and departments |
-| **Direct Career Pages** | HTML scraping + Trafilatura | Any company career page via web discovery |
-
-<br/>
-<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
-<br/>
-
-## 📐 Full System Architecture
-
-```mermaid
-graph TB
-    subgraph Client ["🖥️ Single Page Application"]
-        direction LR
-        UI["Web Dashboard<br/>(HTML/JS/CSS)"]
-        Canvas["Live Browser Canvas<br/>(CDP Screencast)"]
-        WS_C["WebSocket Client"]
-    end
-
-    subgraph Server ["⚡ FastAPI Server"]
-        direction LR
-        REST["REST API Routes<br/>(/api/*)"]
-        WS_S["WebSocket Manager<br/>(/ws)"]
-        CDP["CDP Broadcaster<br/>(/ws/browser)"]
-    end
-
-    subgraph Pipeline ["🧠 LangGraph Agent Pipeline"]
-        direction TB
-        A1["🧬 Profile Extractor"]
-        A2["🗺️ Search Planner"]
-        A3["🕵️ Web Scout & ATS Scraper"]
-        EG["🚫 Eligibility Gate"]
-        A4["🎯 Job Evaluator"]
-        A5["✨ Resume Validator & Tailor"]
-        A6["🥷 Stealth Browser Agent"]
-
-        A1 --> A2 --> A3 --> EG --> A4 --> A5 --> A6
-    end
-
-    subgraph Infra ["🛡️ Infrastructure"]
-        direction LR
-        LLM["LLM Router<br/>(LiteLLM + Fallbacks)"]
-        DB[("SQLite<br/>(aiosqlite)")]
-        Cache[("DiskCache<br/>+ Gemma Budget")]
-        Chrome["Chromium<br/>(Persistent Profile)"]
-    end
-
-    UI --> REST
-    WS_C <--> WS_S
-    WS_C <--> CDP
-    REST --> Pipeline
-    Pipeline --> LLM
-    Pipeline --> DB
-    Pipeline --> Cache
-    A6 --> Chrome
-    Chrome --> CDP
-
-    classDef frontend fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px;
-    classDef api fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px;
-    classDef agent fill:#059669,stroke:#047857,color:#fff,stroke-width:2px;
-    classDef infra fill:#d97706,stroke:#b45309,color:#fff,stroke-width:2px;
-
-    class UI,Canvas,WS_C frontend;
-    class REST,WS_S,CDP api;
-    class A1,A2,A3,EG,A4,A5,A6 agent;
-    class LLM,DB,Cache,Chrome infra;
-```
-
-<br/>
-<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
-<br/>
-
-## 📁 Project Structure
-
-<details>
-<summary><b>Click to expand full directory tree</b></summary>
+## 📐 Architecture
 
 ```
-jobhunterx/
-│
-├── 📂 assets/                          # README images & visual assets
-│
-├── 📂 data/                            # Runtime storage (gitignored)
-│
-├── 📂 jobhunterx/                       # Main Python package
-│   ├── pyproject.toml                  # Build config & dependency spec
-│   ├── requirements.txt               # Pinned dependencies
-│   ├── .env.example                    # Environment variable template
-│   │
-│   ├── 📂 tests/                       # 85 automated tests
-│   │   ├── test_api.py                 # API route tests
-│   │   ├── test_ats_pagination.py      # ATS scraper pagination tests
-│   │   ├── test_dedupe_freshness.py    # Job deduplication tests
-│   │   ├── test_eligibility.py         # Eligibility gate tests
-│   │   ├── test_gemma_budget.py        # Token budget enforcement tests
-│   │   ├── test_json_helper.py         # LLM JSON parsing tests
-│   │   ├── test_liveness.py            # URL liveness checker tests
-│   │   └── test_resume_tailoring.py    # Resume tailor & PDF tests
-│   │
-│   └── 📂 vellum/                      # Application source code
-│       ├── models.py                   # Pydantic models (CandidateProfile, JobPipelineState, etc.)
-│       │
-│       ├── 📂 agents/                  # The 6 AI agents
-│       │   ├── extractor.py            # 🧬 Profile Extractor
-│       │   ├── search_planner.py       # 🗺️ Search Planner
-│       │   ├── job_search_agents.py    # 🕵️ Web Scout (multi-agent search)
-│       │   ├── eligibility.py          # 🚫 Eligibility Gate (zero-token)
-│       │   ├── job_scorer.py           # 🎯 Job Evaluator
-│       │   ├── job_sync.py             # Company sync & ATS probing
-│       │   ├── validator_tailor.py     # ✨ Resume Validator & Tailor
-│       │   ├── browser_agent.py        # 🥷 Stealth Browser Agent
-│       │   └── graph.py                # LangGraph state machine orchestrator
-│       │
-│       ├── 📂 api/                     # FastAPI server
-│       │   ├── main.py                 # App entry point, lifespan, CDP streaming
-│       │   ├── routes.py               # All REST endpoints
-│       │   └── ws.py                   # WebSocket connection manager
-│       │
-│       ├── 📂 config/                  # Configuration & infrastructure
-│       │   ├── settings.py             # Pydantic settings (.env loader)
-│       │   ├── llm_router.py           # Unified LLM router (LiteLLM)
-│       │   ├── gemma.py                # Gemma budget tracker (15K/day)
-│       │   ├── database.py             # SQLite schema & queries (aiosqlite)
-│       │   └── logging.py              # Structured logging (structlog)
-│       │
-│       ├── 📂 tools/                   # Scraping & utility tools
-│       │   ├── ats_client.py           # ATS board scrapers (6 platforms)
-│       │   ├── job_discovery.py        # DuckDuckGo search & page scraping
-│       │   ├── liveness.py             # Job URL liveness verification
-│       │   ├── scrape.py               # Web content extraction
-│       │   └── pdf_render.py           # Jinja2 + xhtml2pdf resume renderer
-│       │
-│       ├── 📂 templates/              # HTML templates
-│       │   └── resume.html             # ATS-optimized resume template
-│       │
-│       ├── 📂 utils/                   # Helpers
-│       │   ├── json_helper.py          # LLM JSON response parser
-│       │   └── job_cleaner.py          # Job data normalization
-│       │
-│       └── 📂 web/                     # Frontend SPA
-│           ├── index.html              # Main dashboard page
-│           ├── app.js                  # Application logic (~111KB)
-│           ├── styles.css              # Styling (~98KB)
-│           └── sw.js                   # Service worker
-│
-├── .gitignore
-├── requirements.txt
-└── README.md                           # You are reading this!
+jobhunterx/jobhunterx/
+├── domain/          # First-class data contracts: CandidateProfile/Snapshot, JobPosting, MatchAssessment, GeneratedDocument
+├── intelligence/    # Understanding + judgement
+│   ├── llm_structured.py   # schema-validated LLM calls, repair, caching, untrusted-text fencing
+│   ├── candidate.py        # Stage 1: profile → snapshot (verified against the profile)
+│   ├── job.py              # Stage 7: JD understanding (verified against the JD) + batched role-fit
+│   ├── matching.py         # Stages 8–9: hard constraints, weighted components, explanations
+│   ├── policy.py           # all scoring weights / tolerances (tunable)
+│   └── text.py             # generic date/term helpers
+├── discovery/       # Stages 2–7: search, ATS adapters, page parsing, dedupe, validation, SSRF-safe fetch
+├── generation/      # Resume / CV / cover letter + fact-checking + PDF rendering (templates/)
+├── services/        # Orchestration: search runs, jobs, documents, profile, browser apply
+├── storage.py       # Persistence for the domain (extends the SQLite schema with migrations)
+├── api/             # FastAPI routes (docs/API.md), WebSocket, browser live-stream
+├── agents/          # PDF → profile extractor, browser auto-apply agent (browser-use)
+├── config/          # settings, LLM router (model chains), Gemma budget, logging, legacy DB helpers
+└── web/             # Preact + htm UI (vendored, no build step)
 ```
 
-</details>
+* **One active search run**; starting another cancels it. Every job and WebSocket event carries the run id, so the
+  UI never mixes results from an old run into a new one.
+* **LLM cost control:** candidate understanding is cached per profile version, JD extraction per JD content hash,
+  role-fit is batched, out-of-location jobs skip AI analysis entirely, and the number of AI extractions per search is capped.
+* **Security:** CORS limited to the app's own origin, cross-site writes rejected (CSRF guard), WebSocket origin checks,
+  SSRF-safe fetching, upload type/size limits, Jinja autoescaping, no `innerHTML` in the UI, untrusted job text fenced in prompts.
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -739,51 +501,34 @@ python -m jobhunterx.api.main
 
 ## 🔌 API Reference
 
-### Core Endpoints
+The full v2 contract (REST + WebSocket, request/response shapes, error format) is in
+[`jobhunterx/docs/API.md`](jobhunterx/docs/API.md). Main groups:
 
-| Method | Endpoint | What It Does |
-|:------:|:---------|:-------------|
-| `POST` | `/api/upload-resume` | Upload resume PDF → extract candidate profile |
-| `GET` | `/api/profile` | Get current candidate profile |
-| `POST` | `/api/start-search` | Launch full discovery + scoring pipeline |
-| `GET` | `/api/jobs` | List all discovered & scored jobs |
-| `GET` | `/api/jobs/{id}` | Get detailed job info + match breakdown |
-| `POST` | `/api/jobs/{id}/apply` | Trigger per-job apply pipeline (tailor → browser) |
-| `GET` | `/api/jobs/{id}/resume-pdf` | Download tailored resume PDF |
-| `DELETE` | `/api/jobs/{id}` | Remove a job listing |
+| Group | Endpoints |
+|-------|-----------|
+| Profile | `GET/PUT /api/profile`, `POST /api/profile/upload` |
+| Searches | `POST /api/searches`, `GET /api/searches/current`, `GET /api/searches/{id}`, `POST /api/searches/{id}/cancel` |
+| Jobs | `GET /api/jobs?view=recommended\|all\|rejected\|saved\|applied`, `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore`, `POST /api/jobs/{id}/apply` |
+| Documents | `POST /api/jobs/{id}/documents` (resume / cover letter), `POST /api/documents/cv`, `GET /api/documents`, `GET /api/documents/{id}`, `GET /api/documents/{id}/pdf` |
+| System | settings, models, usage, pipeline mode, interventions, browser control, reset |
 
-### Company Management
+## 🧪 Testing
 
-| Method | Endpoint | What It Does |
-|:------:|:---------|:-------------|
-| `GET` | `/api/companies` | List tracked companies with ATS status |
-| `POST` | `/api/companies` | Add company → auto-probe ATS board |
-| `POST` | `/api/companies/load-seed` | Import 4,000+ pre-indexed Indian startups |
-| `POST` | `/api/companies/sync` | Run sync pass: probe → fetch → score → store |
+```bash
+cd jobhunterx
+pip install pytest pytest-asyncio playwright
+python -m pytest -q                 # unit, scenario, API and browser tests
+```
 
-### System Control
-
-| Method | Endpoint | What It Does |
-|:------:|:---------|:-------------|
-| `GET/POST` | `/api/pipeline-mode` | Get or set mode (`automatic` / `manual`) |
-| `GET` | `/api/budget` | View Gemma token usage (15K RPD / 30 RPM) |
-| `GET` | `/api/status` | System status, job counts, token telemetry |
-| `POST` | `/api/stop-browser` | Kill active browser sessions |
-| `POST` | `/api/browser/takeover` | Request HITL takeover of live browser |
-| `POST` | `/api/browser/release` | Release control back to agent |
-| `POST` | `/api/reset` | Nuclear option — clear everything |
-
-### WebSocket Streams
-
-| Endpoint | What It Streams |
-|:---------|:----------------|
-| `/ws` | Agent logs, pipeline progress, job events, scoring updates, intervention alerts |
-| `/ws/browser` | Live CDP JPEG frames (screencast) + mouse/keyboard event forwarding |
+* `tests/test_scenarios.py` — the full pipeline on a realistic candidate and good/bad jobs (fake network + fake LLM,
+  including deliberate LLM hallucinations that must be rejected).
+* `tests/test_api_v2.py` — API contract, error envelope, idempotency, cancellation, CSRF/WebSocket/SSRF guards.
+* `tests/frontend/test_ui.py` — Playwright against the real app: stale-run events, out-of-order responses,
+  save rollback, document/job association, retry, XSS, mobile layout.
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
-
 
 ## 🛡️ Stealth Browser Architecture
 

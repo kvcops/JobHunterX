@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from typing import Any
 from datetime import datetime, timezone
 
 from jobhunterx.config.logging import get_logger
@@ -121,9 +122,7 @@ async def call_gemma(
     from datetime import datetime
     today_str = datetime.now().strftime("%Y-%m-%d")
     date_prefix = (
-        f"CRITICAL SYSTEM CONTEXT: Today's date is {today_str}. "
-        "You are an active real-time AI agent. Do NOT rely on static trained memory or knowledge cutoff. "
-        f"Always evaluate job openings, query strategies, and data with respect to today's date ({today_str}).\n\n"
+        f"Today's date is {today_str}. Judge dates, freshness and deadlines relative to it.\n\n"
     )
     if "Today's date is" not in system:
         system = date_prefix + system
@@ -222,4 +221,4 @@ async def call_gemma(
 
     log.info("gemma_call", tokens_in=tokens_in, tokens_out=tokens_out, tokens_used=_tokens_used,
              requests_today=_requests_today)
-    return content
+    return content

@@ -46,10 +46,8 @@ class Settings(BaseSettings):
 
     # --- Web Search API Provider Keys & Router Settings ---
     enable_web_search_apis: bool = True
-    search_router_mode: str = "sequential"
     primary_search_provider: str = "tinyfish"
     strict_zero_spend_protection: bool = True
-    quality_score_threshold: float = 0.60
 
     tinyfish_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None

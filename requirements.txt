@@ -40,7 +40,6 @@ pymupdf>=1.25.0
 # --- Persistence & Caching ---
 aiosqlite>=0.22.0
 diskcache>=5.6.0
-tenacity>=9.1.0
 
 # --- System & Observability ---
 structlog>=26.1.0
