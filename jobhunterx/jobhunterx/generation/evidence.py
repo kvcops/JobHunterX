@@ -25,13 +25,61 @@ from jobhunterx.intelligence.text import term_in_text
 _NUM_RE = re.compile(r"(?<![A-Za-z])\d[\d,.]*\s*(?:%|x|k|m|\+)?", re.I)
 
 
+def _canon(raw: str) -> str:
+    """'20k' / '20,000' / '20000' -> '20000'; '30%' -> '30'; '1.50' -> '1.5' (same fact, different spelling)."""
+    n = re.sub(r"[,\s]", "", raw).rstrip(".").lower().rstrip("+x%")
+    mult = 1
+    if n.endswith("k"):
+        n, mult = n[:-1], 1000
+    elif n.endswith("m"):
+        n, mult = n[:-1], 1_000_000
+    try:
+        value = float(n) * mult
+    except ValueError:
+        return n
+    return f"{value:g}" if value < 1e15 else n
+
+
 def numbers(text: str) -> set[str]:
     out = set()
     for m in _NUM_RE.finditer(text or ""):
-        n = re.sub(r"[,\s]", "", m.group(0)).rstrip(".").lower()
+        n = _canon(m.group(0))
         if n:
             out.add(n)
     return out
+
+
+def snapshot_facts(snapshot) -> str:
+    """Facts the app worked out and verified itself (years of experience, verified skills) —
+    allowed in generated text even though the profile never spells them out (e.g. '1.6 years')."""
+    if snapshot is None:
+        return ""
+    parts = []
+    for attr in ("professional_years", "total_years", "internship_years"):
+        v = float(getattr(snapshot, attr, 0) or 0)
+        if v:
+            parts += [f"{v:g}", f"{round(v, 1):g}", f"{round(v):g}", f"{int(v):g}"]
+    for s in getattr(snapshot, "skills", []) or []:
+        parts += [s.name, *getattr(s, "aliases", [])]
+    # Target titles and career tracks are deliberately NOT allowed: they are jobs to search for, not jobs held.
+    return "\n".join(str(x) for x in parts if x)
+
+
+def keep_tense(original: str, rewritten: str) -> str:
+    """If the rewrite only changed the opening verb's form ('Built' -> 'Build'), keep the original verb."""
+    o, r = (original or "").split(maxsplit=1), (rewritten or "").split(maxsplit=1)
+    if len(o) < 1 or len(r) < 2:
+        return rewritten
+    ow, rw = o[0].strip(",;:"), r[0].strip(",;:")
+    if ow.lower() == rw.lower():
+        return rewritten
+    a, b = ow.lower(), rw.lower()
+    common = 0
+    while common < min(len(a), len(b)) and a[common] == b[common]:
+        common += 1
+    if common >= max(3, min(len(a), len(b)) - 2):          # same verb, different form
+        return f"{ow} {r[1]}"
+    return rewritten
 
 
 def _sentence_starts(text: str) -> set[int]:

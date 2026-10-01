@@ -31,9 +31,9 @@ log = get_logger("models")
 CATALOG: list[dict[str, Any]] = [
     # Google AI Studio — Gemma runs on the Gemini API (no system role: instructions are sent inline).
     {"id": "gemini/gemma-4-31b-it", "name": "Gemma 4 31B", "provider": "google", "rpm": 15, "rpd": 1500, "tpm": None, "tpd": None,
-     "note": "Dense 31B, 256K context. Strong reasoning; slower than the MoE models."},
+     "note": "Dense 31B, 256K context. Strong, but slow and often overloaded on the free tier — used as a fallback."},
     {"id": "gemini/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "provider": "google", "rpm": 15, "rpd": 500, "tpm": 250_000, "tpd": None,
-     "note": "Fast, low latency."},
+     "note": "Fast (~1 s) and reliable — first choice for every task."},
     # Groq — production/preview open models (Llama deliberately not used).
     {"id": "groq/openai/gpt-oss-120b", "name": "GPT-OSS 120B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200_000,
      "note": "Best open reasoning model on Groq; low TPM on the free plan."},
@@ -59,14 +59,17 @@ CATALOG: list[dict[str, Any]] = [
 BY_ID = {m["id"]: m for m in CATALOG}
 
 # Task → ordered preferences. Unavailable/disabled models are skipped at call time.
+# Live tests (Oct 2026): Gemini 3.5 Flash Lite answers in ~1 s; free Gemma 4 31B takes 12-36 s and often
+# fails with 500/503 under load. So Flash Lite leads, Gemma 4 31B is the first fallback (bigger daily budget),
+# then Groq and Mistral.
 CHAINS: dict[str, list[str]] = {
-    "fast": ["gemini/gemma-4-31b-it", "gemini/gemini-3.5-flash-lite", "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b",
+    "fast": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b",
              "groq/qwen/qwen3-32b", "mistral/mistral-small-latest"],
-    "reasoning": ["gemini/gemma-4-31b-it", "gemini/gemini-3.5-flash-lite", "groq/openai/gpt-oss-120b",
+    "reasoning": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b",
                   "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest"],
-    "tailoring": ["gemini/gemma-4-31b-it", "gemini/gemini-3.5-flash-lite", "groq/moonshotai/kimi-k2-instruct-0905",
+    "tailoring": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/moonshotai/kimi-k2-instruct-0905",
                   "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b", "mistral/mistral-medium-latest"],
-    "extraction": ["gemini/gemma-4-31b-it", "gemini/gemini-3.5-flash-lite", "groq/openai/gpt-oss-120b", "groq/qwen/qwen3.6-27b",
+    "extraction": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/qwen/qwen3.6-27b",
                    "groq/qwen/qwen3-32b", "mistral/mistral-medium-latest"],
     "browser": ["gemini/gemini-3.5-flash-lite", "groq/openai/gpt-oss-120b", "mistral/mistral-small-latest"],
 }

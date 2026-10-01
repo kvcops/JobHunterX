@@ -372,8 +372,9 @@ def _build_llms() -> tuple[Any, Any]:
     if mistral_key and ChatMistral is not None:
         candidates.append(ChatMistral(model="mistral-small-latest", api_key=mistral_key, temperature=0.2, max_retries=6))
     if google_key and len(candidates) < 2:
-        candidates.append(ChatGoogle(model="gemma-4-31b-it", api_key=google_key, temperature=0.2, max_retries=6,
-                                     retry_base_delay=4.0, retry_max_delay=40.0))
+        # last resort only: free Gemma is slow and often overloaded, so don't sit in long retry loops on it
+        candidates.append(ChatGoogle(model="gemma-4-31b-it", api_key=google_key, temperature=0.2, max_retries=1,
+                                     retry_base_delay=2.0, retry_max_delay=5.0))
     if not candidates:
         raise RuntimeError("No AI provider is available for the browser agent. Add a key or turn a provider on in Settings.")
     return candidates[0], (candidates[1] if len(candidates) > 1 else None)

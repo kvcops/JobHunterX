@@ -6,7 +6,10 @@ no system role, so instructions are sent inline. Calls go through `google.genai`
 directly; the router spaces requests to the model's RPM (config/models.py) and
 this module tracks the daily request budget.
 
-Google's free Gemma endpoint sometimes answers "500 INTERNAL" for a while. We
+Google's free Gemma endpoint is often overloaded: live tests (Oct 2026) showed tiny prompts
+taking 12-36 s and larger ones failing at once with "500 INTERNAL" or "503 high demand",
+while Gemini 3.5 Flash Lite answered in under a second. So Gemma is a fallback, not the
+first choice (config/models.py CHAINS). We
 retry once (without the thinking setting, which is a common trigger), then give
 up fast so the router can move to the next model; the router also rests Gemma
 for a few minutes after repeated errors (config/models.py → model health), so
@@ -37,7 +40,7 @@ DEFAULT_RPM = 15
 # Spacing is enforced by the router's per-model budget; this is only a floor between retries.
 _MIN_INTERVAL_S = 0.5
 _SERVER_ERRORS = ("500", "502", "503", "504", "INTERNAL", "UNAVAILABLE", "DEADLINE", "overloaded", "timed out", "Timeout")
-_TIMEOUT_S = float(os.getenv("GEMMA_TIMEOUT_S", "150"))     # a slow answer is better than none, but not forever
+_TIMEOUT_S = float(os.getenv("GEMMA_TIMEOUT_S", "90"))     # a slow answer is better than none, but not forever
 
 _tokens_used = 0
 _requests_today = 0
@@ -167,6 +170,9 @@ async def call_gemma(
             config=cfg,
         )
         text = getattr(response, "text", "") or ""
+        if not text.strip():
+            # e.g. all output tokens were spent on thinking — treat as a failure so the router falls back
+            raise RuntimeError("Gemma returned an empty answer")
         usage_meta = getattr(response, "usage_metadata", None)
         t_in = getattr(usage_meta, "prompt_token_count", 0) if usage_meta else 0
         t_out = getattr(usage_meta, "candidates_token_count", 0) if usage_meta else 0
@@ -194,7 +200,8 @@ async def call_gemma(
                     continue
                 if not retried and any(code in err for code in _SERVER_ERRORS):
                     retried = True
-                    cfg.pop("thinkingConfig", None)    # Google's 500s on Gemma often go away without thinking
+                    # Keep the thinking level: without it Gemma thinks at full length by default, which can use up
+                    # the whole output budget and return an empty answer (seen in live tests).
                     delay = 1.5 + random.uniform(0, 1.5)
                     log.warning("gemma_server_error_retry", error=err[:100], retry_in_s=round(delay, 1))
                     await asyncio.sleep(delay)

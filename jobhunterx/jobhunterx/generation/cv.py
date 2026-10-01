@@ -27,11 +27,12 @@ from jobhunterx.generation.content import (
     header_for,
     profile_text,
 )
-from jobhunterx.generation.evidence import check_free_text, check_rewrite
+from jobhunterx.generation.evidence import check_rewrite, keep_tense, snapshot_facts
+from jobhunterx.generation.resume import _checked_summary
 from jobhunterx.generation.skills import group_skills
 from jobhunterx.intelligence.llm_structured import call_structured
 
-VERSION = "cv-v1"
+VERSION = "cv-v3"
 
 
 class _Line(BaseModel):
@@ -46,9 +47,11 @@ class _CvOut(BaseModel):
 
 _SYSTEM = """You prepare a comprehensive academic/professional CV from a candidate's own material.
 - Write a career summary (4-6 sentences) covering their experience, strongest areas, notable projects and direction.
-  Use only facts present in the material. No pronouns, no salary.
+  Use only facts present in the material. Only call the candidate by job titles they actually held (the career
+  tracks are directions, not past jobs). No pronouns, no salary.
 - Polish each bullet for grammar and clarity ONLY. Do not shorten away detail, do not add or change facts,
-  numbers, tools, scope or outcomes. Return every id."""
+  numbers, tools, scope or outcomes. Keep each bullet's verb tense (past tense for finished work). Return every id.
+- Write names, degrees, titles and numbers exactly as the candidate wrote them (do not expand abbreviations)."""
 
 
 async def generate_cv(profile: CandidateProfile, snapshot: CandidateSnapshot, *, focus: str = "",
@@ -80,6 +83,7 @@ async def generate_cv(profile: CandidateProfile, snapshot: CandidateSnapshot, *,
         bullets = []
         for k, original in enumerate(e.bullets):
             new = polished.get(f"e{i}b{k}")
+            new = keep_tense(original, new) if new else new
             if new and new != original:
                 res = check_rewrite(new, original, ptext)
                 prov.rewrites.append(RewriteRecord(section=f"experience[{i}]", original=original, rewritten=new,
@@ -92,11 +96,8 @@ async def generate_cv(profile: CandidateProfile, snapshot: CandidateSnapshot, *,
 
     summary = profile.summary
     if out and out.summary.strip():
-        res = check_free_text(out.summary, ptext)
-        prov.rewrites.append(RewriteRecord(section="summary", original=profile.summary, rewritten=out.summary,
-                                           accepted=res.ok, reason="; ".join(res.problems)))
-        if res.ok:
-            summary = out.summary.strip()
+        summary, calls = await _checked_summary(out.summary, profile, ptext, snapshot_facts(snapshot), prov, "cv_summary")
+        prov.llm_calls += calls
 
     groups, gmodel = await group_skills(profile, snapshot, use_llm=use_llm)
     if gmodel:

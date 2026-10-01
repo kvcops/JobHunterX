@@ -350,7 +350,7 @@ graph LR
         M1["mistral-medium-latest"]
         M2["mistral-small-latest"]
     end
-    G1 -->|fallback| G2 -->|fallback| GR1 -->|fallback| M1
+    G2 -->|fallback| G1 -->|fallback| GR1 -->|fallback| M1
 
     classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px;
     classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px;
@@ -364,10 +364,10 @@ graph LR
 
 | Task (Settings label) | Chain | Model order |
 |:--|:--|:--|
-| Quick tasks | `fast` | Gemma 4 31B → Gemini 3.5 Flash Lite → GPT-OSS 20B → Qwen3.6 27B / Qwen3 32B → Mistral Small |
-| Matching & analysis | `reasoning` | Gemma 4 31B → Gemini 3.5 Flash Lite → GPT-OSS 120B → Kimi K2 → Mistral Medium |
-| Resume & letter writing | `tailoring` | Gemma 4 31B → Gemini 3.5 Flash Lite → Kimi K2 → GPT-OSS 120B → Mistral Medium |
-| Resume reading | `extraction` | Gemma 4 31B → Gemini 3.5 Flash Lite → GPT-OSS 120B → Qwen3.6 27B / Qwen3 32B → Mistral Medium |
+| Quick tasks | `fast` | Gemini 3.5 Flash Lite → Gemma 4 31B → GPT-OSS 20B → Qwen3.6 27B / Qwen3 32B → Mistral Small |
+| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → Gemma 4 31B → GPT-OSS 120B → Kimi K2 → Mistral Medium |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → Gemma 4 31B → Kimi K2 → GPT-OSS 120B → Mistral Medium |
+| Resume reading | `extraction` | Gemini 3.5 Flash Lite → Gemma 4 31B → GPT-OSS 120B → Qwen3.6 27B / Qwen3 32B → Mistral Medium |
 | Browser agent | `browser` | Gemini 3.5 Flash Lite → GPT-OSS 120B → Mistral Small (→ Gemma 4 31B) |
 
 Llama models are deliberately not used. In **Settings → AI providers** you can turn any provider off, add or replace its key,
@@ -394,11 +394,12 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
 
 > [!NOTE]
-> **Why you may see `500 INTERNAL` from Gemma:** that error comes from Google's servers — the free Gemma endpoint
-> sometimes has a bad spell. JobHunterX now handles it calmly: one quick retry (without "thinking", a common trigger),
-> then it moves on to the next model straight away. Gemma then **rests for 2 minutes** (4, 8… up to 30 if it keeps
-> failing) while Gemini 3.5 Flash Lite and the others keep working. Settings → AI providers shows "resting N min" next
-> to it. A call never waits more than `GEMMA_TIMEOUT_S` (150 s).
+> **Why you may see `500 INTERNAL` or `503 high demand` from Gemma:** those come from Google's servers. In live tests
+> (Oct 2026) the free Gemma 4 31B endpoint took 12–120 s per answer and often refused larger prompts, while
+> Gemini 3.5 Flash Lite answered in about 1–5 s. So **Flash Lite is now the first choice for every task** and Gemma 4 31B
+> is the first backup. When Gemma fails it gets one quick retry, then the app moves on and Gemma **rests for 2 minutes**
+> (4, 8… up to 30 if it keeps failing). Settings → AI providers shows "resting N min". A Gemma call never waits more
+> than `GEMMA_TIMEOUT_S` (90 s).
 > Resume upload runs in the background with live progress, so a slow free-tier call never times out the page.
 
 <br/>

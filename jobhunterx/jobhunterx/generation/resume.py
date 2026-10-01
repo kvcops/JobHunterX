@@ -29,13 +29,14 @@ from jobhunterx.generation.content import (
     header_for,
     profile_text,
 )
-from jobhunterx.generation.evidence import check_free_text, check_rewrite
+from jobhunterx.generation.evidence import check_free_text, check_rewrite, keep_tense, snapshot_facts
+from jobhunterx.generation.repair import repair_text
 from jobhunterx.generation.skills import group_skills
 from jobhunterx.intelligence.llm_structured import call_structured, fence
 from jobhunterx.intelligence.matching import build_idf, cosine
 from jobhunterx.intelligence.text import any_term_in_text
 
-VERSION = "resume-v1"
+VERSION = "resume-v2"
 
 # Layout budget for one page (a product decision, tune here).
 MAX_BULLETS_PER_ROLE = 4
@@ -57,9 +58,24 @@ Rules:
 - Rewrite each given bullet so the parts most relevant to the job come first. Keep the facts identical:
   no new numbers, metrics, tools, technologies, employers, titles, scope or outcomes. If a bullet is already good, return it unchanged.
 - Never add a skill or technology to a bullet that the bullet does not already mention, even if the job asks for it.
-- Start bullets with a strong verb; keep each under 35 words.
+- Start bullets with a strong action verb in the SAME tense as the original bullet (past tense for finished work,
+  e.g. "Built", never "Build"); keep each under 35 words.
+- Write names, degrees, titles and numbers exactly as the candidate wrote them (do not expand abbreviations).
 - The summary may only use facts present in the candidate material. No salary, no pronouns, no buzzword stuffing.
 - Return every bullet id you were given."""
+
+
+async def _checked_summary(text: str, profile: CandidateProfile, ptext: str, allowed: str, prov: Provenance,
+                           task: str) -> tuple[str, int]:
+    """Fact-check an AI summary; if a few words fail, give the AI one chance to fix them. Returns (summary, extra calls)."""
+    res = check_free_text(text, ptext, allowed_extra=allowed)
+    if res.ok:
+        prov.rewrites.append(RewriteRecord(section="summary", original=profile.summary, rewritten=text, accepted=True, reason=""))
+        return text.strip(), 0
+    fixed, _ = await repair_text(text, res.problems, ptext, allowed_extra=allowed, task=task, max_tokens=600)
+    prov.rewrites.append(RewriteRecord(section="summary", original=profile.summary, rewritten=fixed or text, accepted=bool(fixed),
+                                       reason="fixed: " + "; ".join(res.problems) if fixed else "; ".join(res.problems)))
+    return (fixed or profile.summary), 1
 
 
 def _job_text(job: JobPosting) -> str:
@@ -120,6 +136,7 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
         for k in exp_sel.get(i, []):
             bid, original = f"e{i}b{k}", e.bullets[k]
             new = rewrites.get(bid)
+            new = keep_tense(original, new) if new else new
             if new and new != original:
                 res = check_rewrite(new, original, ptext, forbidden_new_terms=job_terms)
                 prov.rewrites.append(RewriteRecord(section=f"experience[{i}]", original=original, rewritten=new,
@@ -132,11 +149,8 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
 
     summary = profile.summary
     if tailored and tailored.summary.strip():
-        res = check_free_text(tailored.summary, ptext)
-        prov.rewrites.append(RewriteRecord(section="summary", original=profile.summary, rewritten=tailored.summary,
-                                           accepted=res.ok, reason="; ".join(res.problems)))
-        if res.ok:
-            summary = tailored.summary.strip()
+        summary, calls = await _checked_summary(tailored.summary, profile, ptext, snapshot_facts(snapshot), prov, "resume_summary")
+        prov.llm_calls += calls
 
     # Skills: candidate's own skills only; those the job asks for first.
     groups, gmodel = await group_skills(profile, snapshot, use_llm=use_llm)
