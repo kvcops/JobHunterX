@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useRef, useId } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { closeConfirm, dismissToast } from '../actions.js';
-import { scoreTone, VERDICT_LABEL } from '../lib/format.js';
+import { VERDICT_LABEL } from '../lib/format.js';
 
 const ICONS = {
   search: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm10 17-5.2-5.2',
@@ -27,6 +27,7 @@ const ICONS = {
   back: 'M15 5l-7 7 7 7',
   stop: 'M6 6h12v12H6z',
   plus: 'M12 5v14M5 12h14',
+  arrow: 'M5 12h14M13 6l6 6-6 6',
 };
 
 export function Icon({ name, size = 18, label }) {
@@ -47,13 +48,15 @@ export function Badge({ tone = 'neutral', children, title }) {
   return html`<span class=${`badge tone-${tone}`} title=${title}>${children}</span>`;
 }
 
+export const VERDICT_TONE = { strong: 'success', good: 'info', stretch: 'warning', weak: 'danger', incompatible: 'danger' };
+
 export function ScoreRing({ score, verdict, size = 52 }) {
   const has = typeof score === 'number';
-  const tone = verdict === 'incompatible' ? 'danger' : has ? scoreTone(score) : 'unknown';
-  const r = 20;
+  const tone = VERDICT_TONE[verdict] || 'unknown';
+  const r = 21;
   const c = 2 * Math.PI * r;
   const pct = has ? Math.max(0, Math.min(100, score)) : 0;
-  return html`<div class=${`score-ring tone-${tone}`} style=${{ width: `${size}px`, height: `${size}px` }}
+  return html`<div class=${`score-ring tone-${tone} ${size >= 70 ? 'big' : ''}`} style=${{ width: `${size}px`, height: `${size}px` }}
       role="img" aria-label=${has ? `Match score ${score} of 100, ${VERDICT_LABEL[verdict] || ''}` : 'Not scored yet'}>
     <svg viewBox="0 0 48 48" width=${size} height=${size} aria-hidden="true">
       <circle cx="24" cy="24" r=${r} class="ring-bg" />
@@ -61,6 +64,18 @@ export function ScoreRing({ score, verdict, size = 52 }) {
     </svg>
     <span class="score-num">${has ? score : '–'}</span>
   </div>`;
+}
+
+export function PageHero({ announce, title, lead, actions, center, children }) {
+  return html`<header class=${`hero ${center ? 'center' : ''}`}>
+    ${announce ? html`<div class="announce"><span class="dotx" aria-hidden="true"></span><span>${announce}</span><span class="go" aria-hidden="true"><${Icon} name="arrow" size=${12} /></span></div>` : null}
+    <div class="hero-row"><div>
+      <h1>${title}</h1>${lead ? html`<p class="lead">${lead}</p>` : null}</div>
+    ${actions ? html`<div class="row gap wrap">${actions}</div>` : null}</div>${children || null}</header>`;
+}
+
+export function Stat({ label, value, hint }) {
+  return html`<div class="stat"><div class="label">${label}</div><div class="value">${value}</div>${hint ? html`<div class="hint">${hint}</div>` : null}</div>`;
 }
 
 export function Meter({ value, tone }) {

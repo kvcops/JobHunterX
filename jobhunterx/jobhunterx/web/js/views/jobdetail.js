@@ -4,7 +4,7 @@ import {
   loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, generateDocument, autoApply, deleteJob, navigate,
 } from '../actions.js';
 import {
-  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs,
+  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, VERDICT_TONE,
 } from '../components/ui.js';
 import {
   VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, CHECK_LABEL, CHECK_STATUS_LABEL, CHECK_STATUS_TONE,
@@ -32,7 +32,7 @@ function MatchTab({ job }) {
       <div class="components">
         ${m.components.map((c) => html`<div class="component" key=${c.key}>
           <div class="component-head"><span>${c.label}</span><span class="muted small">weight ${Math.round(c.weight * 100)}% · ${Math.round(c.score * 100)}/100</span></div>
-          <${Meter} value=${c.score} /><div class="muted small">${c.detail}</div></div>`)}
+          <${Meter} value=${c.score} /><div class="muted small" style=${{ marginTop: '6px' }}>${c.detail}</div></div>`)}
       </div>
       ${m.rejected_reasons.length ? html`<p class="muted small">Because a hard requirement failed, the score is capped no matter how many skills overlap.</p>` : null}
     </section>
@@ -140,12 +140,12 @@ export function JobDetailDrawer({ jobId, onClose }) {
     ${entry && entry.status === 'error' && !job ? html`<div class="drawer-body"><${ErrorBox} message=${entry.error} onRetry=${() => loadDetail(jobId)} /></div>` : null}
     ${job ? html`<div class="drawer-body">
       <header class="detail-header">
-        <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${68} />
+        <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${80} />
         <div class="grow">
           <h2>${job.title}</h2>
           <div class="muted">${job.company} · ${job.location || 'Location not stated'}</div>
           <div class="row gap wrap">
-            ${job.match ? html`<${Badge} tone=${job.match.verdict === 'incompatible' ? 'danger' : 'info'}>${VERDICT_LABEL[job.match.verdict]}</${Badge}>` : null}
+            ${job.match ? html`<${Badge} tone=${VERDICT_TONE[job.match.verdict]}>${VERDICT_LABEL[job.match.verdict]}</${Badge}>` : null}
             <${Badge} tone=${VALIDATION_TONE[job.validation.status]}>${VALIDATION_LABEL[job.validation.status]}</${Badge}>
             ${job.match && job.match.experience ? html`<span class="muted small">${experienceText(job.match.experience)}</span>` : null}
             ${job.posted_at ? html`<span class="muted small">Posted ${fmtDate(job.posted_at)}</span>` : null}

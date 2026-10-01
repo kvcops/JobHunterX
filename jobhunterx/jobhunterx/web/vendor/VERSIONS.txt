@@ -6,3 +6,6 @@ preact/hooks     hooks/dist/hooks.module.js -> hooks.module.js (MIT, LICENSE.pre
 htm 3.1.1        dist/htm.module.js     -> htm.module.js      (Apache-2.0, LICENSE.htm)
 
 Source-map comments removed (maps not vendored).
+
+Fonts (SIL Open Font License 1.1, see fonts/LICENSE-OFL.txt), latin subset, via @fontsource 5.3.0:
+  Geist (variable, UI), Geist Mono (variable, numbers), Instrument Serif italic (accent words)

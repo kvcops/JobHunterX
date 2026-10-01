@@ -1,7 +1,7 @@
 import { html, useState } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { generateCv, loadDocuments, loadDocument, deleteDocument, navigate } from '../actions.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, Field } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, Field, PageHero } from '../components/ui.js';
 import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
 import { api } from '../lib/api.js';
 import { genKey } from '../state/domain.js';
@@ -81,6 +81,8 @@ export function DocumentsView() {
   if (route.docId) return html`<div class="page"><${DocumentDetail} docId=${route.docId} /></div>`;
   const groups = ['resume', 'cv', 'cover_letter'].map((k) => [k, docs.items.filter((d) => d.kind === k)]);
   return html`<div class="page">
+    <${PageHero} center announce="Application materials" title=${html`Documents, <span class="serif">fact-checked</span>`}
+      lead="Job-specific resumes and cover letters, plus a comprehensive CV. Every AI edit is checked against your profile — nothing is invented." />
     <${CvGenerator} />
     ${docs.status === 'error' ? html`<${ErrorBox} message=${docs.error} onRetry=${loadDocuments} />` : null}
     ${docs.status === 'loading' ? html`<${Skeleton} lines=${4} />` : null}
@@ -88,7 +90,8 @@ export function DocumentsView() {
       Open a job and click “Generate” to create a tailored resume or cover letter, or generate your CV above.</${EmptyState}>` : null}
     ${groups.map(([kind, items]) => items.length ? html`<section key=${kind}><h2 class="group-title">${DOC_KIND_LABEL[kind]}s</h2>
       <div class="doc-grid">${items.map((d) => html`<a class="card doc-card" href=${`#/documents/${d.id}`} key=${d.id}>
-        <div class="row space"><${Icon} name="doc" /><span class="muted small">${relTime(d.created_at)}</span></div>
+        <div class="doc-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        <div class="row space"><span class="doc-kind">${DOC_KIND_LABEL[d.kind]}</span><span class="muted small">${relTime(d.created_at)}</span></div>
         <strong>${d.job ? `${d.job.title}` : d.title}</strong>
         <span class="muted small">${d.job ? d.job.company : d.focus || 'Whole career'} · ${d.page_count} page(s)</span>
         <div class="row gap wrap">${d.stale ? html`<${Badge} tone="warning">Profile changed</${Badge}>` : null}${d.warnings_count ? html`<${Badge} tone="info">${d.warnings_count} note(s)</${Badge}>` : null}</div>

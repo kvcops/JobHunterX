@@ -18,7 +18,7 @@ function readTheme() {
     const t = localStorage.getItem('jhx-theme');
     if (t === 'light' || t === 'dark') return t;
   } catch { /* storage unavailable */ }
-  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return 'light';   // light-first design; dark is opt-in
 }
 
 export function initialState() {

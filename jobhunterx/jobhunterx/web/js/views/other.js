@@ -5,7 +5,7 @@ import {
   loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention,
   stopBrowser, setTakeover, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
 } from '../actions.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, Notice } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHero } from '../components/ui.js';
 import { JobCard } from './discover.js';
 import { TRACKING_LABEL, DEFAULT_TRACKING, relTime, humanize, fmtNum } from '../lib/format.js';
 import { ReconnectingSocket } from '../lib/ws.js';
@@ -17,7 +17,8 @@ export function TrackerView() {
   const jobs = tr.ids.map((id) => byId[id]).filter(Boolean);
   const open = (id) => navigate(`#/tracker/job/${encodeURIComponent(id)}`);
   return html`<div class="page">
-    <div class="row space"><h1>Application tracker</h1><${Button} icon="refresh" onClick=${loadTracker}>Refresh</${Button}></div>
+    <${PageHero} announce="Pipeline" title=${html`Application <span class="serif">tracker</span>`} lead="Every job you saved, from shortlist to offer."
+      actions=${html`<${Button} icon="refresh" onClick=${loadTracker}>Refresh</${Button}>`} />
     ${tr.status === 'error' ? html`<${ErrorBox} message=${tr.error} onRetry=${loadTracker} />` : null}
     ${tr.status === 'loading' ? html`<${Skeleton} lines=${4} />` : null}
     ${tr.status === 'ready' && !jobs.length ? html`<${EmptyState} icon="star" title="Nothing tracked yet">Save jobs with the star to track them through your application pipeline.</${EmptyState}>` : null}
@@ -52,9 +53,9 @@ export function BrowserView() {
   };
   const send = (msg) => b.takeover && sock.current && sock.current.send(msg);
   return html`<div class="page">
-    <div class="row space wrap"><div><h1>Browser agent</h1><p class="muted">Watch the agent fill applications. Take over to type or solve a CAPTCHA yourself.</p></div>
-      <div class="row gap"><${Button} variant=${b.takeover ? 'primary' : 'secondary'} icon="hand" onClick=${() => setTakeover(!b.takeover)}>${b.takeover ? 'Release control' : 'Take over'}</${Button}>
-        <${Button} variant="danger" icon="stop" onClick=${stopBrowser}>Stop</${Button}></div></div>
+    <${PageHero} announce="Auto-apply" title=${html`Browser <span class="serif">agent</span>`} lead="Watch the agent fill applications live. Take over any time to type or solve a CAPTCHA yourself."
+      actions=${html`<${Button} variant=${b.takeover ? 'primary' : 'secondary'} icon="hand" onClick=${() => setTakeover(!b.takeover)}>${b.takeover ? 'Release control' : 'Take over'}</${Button}>
+        <${Button} variant="danger" icon="stop" onClick=${stopBrowser}>Stop</${Button}>`} />
     <div class="browser-layout">
       <div class=${`browser-frame ${b.takeover ? 'takeover' : ''}`}>
         ${b.url ? html`<div class="browser-url" title=${b.url}>${b.title || b.url}</div>` : null}
@@ -73,8 +74,8 @@ export function BrowserView() {
 export function InterventionsView() {
   const iv = useStore((s) => s.interventions);
   return html`<div class="page">
-    <div class="row space"><h1>Interventions</h1><${Button} icon="refresh" onClick=${loadInterventions}>Refresh</${Button}></div>
-    <p class="muted">When the agent hits a login wall, CAPTCHA or one-time code, it pauses here. Solve it in the browser, then continue.</p>
+    <${PageHero} announce="Human in the loop" title="Interventions" lead="When the agent hits a login wall, CAPTCHA or one-time code, it pauses here. Solve it in the browser, then continue."
+      actions=${html`<${Button} icon="refresh" onClick=${loadInterventions}>Refresh</${Button}>`} />
     ${iv.status === 'error' ? html`<${ErrorBox} message=${iv.error} onRetry=${loadInterventions} />` : null}
     ${iv.status === 'loading' ? html`<${Skeleton} lines=${3} />` : null}
     ${iv.status === 'ready' && !iv.items.length ? html`<${EmptyState} icon="check" title="Nothing needs you">The agent is not waiting on anything.</${EmptyState}>` : null}
@@ -105,9 +106,10 @@ export function SettingsView() {
   const mode = useStore((s) => s.pipelineMode);
   const d = st.data;
   return html`<div class="page">
-    <h1>Settings</h1>
+    <${PageHero} announce="Control room" title="Settings" lead="Keys, search providers, AI model preferences and usage." />
     ${st.status === 'error' ? html`<${ErrorBox} message=${st.error} />` : null}
-    ${d ? html`<${KeysForm} data=${d} />
+    <div class="settings-grid">
+    ${d ? html`<div class="wide"><${KeysForm} data=${d} /></div>
     <section class="card"><h2>Search</h2>
       <label class="check"><input type="checkbox" checked=${d.enable_web_search_apis} onChange=${(e) => saveSettings({ enable_web_search_apis: e.currentTarget.checked })} /> Use web search APIs (otherwise only the free DuckDuckGo fallback)</label>
       <label class="check"><input type="checkbox" checked=${d.strict_zero_spend_protection} onChange=${(e) => saveSettings({ strict_zero_spend_protection: e.currentTarget.checked })} /> Zero-spend protection (never exceed free allowances)</label>
@@ -127,9 +129,10 @@ export function SettingsView() {
     </section>
     <section class="card"><h2>Browser agent mode</h2>
       <div class="seg" role="group" aria-label="Pipeline mode">${['manual', 'automatic'].map((m) => html`<button type="button" class=${`seg-btn ${mode.mode === m ? 'on' : ''}`} aria-pressed=${mode.mode === m ? 'true' : 'false'} onClick=${() => setPipelineMode(m)}>${humanize(m)}</button>`)}</div>
-      <p class="muted small">Manual: the agent only applies when you click Auto-apply on a job.</p></section>
+      <p class="muted small" style=${{ marginTop: '10px' }}>Manual: the agent only applies when you click Auto-apply on a job.</p></section>
     <section class="card danger-zone"><h2>Data</h2>
       <div class="row gap wrap"><${Button} onClick=${() => clearJobs('unsaved')}>Clear unsaved jobs</${Button}><${Button} onClick=${() => clearJobs('all')}>Clear all jobs</${Button}>
         <${Button} variant="danger" onClick=${resetEverything}>Reset everything</${Button}></div></section>
+    </div>
   </div>`;
 }

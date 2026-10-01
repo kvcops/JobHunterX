@@ -2,7 +2,7 @@ import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { uploadResume, saveProfile, loadProfile } from '../actions.js';
 import {
-  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs,
+  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHero, Stat,
 } from '../components/ui.js';
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
 import { WORK_MODES, WORK_MODE_LABEL, SENIORITIES, YEARS_SOURCE_LABEL, humanize } from '../lib/format.js';
@@ -31,18 +31,18 @@ function Upload() {
 function Understanding({ snap }) {
   if (!snap) return html`<section class="card"><h2>How JobHunterX understands you</h2><${Skeleton} lines=${4} /></section>`;
   return html`<section class="card understanding" aria-label="How JobHunterX understands you">
-    <div class="row space"><h2>How JobHunterX understands you</h2>
+    <div class="dna-head"><div><h2>How JobHunterX understands you</h2><p class="muted small">Derived from your profile. Every skill is checked against what you actually wrote.</p></div>
       <${Badge} tone=${snap.method === 'llm' ? 'success' : 'warning'}>${snap.method === 'llm' ? 'AI analysis' : 'Basic (AI unavailable)'}</${Badge}></div>
-    <div class="facts-grid">
-      <div><span class="muted small">Experience</span><div class="big">${snap.professional_years} yrs</div><div class="muted small">${YEARS_SOURCE_LABEL[snap.years_source]}</div></div>
-      <div><span class="muted small">Level</span><div class="big">${humanize(snap.seniority)}</div></div>
-      <div><span class="muted small">Education</span><div class="big">${humanize(snap.education_level)}</div></div>
-      <div><span class="muted small">Locations</span><div>${snap.locations.map((p) => p.city || p.country).join(', ') || 'Not set'}</div>
-        <div class="muted small">${snap.work_modes.map((m) => WORK_MODE_LABEL[m]).join(' · ')}${snap.willing_to_relocate ? ' · open to relocation' : ''}</div></div>
+    <div class="stats">
+      <${Stat} label="Experience" value=${`${snap.professional_years} yrs`} hint=${YEARS_SOURCE_LABEL[snap.years_source]} />
+      <${Stat} label="Level" value=${humanize(snap.seniority)} />
+      <${Stat} label="Education" value=${humanize(snap.education_level)} />
+      <${Stat} label="Locations" value=${snap.locations.map((p) => p.city || p.country).join(', ') || 'Not set'}
+        hint=${`${snap.work_modes.map((m) => WORK_MODE_LABEL[m]).join(' · ')}${snap.willing_to_relocate ? ' · open to relocation' : ''}`} />
     </div>
-    <h3 class="sec-title">Career tracks</h3>
+    <h3 class="sec-title" style=${{ marginTop: '20px' }}>Career tracks</h3>
     <div class="tracks">${snap.role_families.map((f) => html`<div class="track" title=${f.evidence}>
-      <span>${f.label}</span><${Meter} value=${f.closeness} tone="info" /></div>`)}</div>
+      <div class="row space"><span>${f.label}</span><span class="track-pct">${Math.round(f.closeness * 100)}%</span></div><${Meter} value=${f.closeness} /></div>`)}</div>
     <h3 class="sec-title">Titles we search for</h3>
     <div class="chip-row">${[...snap.target_titles, ...snap.adjacent_titles].map((t, i) => html`<span class=${`chip ${i >= snap.target_titles.length ? 'soft' : ''}`}>${t}</span>`)}</div>
     <h3 class="sec-title">Skills with evidence</h3>
@@ -159,6 +159,8 @@ export function ProfileView() {
   const pr = useStore((s) => s.profile);
   const env = pr.envelope;
   return html`<div class="page">
+    <${PageHero} center announce="Candidate profile" title=${html`Your career, <span class="serif">understood</span>`}
+      lead="Upload your resume, check what was read, and tell JobHunterX what you want next. Everything downstream — search, scoring, documents — uses only this." />
     <${Upload} />
     ${pr.status === 'loading' && !env ? html`<section class="card"><${Skeleton} lines=${6} /></section>` : null}
     ${pr.status === 'error' && !env ? html`<${ErrorBox} message=${pr.error} onRetry=${loadProfile} />` : null}

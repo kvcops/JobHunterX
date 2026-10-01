@@ -98,11 +98,38 @@
 
 ## 🖥️ Dashboard Preview
 
+A calm, light-first interface: warm off-white canvas with a soft pastel wash, white frosted cards, a floating
+sidebar, black pill actions, one warm orange accent and an elegant serif accent word in each heading. Dark theme is one click away.
+
 <div align="center">
-<img src="assets/dashboard_preview.jpg" alt="JobHunterX Dashboard — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
-<br/>
-<sub><i>Dark-mode dashboard with scored job cards, live browser canvas streaming, and real-time agent activity feed</i></sub>
+<img src="assets/ui_discover.png" alt="Discover — search command center" width="90%"/>
+<br/><sub><i>Discover — your profile summary, search command center and live 9-stage discovery pipeline</i></sub>
+<br/><br/>
+<img src="assets/ui_results.png" alt="Ranked, explained matches" width="90%"/>
+<br/><sub><i>Ranked matches — verdict, honest verification badge, required-skill coverage and experience fit on every card</i></sub>
+<br/><br/>
+<img src="assets/ui_match.png" alt="Why this score" width="90%"/>
+<br/><sub><i>"Why this score" — hard requirements, weighted components, strengths, gaps and unknowns</i></sub>
+<br/><br/>
+<img src="assets/ui_profile.png" alt="How JobHunterX understands you" width="90%"/>
+<br/><sub><i>Profile — how JobHunterX understands you: computed experience, level, career tracks and skills with evidence</i></sub>
+<br/><br/>
+<img src="assets/ui_documents.png" alt="Fact-checked resume" width="90%"/>
+<br/><sub><i>Documents — job-specific resume with every AI edit shown as accepted or rejected by the fact-checker</i></sub>
+<br/><br/>
+<img src="assets/ui_mobile.png" alt="Mobile" width="280"/>
+<br/><sub><i>Fully responsive — on phones the sidebar becomes a floating bottom bar</i></sub>
 </div>
+
+### UI highlights
+
+| | |
+|---|---|
+| **Design system** | Quiet white cards on a warm canvas, a single orange accent, bundled fonts (Geist · Instrument Serif · Geist Mono — no CDN at runtime), light + dark themes, reduced-motion support |
+| **Live pipeline** | Every search shows its 9 stages on a progress track with live counters (recommended, analysed, duplicates merged, not a fit) |
+| **Explainable cards** | Thin score ring coloured by verdict, verification badge, skills matched x/y, experience fit, source and freshness |
+| **Reliable state** | One central store; results from an old search can never leak into a new one; late responses are ignored; failed saves roll back |
+| **Accessible** | Keyboard navigation, focus-trapped dialogs and drawer (Esc closes), ARIA live regions for progress and toasts |
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -408,7 +435,7 @@ jobhunterx/jobhunterx/
 ├── api/             # FastAPI routes (docs/API.md), WebSocket, browser live-stream
 ├── agents/          # PDF → profile extractor, browser auto-apply agent (browser-use)
 ├── config/          # settings, LLM router (model chains), Gemma budget, logging, legacy DB helpers
-└── web/             # Preact + htm UI (vendored, no build step)
+└── web/             # "Calm" UI: Preact + htm + bundled fonts (vendored, no build step)
 ```
 
 * **One active search run**; starting another cancels it. Every job and WebSocket event carries the run id, so the
