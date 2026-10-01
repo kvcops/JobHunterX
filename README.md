@@ -122,7 +122,7 @@ Dark theme is one click away.
 <br/><sub><i>Profile — understanding on the left, a tabbed editor on the right</i></sub>
 <br/><br/>
 <img src="assets/ui_tracker.png" alt="Application tracker" width="90%"/>
-<br/><sub><i>Tracker — pipeline summary on top, drag-and-drop lanes from Saved to Offer, colour-coded status dropdowns on every card</i></sub>
+<br/><sub><i>Tracker — the whole journey in one stage bar, a grouped list with one-click “move to next stage”, and the job (or a pipeline overview with next steps) beside it — no sideways scrolling</i></sub>
 <br/><br/>
 <img src="assets/ui_browser.png" alt="Auto-apply agent" width="90%"/>
 <br/><sub><i>Auto-apply agent — a live browser window with LIVE badge and take-over mode, plus agent status, current step and an activity timeline</i></sub>

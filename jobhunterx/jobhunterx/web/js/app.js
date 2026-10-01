@@ -5,7 +5,6 @@ import { useStore } from './state/store.js';
 import { boot, navigate, setTheme, retryBoot } from './actions.js';
 import { Icon, ConfirmDialog, Toasts, Button } from './components/ui.js';
 import { DiscoverView } from './views/discover.js';
-import { JobDetailDrawer } from './views/jobdetail.js';
 import { ProfileView } from './views/profile.js';
 import { DocumentsView } from './views/documents.js';
 import { OnboardingView } from './views/onboarding.js';
@@ -115,7 +114,6 @@ function AppShell() {
       <${View} key=${route.page} />
     </main>
     ${activity ? html`<div class="activity-line" aria-live="polite" key=${activity.id}>${activity.message}</div>` : null}
-    ${route.jobId && route.page === 'tracker' ? html`<${JobDetailDrawer} key=${route.jobId} jobId=${route.jobId} onClose=${() => navigate('#/tracker')} />` : null}
   </div>`;
 }
 

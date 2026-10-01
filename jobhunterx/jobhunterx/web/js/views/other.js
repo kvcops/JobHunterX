@@ -9,58 +9,80 @@ import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, S
 import { TRACKING_LABEL, DEFAULT_TRACKING, relTime, humanize, fmtNum, safeUrl } from '../lib/format.js';
 import { setTheme } from '../actions.js';
 import { ReconnectingSocket } from '../lib/ws.js';
+import { JobDetail } from './jobdetail.js';
 
 // ---------------------------------------------------------------------------- tracker
-// Lanes follow the application journey; "Closed" gathers rejected and archived jobs.
+// Stages follow the application journey; "Closed" gathers rejected and archived jobs.
 const LANES = [
-  { key: 'saved', label: 'Saved', hint: 'Shortlisted', statuses: ['saved'], drop: 'saved' },
-  { key: 'preparing', label: 'Preparing', hint: 'Tailoring documents', statuses: ['preparing'], drop: 'preparing' },
-  { key: 'applied', label: 'Applied', hint: 'Waiting to hear back', statuses: ['applied'], drop: 'applied' },
-  { key: 'interviewing', label: 'Interviewing', hint: 'In conversation', statuses: ['interviewing'], drop: 'interviewing' },
-  { key: 'offer', label: 'Offer', hint: 'Decision time', statuses: ['offer'], drop: 'offer' },
-  { key: 'closed', label: 'Closed', hint: 'Rejected or archived', statuses: ['rejected', 'archived'], drop: 'archived' },
+  { key: 'saved', label: 'Saved', statuses: ['saved'], next: 'preparing', tip: 'Generate a tailored resume, then move it to Preparing.' },
+  { key: 'preparing', label: 'Preparing', statuses: ['preparing'], next: 'applied', tip: 'Documents ready? Apply and move it to Applied.' },
+  { key: 'applied', label: 'Applied', statuses: ['applied'], next: 'interviewing', tip: 'Waiting to hear back — follow up after a week.' },
+  { key: 'interviewing', label: 'Interviewing', statuses: ['interviewing'], next: 'offer', tip: 'In conversation — prepare from the job requirements.' },
+  { key: 'offer', label: 'Offer', statuses: ['offer'], next: null, tip: 'Decision time.' },
+  { key: 'closed', label: 'Closed', statuses: ['rejected', 'archived'], next: null, tip: 'Rejected or archived.' },
 ];
+const laneOf = (status) => LANES.find((l) => l.statuses.includes(status)) || LANES[0];
 
-function TrackCard({ job, statuses, selected, index, onOpen }) {
+function StageBar({ jobs, value, onChange }) {
+  const total = jobs.length;
+  const items = [{ key: 'all', label: 'All', n: total }, ...LANES.map((l) => ({ key: l.key, label: l.label, n: jobs.filter((j) => l.statuses.includes(j.tracking_status)).length }))];
+  return html`<nav class="stagebar card" aria-label="Pipeline stages">${items.map((it, i) => html`<button type="button" key=${it.key}
+      class=${`stage-tab s-${it.key} ${value === it.key ? 'on' : ''}`} aria-pressed=${value === it.key ? 'true' : 'false'} style=${{ '--i': i }} onClick=${() => onChange(it.key)}>
+      <span class="st-n"><${CountUp} value=${it.n} /></span>
+      <span class="st-l">${it.key !== 'all' ? html`<i class="st-dot"></i>` : null}${it.label}</span>
+      ${it.key !== 'all' ? html`<span class="st-bar"><span style=${{ width: `${total ? (it.n / total) * 100 : 0}%` }}></span></span>` : null}
+    </button>${i > 0 && i < items.length - 1 ? html`<span class="st-arrow" aria-hidden="true"><${Icon} name="next" size=${13} /></span>` : null}`)}</nav>`;
+}
+
+function TrackRow({ job, statuses, selected, index, onOpen }) {
   const pending = useStore((s) => !!s.pending.track[job.id]);
-  const [dragging, setDragging] = useState(false);
-  const apply = safeUrl(job.apply_url);
+  const lane = laneOf(job.tracking_status);
+  const next = lane.next && LANES.find((l) => l.key === lane.next);
   const docs = job.documents || {};
-  return html`<article class=${`track-card job-card ${selected ? 'is-selected' : ''} ${dragging ? 'dragging' : ''} ${pending ? 'is-moving' : ''}`} style=${{ '--i': index }}
-      draggable="true" onDragStart=${(e) => { e.dataTransfer.setData('text/x-job', job.id); e.dataTransfer.effectAllowed = 'move'; setDragging(true); }}
-      onDragEnd=${() => setDragging(false)}>
-    <button type="button" class="job-main" onClick=${() => onOpen(job.id)} aria-label=${`Open ${job.title} at ${job.company}`}>
-      <div class="tc-top"><${Monogram} name=${job.company} size=${34} />
-        <div class="grow"><div class="job-company">${job.company || 'Unknown company'}</div><strong class="track-title">${job.title}</strong></div>
-        <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${40} /></div>
-      <div class="tc-meta"><span><${Icon} name="pin" size=${12} />${job.location || 'Location not stated'}</span>
-        <span>${job.posted_at ? `Posted ${relTime(job.posted_at)}` : `Found ${relTime(job.discovered_at)}`}</span></div>
+  return html`<article class=${`track-row job-card ${selected ? 'is-selected' : ''} ${pending ? 'is-moving' : ''}`} style=${{ '--i': Math.min(index, 14) }}>
+    <button type="button" class="job-main tr-main" onClick=${() => onOpen(job.id)} aria-label=${`Open ${job.title} at ${job.company}`} aria-current=${selected ? 'true' : undefined}>
+      <${Monogram} name=${job.company} size=${38} />
+      <div class="grow">
+        <div class="job-company">${job.company || 'Unknown company'}<span class="job-when">${job.posted_at ? relTime(job.posted_at) : relTime(job.discovered_at)}</span></div>
+        <strong class="track-title">${job.title}</strong>
+        <div class="tr-sub"><span class=${`tc-doc ${docs.resume ? 'on' : ''}`}><${Icon} name="doc" size=${12} />${docs.resume ? 'Resume ready' : 'No resume yet'}</span>
+          <span>${job.location || 'Location not stated'}</span></div>
+      </div>
+      <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${42} />
     </button>
-    <div class="tc-foot">
+    <div class="tr-actions">
       <${Select} size="sm" label=${`Status for ${job.title}`} tone=${`s-${job.tracking_status}`} value=${job.tracking_status}
         onChange=${(v) => setTracking(job.id, v)} options=${statuses.map((t) => [t, TRACKING_LABEL[t] || humanize(t)])} />
-      <div class="tc-icons">
-        <span class=${`tc-doc ${docs.resume ? 'on' : ''}`} title=${docs.resume ? 'Tailored resume ready' : 'No tailored resume yet'}><${Icon} name="doc" size=${14} /></span>
-        ${apply ? html`<a class="icon-btn tc-link" href=${apply} target="_blank" rel="noopener noreferrer" aria-label="Open posting" title="Open posting"><${Icon} name="external" size=${14} /></a>` : null}
-      </div>
+      ${next ? html`<button type="button" class="advance" disabled=${pending} onClick=${() => setTracking(job.id, next.key)} title=${`Move to ${next.label}`}>
+        ${next.label} <${Icon} name="arrow" size=${13} /></button>` : null}
     </div>
   </article>`;
 }
 
-function Pipeline({ jobs }) {
-  const total = Math.max(1, jobs.length);
-  const tracked = jobs.filter((j) => j.match);
-  const avg = tracked.length ? Math.round(tracked.reduce((a, j) => a + j.match.score, 0) / tracked.length) : null;
-  return html`<section class="card pipeline" aria-label="Pipeline summary">
-    <div class="pl-stages">${LANES.map((l, i) => {
+function TrackerOverview({ jobs }) {
+  const total = jobs.length;
+  const max = Math.max(1, ...LANES.map((l) => jobs.filter((j) => l.statuses.includes(j.tracking_status)).length));
+  const scored = jobs.filter((j) => j.match);
+  const avg = scored.length ? Math.round(scored.reduce((a, j) => a + j.match.score, 0) / scored.length) : null;
+  const needResume = jobs.filter((j) => ['saved', 'preparing'].includes(j.tracking_status) && !(j.documents && j.documents.resume));
+  const active = jobs.filter((j) => ['applied', 'interviewing', 'offer'].includes(j.tracking_status)).length;
+  return html`<div class="tk-overview scroll">
+    <div class="tk-hero"><h2>Your <span class="serif">pipeline</span></h2><p class="muted small">Select a job on the left to see its details, documents and score — or move it forward with one click.</p></div>
+    <div class="tk-stats">
+      <div><span class="n"><${CountUp} value=${total} /></span><span class="l">tracked</span></div>
+      <div><span class="n"><${CountUp} value=${active} /></span><span class="l">in progress</span></div>
+      <div><span class="n">${avg == null ? '–' : html`<${CountUp} value=${avg} />`}</span><span class="l">avg. match</span></div>
+    </div>
+    <div class="funnel">${LANES.map((l, i) => {
       const n = jobs.filter((j) => l.statuses.includes(j.tracking_status)).length;
-      return html`<div class=${`pl-stage s-${l.key}`} key=${l.key} style=${{ '--i': i }}>
-        <div class="pl-num"><${CountUp} value=${n} /></div><div class="pl-label">${l.label}</div>
-        <div class="pl-bar"><span style=${{ width: `${(n / total) * 100}%` }}></span></div></div>`;
+      return html`<div class=${`fn-row s-${l.key}`} key=${l.key} style=${{ '--i': i }}><span class="fn-label">${l.label}</span>
+        <span class="fn-track"><span class="fn-fill" style=${{ width: `${(n / max) * 100}%` }}></span></span><span class="fn-n">${n}</span></div>`;
     })}</div>
-    <div class="pl-side"><div><span class="pl-big"><${CountUp} value=${jobs.length} /></span><span class="muted small">tracked</span></div>
-      <div><span class="pl-big">${avg == null ? '–' : html`<${CountUp} value=${avg} />`}</span><span class="muted small">avg. match</span></div></div>
-  </section>`;
+    ${needResume.length ? html`<div class="tk-todo"><div class="sec-title">Next steps</div>
+      ${needResume.slice(0, 5).map((j, i) => html`<a class="todo" key=${j.id} style=${{ '--i': i }} href=${`#/tracker/job/${encodeURIComponent(j.id)}`}>
+        <span class="todo-ico"><${Icon} name="spark" size=${14} /></span><span class="grow">Tailor a resume for <strong>${j.title}</strong> at ${j.company}</span><${Icon} name="arrow" size=${14} /></a>`)}
+    </div>` : null}
+  </div>`;
 }
 
 export function TrackerView() {
@@ -68,37 +90,48 @@ export function TrackerView() {
   const byId = useStore((s) => s.jobs.byId);
   const route = useStore((s) => s.route);
   const statuses = useStore((s) => (s.meta.data && s.meta.data.tracking_statuses) || DEFAULT_TRACKING);
-  const [over, setOver] = useState(null);
+  const [stage, setStage] = useState('all');
+  const [q, setQ] = useState('');
   const jobs = tr.ids.map((id) => byId[id]).filter(Boolean);
   const open = (id) => navigate(`#/tracker/job/${encodeURIComponent(id)}`);
-  const lanes = LANES.filter((l) => statuses.includes(l.drop));
-  const onDrop = (lane) => (e) => {
-    e.preventDefault(); setOver(null);
-    const id = e.dataTransfer.getData('text/x-job');
-    const job = byId[id];
-    if (job && !lane.statuses.includes(job.tracking_status)) setTracking(id, lane.drop);
-  };
+  const close = () => navigate('#/tracker');
+  useEffect(() => {
+    if (!route.jobId) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay, .popover, .select-list')) close(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [route.jobId]);
+  const needle = q.trim().toLowerCase();
+  const visible = jobs.filter((j) => (stage === 'all' || LANES.find((l) => l.key === stage).statuses.includes(j.tracking_status))
+    && (!needle || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(needle)));
+  const groups = (stage === 'all' ? LANES : LANES.filter((l) => l.key === stage))
+    .map((l) => [l, visible.filter((j) => l.statuses.includes(j.tracking_status)).sort((a, b) => (b.match ? b.match.score : -1) - (a.match ? a.match.score : -1))])
+    .filter(([, g]) => g.length);
+  let k = 0;
   return html`<div class="view view-tracker">
-    <${PageHead} title=${html`Application <span class="serif">tracker</span>`} sub="Drag a card to move it along — or change its status. Every saved job lives here."
+    <${PageHead} title=${html`Application <span class="serif">tracker</span>`} sub="Every saved job, from shortlist to offer — move it forward with one click."
       actions=${html`<${Button} icon="refresh" busy=${tr.status === 'refreshing'} onClick=${loadTracker}>Refresh</${Button}>`} />
     ${tr.status === 'error' ? html`<${ErrorBox} message=${tr.error} onRetry=${loadTracker} />` : null}
     ${tr.status === 'ready' && !jobs.length ? html`<div class="card pane-center grow-fill"><${EmptyState} icon="star" title="Nothing tracked yet"
       action=${html`<${Button} variant="primary" onClick=${() => navigate('#/discover')}>Find roles <${Icon} name="arrow" size=${16} /></${Button}>`}>Star a job in Discover and it lands here, ready to move from shortlist to offer.</${EmptyState}></div>` : html`
-    <${Pipeline} jobs=${jobs} />
-    <div class="board" role="list">${lanes.map((lane, ci) => {
-      const col = jobs.filter((j) => lane.statuses.includes(j.tracking_status));
-      return html`<section class=${`board-col lane-${lane.key} ${over === lane.key ? 'drop-over' : ''}`} key=${lane.key} role="listitem" style=${{ '--i': ci }} aria-label=${lane.label}
-          onDragOver=${(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (over !== lane.key) setOver(lane.key); }}
-          onDragLeave=${(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(null); }} onDrop=${onDrop(lane)}>
-        <header class="board-head"><span class=${`board-dot s-${lane.key}`}></span>
-          <div class="grow"><div class="board-title">${lane.label}</div><div class="board-hint">${lane.hint}</div></div>
-          <span class="board-count">${col.length}</span></header>
-        <div class="scroll board-body">
-          ${tr.status === 'loading' ? html`<${Skeleton} lines=${2} card />` : null}
-          ${col.map((j, i) => html`<${TrackCard} key=${j.id} job=${j} index=${i} statuses=${statuses} selected=${route.jobId === j.id} onOpen=${open} />`)}
-          ${tr.status !== 'loading' ? html`<div class=${`board-drop ${col.length ? 'slim' : ''}`}>${over === lane.key ? 'Release to move here' : col.length ? 'Drop here' : 'No jobs yet · drop one here'}</div>` : null}
-        </div></section>`;
-    })}</div>`}
+    <${StageBar} jobs=${jobs} value=${stage} onChange=${setStage} />
+    <div class=${`split split-tracker ${route.jobId ? 'has-detail' : ''}`}>
+      <section class="pane list-pane card" aria-label="Tracked jobs">
+        <div class="tk-tools"><label class="search-field"><${Icon} name="search" size=${15} />
+          <input type="search" placeholder="Filter tracked jobs" aria-label="Filter tracked jobs" value=${q} onInput=${(e) => setQ(e.currentTarget.value)} /></label></div>
+        <div class="scroll tk-list">
+          ${tr.status === 'loading' ? html`<${Skeleton} rows=${4} />` : null}
+          ${tr.status !== 'loading' && !groups.length ? html`<${EmptyState} icon="info" title="Nothing here">${needle ? 'No tracked jobs match this filter.' : 'No jobs at this stage yet.'}</${EmptyState}>` : null}
+          ${groups.map(([lane, g]) => html`<section class="tk-group" key=${lane.key}>
+            <header class=${`tk-group-head s-${lane.key}`}><i class="st-dot"></i>${lane.label}<span class="board-count">${g.length}</span><span class="tk-tip">${lane.tip}</span></header>
+            ${g.map((j) => html`<${TrackRow} key=${j.id} job=${j} index=${k++} statuses=${statuses} selected=${route.jobId === j.id} onOpen=${open} />`)}
+          </section>`)}
+        </div>
+      </section>
+      <section class="pane detail-pane card" aria-label=${route.jobId ? 'Job details' : 'Pipeline overview'}>
+        ${route.jobId ? html`<${JobDetail} key=${route.jobId} jobId=${route.jobId} onClose=${close} />` : html`<${TrackerOverview} jobs=${jobs} />`}
+      </section>
+    </div>`}
   </div>`;
 }
 
