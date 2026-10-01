@@ -316,6 +316,11 @@ They are three different documents — JobHunterX makes all three, and Auto-appl
 | What's in it | The points that matter most for *this* job | Every role, project, education, certificates, achievements | Links your real experience to what the job asks for |
 | Code | `generation/resume.py` | `generation/cv.py` | `generation/cover_letter.py` |
 
+🔗 **Links stay where they belong:** when your resume PDF is read, every link is kept together with the text on it
+("Code", "Live demo", "Verify") and the lines around it. So a project keeps its GitHub *and* demo links, a certificate
+keeps its credential link, and blog / Kaggle-style profiles go to the header. In the resume and CV they show up as small
+clickable labels next to the right project or entry — nothing extra, no long raw URLs. You can edit them in Profile.
+
 ✅ **Nothing invented:** every AI-written line is fact-checked (`generation/evidence.py`). A new number, tool, employer
 or claim that isn't in your profile is rejected and your own words are kept.
 

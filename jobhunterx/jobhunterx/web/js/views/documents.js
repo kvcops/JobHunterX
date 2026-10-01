@@ -6,20 +6,25 @@ import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
 import { api } from '../lib/api.js';
 import { genKey } from '../state/domain.js';
 
+const ext = (l) => { const u = safeUrl(l.url); return u ? html`<a href=${u} target="_blank" rel="noopener noreferrer">${l.text || l.label}</a>` : null; };
+const linkRow = (links) => (links && links.length ? html`<span class="paper-links">${links.map((l, i) => html`${i ? ' · ' : ''}${ext(l)}`)}</span>` : null);
+
 function ResumePreview({ c }) {
+  const il = c.item_links || {};
   return html`<article class="paper">
     <header class="paper-head"><h2>${c.header.name}</h2>${c.headline ? html`<div class="paper-sub">${c.headline}</div>` : null}
       <div class="paper-contact">${[c.header.email, c.header.phone, c.header.location].filter(Boolean).join(' · ')}
-        ${c.header.links.map((l) => { const u = safeUrl(l.url); return u ? html` · <a href=${u} target="_blank" rel="noopener noreferrer">${l.label}</a>` : null; })}</div></header>
+        ${c.header.links.length ? html`<br />${linkRow(c.header.links)}` : null}</div></header>
     ${c.summary ? html`<section><h3>Summary</h3><p>${c.summary}</p></section>` : null}
     ${c.skills.length ? html`<section><h3>Skills</h3>${c.skills.map((g) => html`<p><strong>${g.category}:</strong> ${g.items.join(', ')}</p>`)}</section>` : null}
     ${c.experience.length ? html`<section><h3>Experience</h3>${c.experience.map((e) => html`<div class="paper-item">
       <div class="row space"><strong>${e.role}${e.company ? ` — ${e.company}` : ''}</strong><span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}</span></div>
       <ul>${e.bullets.map((b) => html`<li>${b}</li>`)}</ul></div>`)}</section>` : null}
-    ${c.projects.length ? html`<section><h3>Projects</h3>${c.projects.map((p) => html`<div class="paper-item"><strong>${p.title}</strong>
-      ${p.technologies.length ? html` <span class="muted small">· ${p.technologies.join(', ')}</span>` : null}<p>${p.description}</p></div>`)}</section>` : null}
+    ${c.projects.length ? html`<section><h3>Projects</h3>${c.projects.map((p) => html`<div class="paper-item">
+      <div class="row space"><span><strong>${p.title}</strong>${p.technologies.length ? html` <span class="muted small">· ${p.technologies.join(', ')}</span>` : null}</span>
+        ${linkRow(p.links && p.links.length ? p.links : p.url ? [{ url: p.url, label: 'Link' }] : [])}</div><p>${p.description}</p></div>`)}</section>` : null}
     ${c.education.length ? html`<section><h3>Education</h3>${c.education.map((e) => html`<p><strong>${e.degree}</strong>${e.institution ? ` — ${e.institution}` : ''} <span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}${e.grade ? ` · ${e.grade}` : ''}</span></p>`)}</section>` : null}
-    ${['certifications', 'achievements', 'competitions', 'languages'].map((k) => c[k] && c[k].length ? html`<section><h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${c[k].map((x) => html`<li>${x}</li>`)}</ul></section>` : null)}
+    ${['certifications', 'achievements', 'competitions', 'languages'].map((k) => c[k] && c[k].length ? html`<section><h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${c[k].map((x) => html`<li>${x}${il[x] ? html` · ${linkRow(il[x])}` : null}</li>`)}</ul></section>` : null)}
   </article>`;
 }
 

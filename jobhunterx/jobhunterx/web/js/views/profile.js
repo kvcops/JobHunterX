@@ -60,6 +60,41 @@ function TextField({ draft, path, label, set, type = 'text', hint, textarea, wid
         onInput=${(e) => set(path, type === 'number' ? (e.currentTarget.value === '' ? null : Number(e.currentTarget.value)) : e.currentTarget.value)} />`}</${Field}>`;
 }
 
+/** Label + address pairs ("Code" → github.com/…). Empty rows are dropped when saving. */
+function LinksEditor({ value, onChange, labelHint = 'Code, Live demo…' }) {
+  const rows = value || [];
+  const put = (i, k, v) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  return html`<div class="links-editor">
+    ${rows.map((r, i) => html`<div class="link-row" key=${i}>
+      <input class="input link-label" value=${r.label} placeholder=${labelHint} aria-label=${`Link ${i + 1} text`} onInput=${(e) => put(i, 'label', e.currentTarget.value)} />
+      <input class="input" type="url" value=${r.url} placeholder="https://…" aria-label=${`Link ${i + 1} address`} onInput=${(e) => put(i, 'url', e.currentTarget.value)} />
+      <button type="button" class="icon-btn" aria-label=${`Remove link ${i + 1}`} onClick=${() => onChange(rows.filter((_, j) => j !== i))}><${Icon} name="trash" size=${15} /></button>
+    </div>`)}
+    <button type="button" class="link-btn add-link" onClick=${() => onChange([...rows, { label: '', url: '' }])}><${Icon} name="plus" size=${14} /> Add link</button>
+  </div>`;
+}
+
+const cleanLinks = (rows) => (rows || []).map((l) => ({ ...l, label: (l.label || '').trim(), url: (l.url || '').trim() })).filter((l) => l.url);
+
+function ItemLinksEditor({ draft, set }) {
+  const entries = [['certification', 'certifications'], ['achievement', 'achievements'], ['competition', 'competitions']]
+    .flatMap(([sec, key]) => draft[key].map((x) => [`${sec}::${x}`, x, humanize(sec)]));
+  const rows = draft.item_links;
+  const put = (i, patch) => set(['item_links'], rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  if (!entries.length) return html`<p class="muted small">Add a certification or achievement above to give it a link (for example a credential page).</p>`;
+  return html`<div class="links-editor">
+    ${rows.map((r, i) => html`<div class="link-row three" key=${i}>
+      <${Select} label=${`Entry for link ${i + 1}`} block value=${`${r.section}::${r.item}`} options=${entries}
+        onChange=${(v) => { const [section, ...rest] = v.split('::'); put(i, { section, item: rest.join('::') }); }} />
+      <input class="input link-label" value=${r.label} placeholder="Verify, Certificate…" aria-label=${`Link ${i + 1} text`} onInput=${(e) => put(i, { label: e.currentTarget.value })} />
+      <input class="input" type="url" value=${r.url} placeholder="https://…" aria-label=${`Link ${i + 1} address`} onInput=${(e) => put(i, { url: e.currentTarget.value })} />
+      <button type="button" class="icon-btn" aria-label=${`Remove link ${i + 1}`} onClick=${() => set(['item_links'], rows.filter((_, j) => j !== i))}><${Icon} name="trash" size=${15} /></button>
+    </div>`)}
+    <button type="button" class="link-btn add-link" onClick=${() => { const [section, ...rest] = entries[0][0].split('::'); set(['item_links'], [...rows, { section, item: rest.join('::'), label: '', url: '' }]); }}>
+      <${Icon} name="plus" size=${14} /> Add link to an entry</button>
+  </div>`;
+}
+
 function ListEditor({ draft, set, path, fields, empty, title }) {
   const items = getIn(draft, path) || [];
   return html`<div class="stack">
@@ -73,6 +108,8 @@ function ListEditor({ draft, set, path, fields, empty, title }) {
               onBlur=${(e) => set([...path, i, f.key], e.currentTarget.value.split('\n').map((x) => x.trim()).filter(Boolean))} />`}</${Field}>`
           : f.kind === 'chips'
             ? html`<${Field} label=${f.label} wide><${ChipsInput} label=${f.label} value=${it[f.key] || []} onChange=${(v) => set([...path, i, f.key], v)} /></${Field}>`
+          : f.kind === 'links'
+            ? html`<${Field} label=${f.label} hint=${f.hint} wide><${LinksEditor} value=${it[f.key] || []} onChange=${(v) => set([...path, i, f.key], v)} /></${Field}>`
             : html`<${TextField} draft=${draft} path=${[...path, i, f.key]} label=${f.label} set=${set} textarea=${f.kind === 'text'} wide=${f.kind === 'text'} />`)}
       </div></div>`)}
     <${Button} size="sm" icon="plus" onClick=${() => set(path, [...items, { ...empty }])}>Add ${title.toLowerCase()}</${Button}>
@@ -92,7 +129,10 @@ function Editor({ profile }) {
   const set = (path, value) => setDraft((d) => setIn(d, path, value));
   const p = draft.preferences;
   const save = async () => {
-    const clean = setIn(draft, ['experience'], draft.experience.map((e) => ({ ...e, bullets: e.bullets.map((b) => b.trim()).filter(Boolean) })));
+    let clean = setIn(draft, ['experience'], draft.experience.map((e) => ({ ...e, bullets: e.bullets.map((b) => b.trim()).filter(Boolean) })));
+    clean = setIn(clean, ['projects'], clean.projects.map((pr) => { const links = cleanLinks(pr.links); return { ...pr, links, url: links.length ? links[0].url : '' }; }));
+    clean = setIn(clean, ['links'], cleanLinks(clean.links));
+    clean = setIn(clean, ['item_links'], cleanLinks(clean.item_links).filter((l) => l.item));
     if (await saveProfile(clean)) setBase(JSON.stringify(normalizeProfile(clean)));
   };
   const tabs = [
@@ -112,6 +152,7 @@ function Editor({ profile }) {
     ${tab === 'about' ? html`<div class="form-grid">
       ${[['name', 'Full name'], ['email', 'Email', 'email'], ['phone', 'Phone'], ['location', 'Current location'], ['suggested_role', 'Current / target title'],
         ['linkedin', 'LinkedIn URL', 'url'], ['github', 'GitHub URL', 'url'], ['portfolio', 'Portfolio URL', 'url']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
+      <${Field} label="Other links" hint="Blog, Kaggle, Scholar, personal site… shown in your resume header." wide><${LinksEditor} value=${draft.links} labelHint="Blog, Kaggle…" onChange=${(v) => set(['links'], v)} /></${Field}>
       <${TextField} draft=${draft} path=${['summary']} label="Summary" set=${set} textarea wide />
       <${Field} label="Skills" wide><${ChipsInput} label="Skills" value=${draft.skills} onChange=${(v) => set(['skills'], v)} placeholder="Add a skill…" /></${Field}>
     </div>` : null}
@@ -140,14 +181,16 @@ function Editor({ profile }) {
       fields=${[{ key: 'role', label: 'Role' }, { key: 'company', label: 'Company' }, { key: 'location', label: 'Location' }, { key: 'employment_type', label: 'Type (full_time, internship…)' },
         { key: 'start', label: 'Start (e.g. Jan 2024)' }, { key: 'end', label: 'End (empty = present)' }, { key: 'bullets', label: 'What you did', kind: 'lines' }]} />` : null}
     ${tab === 'proj' ? html`<${ListEditor} draft=${draft} set=${set} path=${['projects']} title="Project"
-      empty=${{ title: '', description: '', url: '', technologies: [] }}
-      fields=${[{ key: 'title', label: 'Title' }, { key: 'url', label: 'Link' }, { key: 'description', label: 'Description', kind: 'text' }, { key: 'technologies', label: 'Technologies', kind: 'chips' }]} />` : null}
+      empty=${{ title: '', description: '', url: '', links: [], technologies: [] }}
+      fields=${[{ key: 'title', label: 'Title' }, { key: 'description', label: 'Description', kind: 'text' }, { key: 'technologies', label: 'Technologies', kind: 'chips' },
+        { key: 'links', label: 'Links', kind: 'links', hint: 'Code, live demo, paper, video… The first one is the main link.' }]} />` : null}
     ${tab === 'edu' ? html`<${ListEditor} draft=${draft} set=${set} path=${['education']} title="Education"
       empty=${{ degree: '', institution: '', start: '', end: '', grade: '', details: '' }}
       fields=${[{ key: 'degree', label: 'Degree' }, { key: 'institution', label: 'Institution' }, { key: 'start', label: 'Start' }, { key: 'end', label: 'End' }, { key: 'grade', label: 'Grade' }, { key: 'details', label: 'Details', kind: 'text' }]} />` : null}
     ${tab === 'more' ? html`<div class="form-grid">
       ${[['certifications', 'Certifications'], ['achievements', 'Achievements'], ['competitions', 'Competitions & hackathons'], ['languages', 'Spoken languages']].map(([k, l]) =>
         html`<${Field} label=${l} wide><${ChipsInput} label=${l} value=${draft[k]} onChange=${(v) => set([k], v)} /></${Field}>`)}
+      <${Field} label="Links for certificates & achievements" hint="e.g. a credential page next to the certification." wide><${ItemLinksEditor} draft=${draft} set=${set} /></${Field}>
     </div>` : null}
     ${tab === 'qa' ? html`<div class="form-grid">
       <p class="muted small field-wide">Used only by the browser agent to answer application-form questions.</p>

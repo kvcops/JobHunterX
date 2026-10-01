@@ -476,6 +476,14 @@ def _profile_block(profile: dict) -> str:
     if prefs.get("notice_period_days") is not None and not qa.get("notice_period"):
         qa_lines.append(f"  • Notice period: {prefs['notice_period_days']} days")
     langs = profile.get("languages", [])
+    other = [f"{l.get('label') or 'Link'}: {l.get('url')}" for l in profile.get("links") or [] if l.get("url")]
+    proj_links = []
+    for pr in profile.get("projects") or []:
+        urls = [f"{l.get('label') or 'link'} {l.get('url')}" for l in pr.get("links") or [] if l.get("url")] or ([pr["url"]] if pr.get("url") else [])
+        if urls:
+            proj_links.append(f"  • {pr.get('title', '')}: " + ", ".join(urls))
+    links_block = ("\n- Other links: " + "; ".join(other) if other else "") + \
+        ("\n- Project links (use for 'portfolio / work samples / website' questions):\n" + "\n".join(proj_links[:6]) if proj_links else "")
     return f"""=== CANDIDATE ===
 - Full name: {profile.get('name', '')}
 - Email: {profile.get('email', '')}
@@ -485,7 +493,7 @@ def _profile_block(profile: dict) -> str:
 - Languages: {', '.join(langs) if isinstance(langs, list) else langs}
 - LinkedIn: {profile.get('linkedin', '')}
 - GitHub: {profile.get('github', '')}
-- Portfolio: {profile.get('portfolio', '')}
+- Portfolio: {profile.get('portfolio', '')}{links_block}
 - Summary: {profile.get('summary', '')}
 
 === SKILLS ===

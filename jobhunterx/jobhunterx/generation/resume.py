@@ -22,7 +22,8 @@ from jobhunterx.domain.job import JobPosting
 from jobhunterx.generation.content import (
     EducationItem,
     ExperienceItem,
-    ProjectItem,
+    item_links_for,
+    project_item,
     ResumeContent,
     SkillGroup,
     header_for,
@@ -150,11 +151,11 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
     skill_groups = [SkillGroup(category=g.category, items=sorted(g.items, key=rank)) for g in groups]
     skill_groups.sort(key=lambda g: min((rank(i) for i in g.items), default=1))
 
-    projects = [ProjectItem(title=p.title, description=p.description, technologies=p.technologies, url=p.url)
+    projects = [project_item(p, max_links=2)
                 for p in (profile.projects[idx] for idx in proj_sel)]
 
     content = ResumeContent(
-        header=header_for(profile),
+        header=header_for(profile, max_links=4),
         # The candidate's own title — never claim the target job's title.
         headline=profile.suggested_role or (profile.experience[0].role if profile.experience else ""),
         summary=summary,
@@ -165,6 +166,7 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
         certifications=profile.certifications,
         achievements=profile.achievements[:4],
         languages=profile.languages,
+        item_links=item_links_for(profile),
     )
     rejected = [r for r in prov.rewrites if not r.accepted]
     if rejected:

@@ -362,3 +362,19 @@ Sessions are stored in the `apply_sessions` table; on restart, running ones beco
 | `GET /api/system/health` · `POST /api/system/repair` · `POST /api/system/backup` | Database checks, repairs, and a consistent backup (VACUUM INTO). |
 
 Every jobs, documents and search-run query is scoped to the active profile.
+
+---
+
+## Links in the profile
+
+`CandidateProfile` carries links as found in the resume (each `{label, url}`; `label` is the text that was on the link):
+
+* `linkedin`, `github`, `portfolio` — the main profile links.
+* `links: Link[]` — other personal pages (blog, coding or research profiles…), shown in the document header.
+* `projects[].links: Link[]` — every link of a project (code, live demo, paper…); `projects[].url` is the main one.
+* `item_links: {section: "certification"|"achievement"|"competition", item, label, url}[]` — a link for one entry
+  (e.g. a credential page), `item` being that entry's exact text.
+
+Generated documents expose `header.links[]`, `projects[].links[]` and `item_links{ entry text: Link[] }`; each link has
+`text`, what is printed (a short address in the header, the label next to a project).
+

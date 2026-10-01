@@ -1196,3 +1196,13 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .view-browser .watch-banner { top: auto; bottom: 10px; right: 10px; opacity: .85; }
 .view-browser .control-banner { top: auto; bottom: 14px; }
 .view-browser .bw-idle { position: absolute; inset: 0; }
+.paper-links a { color: #1d4ed8; font-size: .78rem; text-decoration: none; } .paper-links a:hover { text-decoration: underline; } .paper-item .row.space { gap: 12px; align-items: baseline; }
+.links-editor { display: flex; flex-direction: column; gap: 8px; }
+.link-row { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr) 32px; gap: 8px; align-items: center; animation: fadeUp .25s var(--ease) both; }
+.link-row.three { grid-template-columns: minmax(140px, 1.2fr) minmax(100px, 140px) minmax(0, 1.4fr) 32px; }
+.add-link { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: .82rem; }
+@media (max-width: 700px) { .link-row, .link-row.three { grid-template-columns: 1fr 32px; } .link-row .link-label { grid-column: 1 / -1; } }
+.ob-links { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 16px; background: var(--card-solid); border: 1px solid var(--line); animation: fadeUp .4s var(--ease) both; }
+.ob-links .field-label { display: inline-flex; align-items: center; gap: 6px; }
+.link-chip { text-decoration: none; color: var(--text); gap: 5px; transition: border-color .2s, background .2s; }
+.link-chip:hover { border-color: var(--accent); background: var(--accent-soft); }

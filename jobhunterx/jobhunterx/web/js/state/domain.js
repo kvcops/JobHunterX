@@ -115,7 +115,15 @@ export function normalizeProfile(p) {
   }
   out.experience = out.experience.map((e) => ({ role: '', company: '', location: '', start: '', end: '', employment_type: '', bullets: [], ...e, bullets: Array.isArray(e.bullets) ? e.bullets : [] }));
   out.education = out.education.map((e) => ({ degree: '', institution: '', start: '', end: '', grade: '', details: '', ...e }));
-  out.projects = out.projects.map((e) => ({ title: '', description: '', url: '', ...e, technologies: Array.isArray(e.technologies) ? e.technologies : [] }));
+  const links = (v) => (Array.isArray(v) ? v.filter((l) => l && typeof l === 'object').map((l) => ({ label: l.label || '', url: l.url || '' })) : []);
+  out.links = links(p.links);
+  out.item_links = Array.isArray(p.item_links) ? p.item_links.filter((l) => l && typeof l === 'object').map((l) => ({ section: '', item: '', label: '', url: '', ...l })) : [];
+  out.projects = out.projects.map((e) => {
+    const pl = links(e.links);
+    // older profiles have a single `url`; show it as the first link
+    if (e.url && !pl.some((l) => l.url.replace(/\/$/, '') === e.url.replace(/\/$/, ''))) pl.unshift({ label: '', url: e.url });
+    return { title: '', description: '', url: '', ...e, links: pl, technologies: Array.isArray(e.technologies) ? e.technologies : [] };
+  });
   return out;
 }
 

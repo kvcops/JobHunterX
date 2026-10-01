@@ -21,7 +21,8 @@ from jobhunterx.domain.documents import GeneratedDocument, Provenance, RewriteRe
 from jobhunterx.generation.content import (
     EducationItem,
     ExperienceItem,
-    ProjectItem,
+    item_links_for,
+    project_item,
     ResumeContent,
     header_for,
     profile_text,
@@ -106,13 +107,14 @@ async def generate_cv(profile: CandidateProfile, snapshot: CandidateSnapshot, *,
         summary=summary,
         skills=groups,
         experience=experience,
-        projects=[ProjectItem(title=p.title, description=p.description, technologies=p.technologies, url=p.url)
+        projects=[project_item(p)
                   for p in profile.projects],
         education=[EducationItem(**e.model_dump()) for e in profile.education],
         certifications=profile.certifications,
         achievements=profile.achievements,
         competitions=profile.competitions,
         languages=profile.languages,
+        item_links=item_links_for(profile),
     )
     rejected = [r for r in prov.rewrites if not r.accepted]
     if rejected:

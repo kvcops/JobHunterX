@@ -8,7 +8,7 @@ import {
 } from '../components/ui.js';
 import { ExperienceSummary } from '../components/experience.js';
 import { normalizeProfile, setIn, defaultSearchRequest } from '../state/domain.js';
-import { WORK_MODES, WORK_MODE_LABEL, humanize } from '../lib/format.js';
+import { WORK_MODES, WORK_MODE_LABEL, humanize, safeUrl } from '../lib/format.js';
 
 const STEPS = [
   { key: 'upload', label: 'Your resume', hint: 'One PDF, read once' },
@@ -84,6 +84,15 @@ function UploadStep() {
   </div>`;
 }
 
+function foundLinks(d) {
+  const out = [];
+  [['LinkedIn', d.linkedin], ['GitHub', d.github], ['Portfolio', d.portfolio]].forEach(([l, u]) => u && out.push({ where: '', label: l, url: u }));
+  (d.links || []).forEach((l) => l.url && out.push({ where: '', label: l.label || 'Link', url: l.url }));
+  (d.projects || []).forEach((pr) => (pr.links || []).forEach((l) => l.url && out.push({ where: pr.title, label: l.label || 'Link', url: l.url })));
+  (d.item_links || []).forEach((l) => l.url && out.push({ where: l.item, label: l.label || 'Link', url: l.url }));
+  return out;
+}
+
 function ReviewStep({ draft, set }) {
   const env = useStore((s) => s.profile.envelope);
   const extraction = useStore((s) => s.profile.upload.extraction);
@@ -102,6 +111,13 @@ function ReviewStep({ draft, set }) {
         placeholder="e.g. Hyderabad, Telangana, India" onInput=${(e) => set(['location'], e.currentTarget.value)} />
         <datalist id="ob-loc">${locSugg.map((l) => html`<option value=${l} />`)}</datalist>`}</${Field}>
     </div>
+    ${(() => {
+      const links = foundLinks(draft);
+      return links.length ? html`<div class="ob-links"><span class="field-label"><${Icon} name="external" size=${13} /> Links we found · ${links.length}</span>
+        <div class="chip-row">${links.map((l, i) => { const u = safeUrl(l.url); return u ? html`<a key=${i} class="chip link-chip" href=${u} target="_blank" rel="noopener noreferrer" title=${l.url}>
+          ${l.where ? html`<span class="muted">${l.where.length > 26 ? `${l.where.slice(0, 25)}…` : l.where} ·</span>` : null}${l.label}</a>` : null; })}</div>
+        <span class="field-hint">They go into your resume and CV next to the project or entry they belong to. Edit them any time in Profile.</span></div>` : null;
+    })()}
   </div>`;
 }
 

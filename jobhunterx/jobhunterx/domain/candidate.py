@@ -80,14 +80,66 @@ class Education(_Lenient):
     _s = field_validator("degree", "institution", "start", "end", "grade", "details", mode="before")(_coerce_str)
 
 
+class Link(_Lenient):
+    """A clickable link as it appeared in the resume (label = the text on the button/link, e.g. "Live demo")."""
+
+    label: str = ""
+    url: str = ""
+
+    _s = field_validator("label", "url", mode="before")(_coerce_str)
+
+
+def _coerce_links(v: Any) -> Any:
+    if v is None:
+        return []
+    if isinstance(v, (str, dict, BaseModel)):
+        v = [v]
+    out = []
+    for x in v if isinstance(v, list) else []:
+        if isinstance(x, str):
+            x = {"url": x}
+        if isinstance(x, (dict, BaseModel)):
+            out.append(x)
+    return out
+
+
+class ItemLink(_Lenient):
+    """A link that belongs to one certification / achievement / competition (e.g. a credential page)."""
+
+    section: str = ""      # certification | achievement | competition
+    item: str = ""         # the entry's text, as written in the profile
+    label: str = ""
+    url: str = ""
+
+    _s = field_validator("section", "item", "label", "url", mode="before")(_coerce_str)
+
+
 class Project(_Lenient):
     title: str = ""
     description: str = ""
-    url: str = ""
+    url: str = ""                                          # main link (kept for older profiles)
+    links: list[Link] = Field(default_factory=list)        # every link of the project: code, live demo, paper…
     technologies: list[str] = Field(default_factory=list)
 
     _s = field_validator("title", "description", "url", mode="before")(_coerce_str)
     _l = field_validator("technologies", mode="before")(_coerce_str_list)
+    _k = field_validator("links", mode="before")(_coerce_links)
+
+    def all_links(self) -> list[Link]:
+        """`url` + `links`, without duplicates or empty entries."""
+        out: list[Link] = []
+        index: dict[str, int] = {}
+        for link in ([Link(url=self.url)] if self.url else []) + list(self.links):
+            key = link.url.strip().rstrip("/").lower()
+            if not key:
+                continue
+            if key in index:
+                if link.label and not out[index[key]].label:      # keep the text that was on the button
+                    out[index[key]] = Link(label=link.label, url=out[index[key]].url)
+                continue
+            index[key] = len(out)
+            out.append(Link(label=link.label, url=link.url.strip()))
+        return out
 
 
 class QAMemory(_Lenient):
@@ -183,6 +235,8 @@ class CandidateProfile(_Lenient):
     linkedin: str = ""
     github: str = ""
     portfolio: str = ""
+    links: list[Link] = Field(default_factory=list)        # other profiles shown in the header: blog, Kaggle, Scholar…
+    item_links: list[ItemLink] = Field(default_factory=list)
     summary: str = ""
     suggested_role: str = ""
     relevant_experience: str = ""
@@ -204,6 +258,13 @@ class CandidateProfile(_Lenient):
     )(_coerce_str)
     _l = field_validator("languages", "skills", "certifications", "competitions", "achievements", mode="before")(_coerce_str_list)
 
+    _k = field_validator("links", mode="before")(_coerce_links)
+
+    @field_validator("item_links", mode="before")
+    @classmethod
+    def _item_links(cls, v: Any) -> Any:
+        return [x for x in v if isinstance(x, (dict, BaseModel))] if isinstance(v, list) else []
+
     @field_validator("experience", "education", "projects", mode="before")
     @classmethod
     def _list_of_dicts(cls, v: Any) -> Any:
@@ -221,7 +282,15 @@ class CandidateProfile(_Lenient):
     def content_hash(self) -> str:
         """Stable hash of the profile — used to detect stale match scores
         and stale generated documents."""
-        blob = json.dumps(self.model_dump(mode="json"), sort_keys=True)
+        data = self.model_dump(mode="json")
+        # Fields added later are left out while empty, so older profiles keep their hash (documents stay "current").
+        for key in ("links", "item_links"):
+            if not data.get(key):
+                data.pop(key, None)
+        for proj in data.get("projects", []):
+            if not proj.get("links"):
+                proj.pop("links", None)
+        blob = json.dumps(data, sort_keys=True)
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
     def is_empty(self) -> bool:

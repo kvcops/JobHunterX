@@ -6,7 +6,7 @@
   <td><div class="name">{{ c.header.name }}</div>{% if c.headline %}<div class="headline">{{ c.headline }}</div>{% endif %}</td>
   <td class="contact" style="text-align:right">
     {{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}<br>
-    {% for l in c.header.links %}<a href="{{ l.url }}">{{ l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+    {% for l in c.header.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
   </td>
 </tr></table>
 {% if c.summary %}<div class="section"><div class="section-title">Summary</div><div>{{ c.summary }}</div></div>{% endif %}
@@ -20,7 +20,8 @@
 {% endfor %}</div>{% endif %}
 {% if c.projects %}<div class="section"><div class="section-title">Projects</div>
 {% for p in c.projects[:max_projects] %}
-<div><span class="row-title">{{ p.title }}</span>{% if p.technologies %} <span class="row-sub">· {{ p.technologies | join(', ') }}</span>{% endif %}</div>
+<table><tr><td><span class="row-title">{{ p.title }}</span>{% if p.technologies %} <span class="row-sub">· {{ p.technologies | join(', ') }}</span>{% endif %}</td>
+{% if p.links %}<td class="right links">{% for l in p.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</td>{% endif %}</tr></table>
 {% if p.description %}<div style="margin-bottom: {{ margin_exp }}">{{ p.description }}</div>{% endif %}
 {% endfor %}</div>{% endif %}
 {% if c.education %}<div class="section"><div class="section-title">Education</div>
@@ -28,6 +29,7 @@
 <table><tr><td><span class="row-title">{{ e.degree }}</span>{% if e.institution %} — {{ e.institution }}{% endif %}{% if e.grade %} <span class="row-sub">({{ e.grade }})</span>{% endif %}</td>
 <td class="right">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}</td></tr></table>
 {% endfor %}</div>{% endif %}
-{% if c.certifications %}<div class="section"><div class="section-title">Certifications</div><div>{{ c.certifications | join(' · ') }}</div></div>{% endif %}
-{% if c.achievements %}<div class="section"><div class="section-title">Achievements</div><ul>{% for a in c.achievements[:max_achievements] %}<li>{{ a }}</li>{% endfor %}</ul></div>{% endif %}
+{% set il = c.item_links or {} %}
+{% if c.certifications %}<div class="section"><div class="section-title">Certifications</div><div>{% for x in c.certifications %}{% if il.get(x) %}<a href="{{ il[x][0].url }}">{{ x }}</a>{% else %}{{ x }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div></div>{% endif %}
+{% if c.achievements %}<div class="section"><div class="section-title">Achievements</div><ul>{% for a in c.achievements[:max_achievements] %}<li>{{ a }}{% for l in il.get(a, [])[:1] %} · <a href="{{ l.url }}">{{ l.text or l.label }}</a>{% endfor %}</li>{% endfor %}</ul></div>{% endif %}
 </body></html>
