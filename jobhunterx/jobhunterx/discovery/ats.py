@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 from jobhunterx.config.logging import get_logger
 from jobhunterx.discovery.htmltext import html_to_text
-from jobhunterx.discovery.net import fetch_json
+from jobhunterx.discovery import net
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, FieldCheck, JobPosting, Salary, SourceRef
 from jobhunterx.intelligence.text import parse_iso_datetime
@@ -136,10 +136,10 @@ class Greenhouse(AtsAdapter):
         return ref
 
     async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
-        data, res = await fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true")
+        data, res = await net.fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true")
         if not isinstance(data, dict):
             return None
-        meta, _ = await fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{token}")
+        meta, _ = await net.fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{token}")
         company = (meta or {}).get("name") or token
         out = []
         for it in data.get("jobs") or []:
@@ -155,7 +155,7 @@ class Greenhouse(AtsAdapter):
     async def check(self, ref: AtsRef) -> tuple[Liveness, Optional[JobPosting]]:
         if not ref.job_id:
             return "unknown", None
-        data, res = await fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{ref.token}/jobs/{ref.job_id}")
+        data, res = await net.fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{ref.token}/jobs/{ref.job_id}")
         if res.status == 404:
             return "gone", None
         if not isinstance(data, dict):
@@ -199,7 +199,7 @@ class Lever(AtsAdapter):
         )
 
     async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
-        data, _ = await fetch_json(f"https://api.lever.co/v0/postings/{token}?mode=json")
+        data, _ = await net.fetch_json(f"https://api.lever.co/v0/postings/{token}?mode=json")
         if not isinstance(data, list):
             return None
         return [self._to_posting(token, it) for it in data if isinstance(it, dict)]
@@ -207,7 +207,7 @@ class Lever(AtsAdapter):
     async def check(self, ref: AtsRef) -> tuple[Liveness, Optional[JobPosting]]:
         if not ref.job_id:
             return "unknown", None
-        data, res = await fetch_json(f"https://api.lever.co/v0/postings/{ref.token}/{ref.job_id}?mode=json")
+        data, res = await net.fetch_json(f"https://api.lever.co/v0/postings/{ref.token}/{ref.job_id}?mode=json")
         if res.status == 404:
             return "gone", None
         if not isinstance(data, dict):
@@ -225,7 +225,7 @@ class Ashby(AtsAdapter):
     )
 
     async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
-        data, _ = await fetch_json(f"https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true")
+        data, _ = await net.fetch_json(f"https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=true")
         if not isinstance(data, dict):
             return None
         out = []
@@ -270,7 +270,7 @@ class SmartRecruiters(AtsAdapter):
     async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
         out, offset = [], 0
         while offset < 500:
-            data, _ = await fetch_json(f"https://api.smartrecruiters.com/v1/companies/{token}/postings?limit=100&offset={offset}")
+            data, _ = await net.fetch_json(f"https://api.smartrecruiters.com/v1/companies/{token}/postings?limit=100&offset={offset}")
             if not isinstance(data, dict):
                 return None if not out else out
             chunk = data.get("content") or []
@@ -283,7 +283,7 @@ class SmartRecruiters(AtsAdapter):
     async def check(self, ref: AtsRef) -> tuple[Liveness, Optional[JobPosting]]:
         if not ref.job_id:
             return "unknown", None
-        data, res = await fetch_json(f"https://api.smartrecruiters.com/v1/companies/{ref.token}/postings/{ref.job_id}")
+        data, res = await net.fetch_json(f"https://api.smartrecruiters.com/v1/companies/{ref.token}/postings/{ref.job_id}")
         if res.status == 404:
             return "gone", None
         if not isinstance(data, dict):
@@ -301,7 +301,7 @@ class Recruitee(AtsAdapter):
     url_patterns = (r"(?P<token>[\w\-]+)\.recruitee\.com/o/(?P<job>[\w\-]+)", r"(?P<token>[\w\-]+)\.recruitee\.com")
 
     async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
-        data, _ = await fetch_json(f"https://{token}.recruitee.com/api/offers/")
+        data, _ = await net.fetch_json(f"https://{token}.recruitee.com/api/offers/")
         if not isinstance(data, dict):
             return None
         out = []
@@ -324,7 +324,7 @@ class Workable(AtsAdapter):
     url_patterns = (r"apply\.workable\.com/(?P<token>[\w\-]+)/j/(?P<job>[A-Z0-9]+)", r"apply\.workable\.com/(?P<token>[\w\-]+)/?(?:$|\?)")
 
     async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
-        data, _ = await fetch_json(f"https://apply.workable.com/api/v1/widget/accounts/{token}?details=true")
+        data, _ = await net.fetch_json(f"https://apply.workable.com/api/v1/widget/accounts/{token}?details=true")
         if not isinstance(data, dict):
             return None
         company = data.get("name") or token

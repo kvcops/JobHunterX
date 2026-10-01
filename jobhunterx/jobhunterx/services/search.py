@@ -119,16 +119,25 @@ def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
     return best
 
 
-async def _expand_boards(refs: list, snap: CandidateSnapshot, include_remote: bool) -> list[JobPosting]:
-    """For each discovered ATS board, pull its open jobs and keep the relevant ones."""
+async def _expand_boards(refs: list, snap: CandidateSnapshot, include_remote: bool,
+                         skip_llm: set[str]) -> list[JobPosting]:
+    """For each discovered ATS board, pull its open jobs and keep the relevant ones.
+
+    Jobs outside the candidate's locations are kept (so the user can see why
+    they were excluded) but marked to skip LLM analysis — their location
+    already makes them incompatible, so spending a model call would be waste.
+    """
     out: list[JobPosting] = []
 
     async def one(ref):
         jobs = await ats.ADAPTERS[ref.kind].list_jobs(ref.token)
         if not jobs:
             return []
-        keep = [j for j in jobs if _location_prefilter(j, snap, include_remote)]
-        keep = [(j, _title_relevance(j, snap)) for j in keep]
+        for j in jobs:
+            j.id = j.id or str(uuid.uuid4())
+            if not _location_prefilter(j, snap, include_remote):
+                skip_llm.add(j.id)
+        keep = [(j, _title_relevance(j, snap)) for j in jobs]
         keep = [jr for jr in keep if jr[1] > 0]
         keep.sort(key=lambda jr: -jr[1])
         return [j for j, _ in keep[:BOARD_JOBS_PER_BOARD]]
@@ -180,7 +189,8 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             posting_leads.append(lead)
             if ref:
                 boards.setdefault((ref.kind, ref.token.lower()), ref.model_copy(update={"job_id": ""}))
-    board_jobs = await _expand_boards(list(boards.values())[:12], snap, scope.include_remote)
+    skip_llm: set[str] = set()
+    board_jobs = await _expand_boards(list(boards.values())[:12], snap, scope.include_remote, skip_llm)
     await run.stage("discover", "done", f"{len(leads)} search results · {len(boards)} employer job boards")
 
     # 4. Normalize ------------------------------------------------------------
@@ -230,7 +240,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
 
         await asyncio.gather(*(check(p) for p in chunk))
         for p in chunk:
-            use_llm = llm_budget > 0 and p.validation.status not in ("invalid",)
+            use_llm = llm_budget > 0 and p.validation.status not in ("invalid",) and p.id not in skip_llm
             method = await job_ai.understand_job(p, snap, use_llm=use_llm)
             if method == "llm":
                 llm_budget -= 1

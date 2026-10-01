@@ -21,7 +21,8 @@ from urllib.parse import urljoin, urlparse
 from jobhunterx.config.logging import get_logger
 from jobhunterx.discovery import ats
 from jobhunterx.discovery.htmltext import html_to_text
-from jobhunterx.discovery.net import FetchResult, fetch
+from jobhunterx.discovery import net
+from jobhunterx.discovery.net import FetchResult
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import FieldCheck, JobPosting, Salary, SourceRef
 from jobhunterx.intelligence.text import parse_iso_datetime
@@ -169,7 +170,7 @@ async def posting_from_url(url: str, hint_title: str = "", hint_snippet: str = "
             p.validation.notes.append(f"No longer listed on the {ref.kind.title()} board.")
             return p, None
 
-    res = await fetch(url)
+    res = await net.fetch(url)
     if not res.ok:
         return None, res
     html = res.text

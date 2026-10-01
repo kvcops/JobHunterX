@@ -1,0 +1,97 @@
+import { html, useState } from '../lib/preact.js';
+import { useStore } from '../state/store.js';
+import { generateCv, loadDocuments, loadDocument, deleteDocument, navigate } from '../actions.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, Field } from '../components/ui.js';
+import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
+import { api } from '../lib/api.js';
+import { genKey } from '../state/domain.js';
+
+function ResumePreview({ c }) {
+  return html`<article class="paper">
+    <header class="paper-head"><h2>${c.header.name}</h2>${c.headline ? html`<div class="paper-sub">${c.headline}</div>` : null}
+      <div class="paper-contact">${[c.header.email, c.header.phone, c.header.location].filter(Boolean).join(' · ')}
+        ${c.header.links.map((l) => { const u = safeUrl(l.url); return u ? html` · <a href=${u} target="_blank" rel="noopener noreferrer">${l.label}</a>` : null; })}</div></header>
+    ${c.summary ? html`<section><h3>Summary</h3><p>${c.summary}</p></section>` : null}
+    ${c.skills.length ? html`<section><h3>Skills</h3>${c.skills.map((g) => html`<p><strong>${g.category}:</strong> ${g.items.join(', ')}</p>`)}</section>` : null}
+    ${c.experience.length ? html`<section><h3>Experience</h3>${c.experience.map((e) => html`<div class="paper-item">
+      <div class="row space"><strong>${e.role}${e.company ? ` — ${e.company}` : ''}</strong><span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}</span></div>
+      <ul>${e.bullets.map((b) => html`<li>${b}</li>`)}</ul></div>`)}</section>` : null}
+    ${c.projects.length ? html`<section><h3>Projects</h3>${c.projects.map((p) => html`<div class="paper-item"><strong>${p.title}</strong>
+      ${p.technologies.length ? html` <span class="muted small">· ${p.technologies.join(', ')}</span>` : null}<p>${p.description}</p></div>`)}</section>` : null}
+    ${c.education.length ? html`<section><h3>Education</h3>${c.education.map((e) => html`<p><strong>${e.degree}</strong>${e.institution ? ` — ${e.institution}` : ''} <span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}${e.grade ? ` · ${e.grade}` : ''}</span></p>`)}</section>` : null}
+    ${['certifications', 'achievements', 'competitions', 'languages'].map((k) => c[k] && c[k].length ? html`<section><h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${c[k].map((x) => html`<li>${x}</li>`)}</ul></section>` : null)}
+  </article>`;
+}
+
+function LetterPreview({ c }) {
+  return html`<article class="paper"><p>${c.greeting}</p>${c.paragraphs.map((p) => html`<p>${p}</p>`)}<p>${c.closing}<br />${c.signature}</p></article>`;
+}
+
+function Provenance({ doc }) {
+  const p = doc.provenance;
+  const [all, setAll] = useState(false);
+  const rewrites = all ? p.rewrites : p.rewrites.slice(0, 6);
+  return html`<section class="card"><h3 class="sec-title">What changed and why</h3>
+    <p class="muted small">Every AI edit is fact-checked against your profile. Edits that add numbers, tools or claims you never wrote are rejected and your original text is kept.</p>
+    ${p.warnings.map((w) => html`<${Notice} tone="warning">${w}</${Notice}>`)}
+    ${doc.kind === 'resume' && (p.omitted_projects.length || p.omitted_experience.length) ? html`<p class="muted small">Left out to stay on one page (less relevant to this job): ${p.omitted_projects.length} project(s).</p>` : null}
+    ${rewrites.length ? html`<ul class="rewrites">${rewrites.map((r) => html`<li class=${r.accepted ? 'ok' : 'rejected'}>
+      <${Badge} tone=${r.accepted ? 'success' : 'danger'}>${r.accepted ? 'Accepted' : 'Rejected'}</${Badge}> <span class="muted small">${r.section}</span>
+      ${r.original ? html`<div class="diff-old">${r.original}</div>` : null}<div class="diff-new">${r.rewritten}</div>
+      ${r.reason ? html`<div class="muted small">${r.reason}</div>` : null}</li>`)}</ul>` : html`<p class="muted">No AI rewrites — your original text was used.</p>`}
+    ${p.rewrites.length > 6 ? html`<button type="button" class="link-btn" onClick=${() => setAll(!all)}>${all ? 'Show fewer' : `Show all ${p.rewrites.length}`}</button>` : null}
+    <p class="muted small">${p.llm_model ? `Written with ${p.llm_model} · ${p.llm_calls} AI call(s)` : 'No AI used'}</p>
+  </section>`;
+}
+
+function DocumentDetail({ docId }) {
+  const entry = useStore((s) => s.docDetails[docId]);
+  if (!entry || entry.status === 'loading') return html`<${Skeleton} lines=${8} />`;
+  if (entry.status === 'error') return html`<${ErrorBox} message=${entry.error} onRetry=${() => loadDocument(docId)} />`;
+  const d = entry.doc;
+  return html`<div class="stack">
+    <div class="row space wrap"><div><button type="button" class="link-btn" onClick=${() => navigate('#/documents')}><${Icon} name="back" size=${14} /> All documents</button>
+      <h2>${d.title}</h2><div class="muted small">${DOC_KIND_LABEL[d.kind]} · ${relTime(d.created_at)} · ${d.page_count} page(s)
+        ${d.job ? html` · for <a href=${`#/discover/job/${d.job_id}`}>${d.job.title} @ ${d.job.company}</a>` : ''}</div></div>
+      <div class="row gap">${d.has_pdf ? html`<a class="btn btn-primary" href=${api.documentPdfUrl(d.id)} download><${Icon} name="download" size=${16} /><span>Download PDF</span></a>` : null}
+        <${Button} icon="trash" onClick=${() => deleteDocument(d.id)}>Delete</${Button}></div></div>
+    ${d.stale ? html`<${Notice} tone="warning">Your profile changed after this was generated. Regenerate it to include the latest information.</${Notice}>` : null}
+    <div class="doc-layout">${d.kind === 'cover_letter' ? html`<${LetterPreview} c=${d.content} />` : html`<${ResumePreview} c=${d.content} />`}<${Provenance} doc=${d} /></div>
+  </div>`;
+}
+
+function CvGenerator() {
+  const g = useStore((s) => s.gen[genKey(null, 'cv')]);
+  const tracks = useStore((s) => (s.profile.envelope && s.profile.envelope.snapshot ? s.profile.envelope.snapshot.role_families.map((f) => f.label) : []));
+  const [focus, setFocus] = useState('');
+  return html`<section class="card cv-gen">
+    <div class="grow"><h2>Comprehensive CV</h2>
+      <p class="muted">Your full career on multiple pages — every role, project, certification and achievement. Not tailored to one job (use a job's Resume for that).</p>
+      <${Field} label="Optional focus">${(id) => html`<input id=${id} class="input" list="cv-tracks" value=${focus} placeholder="Whole career" onInput=${(e) => setFocus(e.currentTarget.value)} />
+        <datalist id="cv-tracks">${tracks.map((t) => html`<option value=${t} />`)}</datalist>`}</${Field}>
+      ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}</div>
+    <${Button} variant="primary" icon=${g && g.status === 'failed' ? 'refresh' : 'spark'} busy=${g && g.status === 'generating'} onClick=${() => generateCv(focus.trim())}>
+      ${g && g.status === 'generating' ? 'Generating…' : g && g.status === 'failed' ? 'Retry' : 'Generate CV'}</${Button}>
+  </section>`;
+}
+
+export function DocumentsView() {
+  const docs = useStore((s) => s.docs);
+  const route = useStore((s) => s.route);
+  if (route.docId) return html`<div class="page"><${DocumentDetail} docId=${route.docId} /></div>`;
+  const groups = ['resume', 'cv', 'cover_letter'].map((k) => [k, docs.items.filter((d) => d.kind === k)]);
+  return html`<div class="page">
+    <${CvGenerator} />
+    ${docs.status === 'error' ? html`<${ErrorBox} message=${docs.error} onRetry=${loadDocuments} />` : null}
+    ${docs.status === 'loading' ? html`<${Skeleton} lines=${4} />` : null}
+    ${docs.status !== 'loading' && !docs.items.length ? html`<${EmptyState} icon="doc" title="No documents yet">
+      Open a job and click “Generate” to create a tailored resume or cover letter, or generate your CV above.</${EmptyState}>` : null}
+    ${groups.map(([kind, items]) => items.length ? html`<section key=${kind}><h2 class="group-title">${DOC_KIND_LABEL[kind]}s</h2>
+      <div class="doc-grid">${items.map((d) => html`<a class="card doc-card" href=${`#/documents/${d.id}`} key=${d.id}>
+        <div class="row space"><${Icon} name="doc" /><span class="muted small">${relTime(d.created_at)}</span></div>
+        <strong>${d.job ? `${d.job.title}` : d.title}</strong>
+        <span class="muted small">${d.job ? d.job.company : d.focus || 'Whole career'} · ${d.page_count} page(s)</span>
+        <div class="row gap wrap">${d.stale ? html`<${Badge} tone="warning">Profile changed</${Badge}>` : null}${d.warnings_count ? html`<${Badge} tone="info">${d.warnings_count} note(s)</${Badge}>` : null}</div>
+      </a>`)}</div></section>` : null)}
+  </div>`;
+}

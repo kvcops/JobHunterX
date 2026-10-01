@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from jobhunterx.discovery import ats
-from jobhunterx.discovery.net import fetch
+from jobhunterx.discovery import net
 from jobhunterx.domain.job import FieldCheck, JobPosting
 from jobhunterx.intelligence.policy import get_policy
 
@@ -28,7 +28,7 @@ async def check_liveness(job: JobPosting) -> tuple[str, str]:
     url = job.apply_url or job.canonical_url
     if not url:
         return "unknown", "No URL"
-    res = await fetch(url, timeout=10)
+    res = await net.fetch(url, timeout=10)
     if res.status in (404, 410):
         return "gone", f"HTTP {res.status}"
     if res.ok:
@@ -44,6 +44,9 @@ def finalize(job: JobPosting, liveness: Optional[tuple[str, str]] = None, now: O
     checks = v.checks
     v.checked_at = now
 
+    if liveness is None and "url_reachable" in checks:   # re-finalize: reuse earlier evidence
+        prev = checks["url_reachable"]
+        liveness = (prev.value or "unknown", prev.evidence)
     if liveness:
         state, ev = liveness
         checks["url_reachable"] = FieldCheck(status={"live": "verified", "gone": "failed"}.get(state, "unknown"),

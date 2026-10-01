@@ -165,6 +165,8 @@ def _location_check(snapshot: CandidateSnapshot, job: JobPosting) -> tuple[Const
         return res("warn", f"In {label} (abroad) — you are open to international roles.", 0.4)
     if domestic is False:
         return res("fail", f"In {label} (outside {snapshot.home_country or 'your country'}) — you are not open to international roles.", 0.0)
+    if domestic is None:
+        return res("fail", f"In {label} — not one of your locations.", 0.0)
     return res("fail", f"In {label} — not one of your locations and you are not open to relocating.", 0.0)
 
 
@@ -410,7 +412,8 @@ def assess(
     mult = max(pol.min_warn_multiplier, pol.warn_multiplier ** len(warns))
     score = raw * mult
     if fails:
-        score = min(score, pol.hard_fail_score_cap)
+        # Scale into [0, cap] so incompatible jobs stay ordered by how close they were.
+        score = score * pol.hard_fail_score_cap / 100
         verdict = "incompatible"
     elif score >= pol.strong_at:
         verdict = "strong"
