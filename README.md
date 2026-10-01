@@ -98,24 +98,32 @@
 
 ## 🖥️ Dashboard Preview
 
-A calm, light-first interface: warm off-white canvas with a soft pastel wash, white frosted cards, a floating
-sidebar, black pill actions, one warm orange accent and an elegant serif accent word in each heading. Dark theme is one click away.
+A calm, light-first **app-style** interface: warm off-white canvas with a soft pastel wash, white cards, a floating
+sidebar, black pill actions, one warm orange accent and an elegant serif accent word in each heading.
+Every screen fits the window — lists, details and editors scroll inside their own panes, so you never scroll a long page.
+Dark theme is one click away.
 
 <div align="center">
-<img src="assets/ui_discover.png" alt="Discover — search command center" width="90%"/>
-<br/><sub><i>Discover — your profile summary, search command center and live 9-stage discovery pipeline</i></sub>
+<img src="assets/ui_onboarding.png" alt="One-time onboarding" width="90%"/>
+<br/><sub><i>First run — a one-time, 4-step setup: upload your resume → check what was understood → set preferences → first search</i></sub>
 <br/><br/>
-<img src="assets/ui_results.png" alt="Ranked, explained matches" width="90%"/>
-<br/><sub><i>Ranked matches — verdict, honest verification badge, required-skill coverage and experience fit on every card</i></sub>
+<img src="assets/ui_onboarding_review.png" alt="What we understood" width="90%"/>
+<br/><sub><i>"Here's how we see you" — computed experience, level, career tracks and verified skills, editable before you continue</i></sub>
+<br/><br/>
+<img src="assets/ui_discover.png" alt="Discover — mission control" width="90%"/>
+<br/><sub><i>Discover — search and ranked results on the left, live mission control (9-stage pipeline, counters) on the right</i></sub>
 <br/><br/>
 <img src="assets/ui_match.png" alt="Why this score" width="90%"/>
-<br/><sub><i>"Why this score" — hard requirements, weighted components, strengths, gaps and unknowns</i></sub>
-<br/><br/>
-<img src="assets/ui_profile.png" alt="How JobHunterX understands you" width="90%"/>
-<br/><sub><i>Profile — how JobHunterX understands you: computed experience, level, career tracks and skills with evidence</i></sub>
+<br/><sub><i>Select a job and it opens beside the list — hard requirements, weighted score, requirements, verification and the application kit</i></sub>
 <br/><br/>
 <img src="assets/ui_documents.png" alt="Fact-checked resume" width="90%"/>
-<br/><sub><i>Documents — job-specific resume with every AI edit shown as accepted or rejected by the fact-checker</i></sub>
+<br/><sub><i>Documents — library on the left, live preview on the right, plus "What changed": every AI edit accepted or rejected by the fact-checker</i></sub>
+<br/><br/>
+<img src="assets/ui_profile.png" alt="How JobHunterX understands you" width="90%"/>
+<br/><sub><i>Profile — understanding on the left, a tabbed editor on the right</i></sub>
+<br/><br/>
+<img src="assets/ui_tracker.png" alt="Application tracker" width="90%"/>
+<br/><sub><i>Tracker — a horizontal board from Saved to Offer; change a status to move a card</i></sub>
 <br/><br/>
 <img src="assets/ui_mobile.png" alt="Mobile" width="280"/>
 <br/><sub><i>Fully responsive — on phones the sidebar becomes a floating bottom bar</i></sub>
@@ -125,11 +133,13 @@ sidebar, black pill actions, one warm orange accent and an elegant serif accent 
 
 | | |
 |---|---|
-| **Design system** | Quiet white cards on a warm canvas, a single orange accent, bundled fonts (Geist · Instrument Serif · Geist Mono — no CDN at runtime), light + dark themes, reduced-motion support |
-| **Live pipeline** | Every search shows its 9 stages on a progress track with live counters (recommended, analysed, duplicates merged, not a fit) |
+| **Flow** | Lifecycle-driven: boot splash → one-time onboarding (resumes where you left off after a reload) → app. Sidebar is ordered like the work: Profile → Discover → Documents → Tracker |
+| **No long scrolling** | Split workspaces (list ⇄ detail, library ⇄ preview, nav ⇄ settings); options live in popovers, sections in tabs |
+| **Motion** | Signature orbit loader for live search, resume "scan" animation while reading, springy sliding tab and sidebar indicators, count-up numbers, self-drawing score rings, staggered list entrances, glow on freshly streamed jobs, shimmer skeletons, page transitions via the View Transitions API (with CSS fallback) |
+| **Design system** | Quiet white cards on a warm canvas, a single orange accent, bundled fonts (Geist · Instrument Serif · Geist Mono — no CDN at runtime), light + dark themes, full `prefers-reduced-motion` support |
 | **Explainable cards** | Thin score ring coloured by verdict, verification badge, skills matched x/y, experience fit, source and freshness |
-| **Reliable state** | One central store; results from an old search can never leak into a new one; late responses are ignored; failed saves roll back |
-| **Accessible** | Keyboard navigation, focus-trapped dialogs and drawer (Esc closes), ARIA live regions for progress and toasts |
+| **Reliable state** | One central store with an explicit app phase; results from an old search can never leak into a new one; late responses are ignored; failed saves roll back |
+| **Accessible** | Keyboard navigation (arrow keys in tabs, Esc closes details, popovers and dialogs), focus-trapped dialogs, ARIA live regions for progress and toasts |
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>

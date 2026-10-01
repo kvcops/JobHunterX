@@ -97,15 +97,16 @@ def test_search_stream_and_explanations(page, server):
 def test_detail_shows_breakdown_and_honest_unknowns(page, server):
     run_search(page, server)
     page.locator(".job-main", has_text="AI Engineer").first.click()
-    drawer = page.locator(".drawer")
+    drawer = page.locator(".detail-pane")
     expect(drawer.get_by_text("Hard requirements", exact=True)).to_be_visible()
     expect(drawer.get_by_text("How the score was built")).to_be_visible()
     drawer.get_by_role("tab", name="Verification").click()
     expect(drawer.locator(".checks")).to_contain_text("Confirmed on company ATS")
     row = drawer.locator("tr", has_text="Salary")
     expect(row).to_contain_text("Unknown")
-    page.keyboard.press("Escape")
-    expect(drawer).to_have_count(0)
+    drawer.get_by_role("button", name="Close").click()
+    expect(drawer.locator(".detail")).to_have_count(0)
+    expect(drawer.locator(".mission")).to_be_visible()      # back to the search overview
 
 
 def test_save_failure_rolls_back_and_double_click_sends_one_request(page, server):
@@ -181,7 +182,8 @@ def test_out_of_order_list_responses(page, server):
 def test_resume_is_associated_with_its_job_and_failure_can_retry(page, server):
     run_search(page, server)
     page.locator(".job-main", has_text="AI Engineer").first.click()
-    drawer = page.locator(".drawer")
+    drawer = page.locator(".detail-pane")
+    drawer.get_by_role("tab", name="Application kit").click()
     state = {"fail": True}
 
     def maybe_fail(route):
@@ -199,18 +201,19 @@ def test_resume_is_associated_with_its_job_and_failure_can_retry(page, server):
     drawer.get_by_role("button", name="Open", exact=True).click()
     expect(page.locator(".paper")).to_contain_text("Asha Rao")
     expect(page.get_by_text("for AI Engineer @ Acme")).to_be_visible()
+    page.get_by_role("tab", name="What changed").click()
     expect(page.get_by_text("Rejected").first).to_be_visible()      # fact-check visible in provenance
 
 
 def test_cv_is_separate_from_resume(page, server):
     page.goto(f"{server}/#/documents")
-    page.get_by_role("button", name="Generate CV").click()
+    page.get_by_role("button", name="Generate CV").click()                     # opens the options popover
+    page.get_by_role("dialog", name="Generate CV").get_by_role("button", name="Generate CV").click()
     expect(page.get_by_text("Download PDF", exact=True)).to_be_visible(timeout=30000)
     paper = page.locator(".paper")
     expect(paper).to_contain_text("Orbit Analytics")        # internship included in the comprehensive CV
     expect(paper).to_contain_text("VisionSort")
-    page.get_by_role("button", name="All documents").click()
-    expect(page.get_by_role("heading", name="CVs")).to_be_visible()
+    expect(page.locator(".doc-library")).to_contain_text("CVs")
 
 
 def test_untrusted_text_is_rendered_as_text(page, server):
@@ -225,6 +228,20 @@ def test_untrusted_text_is_rendered_as_text(page, server):
     expect(page.get_by_text("<img src=x onerror=window.__pwned=1>")).to_be_visible()
     assert page.evaluate("window.__pwned") is None
     assert page.locator(".job-card img").count() == 0
+
+
+def test_onboarding_resumes_at_saved_step_and_advances(page, server):
+    page.goto(f"{server}/")
+    page.evaluate("localStorage.setItem('jhx-onboarding', 'review')")
+    page.reload()
+    expect(page.get_by_role("heading", name="Here's how we see you")).to_be_visible()
+    page.get_by_role("button", name="Looks right").click()
+    expect(page.get_by_role("heading", name="Where do you want to go?")).to_be_visible()
+    page.get_by_role("button", name="Continue").click()
+    page.get_by_role("button", name="Explore first").click()
+    expect(page.locator(".view-discover")).to_be_visible()
+    assert page.evaluate("localStorage.getItem('jhx-onboarding')") is None
+    assert not page.errors
 
 
 def test_mobile_layout_has_no_horizontal_scroll(browser, server):

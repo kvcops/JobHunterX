@@ -8,13 +8,21 @@ import {
 } from './state/store.js';
 import { matchesList, sortIds, summaryFromDetail, SUMMARY_SAFE_FIELDS, genKey } from './state/domain.js';
 
+const prefersReducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** Run a state change inside a View Transition when the browser supports it (pure enhancement). */
+export function withTransition(apply) {
+  if (!document.startViewTransition || prefersReducedMotion() || document.hidden) { apply(); return; }
+  // Preact renders on a microtask after the store changes; resolve after it so the new DOM is captured.
+  document.startViewTransition(() => { apply(); return new Promise((r) => setTimeout(r, 0)); });
+}
+
 // ---------------------------------------------------------------------------
 // Toasts, confirm, activity
 // ---------------------------------------------------------------------------
 let toastSeq = 0;
 export function toast(message, tone = 'info', ms = 4500) {
   const id = ++toastSeq;
-  setState((s) => ({ ...s, toasts: [...s.toasts, { id, message, tone }].slice(-4) }));
+  setState((s) => ({ ...s, toasts: [...s.toasts, { id, message, tone, ms }].slice(-4) }));
   setTimeout(() => dismissToast(id), ms);
 }
 export function dismissToast(id) {
@@ -46,7 +54,9 @@ export function navigate(hash) {
 export function initRouting() {
   window.addEventListener('hashchange', () => {
     const route = parseHash();
-    setState((s) => ({ ...s, route }));
+    const prev = getState().route;
+    const apply = () => setState((s) => ({ ...s, route }));
+    if (prev.page !== route.page && getState().app.phase === 'ready') withTransition(apply); else apply();
     onRoute(route);
   });
   onRoute(getState().route);
@@ -107,6 +117,51 @@ function removeJobs(ids) {
 }
 
 // ---------------------------------------------------------------------------
+// App lifecycle & one-time onboarding
+// ---------------------------------------------------------------------------
+// The step is remembered so a reload in the middle of setup resumes where the user was.
+const ONB_KEY = 'jhx-onboarding';
+const ONB_STEPS = ['upload', 'review', 'prefs', 'launch'];
+function readOnb() { try { return localStorage.getItem(ONB_KEY); } catch { return null; } }
+function writeOnb(v) { try { if (v) localStorage.setItem(ONB_KEY, v); else localStorage.removeItem(ONB_KEY); } catch { /* ignore */ } }
+
+export function setOnboardingStep(step) {
+  if (!ONB_STEPS.includes(step)) return;
+  const cur = getState().onboarding.step;
+  writeOnb(step);
+  setSlice('onboarding', { step, dir: ONB_STEPS.indexOf(step) >= ONB_STEPS.indexOf(cur) ? 1 : -1 });
+}
+/** Leave setup. With a request, the first search starts immediately. */
+export function finishOnboarding({ search = null, to = '#/discover' } = {}) {
+  writeOnb(null);
+  withTransition(() => {
+    setSlice('app', { phase: 'ready' });
+    if (window.location.hash !== to) window.location.hash = to;
+  });
+  if (search) startSearch(search);
+}
+function decidePhase() {
+  const p = getState().profile;
+  if (p.status === 'error' && !p.envelope) { setSlice('app', { phase: 'error', error: p.error }); return; }
+  const hasProfile = !!(p.envelope && p.envelope.profile);
+  const pending = readOnb();
+  if (!hasProfile) {
+    setSlice('onboarding', { step: 'upload', dir: 1 });
+    setSlice('app', { phase: 'onboarding', error: null });
+  } else if (pending && pending !== 'upload' && ONB_STEPS.includes(pending)) {
+    setSlice('onboarding', { step: pending, dir: 1 });
+    setSlice('app', { phase: 'onboarding', error: null });
+  } else {
+    setSlice('app', { phase: 'ready', error: null });
+  }
+}
+export async function retryBoot() {
+  setSlice('app', { phase: 'booting', error: null });
+  await loadProfile();
+  decidePhase();
+}
+
+// ---------------------------------------------------------------------------
 // Profile
 // ---------------------------------------------------------------------------
 let profileCtrl = null;
@@ -130,18 +185,20 @@ export async function uploadResume(file) {
     const res = await api.uploadProfile(file);
     const { extraction, ...env } = res;
     setSlice('profile', (p) => ({ ...p, status: 'ready', envelope: env, upload: { status: 'done', error: null, extraction, fileName: file.name } }));
-    toast(extraction && extraction.status === 'partial' ? 'Resume read — please review the highlighted gaps.' : 'Resume read successfully.', extraction && extraction.status === 'partial' ? 'warning' : 'success');
+    const partial = extraction && extraction.status === 'partial';
+    if (getState().app.phase === 'onboarding') setOnboardingStep('review');
+    toast(partial ? 'Resume read — please review the highlighted gaps.' : 'Resume read successfully.', partial ? 'warning' : 'success');
   } catch (err) {
     setSlice('profile', (p) => ({ ...p, upload: { status: 'error', error: errorText(err), extraction: null, fileName: file.name } }));
   }
 }
-export async function saveProfile(profile) {
+export async function saveProfile(profile, { quiet = false } = {}) {
   if (getState().profile.saving) return false;
   setSlice('profile', { saving: true, saveError: null, saveDetails: [] });
   try {
     const env = await api.putProfile(profile, { timeout: 90_000 });
     setSlice('profile', { saving: false, status: 'ready', envelope: env });
-    toast('Profile saved. Matches will refresh on the next search or rescore.', 'success');
+    if (!quiet) toast('Profile saved. Matches will refresh on the next search or rescore.', 'success');
     return true;
   } catch (err) {
     setSlice('profile', { saving: false, saveError: errorText(err), saveDetails: (err.details || []).map((d) => d.msg ? `${(d.loc || []).slice(1).join('.')}: ${d.msg}` : String(d)) });
@@ -466,7 +523,8 @@ export async function resetEverything() {
   if (!(await confirmAction({ title: 'Reset everything?', body: 'This deletes your profile, all jobs, documents and caches. This cannot be undone.', confirm: 'Reset everything', tone: 'danger', typeToConfirm: 'RESET' }))) return;
   try {
     await api.reset();
-    window.location.hash = '#/profile';
+    writeOnb(null);
+    window.location.hash = '#/discover';
     window.location.reload();
   } catch (err) {
     toast(errorText(err), 'danger');
@@ -613,6 +671,7 @@ export async function boot() {
   connectSocket();
   initRouting();
   await Promise.all([loadProfile(), loadCurrentRun(), api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {})]);
+  decidePhase();
   const run = getState().search.run;
   if (run && ['queued', 'running'].includes(run.status)) setSlice('list', { scope: 'run', runId: run.id });
   loadList();

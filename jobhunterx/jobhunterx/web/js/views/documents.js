@@ -1,7 +1,7 @@
-import { html, useState } from '../lib/preact.js';
+import { html, useState, useEffect } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
-import { generateCv, loadDocuments, loadDocument, deleteDocument, navigate } from '../actions.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, Field, PageHero } from '../components/ui.js';
+import { generateCv, loadDocuments, loadDocument, deleteDocument } from '../actions.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Tabs } from '../components/ui.js';
 import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
 import { api } from '../lib/api.js';
 import { genKey } from '../state/domain.js';
@@ -31,7 +31,7 @@ function Provenance({ doc }) {
   const p = doc.provenance;
   const [all, setAll] = useState(false);
   const rewrites = all ? p.rewrites : p.rewrites.slice(0, 6);
-  return html`<section class="card"><h3 class="sec-title">What changed and why</h3>
+  return html`<section class="provenance">
     <p class="muted small">Every AI edit is fact-checked against your profile. Edits that add numbers, tools or claims you never wrote are rejected and your original text is kept.</p>
     ${p.warnings.map((w) => html`<${Notice} tone="warning">${w}</${Notice}>`)}
     ${doc.kind === 'resume' && (p.omitted_projects.length || p.omitted_experience.length) ? html`<p class="muted small">Left out to stay on one page (less relevant to this job): ${p.omitted_projects.length} project(s).</p>` : null}
@@ -46,17 +46,27 @@ function Provenance({ doc }) {
 
 function DocumentDetail({ docId }) {
   const entry = useStore((s) => s.docDetails[docId]);
-  if (!entry || entry.status === 'loading') return html`<${Skeleton} lines=${8} />`;
-  if (entry.status === 'error') return html`<${ErrorBox} message=${entry.error} onRetry=${() => loadDocument(docId)} />`;
+  const [tab, setTab] = useState('preview');
+  useEffect(() => { loadDocument(docId); }, [docId]);
+  if (!entry || entry.status === 'loading') return html`<div class="pane-pad"><${Skeleton} lines=${10} /></div>`;
+  if (entry.status === 'error') return html`<div class="pane-pad"><${ErrorBox} message=${entry.error} onRetry=${() => loadDocument(docId)} /></div>`;
   const d = entry.doc;
-  return html`<div class="stack">
-    <div class="row space wrap"><div><button type="button" class="link-btn" onClick=${() => navigate('#/documents')}><${Icon} name="back" size=${14} /> All documents</button>
-      <h2>${d.title}</h2><div class="muted small">${DOC_KIND_LABEL[d.kind]} · ${relTime(d.created_at)} · ${d.page_count} page(s)
-        ${d.job ? html` · for <a href=${`#/discover/job/${d.job_id}`}>${d.job.title} @ ${d.job.company}</a>` : ''}</div></div>
-      <div class="row gap">${d.has_pdf ? html`<a class="btn btn-primary" href=${api.documentPdfUrl(d.id)} download><${Icon} name="download" size=${16} /><span>Download PDF</span></a>` : null}
-        <${Button} icon="trash" onClick=${() => deleteDocument(d.id)}>Delete</${Button}></div></div>
-    ${d.stale ? html`<${Notice} tone="warning">Your profile changed after this was generated. Regenerate it to include the latest information.</${Notice}>` : null}
-    <div class="doc-layout">${d.kind === 'cover_letter' ? html`<${LetterPreview} c=${d.content} />` : html`<${ResumePreview} c=${d.content} />`}<${Provenance} doc=${d} /></div>
+  return html`<div class="detail">
+    <header class="detail-top doc-top">
+      <div class="row space wrap">
+        <div class="grow"><span class="doc-kind">${DOC_KIND_LABEL[d.kind]}</span><h2>${d.title}</h2>
+          <div class="muted small">${relTime(d.created_at)} · ${d.page_count} page(s)
+            ${d.job ? html` · for <a href=${`#/discover/job/${d.job_id}`}>${d.job.title} @ ${d.job.company}</a>` : ''}</div></div>
+        <div class="row gap">${d.has_pdf ? html`<a class="btn btn-primary btn-sm" href=${api.documentPdfUrl(d.id)} download><${Icon} name="download" size=${15} /><span>Download PDF</span></a>` : null}
+          <button type="button" class="icon-btn" aria-label="Delete document" onClick=${() => deleteDocument(d.id)}><${Icon} name="trash" size=${16} /></button></div>
+      </div>
+      ${d.stale ? html`<${Notice} tone="warning">Your profile changed after this was generated. Regenerate it to include the latest information.</${Notice}>` : null}
+      <${Tabs} size="sm" label="Document sections" value=${tab} onChange=${setTab}
+        tabs=${[{ key: 'preview', label: 'Preview' }, { key: 'prov', label: 'What changed', count: d.provenance.rewrites.length }]} />
+    </header>
+    <div class="detail-body scroll paper-stage" key=${tab}>
+      ${tab === 'preview' ? (d.kind === 'cover_letter' ? html`<${LetterPreview} c=${d.content} />` : html`<${ResumePreview} c=${d.content} />`) : html`<${Provenance} doc=${d} />`}
+    </div>
   </div>`;
 }
 
@@ -64,37 +74,53 @@ function CvGenerator() {
   const g = useStore((s) => s.gen[genKey(null, 'cv')]);
   const tracks = useStore((s) => (s.profile.envelope && s.profile.envelope.snapshot ? s.profile.envelope.snapshot.role_families.map((f) => f.label) : []));
   const [focus, setFocus] = useState('');
-  return html`<section class="card cv-gen">
-    <div class="grow"><h2>Comprehensive CV</h2>
-      <p class="muted">Your full career on multiple pages — every role, project, certification and achievement. Not tailored to one job (use a job's Resume for that).</p>
-      <${Field} label="Optional focus">${(id) => html`<input id=${id} class="input" list="cv-tracks" value=${focus} placeholder="Whole career" onInput=${(e) => setFocus(e.currentTarget.value)} />
-        <datalist id="cv-tracks">${tracks.map((t) => html`<option value=${t} />`)}</datalist>`}</${Field}>
-      ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}</div>
-    <${Button} variant="primary" icon=${g && g.status === 'failed' ? 'refresh' : 'spark'} busy=${g && g.status === 'generating'} onClick=${() => generateCv(focus.trim())}>
-      ${g && g.status === 'generating' ? 'Generating…' : g && g.status === 'failed' ? 'Retry' : 'Generate CV'}</${Button}>
-  </section>`;
+  const [open, setOpen] = useState(false);
+  const busy = g && g.status === 'generating';
+  return html`<div class="pop-anchor">
+    <${Button} variant="primary" icon="spark" busy=${busy} data-popover-anchor onClick=${() => setOpen(!open)}>${busy ? 'Writing CV…' : 'Generate CV'}</${Button}>
+    <${Popover} open=${open} onClose=${() => setOpen(false)} label="Generate CV" align="right">
+      <div class="stack" style=${{ gap: '12px', width: '300px' }}>
+        <div><strong>Comprehensive CV</strong><p class="muted small">Your full career on multiple pages — every role, project and achievement. Not tailored to one job.</p></div>
+        <label class="field"><span class="field-label">Optional focus</span>
+          <input class="input" list="cv-tracks" value=${focus} placeholder="Whole career" onInput=${(e) => setFocus(e.currentTarget.value)} />
+          <datalist id="cv-tracks">${tracks.map((t) => html`<option value=${t} />`)}</datalist></label>
+        ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
+        <${Button} variant="primary" icon=${g && g.status === 'failed' ? 'refresh' : 'spark'} busy=${busy} onClick=${() => { setOpen(false); generateCv(focus.trim()); }}>
+          ${g && g.status === 'failed' ? 'Retry' : 'Generate CV'}</${Button}>
+      </div>
+    </${Popover}>
+  </div>`;
 }
 
 export function DocumentsView() {
   const docs = useStore((s) => s.docs);
   const route = useStore((s) => s.route);
-  if (route.docId) return html`<div class="page"><${DocumentDetail} docId=${route.docId} /></div>`;
+  const selected = route.docId || (docs.items[0] && docs.items[0].id);
   const groups = ['resume', 'cv', 'cover_letter'].map((k) => [k, docs.items.filter((d) => d.kind === k)]);
-  return html`<div class="page">
-    <${PageHero} center announce="Application materials" title=${html`Documents, <span class="serif">fact-checked</span>`}
-      lead="Job-specific resumes and cover letters, plus a comprehensive CV. Every AI edit is checked against your profile — nothing is invented." />
-    <${CvGenerator} />
-    ${docs.status === 'error' ? html`<${ErrorBox} message=${docs.error} onRetry=${loadDocuments} />` : null}
-    ${docs.status === 'loading' ? html`<${Skeleton} lines=${4} />` : null}
-    ${docs.status !== 'loading' && !docs.items.length ? html`<${EmptyState} icon="doc" title="No documents yet">
-      Open a job and click “Generate” to create a tailored resume or cover letter, or generate your CV above.</${EmptyState}>` : null}
-    ${groups.map(([kind, items]) => items.length ? html`<section key=${kind}><h2 class="group-title">${DOC_KIND_LABEL[kind]}s</h2>
-      <div class="doc-grid">${items.map((d) => html`<a class="card doc-card" href=${`#/documents/${d.id}`} key=${d.id}>
-        <div class="doc-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
-        <div class="row space"><span class="doc-kind">${DOC_KIND_LABEL[d.kind]}</span><span class="muted small">${relTime(d.created_at)}</span></div>
-        <strong>${d.job ? `${d.job.title}` : d.title}</strong>
-        <span class="muted small">${d.job ? d.job.company : d.focus || 'Whole career'} · ${d.page_count} page(s)</span>
-        <div class="row gap wrap">${d.stale ? html`<${Badge} tone="warning">Profile changed</${Badge}>` : null}${d.warnings_count ? html`<${Badge} tone="info">${d.warnings_count} note(s)</${Badge}>` : null}</div>
-      </a>`)}</div></section>` : null)}
+  return html`<div class="view view-documents">
+    <${PageHead} title=${html`Documents, <span class="serif">fact-checked</span>`}
+      sub="Tailored resumes and cover letters per job, plus a full CV — nothing invented." actions=${html`<${CvGenerator} />`} />
+    <div class="split split-docs">
+      <section class="pane card" aria-label="Document library">
+        <div class="scroll pane-pad doc-library">
+          ${docs.status === 'error' ? html`<${ErrorBox} message=${docs.error} onRetry=${loadDocuments} />` : null}
+          ${docs.status === 'loading' ? html`<${Skeleton} rows=${4} />` : null}
+          ${docs.status !== 'loading' && !docs.items.length ? html`<${EmptyState} icon="doc" title="No documents yet">
+            Open a job and use its Application kit, or generate your CV.</${EmptyState}>` : null}
+          ${groups.map(([kind, items]) => items.length ? html`<div key=${kind} class="doc-group"><div class="sec-title">${DOC_KIND_LABEL[kind]}s · ${items.length}</div>
+            ${items.map((d, i) => html`<a class=${`doc-row ${selected === d.id ? 'is-selected' : ''}`} style=${{ '--i': i }} href=${`#/documents/${d.id}`} key=${d.id}
+                aria-current=${selected === d.id ? 'true' : undefined}>
+              <div class="doc-mini" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+              <div class="grow"><strong>${d.job ? d.job.title : d.title}</strong>
+                <span class="muted small">${d.job ? d.job.company : d.focus || 'Whole career'} · ${relTime(d.created_at)}</span></div>
+              ${d.stale ? html`<${Badge} tone="warning">Stale</${Badge}>` : null}
+            </a>`)}</div>` : null)}
+        </div>
+      </section>
+      <section class="pane card" aria-label="Document preview">
+        ${selected ? html`<${DocumentDetail} key=${selected} docId=${selected} />`
+          : html`<div class="pane-center"><${EmptyState} icon="spark" title="Your documents appear here">Each one shows the final text and every AI edit the fact-checker accepted or rejected.</${EmptyState}></div>`}
+      </section>
+    </div>
   </div>`;
 }

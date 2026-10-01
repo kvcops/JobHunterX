@@ -4,7 +4,7 @@ import {
   loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, generateDocument, autoApply, deleteJob, navigate,
 } from '../actions.js';
 import {
-  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, VERDICT_TONE,
+  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, VERDICT_TONE,
 } from '../components/ui.js';
 import {
   VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, CHECK_LABEL, CHECK_STATUS_LABEL, CHECK_STATUS_TONE,
@@ -17,6 +17,7 @@ function MatchTab({ job }) {
   const m = job.match;
   if (!m) return html`<${Notice}>This job has not been scored yet.</${Notice}>`;
   return html`<div class="stack">
+    ${m.headline ? html`<p class="detail-headline">${m.headline}</p>` : null}
     ${m.method === 'fallback' ? html`<${Notice} tone="warning">Partial analysis — the AI could not read this posting fully, so skill coverage and requirements may be incomplete.</${Notice}>` : null}
     <section>
       <h3 class="sec-title">Hard requirements</h3>
@@ -106,71 +107,88 @@ function DocActions({ job }) {
     const g = gen[genKey(job.id, kind)];
     const docId = (g && g.documentId) || (job.documents && job.documents[kind]);
     const latest = (job.document_list || []).find((d) => d.id === docId);
-    return html`<div class="doc-action" key=${kind}>
-      <div><strong>${DOC_KIND_LABEL[kind]}</strong>
-        <div class="muted small">${g && g.status === 'generating' ? 'Generating — this can take up to a minute…'
-          : latest ? `Generated ${relTime(latest.created_at)}${latest.stale ? ' · profile changed since' : ''}${latest.warnings_count ? ` · ${latest.warnings_count} note(s)` : ''}` : 'Not generated yet'}</div>
+    const busy = g && g.status === 'generating';
+    return html`<div class=${`kit-item ${busy ? 'is-busy' : ''}`} key=${kind}>
+      <div class="kit-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>${busy ? html`<span class="scan-beam"></span>` : null}</div>
+      <div class="grow"><strong>${DOC_KIND_LABEL[kind]}</strong>
+        <div class="muted small">${busy ? 'Writing and fact-checking — up to a minute…'
+          : latest ? `Generated ${relTime(latest.created_at)}${latest.stale ? ' · profile changed since' : ''}${latest.warnings_count ? ` · ${latest.warnings_count} note(s)` : ''}` : 'Tailored to this job, using only facts from your profile.'}</div>
         ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
       </div>
       <div class="row gap">
         ${docId ? html`<${Button} size="sm" onClick=${() => navigate(`#/documents/${docId}`)}>Open</${Button}>` : null}
         <${Button} size="sm" variant=${docId ? 'secondary' : 'primary'} icon=${g && g.status === 'failed' ? 'refresh' : 'spark'}
-          busy=${g && g.status === 'generating'} onClick=${() => generateDocument(job.id, kind)}>
+          busy=${busy} onClick=${() => generateDocument(job.id, kind)}>
           ${g && g.status === 'failed' ? 'Retry' : docId ? 'Regenerate' : 'Generate'}</${Button}>
       </div></div>`;
   };
-  return html`<section class="card inset"><h3 class="sec-title">Application materials</h3>${row('resume')}${row('cover_letter')}</section>`;
+  return html`<div class="stack"><p class="muted small">Every AI edit is checked against your profile; anything it cannot back up is rejected and your original wording is kept.</p>
+    ${row('resume')}${row('cover_letter')}</div>`;
 }
 
-export function JobDetailDrawer({ jobId, onClose }) {
+const TABS = [
+  { key: 'match', label: 'Why this score' }, { key: 'req', label: 'Requirements' },
+  { key: 'verify', label: 'Verification' }, { key: 'kit', label: 'Application kit' },
+];
+
+/** The job workspace. Used inline (Discover) and inside a drawer (Tracker). */
+export function JobDetail({ jobId, onClose }) {
   const entry = useStore((s) => s.details[jobId]);
   const tracking = useStore((s) => (s.meta.data && s.meta.data.tracking_statuses) || DEFAULT_TRACKING);
   const pending = useStore((s) => s.pending);
   const [tab, setTab] = useState('match');
   const job = entry && entry.job;
-  return html`<${Drawer} onClose=${onClose} label="Job details">
-    <div class="drawer-head">
-      <button type="button" class="icon-btn" aria-label="Close" onClick=${onClose}><${Icon} name="x" /></button>
-      ${job ? html`<div class="row gap">
-        <button type="button" class=${`icon-btn save-btn ${job.saved ? 'on' : ''}`} aria-pressed=${job.saved ? 'true' : 'false'}
-          aria-label=${job.saved ? 'Unsave job' : 'Save job'} disabled=${!!pending.save[jobId]} onClick=${() => toggleSaved(jobId)}><${Icon} name="star" /></button>
-        <button type="button" class="icon-btn" aria-label="Remove job" onClick=${() => deleteJob(jobId)}><${Icon} name="trash" /></button></div>` : null}
-    </div>
-    ${!entry || (entry.status === 'loading' && !job) ? html`<div class="drawer-body"><${Skeleton} lines=${6} /></div>` : null}
-    ${entry && entry.status === 'error' && !job ? html`<div class="drawer-body"><${ErrorBox} message=${entry.error} onRetry=${() => loadDetail(jobId)} /></div>` : null}
-    ${job ? html`<div class="drawer-body">
-      <header class="detail-header">
-        <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${80} />
+  if (!entry || (entry.status === 'loading' && !job)) {
+    return html`<div class="detail"><div class="detail-top"><div class="row gap"><div class="sk-block sk-ring big"></div>
+      <div class="grow"><div class="sk-block" style=${{ width: '30%' }}></div><div class="sk-block" style=${{ width: '60%', height: '22px', marginTop: '10px' }}></div></div></div></div>
+      <div class="detail-body"><${Skeleton} lines=${6} /></div></div>`;
+  }
+  if (entry.status === 'error' && !job) return html`<div class="detail"><div class="detail-body"><${ErrorBox} message=${entry.error} onRetry=${() => loadDetail(jobId)} /></div></div>`;
+  const apply = safeUrl(job.apply_url);
+  return html`<div class="detail">
+    <header class="detail-top">
+      <div class="detail-tools">
+        <button type="button" class="icon-btn" aria-label="Close" onClick=${onClose}><${Icon} name="x" /></button>
+        <div class="row gap">
+          <button type="button" class=${`icon-btn save-btn ${job.saved ? 'on' : ''}`} aria-pressed=${job.saved ? 'true' : 'false'}
+            aria-label=${job.saved ? 'Unsave job' : 'Save job'} disabled=${!!pending.save[jobId]} onClick=${() => toggleSaved(jobId)}><${Icon} name="star" size=${16} /></button>
+          <button type="button" class="icon-btn" aria-label="Remove job" onClick=${() => deleteJob(jobId)}><${Icon} name="trash" size=${16} /></button>
+        </div>
+      </div>
+      <div class="detail-header">
+        <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${78} />
         <div class="grow">
+          <div class="detail-company"><${Monogram} name=${job.company} size=${22} /> ${job.company} · ${job.location || 'Location not stated'}</div>
           <h2>${job.title}</h2>
-          <div class="muted">${job.company} · ${job.location || 'Location not stated'}</div>
           <div class="row gap wrap">
             ${job.match ? html`<${Badge} tone=${VERDICT_TONE[job.match.verdict]}>${VERDICT_LABEL[job.match.verdict]}</${Badge}>` : null}
             <${Badge} tone=${VALIDATION_TONE[job.validation.status]}>${VALIDATION_LABEL[job.validation.status]}</${Badge}>
             ${job.match && job.match.experience ? html`<span class="muted small">${experienceText(job.match.experience)}</span>` : null}
-            ${job.posted_at ? html`<span class="muted small">Posted ${fmtDate(job.posted_at)}</span>` : null}
+            ${job.posted_at ? html`<span class="muted small">· Posted ${fmtDate(job.posted_at)}</span>` : null}
           </div>
-          ${job.match ? html`<p class="detail-headline">${job.match.headline}</p>` : null}
         </div>
-      </header>
-      ${job.match_stale ? html`<${Notice} tone="warning">Your profile changed since this job was scored.
-        <${Button} size="sm" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score now</${Button}></${Notice}>` : null}
+      </div>
       <div class="action-bar">
-        ${safeUrl(job.apply_url) ? html`<a class="btn btn-primary" href=${safeUrl(job.apply_url)} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${16} /><span>Open posting</span></a>` : null}
+        ${apply ? html`<a class="btn btn-primary btn-sm" href=${apply} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${15} /><span>Open posting</span></a>` : null}
         <label class="inline-select"><span class="sr-only">Tracking status</span>
-          <select class="input" value=${job.tracking_status} disabled=${!!pending.track[jobId]} onChange=${(e) => setTracking(jobId, e.currentTarget.value)}>
+          <select class="input input-sm" value=${job.tracking_status} disabled=${!!pending.track[jobId]} onChange=${(e) => setTracking(jobId, e.currentTarget.value)}>
             ${tracking.map((t) => html`<option value=${t}>${TRACKING_LABEL[t] || humanize(t)}</option>`)}
           </select></label>
-        <${Button} icon="refresh" busy=${!!pending.verify[jobId]} onClick=${() => verifyJob(jobId)}>Re-verify</${Button}>
-        <${Button} busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score</${Button}>
-        <${Button} icon="globe" busy=${!!pending.apply[jobId]} onClick=${() => autoApply(jobId)}>Auto-apply</${Button}>
+        <${Button} size="sm" icon="refresh" busy=${!!pending.verify[jobId]} onClick=${() => verifyJob(jobId)}>Re-verify</${Button}>
+        <${Button} size="sm" icon="bolt" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score</${Button}>
+        <${Button} size="sm" icon="globe" busy=${!!pending.apply[jobId]} onClick=${() => autoApply(jobId)}>Auto-apply</${Button}>
       </div>
-      <${DocActions} job=${job} />
-      <${Tabs} label="Job sections" value=${tab} onChange=${setTab}
-        tabs=${[{ key: 'match', label: 'Why this score' }, { key: 'req', label: 'Requirements' }, { key: 'verify', label: 'Verification' }]} />
-      <div role="tabpanel">
-        ${tab === 'match' ? html`<${MatchTab} job=${job} />` : tab === 'req' ? html`<${RequirementsTab} job=${job} />` : html`<${VerifyTab} job=${job} />`}
-      </div>
-    </div>` : null}
-  </${Drawer}>`;
+      ${job.match_stale ? html`<${Notice} tone="warning">Your profile changed since this job was scored.
+        <${Button} size="sm" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score now</${Button}></${Notice}>` : null}
+      <${Tabs} label="Job sections" value=${tab} onChange=${setTab} tabs=${TABS} size="sm" />
+    </header>
+    <div class="detail-body scroll" role="tabpanel" key=${tab}>
+      ${tab === 'match' ? html`<${MatchTab} job=${job} />` : tab === 'req' ? html`<${RequirementsTab} job=${job} />`
+        : tab === 'verify' ? html`<${VerifyTab} job=${job} />` : html`<${DocActions} job=${job} />`}
+    </div>
+  </div>`;
+}
+
+export function JobDetailDrawer({ jobId, onClose }) {
+  return html`<${Drawer} onClose=${onClose} label="Job details"><${JobDetail} jobId=${jobId} onClose=${onClose} /></${Drawer}>`;
 }

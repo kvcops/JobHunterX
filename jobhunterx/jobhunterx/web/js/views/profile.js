@@ -2,35 +2,32 @@ import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { uploadResume, saveProfile, loadProfile } from '../actions.js';
 import {
-  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHero, Stat,
+  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHead, Stat, Seg, ScanDoc, RotatingText, EmptyState,
 } from '../components/ui.js';
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
 import { WORK_MODES, WORK_MODE_LABEL, SENIORITIES, YEARS_SOURCE_LABEL, humanize } from '../lib/format.js';
 
-function Upload() {
+function UploadButton() {
   const up = useStore((s) => s.profile.upload);
-  const [drag, setDrag] = useState(false);
+  const has = useStore((s) => !!(s.profile.envelope && s.profile.envelope.profile));
   const input = useRef();
-  const pick = (files) => files && files[0] && uploadResume(files[0]);
-  return html`<section class=${`card upload ${drag ? 'drag' : ''}`}
-      onDragOver=${(e) => { e.preventDefault(); setDrag(true); }} onDragLeave=${() => setDrag(false)}
-      onDrop=${(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files); }}>
-    <div class="upload-icon"><${Icon} name="doc" size=${26} /></div>
-    <div class="grow">
-      <h2>Your resume</h2>
-      <p class="muted">Upload a PDF. JobHunterX reads it into an editable profile — nothing is invented; check and correct it below.</p>
-      ${up.status === 'uploading' ? html`<p class="small" aria-live="polite"><span class="spinner"></span> Reading ${up.fileName}… this can take up to a minute.</p>` : null}
-      ${up.status === 'error' ? html`<div class="error-text small" role="alert">${up.error}</div>` : null}
-      ${up.extraction && up.extraction.warnings.length ? html`<${Notice} tone="warning">${up.extraction.warnings.join(' ')}</${Notice}>` : null}
-    </div>
-    <input ref=${input} type="file" accept="application/pdf,.pdf" class="sr-only" onChange=${(e) => { pick(e.currentTarget.files); e.currentTarget.value = ''; }} />
-    <${Button} variant="primary" icon="doc" busy=${up.status === 'uploading'} onClick=${() => input.current.click()}>Upload PDF</${Button}>
-  </section>`;
+  return html`<${Button} variant=${has ? 'secondary' : 'primary'} icon="upload" busy=${up.status === 'uploading'} onClick=${() => input.current.click()}>
+      ${up.status === 'uploading' ? 'Reading…' : has ? 'Replace resume' : 'Upload resume'}</${Button}>
+    <input ref=${input} type="file" accept="application/pdf,.pdf" class="sr-only" aria-label="Resume PDF"
+      onChange=${(e) => { const f = e.currentTarget.files && e.currentTarget.files[0]; if (f) uploadResume(f); e.currentTarget.value = ''; }} />`;
+}
+
+function Reading() {
+  const up = useStore((s) => s.profile.upload);
+  if (up.status !== 'uploading') return null;
+  return html`<div class="reading-overlay" aria-live="polite"><${ScanDoc} />
+    <strong>Reading ${up.fileName}</strong>
+    <p class="muted small"><${RotatingText} items=${['Extracting roles and dates…', 'Checking skills against where you used them…', 'Re-mapping your career tracks…']} /></p></div>`;
 }
 
 function Understanding({ snap }) {
-  if (!snap) return html`<section class="card"><h2>How JobHunterX understands you</h2><${Skeleton} lines=${4} /></section>`;
-  return html`<section class="card understanding" aria-label="How JobHunterX understands you">
+  if (!snap) return html`<div class="understanding"><h2>How JobHunterX understands you</h2><${Skeleton} lines=${6} /></div>`;
+  return html`<div class="understanding" aria-label="How JobHunterX understands you">
     <div class="dna-head"><div><h2>How JobHunterX understands you</h2><p class="muted small">Derived from your profile. Every skill is checked against what you actually wrote.</p></div>
       <${Badge} tone=${snap.method === 'llm' ? 'success' : 'warning'}>${snap.method === 'llm' ? 'AI analysis' : 'Basic (AI unavailable)'}</${Badge}></div>
     <div class="stats">
@@ -42,7 +39,7 @@ function Understanding({ snap }) {
     </div>
     <h3 class="sec-title" style=${{ marginTop: '20px' }}>Career tracks</h3>
     <div class="tracks">${snap.role_families.map((f) => html`<div class="track" title=${f.evidence}>
-      <div class="row space"><span>${f.label}</span><span class="track-pct">${Math.round(f.closeness * 100)}%</span></div><${Meter} value=${f.closeness} /></div>`)}</div>
+      <div class="row space"><span>${f.label}</span><span class="track-pct">${Math.round(f.closeness * 100)}%</span></div><${Meter} value=${f.closeness} tone="ink" /></div>`)}</div>
     <h3 class="sec-title">Titles we search for</h3>
     <div class="chip-row">${[...snap.target_titles, ...snap.adjacent_titles].map((t, i) => html`<span class=${`chip ${i >= snap.target_titles.length ? 'soft' : ''}`}>${t}</span>`)}</div>
     <h3 class="sec-title">Skills with evidence</h3>
@@ -50,7 +47,7 @@ function Understanding({ snap }) {
       title=${s.sources.join('\n')}>${s.name}</span>`)}</div>
     <p class="muted small">Solid: used at work · Normal: used in projects · Faded: listed only. Hover a skill to see where it was found.</p>
     ${snap.notes.length ? html`<ul class="bullets muted small">${snap.notes.map((n) => html`<li>${n}</li>`)}</ul>` : null}
-  </section>`;
+  </div>`;
 }
 
 function TextField({ draft, path, label, set, type = 'text', hint, textarea, wide }) {
@@ -100,13 +97,16 @@ function Editor({ profile }) {
     { key: 'about', label: 'About' }, { key: 'prefs', label: 'Preferences' }, { key: 'exp', label: 'Experience' },
     { key: 'proj', label: 'Projects' }, { key: 'edu', label: 'Education' }, { key: 'more', label: 'More' }, { key: 'qa', label: 'Application answers' },
   ];
-  return html`<section class="card editor" aria-label="Edit profile">
-    <div class="row space sticky-head"><h2>Your profile</h2>
-      <div class="row gap">${dirty ? html`<span class="muted small">Unsaved changes</span>` : null}
-        <${Button} disabled=${!dirty || saving} onClick=${() => setDraft(JSON.parse(base))}>Discard</${Button}>
-        <${Button} variant="primary" busy=${saving} disabled=${!dirty} onClick=${save}>Save profile</${Button}></div></div>
-    ${saveError ? html`<${ErrorBox} message=${[saveError, ...saveDetails].join(' · ')} onRetry=${save} />` : null}
-    <${Tabs} label="Profile sections" tabs=${tabs} value=${tab} onChange=${setTab} />
+  return html`<div class="editor" aria-label="Edit profile">
+    <div class="editor-head">
+      <div class="row space"><h2>Your profile</h2>
+        <div class="row gap">${dirty ? html`<span class="dirty-pill">Unsaved</span>` : null}
+          <${Button} size="sm" disabled=${!dirty || saving} onClick=${() => setDraft(JSON.parse(base))}>Discard</${Button}>
+          <${Button} size="sm" variant="primary" busy=${saving} disabled=${!dirty} onClick=${save}>Save profile</${Button}></div></div>
+      ${saveError ? html`<${ErrorBox} message=${[saveError, ...saveDetails].join(' · ')} onRetry=${save} />` : null}
+      <${Tabs} label="Profile sections" tabs=${tabs} value=${tab} onChange=${setTab} size="sm" />
+    </div>
+    <div class="scroll editor-body" key=${tab}>
     ${tab === 'about' ? html`<div class="form-grid">
       ${[['name', 'Full name'], ['email', 'Email', 'email'], ['phone', 'Phone'], ['location', 'Current location'], ['suggested_role', 'Current / target title'],
         ['linkedin', 'LinkedIn URL', 'url'], ['github', 'GitHub URL', 'url'], ['portfolio', 'Portfolio URL', 'url']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
@@ -116,13 +116,12 @@ function Editor({ profile }) {
     ${tab === 'prefs' ? html`<div class="form-grid">
       <${Field} label="Target roles" hint="Titles you want. Used first in every search." wide><${ChipsInput} label="Target roles" value=${p.target_roles} onChange=${(v) => set(['preferences', 'target_roles'], v)} /></${Field}>
       <${Field} label="Acceptable locations" hint="Cities you can work in." wide><${ChipsInput} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)} /></${Field}>
-      <div class="field field-wide"><span class="field-label">Work modes you accept</span><div class="seg" role="group" aria-label="Work modes">
-        ${WORK_MODES.map((m) => html`<button type="button" class=${`seg-btn ${p.work_modes.includes(m) ? 'on' : ''}`} aria-pressed=${p.work_modes.includes(m) ? 'true' : 'false'}
-          onClick=${() => set(['preferences', 'work_modes'], p.work_modes.includes(m) ? p.work_modes.filter((x) => x !== m) : [...p.work_modes, m])}>${WORK_MODE_LABEL[m]}</button>`)}</div></div>
+      <div class="field field-wide"><span class="field-label">Work modes you accept</span>
+        <${Seg} multi label="Work modes" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${p.work_modes} onChange=${(v) => set(['preferences', 'work_modes'], v)} /></div>
       <${TextField} draft=${draft} path=${['preferences', 'home_country']} label="Home country" set=${set} />
       <div class="field"><span class="field-label">Flexibility</span>
-        <label class="check"><input type="checkbox" checked=${p.willing_to_relocate} onChange=${(e) => set(['preferences', 'willing_to_relocate'], e.currentTarget.checked)} /> Willing to relocate within my country</label>
-        <label class="check"><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} /> Open to roles abroad</label></div>
+        <label class="switch"><input type="checkbox" checked=${p.willing_to_relocate} onChange=${(e) => set(['preferences', 'willing_to_relocate'], e.currentTarget.checked)} /><span class="switch-ui"></span> Willing to relocate within my country</label>
+        <label class="switch"><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} /><span class="switch-ui"></span> Open to roles abroad</label></div>
       <${TextField} draft=${draft} path=${['preferences', 'min_annual_salary']} label="Minimum annual salary" type="number" set=${set} hint="Leave empty if flexible." />
       <${TextField} draft=${draft} path=${['preferences', 'salary_currency']} label="Salary currency" set=${set} />
       <${TextField} draft=${draft} path=${['preferences', 'notice_period_days']} label="Notice period (days)" type="number" set=${set} />
@@ -152,19 +151,32 @@ function Editor({ profile }) {
       ${['current_ctc', 'expected_ctc', 'expected_salary', 'notice_period', 'work_authorization', 'requires_sponsorship', 'preferred_work_mode', 'willing_to_relocate', 'years_of_experience'].map((k) =>
         html`<${TextField} draft=${draft} path=${['qa_memory', k]} label=${humanize(k)} set=${set} />`)}
     </div>` : null}
-  </section>`;
+    </div>
+  </div>`;
 }
 
 export function ProfileView() {
   const pr = useStore((s) => s.profile);
   const env = pr.envelope;
-  return html`<div class="page">
-    <${PageHero} center announce="Candidate profile" title=${html`Your career, <span class="serif">understood</span>`}
-      lead="Upload your resume, check what was read, and tell JobHunterX what you want next. Everything downstream — search, scoring, documents — uses only this." />
-    <${Upload} />
-    ${pr.status === 'loading' && !env ? html`<section class="card"><${Skeleton} lines=${6} /></section>` : null}
-    ${pr.status === 'error' && !env ? html`<${ErrorBox} message=${pr.error} onRetry=${loadProfile} />` : null}
-    ${env && env.profile ? html`<${Understanding} snap=${env.snapshot} /><${Editor} profile=${env.profile} />` : null}
-    ${env && !env.profile ? html`<${Editor} profile=${null} />` : null}
+  const up = pr.upload;
+  return html`<div class="view view-profile">
+    <${PageHead} title=${html`Your career, <span class="serif">understood</span>`}
+      sub="Everything downstream — search, scoring, documents — uses only this profile." actions=${html`<${UploadButton} />`} />
+    ${up.status === 'error' ? html`<${ErrorBox} message=${up.error} />` : null}
+    ${up.extraction && up.extraction.warnings.length ? html`<${Notice} tone="warning">${up.extraction.warnings.join(' ')}</${Notice}>` : null}
+    <div class="split split-profile">
+      <section class="pane card">
+        <${Reading} />
+        <div class="scroll pane-pad">
+          ${pr.status === 'loading' && !env ? html`<${Skeleton} lines=${8} />` : null}
+          ${pr.status === 'error' && !env ? html`<${ErrorBox} message=${pr.error} onRetry=${loadProfile} />` : null}
+          ${env && env.profile ? html`<${Understanding} snap=${env.snapshot} />` : null}
+          ${env && !env.profile ? html`<${EmptyState} icon="upload" title="No resume yet">Upload a PDF, or fill in the profile on the right by hand.</${EmptyState}>` : null}
+        </div>
+      </section>
+      <section class="pane card">
+        ${env ? html`<${Editor} profile=${env.profile} />` : html`<div class="pane-pad"><${Skeleton} lines=${8} /></div>`}
+      </section>
+    </div>
   </div>`;
 }

@@ -130,3 +130,13 @@ export function setIn(obj, path, value) {
 export function getIn(obj, path) {
   return path.reduce((o, k) => (o === null || o === undefined ? undefined : o[k]), obj);
 }
+
+/** Default search request derived from the candidate snapshot (what the profile already says). */
+export function defaultSearchRequest(snap) {
+  return {
+    locations: snap ? snap.locations.map((p) => p.city || p.country).filter(Boolean) : [],
+    work_modes: snap ? [...snap.work_modes] : [],
+    role_focus: [],
+    include_international: snap ? !!snap.open_to_international : false,
+  };
+}

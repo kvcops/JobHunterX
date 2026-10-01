@@ -25,6 +25,10 @@ export function initialState() {
   return {
     route: parseHash(),
     theme: readTheme(),
+    // App lifecycle: booting -> (onboarding | ready); 'error' when the backend cannot be reached.
+    app: { phase: 'booting', error: null },
+    // One-time setup flow. `dir` drives the slide direction of step transitions.
+    onboarding: { step: 'upload', dir: 1 },
     conn: 'connecting',
     meta: { status: 'idle', data: null, error: null },
     profile: {
