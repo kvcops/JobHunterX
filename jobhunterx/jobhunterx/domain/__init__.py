@@ -18,8 +18,10 @@ from jobhunterx.domain.candidate import (  # noqa: F401
     CandidateSnapshot,
     Education,
     Experience,
+    PlaceRef,
     Project,
     QAMemory,
+    RoleFamilyFit,
     SkillEvidence,
 )
 from jobhunterx.domain.common import Seniority, WorkMode  # noqa: F401

@@ -6,46 +6,33 @@ Initialises database, logging, and serves the API + WebSocket + static frontend.
 
 from __future__ import annotations
 
-# Disable LiteLLM remote network cost-map fetch on import (prevents startup blocking/SSL delays)
 import os
-os.environ["LITELLM_LOCAL_RESOURCES"] = "true"
+os.environ.setdefault("LITELLM_LOCAL_RESOURCES", "true")  # no remote cost-map fetch on import
 
-# Windows: Set ProactorEventLoop policy by default
-import sys
 import asyncio
+import json
+import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-try:
-    # Silence legacy langchain_community deprecation warnings on startup
-    import warnings
-    warnings.filterwarnings("ignore", category=DeprecationWarning)
-    warnings.filterwarnings("ignore", category=UserWarning)
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-    try:
-        import langchain_community.chat_models
-        from langchain_ollama import ChatOllama
-        langchain_community.chat_models.ChatOllama = ChatOllama
-        sys.modules['langchain_community.chat_models.ChatOllama'] = ChatOllama
-    except BaseException:
-        pass
-
-    import json
-    from contextlib import asynccontextmanager
-    from pathlib import Path
-    from typing import Any
-
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-    from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.staticfiles import StaticFiles
-
-    from jobhunterx.config.logging import setup_logging, get_logger
-    from jobhunterx.config.settings import get_settings
-    from jobhunterx.config.database import set_db_path, init_db
-    from jobhunterx.api.routes import router
-    from jobhunterx.api.ws import manager
-except KeyboardInterrupt:
-    sys.exit(0)
+from jobhunterx import storage
+from jobhunterx.api.routes import router
+from jobhunterx.api.ws import manager
+from jobhunterx.config.database import init_db, set_db_path
+from jobhunterx.config.logging import get_logger, setup_logging
+from jobhunterx.config.settings import get_settings
 
 log = get_logger("main")
 
@@ -62,7 +49,7 @@ async def lifespan(app: FastAPI):
     # Setup logging
     setup_logging(
         log_level=settings.log_level,
-        json_output=os.getenv("VELLUM_JSON_LOG", "").lower() == "true",
+        json_output=os.getenv("JOBHUNTERX_JSON_LOG", "").lower() == "true",
     )
     log = get_logger("main")
     log.info("starting_jobhunterx", providers=settings.available_providers)
@@ -75,9 +62,10 @@ async def lifespan(app: FastAPI):
     if settings.mistral_api_key:
         os.environ.setdefault("MISTRAL_API_KEY", settings.mistral_api_key)
 
-    # Init database
+    # Init database (+ v2 migrations); runs left "running" by a dead process are marked failed
     set_db_path(str(settings.db_full_path))
     await init_db()
+    await storage.mark_interrupted_runs()
 
     # Ensure directories
     settings.cache_full_path
@@ -112,28 +100,71 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
+# Local-first app: only the app's own origin (and localhost dev ports) may call the API.
+def _allowed_origins() -> list[str]:
+    st = get_settings()
+    hosts = {st.host, "127.0.0.1", "localhost"}
+    return [f"http://{h}:{st.port}" for h in hosts]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Content-Type"],
 )
+
+_CODES = {400: "bad_request", 404: "not_found", 405: "bad_request", 409: "conflict", 413: "payload_too_large",
+          422: "validation_error", 502: "upstream_error"}
+
+
+def _error(status: int, message: str, details: Any = None) -> JSONResponse:
+    return JSONResponse(status_code=status,
+                        content={"error": {"code": _CODES.get(status, "internal_error" if status >= 500 else "bad_request"),
+                                           "message": message, "details": details}})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    return _error(exc.status_code, str(exc.detail))
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    details = [{"loc": list(e.get("loc", [])), "msg": e.get("msg", "")} for e in exc.errors()]
+    first = details[0] if details else {"loc": [], "msg": "Invalid request"}
+    return _error(422, f"{'.'.join(str(x) for x in first['loc'][1:]) or 'request'}: {first['msg']}", details)
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    log.error("unhandled_error", path=request.url.path, error=str(exc)[:300], exc_type=type(exc).__name__)
+    return _error(500, "Something went wrong on the server. Please try again.")
+
 
 # API routes
 app.include_router(router)
 
 
-# WebSocket endpoint
+def _ws_origin_ok(websocket: WebSocket) -> bool:
+    """Block cross-site WebSocket hijacking: browsers always send Origin; it must be ours."""
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True   # non-browser client (tests, CLI)
+    host = websocket.headers.get("host", "")
+    return urlparse(origin).netloc == host or origin in _allowed_origins()
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    if not _ws_origin_ok(websocket):
+        await websocket.close(code=1008)
+        return
     await manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive, receive any client messages
-            data = await websocket.receive_text()
-            # Could handle client commands here in the future
+            await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
@@ -432,6 +463,9 @@ async def _screencast_manager():
 @app.websocket("/ws/browser")
 async def browser_websocket(websocket: WebSocket):
     """CDP live-stream WebSocket: streams browser frames + receives input events."""
+    if not _ws_origin_ok(websocket):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     _browser_ws_clients.append(websocket)
     log.info("browser_ws_client_connected", total=len(_browser_ws_clients))
@@ -439,7 +473,12 @@ async def browser_websocket(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            msg = json.loads(data)
+            try:
+                msg = json.loads(data)
+            except ValueError:
+                continue
+            if not isinstance(msg, dict):
+                continue
 
             # Handle input events by dynamically getting the active page
             try:

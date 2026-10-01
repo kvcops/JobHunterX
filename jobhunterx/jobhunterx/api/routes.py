@@ -1,1048 +1,596 @@
 """
-JobHunterX — REST API Routes
+JobHunterX — REST API (v2 contract, see docs/API.md).
 
-Endpoints for resume upload, company tracking, job sync, job listing,
-per-job apply (browser), and HITL resume.
+Thin HTTP layer: validation, error mapping and event publishing. Business
+logic lives in jobhunterx.services.*.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
+import re
 from datetime import datetime, timezone
-from typing import Any
+from pathlib import Path
+from typing import Literal, Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
 
-from jobhunterx.config import database as db
-from jobhunterx.config.logging import get_logger
-from jobhunterx.agents import extractor, graph
+from jobhunterx import storage
+from jobhunterx.agents import extractor
 from jobhunterx.agents.browser_agent import stop_all_active_browsers
 from jobhunterx.api.ws import manager as ws_manager
+from jobhunterx.config import database as db
+from jobhunterx.config.logging import get_logger
+from jobhunterx.domain.candidate import CandidateProfile
+from jobhunterx.generation.cover_letter import GenerationUnavailable
+from jobhunterx.services import apply as apply_svc
+from jobhunterx.services import documents as docs_svc
+from jobhunterx.services import jobs as jobs_svc
+from jobhunterx.services import profile as profile_svc
+from jobhunterx.services.search import manager as search_manager
 
 log = get_logger("routes")
 
 router = APIRouter(prefix="/api")
 
-# ---------------------------------------------------------------------------
-# Request models
-# ---------------------------------------------------------------------------
-
-class StartSearchRequest(BaseModel):
-    location: str = "Bengaluru"
-    role: str | None = None
-    limit: int = 5000
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
-class ResumeAgentRequest(BaseModel):
-    job_id: str
-    action: str = "done"  # "done" or "skip"
+async def emit(event: dict) -> None:
+    event.setdefault("ts", datetime.now(timezone.utc).isoformat())
+    await ws_manager.broadcast(event)
 
 
-class CompanyInput(BaseModel):
-    name: str
-    website: str = ""
-    careers_url: str = ""
-    hub: str = ""
+async def _profile_or_400() -> CandidateProfile:
+    p = await profile_svc.get_profile()
+    if p is None or p.is_empty():
+        raise HTTPException(400, "Upload a resume or fill in your profile first.")
+    return p
+
+
+async def _current_hash() -> Optional[str]:
+    p = await profile_svc.get_profile()
+    return p.content_hash() if p else None
 
 
 # ---------------------------------------------------------------------------
-# State
+# Meta & profile
 # ---------------------------------------------------------------------------
 
-_current_profile: dict | None = None
-_sync_task: asyncio.Task | None = None
-_apply_tasks: dict[str, asyncio.Task] = {}  # Track per-job apply tasks
-_pipeline_mode: str = "manual"  # "automatic" or "manual"
+@router.get("/meta")
+async def meta():
+    return {"tracking_statuses": storage.TRACKING_STATUSES}
+
+
+@router.get("/profile")
+async def get_profile():
+    return await profile_svc.envelope(await profile_svc.get_profile())
+
+
+@router.put("/profile")
+@router.post("/profile")
+async def put_profile(profile: CandidateProfile):
+    await profile_svc.save_profile(profile)
+    env = await profile_svc.envelope(profile)
+    await emit({"type": "profile.updated", "data": env})
+    return env
+
+
+@router.post("/profile/upload")
+@router.post("/upload-resume")
+async def upload_resume(file: UploadFile = File(...)):
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "The file is larger than 10 MB.")
+    if not data.startswith(b"%PDF"):
+        raise HTTPException(422, "Please upload a PDF resume.")
+    profile, info = await extractor.extract_profile(data)
+    if info["status"] == "failed":
+        raise HTTPException(502, info["warnings"][0] if info["warnings"] else "Could not read the resume.")
+    existing = await profile_svc.get_profile()
+    if existing:  # keep what the user set that a resume cannot contain
+        profile.preferences = existing.preferences
+        profile.qa_memory = existing.qa_memory
+    await profile_svc.save_profile(profile)
+    env = await profile_svc.envelope(profile)
+    await emit({"type": "profile.updated", "data": env})
+    return {**env, "extraction": info}
 
 
 # ---------------------------------------------------------------------------
-# Company tracking (board-first discovery)
+# Searches
 # ---------------------------------------------------------------------------
 
-@router.get("/companies")
-async def list_companies():
-    """All tracked companies with detected ATS status."""
-    companies = await db.get_companies()
-    return {"companies": companies}
+class SearchRequest(BaseModel):
+    locations: list[str] = Field(default_factory=list)
+    work_modes: list[Literal["remote", "hybrid", "onsite"]] = Field(default_factory=list)
+    role_focus: list[str] = Field(default_factory=list)
+    include_international: bool = False
+    max_jobs: Optional[int] = Field(None, ge=5, le=200)
 
 
-@router.post("/companies")
-async def add_company(company: CompanyInput):
-    """Add a company (probes its ATS board immediately)."""
-    from jobhunterx.agents.job_sync import add_company as sync_add_company
+@router.post("/searches", status_code=202)
+async def start_search(req: SearchRequest):
+    profile = await _profile_or_400()
+    run = await search_manager.start(profile, req.model_dump(), emit)
+    return {"run": run}
 
+
+@router.get("/searches/current")
+async def current_search():
+    return {"run": search_manager.current or await storage.latest_run()}
+
+
+@router.get("/searches/{run_id}")
+async def get_search(run_id: str):
+    run = search_manager.current if search_manager.current and search_manager.current["id"] == run_id \
+        else await storage.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Search run not found")
+    return {"run": run}
+
+
+@router.post("/searches/{run_id}/cancel")
+async def cancel_search(run_id: str):
+    run = await search_manager.cancel(run_id)
+    if not run:
+        raise HTTPException(404, "Search run not found")
+    return {"run": run}
+
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+
+@router.get("/jobs")
+async def list_jobs(view: str = "recommended", run_id: str = "", q: str = "", work_mode: str = "",
+                    min_score: int = 0, sort: Literal["score", "recent"] = "score", limit: int = 200):
+    if view not in jobs_svc.VIEWS:
+        raise HTTPException(400, f"Unknown view '{view}'")
+    items, counts = await jobs_svc.list_jobs(view, await _current_hash(), run_id=run_id, q=q.strip()[:100],
+                                             work_mode=work_mode, min_score=min_score, sort=sort,
+                                             limit=max(1, min(limit, 500)))
+    return {"jobs": items, "counts": counts}
+
+
+async def _detail_or_404(job_id: str) -> dict:
+    d = await jobs_svc.detail(job_id, await _current_hash())
+    if not d:
+        raise HTTPException(404, "Job not found")
+    return d
+
+
+async def _summary_and_publish(job_id: str) -> dict:
+    row = await storage.get_row(job_id)
+    if not row:
+        raise HTTPException(404, "Job not found")
+    s = jobs_svc.summary(row, await _current_hash())
+    await emit({"type": "job.updated", "job_id": job_id, "data": {"job": s}})
+    return s
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str):
+    return {"job": await _detail_or_404(job_id)}
+
+
+@router.put("/jobs/{job_id}/saved")
+async def save_job(job_id: str):
+    if not await storage.set_saved(job_id, True):
+        raise HTTPException(404, "Job not found")
+    return {"job": await _summary_and_publish(job_id)}
+
+
+@router.delete("/jobs/{job_id}/saved")
+async def unsave_job(job_id: str):
+    if not await storage.set_saved(job_id, False):
+        raise HTTPException(404, "Job not found")
+    return {"job": await _summary_and_publish(job_id)}
+
+
+class TrackingUpdate(BaseModel):
+    tracking_status: str
+
+
+@router.patch("/jobs/{job_id}")
+async def update_job(job_id: str, body: TrackingUpdate):
+    if body.tracking_status not in storage.TRACKING_STATUSES:
+        raise HTTPException(422, f"tracking_status must be one of {storage.TRACKING_STATUSES}")
+    if not await storage.set_tracking(job_id, body.tracking_status):
+        raise HTTPException(404, "Job not found")
+    return {"job": await _summary_and_publish(job_id)}
+
+
+@router.post("/jobs/{job_id}/verify")
+async def verify_job(job_id: str):
+    profile = await profile_svc.get_profile()
+    snap = await profile_svc.get_snapshot(profile) if profile and not profile.is_empty() else None
+    if not await jobs_svc.verify(job_id, snap, profile.model_dump(mode="json") if profile else None):
+        raise HTTPException(404, "Job not found")
+    await _summary_and_publish(job_id)
+    return {"job": await _detail_or_404(job_id)}
+
+
+@router.post("/jobs/{job_id}/rescore")
+async def rescore_job(job_id: str):
+    profile = await _profile_or_400()
+    snap = await profile_svc.get_snapshot(profile)
+    if not await jobs_svc.rescore(job_id, snap, profile.model_dump(mode="json")):
+        raise HTTPException(404, "Job not found")
+    await _summary_and_publish(job_id)
+    return {"job": await _detail_or_404(job_id)}
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    if not await db.delete_job(job_id):
+        raise HTTPException(404, "Job not found")
+    await emit({"type": "job.deleted", "data": {"ids": [job_id]}})
+    return {"ok": True}
+
+
+@router.delete("/jobs")
+async def delete_jobs(scope: Literal["unsaved", "all"] = "unsaved"):
+    n = await storage.delete_jobs(scope)
+    await emit({"type": "job.deleted", "data": {"ids": [], "scope": scope}})
+    return {"deleted": n}
+
+
+@router.post("/jobs/{job_id}/apply")
+async def apply_job(job_id: str):
+    await _profile_or_400()
+    if not await storage.get_row(job_id):
+        raise HTTPException(404, "Job not found")
     try:
-        result = await sync_add_company(
-            name=company.name,
-            website=company.website,
-            careers_url=company.careers_url,
-            hub=company.hub,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    await ws_manager.broadcast({
-        "agent": "system",
-        "event_type": "company_added",
-        "message": f"Company added: {company.name}",
-        "data": result,
-    })
-    return {"status": "ok", "company": result}
+        await apply_svc.start(job_id, emit)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+    return {"status": "started"}
 
 
-@router.post("/companies/load-seed")
-async def load_seed_companies():
-    """Load the bundled Indian-startup seed list into the DB."""
-    from jobhunterx.agents.job_sync import load_seed_companies as seed_fn, ensure_companies_in_db
+# ---------------------------------------------------------------------------
+# Documents
+# ---------------------------------------------------------------------------
 
-    rows = seed_fn()
-    count = await ensure_companies_in_db(rows)
-    return {"status": "ok", "loaded": count, "total_in_csv": len(rows)}
+class JobDocumentRequest(BaseModel):
+    kind: Literal["resume", "cover_letter"]
 
 
-@router.delete("/companies/{company_id}")
-async def delete_company(company_id: str):
-    """Remove a tracked company."""
-    ok = await db.delete_company(company_id)
-    if not ok:
-        raise HTTPException(404, "Company not found")
-    return {"status": "ok"}
+class CvRequest(BaseModel):
+    focus: str = Field("", max_length=120)
 
 
-@router.post("/companies/sync")
-async def sync_companies():
-    """Run one sync pass: probe ATS → fetch jobs → Gemma score → store."""
-    global _sync_task
-
-    profile = await db.get_latest_profile()
-    if profile is None and _current_profile is not None:
-        profile = _current_profile
-
-    if _sync_task and not _sync_task.done():
-        raise HTTPException(409, "A sync is already running")
-
-    async def _run():
-        try:
-            from jobhunterx.agents.job_sync import run_sync
-
-            result = await run_sync(
-                profile=profile,
-                event_cb=lambda e: ws_manager.broadcast(e),
-            )
-            log.info("sync_complete", result=result)
-        except Exception as exc:
-            log.error("sync_error", error=str(exc))
-            await ws_manager.broadcast({
-                "agent": "system",
-                "event_type": "error",
-                "message": f"Sync error: {str(exc)[:200]}",
-            })
-
-    _sync_task = asyncio.create_task(_run())
-    return {"status": "started", "profile_loaded": profile is not None}
+async def _doc_detail(doc) -> dict:
+    current = await _current_hash()
+    job = None
+    if doc.job_id:
+        row = await storage.get_row(doc.job_id)
+        if row:
+            job, _ = storage.row_to_objects(row)
+    return {**jobs_svc.document_summary(doc, current, job), "content": doc.content,
+            "provenance": doc.provenance.model_dump(mode="json")}
 
 
-@router.get("/locations")
-async def list_locations():
-    """Supported target locations for the frontend dropdown."""
-    SUPPORTED_LOCS = [
-        ("bengaluru", "Bengaluru"),
-        ("hyderabad", "Hyderabad"),
-        ("mumbai", "Mumbai"),
-        ("pune", "Pune"),
-        ("chennai", "Chennai"),
-        ("delhi ncr", "Delhi NCR"),
-        ("kolkata", "Kolkata"),
-        ("ahmedabad", "Ahmedabad"),
-        ("kochi", "Kochi"),
-        ("visakhapatnam", "Visakhapatnam"),
-        ("coimbatore", "Coimbatore"),
-        ("indore", "Indore"),
-        ("jaipur", "Jaipur"),
-        ("chandigarh", "Chandigarh"),
-        ("lucknow", "Lucknow"),
-        ("remote", "Remote"),
-    ]
-    return {"locations": [
-        {"key": key, "label": label}
-        for key, label in SUPPORTED_LOCS
-    ]}
+@router.post("/jobs/{job_id}/documents")
+async def create_job_document(job_id: str, body: JobDocumentRequest):
+    profile = await _profile_or_400()
+    snap = await profile_svc.get_snapshot(profile)
+    try:
+        doc = await docs_svc.generate_for_job(job_id, body.kind, profile, snap, emit)
+    except docs_svc.JobNotFound:
+        raise HTTPException(404, "Job not found")
+    except docs_svc.AlreadyGenerating as exc:
+        raise HTTPException(409, str(exc))
+    except GenerationUnavailable as exc:
+        raise HTTPException(502, str(exc))
+    await _summary_and_publish(job_id)
+    return {"document": await _doc_detail(doc)}
 
 
-def _mask_api_key(key: Optional[str]) -> str:
-    if not key or not key.strip():
+@router.post("/documents/cv")
+async def create_cv(body: CvRequest):
+    profile = await _profile_or_400()
+    snap = await profile_svc.get_snapshot(profile)
+    try:
+        doc = await docs_svc.generate_cv_doc(profile, snap, body.focus.strip(), emit)
+    except docs_svc.AlreadyGenerating as exc:
+        raise HTTPException(409, str(exc))
+    return {"document": await _doc_detail(doc)}
+
+
+@router.get("/documents")
+async def list_documents(job_id: str = "", kind: str = ""):
+    docs = await storage.list_documents(job_id or None, kind or None)
+    current = await _current_hash()
+    out = []
+    for d in docs:
+        job = None
+        if d.job_id:
+            row = await storage.get_row(d.job_id)
+            job = storage.row_to_objects(row)[0] if row else None
+        out.append(jobs_svc.document_summary(d, current, job))
+    return {"documents": out}
+
+
+@router.get("/documents/{doc_id}")
+async def get_document(doc_id: str):
+    doc = await storage.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    return {"document": await _doc_detail(doc)}
+
+
+def _slug(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_\-]", "", (s or "").strip().replace(" ", "_"))[:40]
+
+
+@router.get("/documents/{doc_id}/pdf")
+async def get_document_pdf(doc_id: str):
+    doc = await storage.get_document(doc_id)
+    pdf = await storage.get_document_pdf(doc_id) if doc else None
+    if not doc or not pdf:
+        raise HTTPException(404, "Document not found")
+    profile = await profile_svc.get_profile()
+    parts = [_slug(profile.name if profile else ""), {"resume": "Resume", "cv": "CV", "cover_letter": "Cover_Letter"}[doc.kind]]
+    if doc.job_id:
+        row = await storage.get_row(doc.job_id)
+        if row:
+            parts.append(_slug(row.get("company") or ""))
+    fname = "_".join(p for p in parts if p) + ".pdf"
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    if not await storage.delete_document(doc_id):
+        raise HTTPException(404, "Document not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Settings, models, usage (system)
+# ---------------------------------------------------------------------------
+
+def _mask(key: Optional[str]) -> str:
+    v = (key or "").strip()
+    if not v:
         return ""
-    val = key.strip()
-    if len(val) <= 6:
-        return "******"
-    return "********" + val[-4:]
+    return "******" if len(v) <= 6 else "********" + v[-4:]
+
+
+_KEY_FIELDS = {  # payload key → (settings attr, env var names)
+    "tinyfish_api_key": ("tinyfish_api_key", ["TINYFISH_API_KEY"]),
+    "tavily_api_key": ("tavily_api_key", ["TAVILY_API_KEY"]),
+    "exa_api_key": ("exa_api_key", ["EXA_API_KEY"]),
+    "brave_api_key": ("brave_api_key", ["BRAVE_API_KEY"]),
+    "google_api_key": ("google_api_key", ["GOOGLE_API_KEY", "GEMINI_API_KEY"]),
+    "gemini_api_key": ("google_api_key", ["GOOGLE_API_KEY", "GEMINI_API_KEY"]),
+    "groq_api_key": ("groq_api_key", ["GROQ_API_KEY"]),
+    "mistral_api_key": ("mistral_api_key", ["MISTRAL_API_KEY"]),
+}
+_BOOL_FIELDS = {"enable_web_search_apis": "ENABLE_WEB_SEARCH_APIS", "brave_enabled": "BRAVE_ENABLED",
+                "strict_zero_spend_protection": "STRICT_ZERO_SPEND_PROTECTION"}
+_SEARCH_PROVIDERS = ("tinyfish", "tavily", "exa", "brave", "ddgs")
 
 
 @router.get("/settings")
 async def get_settings_masked():
-    """Return application settings with masked API keys for privacy/security."""
     from jobhunterx.config.settings import get_settings
     s = get_settings()
-
-    gemini_k = s.google_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
-    groq_k = s.groq_api_key or os.environ.get("GROQ_API_KEY") or ""
-    mistral_k = s.mistral_api_key or os.environ.get("MISTRAL_API_KEY") or ""
-
-    return {
-        "enable_web_search_apis": getattr(s, "enable_web_search_apis", True),
-        "search_router_mode": s.search_router_mode,
-        "primary_search_provider": s.primary_search_provider,
-        "strict_zero_spend_protection": s.strict_zero_spend_protection,
-        "quality_score_threshold": s.quality_score_threshold,
-        "tinyfish_configured": bool(s.tinyfish_api_key),
-        "tinyfish_key_masked": _mask_api_key(s.tinyfish_api_key),
-        "tavily_configured": bool(s.tavily_api_key),
-        "tavily_key_masked": _mask_api_key(s.tavily_api_key),
-        "exa_configured": bool(s.exa_api_key),
-        "exa_key_masked": _mask_api_key(s.exa_api_key),
-        "brave_configured": bool(s.brave_api_key),
-        "brave_enabled": s.brave_enabled,
-        "brave_key_masked": _mask_api_key(s.brave_api_key),
-        "google_configured": bool(gemini_k),
-        "google_key_masked": _mask_api_key(gemini_k),
-        "groq_configured": bool(groq_k),
-        "groq_key_masked": _mask_api_key(groq_k),
-        "mistral_configured": bool(mistral_k),
-        "mistral_key_masked": _mask_api_key(mistral_k),
-    }
+    out = {k: getattr(s, k) for k in _BOOL_FIELDS}
+    out["primary_search_provider"] = s.primary_search_provider
+    out["search_providers"] = list(_SEARCH_PROVIDERS)
+    for name in ("tinyfish", "tavily", "exa", "brave", "google", "groq", "mistral"):
+        val = getattr(s, f"{name}_api_key")
+        out[f"{name}_configured"] = bool(val)
+        out[f"{name}_key_masked"] = _mask(val)
+    return out
 
 
-def _persist_to_env_file(env_path: Path, updates: dict) -> None:
-    """Persist updated configuration settings into the .env file."""
-    lines = []
-    if env_path.exists():
-        lines = env_path.read_text(encoding="utf-8").splitlines()
-
-    updated_keys = set()
-    new_lines = []
-
+def _persist_env(updates: dict[str, str]) -> None:
+    from jobhunterx.config.settings import _BASE_DIR
+    path = _BASE_DIR / ".env"
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    done, out = set(), []
     for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in line:
-            k, _ = line.split("=", 1)
-            k = k.strip()
-            if k in updates:
-                new_lines.append(f"{k}={updates[k]}")
-                updated_keys.add(k)
-                continue
-        new_lines.append(line)
-
-    for k, v in updates.items():
-        if k not in updated_keys:
-            new_lines.append(f"{k}={v}")
-
-    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        k = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith("#") else ""
+        if k in updates:
+            out.append(f"{k}={updates[k]}")
+            done.add(k)
+        else:
+            out.append(line)
+    out += [f"{k}={v}" for k, v in updates.items() if k not in done]
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
 @router.post("/settings")
 async def update_settings(payload: dict):
-    """Update search and LLM API provider configuration settings."""
-    from jobhunterx.config.settings import get_settings, _BASE_DIR
+    from jobhunterx.config.settings import get_settings
     s = get_settings()
-
-    env_updates = {}
-
-    if "enable_web_search_apis" in payload:
-        val = bool(payload["enable_web_search_apis"])
-        s.enable_web_search_apis = val
-        env_updates["ENABLE_WEB_SEARCH_APIS"] = "true" if val else "false"
-
-    if "tinyfish_api_key" in payload:
-        key = str(payload["tinyfish_api_key"]).strip()
-        s.tinyfish_api_key = key
-        os.environ["TINYFISH_API_KEY"] = key
-        env_updates["TINYFISH_API_KEY"] = key
-
-    if "tavily_api_key" in payload:
-        key = str(payload["tavily_api_key"]).strip()
-        s.tavily_api_key = key
-        os.environ["TAVILY_API_KEY"] = key
-        env_updates["TAVILY_API_KEY"] = key
-
-    if "exa_api_key" in payload:
-        key = str(payload["exa_api_key"]).strip()
-        s.exa_api_key = key
-        os.environ["EXA_API_KEY"] = key
-        env_updates["EXA_API_KEY"] = key
-
-    if "brave_api_key" in payload:
-        key = str(payload["brave_api_key"]).strip()
-        s.brave_api_key = key
-        os.environ["BRAVE_API_KEY"] = key
-        env_updates["BRAVE_API_KEY"] = key
-
-    if "brave_enabled" in payload:
-        val = bool(payload["brave_enabled"])
-        s.brave_enabled = val
-        env_updates["BRAVE_ENABLED"] = "true" if val else "false"
-
-    if "gemini_api_key" in payload or "google_api_key" in payload:
-        key = str(payload.get("gemini_api_key") or payload.get("google_api_key")).strip()
-        s.google_api_key = key
-        os.environ["GEMINI_API_KEY"] = key
-        os.environ["GOOGLE_API_KEY"] = key
-        env_updates["GEMINI_API_KEY"] = key
-        env_updates["GOOGLE_API_KEY"] = key
-
-    if "groq_api_key" in payload:
-        key = str(payload["groq_api_key"]).strip()
-        s.groq_api_key = key
-        os.environ["GROQ_API_KEY"] = key
-        env_updates["GROQ_API_KEY"] = key
-
-    if "mistral_api_key" in payload:
-        key = str(payload["mistral_api_key"]).strip()
-        s.mistral_api_key = key
-        os.environ["MISTRAL_API_KEY"] = key
-        env_updates["MISTRAL_API_KEY"] = key
-
+    env: dict[str, str] = {}
+    for field, (attr, env_names) in _KEY_FIELDS.items():
+        if field in payload:
+            key = str(payload[field] or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_\-.:]{0,256}", key):
+                raise HTTPException(422, f"{field} contains invalid characters")
+            setattr(s, attr, key or None)
+            for n in env_names:
+                os.environ[n] = key
+                env[n] = key
+    for field, env_name in _BOOL_FIELDS.items():
+        if field in payload:
+            val = bool(payload[field])
+            setattr(s, field, val)
+            env[env_name] = "true" if val else "false"
     if "primary_search_provider" in payload:
-        val = str(payload["primary_search_provider"])
+        val = str(payload["primary_search_provider"]).lower()
+        if val not in _SEARCH_PROVIDERS:
+            raise HTTPException(422, "Unknown search provider")
         s.primary_search_provider = val
-        env_updates["PRIMARY_SEARCH_PROVIDER"] = val
-
-    if "strict_zero_spend_protection" in payload:
-        val = bool(payload["strict_zero_spend_protection"])
-        s.strict_zero_spend_protection = val
-        env_updates["STRICT_ZERO_SPEND_PROTECTION"] = "true" if val else "false"
-
-    if env_updates:
+        env["PRIMARY_SEARCH_PROVIDER"] = val
+    if env:
         try:
-            _persist_to_env_file(_BASE_DIR / ".env", env_updates)
-        except Exception as exc:
-            log.warning("failed_to_persist_env_settings", error=str(exc))
-
-    return {
-        "status": "updated",
-        "enable_web_search_apis": s.enable_web_search_apis,
-        "primary_search_provider": s.primary_search_provider,
-    }
+            _persist_env(env)
+        except OSError as exc:
+            log.warning("persist_env_failed", error=str(exc))
+    return await get_settings_masked()
 
 
-@router.get("/budget")
-async def get_budget():
-    """Gemma budget usage (15k RPD / 30 RPM)."""
-    from jobhunterx.config.gemma import budget_status
-    return {"budget": budget_status()}
+@router.get("/models")
+async def get_models():
+    from jobhunterx.config.llm_router import get_model_config
+    return get_model_config()
+
+
+class ModelSelection(BaseModel):
+    chain: str
+    model_id: str
+
+
+@router.post("/models")
+async def set_model(body: ModelSelection):
+    from jobhunterx.config.llm_router import FALLBACK_CHAINS, get_model_config, set_model_config
+    if body.chain not in FALLBACK_CHAINS or body.model_id not in {m["id"] for m in get_model_config()["all_models"]}:
+        raise HTTPException(422, "Unknown chain or model")
+    set_model_config(body.chain, body.model_id)
+    return {"status": "ok", "config": get_model_config()}
 
 
 @router.get("/usage")
-async def get_usage_report_endpoint():
-    """Complete API usage dashboard: web search providers + LLM providers + budgets.
-
-    Web search usage comes from the SQLite ledger (every provider attempt is
-    recorded); LLM usage comes from the agent_runs telemetry table.
-    """
-    from jobhunterx.tools.usage_ledger import get_usage_report
-    from jobhunterx.config.database import get_token_usage_summary
+async def usage():
     from jobhunterx.config import gemma
-    from jobhunterx.config.settings import get_settings
-
-    s = get_settings()
-
+    from jobhunterx.config.llm_router import get_model_config
+    from jobhunterx.tools.usage_ledger import get_usage_report
     search_report = await get_usage_report()
-    provider_meta = {
-        "tinyfish": {
-            "label": "TinyFish Search", "unit": "credits", "allowance": None,
-            "rate": "0 credits / search", "configured": bool(s.tinyfish_api_key),
-            "enabled_in_order": True,
-        },
-        "tavily": {
-            "label": "Tavily", "unit": "credits", "allowance": 1000.0,
-            "rate": "1 credit / search", "configured": bool(s.tavily_api_key),
-            "enabled_in_order": True,
-        },
-        "exa": {
-            "label": "Exa AI", "unit": "USD", "allowance": 10.0,
-            "rate": "$7 / 1,000 searches (~$0.007 each)",
-            "configured": bool(s.exa_api_key),
-            "enabled_in_order": True,
-            "allowance_desc": "$10.00 / month ≈ 1,428 searches",
-            "allowance_extra": "$20 one-time signup credit ≈ 2,800 extra searches (new accounts)",
-        },
-        "brave": {
-            "label": "Brave Search", "unit": "USD", "allowance": 5.0,
-            "rate": "$0.005 / search", "configured": bool(s.brave_api_key),
-            "enabled_in_order": bool(s.brave_enabled),
-        },
-        "ddgs": {
-            "label": "DuckDuckGo", "unit": "NA", "allowance": None,
-            "rate": "free scraper", "configured": True,
-            "enabled_in_order": True,
-        },
-    }
-    for name, meta in provider_meta.items():
-        stats = search_report.get(name, {})
-        meta["usage"] = stats
-        meta["calls"] = stats.get("calls", 0)
-        meta["calls_this_month"] = stats.get("calls_this_month", 0)
-        meta["units_this_month"] = stats.get("units_this_month", 0.0)
-        meta["last_used"] = stats.get("last_used", "")
-        meta["verdicts"] = sorted(stats.get("verdicts", {}).keys())
-        meta["name"] = name
-        used = stats.get("units_this_month", 0.0)
-        meta["remaining"] = (meta["allowance"] - used) if meta["allowance"] is not None else None
-        meta["usage_pct"] = min(100.0, round(used / meta["allowance"] * 100, 1)) if meta["allowance"] else 0.0
-
-    unit_rate = {"tinyfish": 0.0, "tavily": 0.0, "exa": 0.007, "brave": 0.005, "ddgs": 0.0}
-    total_calls_month = sum(p.get("calls_this_month", 0) for p in provider_meta.values())
-    total_cost_month = sum(
-        p.get("units_this_month", 0.0) * unit_rate.get(name, 0.0)
-        for name, p in provider_meta.items()
-    )
-
-    llm_usage = await get_token_usage_summary()
-    by_model = llm_usage.pop("by_model", {})
-
-    llm_meta = {
-        "gemini/gemma-4-26b-a4b-it": {
-            "label": "Gemma 4 26B (Google)", "provider": "Google AI Studio",
-            "limit_unit": "req/day", "limit_value": s.gemma_daily_requests or 14400,
-        },
-        "gemini/gemini-3.1-flash-lite": {
-            "label": "Gemini 3.1 Flash Lite (Google)", "provider": "Google AI Studio",
-            "limit_unit": "req/day", "limit_value": 500,
-        },
-        "groq/llama-3.3-70b-versatile": {
-            "label": "Llama 3.3 70B (Groq)", "provider": "Groq",
-            "limit_unit": "req/day", "limit_value": 1000,
-        },
-        "groq/llama-3.1-8b-instant": {
-            "label": "Llama 3.1 8B (Groq)", "provider": "Groq",
-            "limit_unit": "req/day", "limit_value": 14400,
-        },
-        "mistral/mistral-small-2603": {
-            "label": "Mistral Small (Mistral)", "provider": "Mistral AI",
-            "limit_unit": "free tier", "limit_value": None,
-        },
-        "mistral/mistral-large-2512": {
-            "label": "Mistral Large (Mistral)", "provider": "Mistral AI",
-            "limit_unit": "free tier", "limit_value": None,
-        },
-        "mistral/codestral-2508": {
-            "label": "Codestral 2508 (Mistral)", "provider": "Mistral AI",
-            "limit_unit": "free tier", "limit_value": None,
-        },
-    }
-    llm_rows = []
-    for model, meta in llm_meta.items():
-        usage = by_model.get(model, {})
-        llm_rows.append({
-            "model": model, "label": meta["label"], "provider": meta["provider"],
-            "limit_unit": meta["limit_unit"], "limit_value": meta["limit_value"],
-            "calls": usage.get("calls", 0), "tokens_in": usage.get("tokens_in", 0),
-            "tokens_out": usage.get("tokens_out", 0),
-            "total_tokens": usage.get("total_tokens", 0),
-        })
-    llm_rows.sort(key=lambda r: -r["calls"])
-
+    llm = await db.get_token_usage_summary()
+    by_model = llm.get("by_model", {})
+    models = {m["id"]: m for m in get_model_config()["all_models"]}
+    rows = [{"model": mid, "label": models.get(mid, {}).get("name", mid), "provider": models.get(mid, {}).get("provider", ""),
+             **{k: u.get(k, 0) for k in ("calls", "tokens_in", "tokens_out", "total_tokens")}}
+            for mid, u in by_model.items()]
+    rows.sort(key=lambda r: -r["calls"])
     return {
-        "web_search": {
-            "enabled": getattr(s, "enable_web_search_apis", True),
-            "primary_provider": getattr(s, "primary_search_provider", "tinyfish"),
-            "total_calls_month": total_calls_month,
-            "total_cost_month": round(total_cost_month, 4),
-            "exa_rate_note": "$7 / 1,000 searches — $10/mo free credit ≈ 1,428 searches/mo; new accounts +$20 signup ≈ 2,800 extra.",
-            "providers": list(provider_meta.values()),
-        },
-        "llm": {
-            "rows": llm_rows,
-            "totals": {
-                "calls": llm_usage.get("total_calls", 0),
-                "tokens_in": llm_usage.get("total_in", 0),
-                "tokens_out": llm_usage.get("total_out", 0),
-                "total_tokens": llm_usage.get("grand_total", 0),
-            },
-        },
+        "web_search": {"providers": [{"name": n, **search_report.get(n, {})} for n in _SEARCH_PROVIDERS]},
+        "llm": {"rows": rows, "totals": {"calls": llm.get("total_calls", 0), "tokens_in": llm.get("total_in", 0),
+                                         "tokens_out": llm.get("total_out", 0), "total_tokens": llm.get("grand_total", 0)}},
         "gemma_budget": gemma.budget_status(),
         "now": datetime.now(timezone.utc).isoformat(),
     }
 
 
+@router.get("/status")
+async def status():
+    run = search_manager.current
+    return {"search": run["status"] if run else "idle", "jobs": await storage.count(),
+            "token_usage": await db.get_token_usage_summary()}
+
+
 # ---------------------------------------------------------------------------
-# Routes
+# Browser agent, interventions, reset
 # ---------------------------------------------------------------------------
 
-
-@router.post("/upload-resume")
-async def upload_resume(file: UploadFile = File(...)):
-    """Upload a resume PDF. Extracts profile and stores in SQLite."""
-    global _current_profile
-
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are supported")
-
-    pdf_bytes = await file.read()
-    if len(pdf_bytes) < 100:
-        raise HTTPException(400, "File appears to be empty")
-
-    log.info("resume_upload", filename=file.filename, size=len(pdf_bytes))
-
-    profile = await extractor.extract_profile(pdf_bytes)
-    profile_dict = profile.model_dump()
-
-    # Store in SQLite
-    profile_id = await db.insert_profile(profile_dict)
-    _current_profile = profile_dict
-
-    # Broadcast to WebSocket
-    await ws_manager.broadcast({
-        "agent": "system",
-        "event_type": "profile_loaded",
-        "message": f"Profile extracted: {profile.name}",
-        "data": {
-            "name": profile.name,
-            "skills_count": len(profile.skills),
-            "experience_count": len(profile.experience),
-        },
-    })
-
-    return {
-        "status": "ok",
-        "profile_id": profile_id,
-        "profile": profile_dict,
-    }
+_pipeline_mode = "manual"
 
 
-@router.post("/start-search")
-async def start_search(request: StartSearchRequest):
-    """Start the discovery flow (company sync → ATS fetch → Gemma scoring)."""
-    global _sync_task
+@router.get("/pipeline-mode")
+async def get_pipeline_mode():
+    return {"mode": _pipeline_mode}
 
-    # Always fetch the latest profile from DB to avoid stale state
-    profile = await db.get_latest_profile()
-    if profile is None:
-        if _current_profile is not None:
-            profile = _current_profile
-        else:
-            raise HTTPException(400, "No resume uploaded yet")
 
-    # Cancel any running sync and wait for it to finish
-    if _sync_task and not _sync_task.done():
-        _sync_task.cancel()
-        try:
-            await asyncio.wait_for(asyncio.shield(_sync_task), timeout=2.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError):
-            pass
-    await stop_all_active_browsers()
+@router.post("/pipeline-mode")
+async def set_pipeline_mode(mode: Optional[str] = None):
+    global _pipeline_mode
+    if mode:
+        if mode not in ("automatic", "manual"):
+            raise HTTPException(422, "mode must be 'automatic' or 'manual'")
+        _pipeline_mode = mode
+    return {"mode": _pipeline_mode}
 
-    async def event_callback(event: dict):
-        await ws_manager.broadcast(event)
 
-    # Run in background
-    async def _run():
-        try:
-            result = await graph.run_full_search(
-                location=request.location,
-                profile=profile,
-                role=request.role,
-                limit=request.limit,
-                event_callback=event_callback,
-                auto_apply=(_pipeline_mode == "automatic"),
-            )
-            log.info("search_complete", result=result)
-        except Exception as exc:
-            log.error("search_error", error=str(exc))
-            await ws_manager.broadcast({
-                "agent": "system",
-                "event_type": "error",
-                "message": f"Search error: {str(exc)[:200]}",
-            })
+class ResumeAgentRequest(BaseModel):
+    job_id: str
+    action: Literal["done", "skip"] = "done"
 
-    _sync_task = asyncio.create_task(_run())
 
-    return {"status": "started", "location": request.location}
+@router.post("/resume-agent")
+async def resume_agent(body: ResumeAgentRequest):
+    from jobhunterx.agents import browser_agent as ba
+    await ba.clear_paused_session(body.job_id)
+    if body.action == "skip":
+        await db.update_job(body.job_id, status="skipped")
+        return {"status": "ok"}
+    try:
+        await apply_svc.start(body.job_id, emit)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+    return {"status": "started"}
 
 
 @router.post("/stop-browser")
-async def stop_browser_endpoint():
-    """Explicitly halt any running Playwright/browser-use sessions."""
-    log.info("received_stop_browser_request")
+async def stop_browser():
+    await apply_svc.cancel_all()
     await stop_all_active_browsers()
-    global _sync_task
-    if _sync_task and not _sync_task.done():
-        _sync_task.cancel()
-        try:
-            await asyncio.wait_for(asyncio.shield(_sync_task), timeout=2.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError):
-            pass
-    return {"status": "ok", "message": "Browser session stopped successfully."}
-
-
-@router.get("/browser/cdp-url")
-async def get_browser_cdp_url():
-    """Return the CDP websocket URL of the currently active browser session."""
-    from jobhunterx.agents.browser_agent import get_active_cdp_url
-    return {"cdp_url": get_active_cdp_url()}
+    return {"status": "ok"}
 
 
 @router.post("/browser/takeover")
 async def browser_takeover(job_id: str = ""):
-    """User is taking over the live browser window.
-
-    Pauses URL streaming so the UI doesn't fight the user, and attempts to
-    bring the real Chrome window to the foreground (Windows).
-    Returns the active CDP url for display.
-    """
     from jobhunterx.agents import browser_agent as ba
     if job_id:
         ba.pause_streaming(job_id)
-    # Best-effort: bring Chrome to foreground on Windows.
-    try:
-        _focus_chrome_window()
-    except Exception as exc:
-        log.warning("focus_chrome_failed", error=str(exc))
-    return {"status": "ok", "cdp_url": ba.get_active_cdp_url()}
+    return {"status": "ok"}
 
 
 @router.post("/browser/release")
 async def browser_release(job_id: str = ""):
-    """User finished manual control — resume URL streaming."""
     from jobhunterx.agents import browser_agent as ba
     if job_id:
         ba.resume_streaming(job_id)
     return {"status": "ok"}
 
 
-def _focus_chrome_window() -> None:
-    """Bring the automation Chrome window to the foreground (Windows only)."""
-    import sys
-    if sys.platform != "win32":
-        return
-    try:
-        import subprocess
-        # Focus by window title substring. The persistent profile launches
-        # Chromium; "Chrome" / "Chromium" / "Edge" title fragments cover it.
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "(New-Object -ComObject WScript.Shell).AppActivate('Chrome')"],
-            capture_output=True, timeout=4,
-        )
-    except Exception:
-        pass
-
-
-def sanitize_for_json(data: Any) -> Any:
-    """Recursively clean data for JSON serialization, replacing binary bytes with info strings."""
-    if isinstance(data, dict):
-        cleaned = {}
-        for k, v in data.items():
-            if isinstance(v, bytes):
-                cleaned[k] = f"<binary_bytes: {len(v)} bytes>"
-            else:
-                cleaned[k] = sanitize_for_json(v)
-        return cleaned
-    elif isinstance(data, list):
-        return [sanitize_for_json(item) for item in data]
-    elif isinstance(data, bytes):
-        return f"<binary_bytes: {len(data)} bytes>"
-    return data
-
-
-@router.post("/resume-agent")
-async def resume_agent(request: ResumeAgentRequest):
-    """Resume a HITL-interrupted agent pipeline."""
-    result = await graph.resume_job_pipeline(request.job_id, request.action)
-    clean_result = sanitize_for_json(result)
-    return {"status": "ok", "result": clean_result}
-
-
-
-@router.get("/jobs")
-async def list_jobs(status: str = "", limit: int = 100, include_closed: bool = False):
-    """List discovered jobs with optional status filter.
-
-    Dead jobs (status='closed') are hidden by default — they waste the
-    user's time. Pass include_closed=true to see them.
-    """
-    if not status and not include_closed:
-        jobs = await db.get_jobs_excluding(["closed"], limit=limit)
-    else:
-        jobs = await db.get_jobs(status=status or None, limit=limit)
-    # Don't send PDF blob in list response; parse validation_json
-    for j in jobs:
-        j["has_tailored_pdf"] = bool(j.get("tailored_pdf"))
-        j.pop("tailored_pdf", None)
-        # Parse freshness_json (eligibility gate + liveness)
-        fj = j.get("freshness_json")
-        if fj and isinstance(fj, str):
-            try:
-                j["freshness"] = json.loads(fj)
-            except (json.JSONDecodeError, TypeError):
-                j["freshness"] = None
-        # Fix match_score NA: ensure it's always a number
-        if j.get("match_score") is None:
-            # Try to extract from validation_json
-            vj = j.get("validation_json")
-            if vj and isinstance(vj, str):
-                try:
-                    v = json.loads(vj)
-                    j["match_score"] = v.get("match_score", 0.0)
-                    j["validation"] = v
-                except (json.JSONDecodeError, TypeError):
-                    j["match_score"] = 0.0
-            else:
-                j["match_score"] = 0.0
-        # Parse validation_json into dict for frontend
-        if "validation_json" in j and isinstance(j["validation_json"], str):
-            try:
-                j["validation"] = json.loads(j["validation_json"])
-            except (json.JSONDecodeError, TypeError):
-                j["validation"] = None
-    return {"jobs": jobs}
-
-
-@router.get("/jobs/{job_id}")
-async def get_job(job_id: str):
-    """Get a single job detail."""
-    job = await db.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "Job not found")
-    # Don't send binary PDF in JSON
-    job["has_tailored_pdf"] = bool(job.get("tailored_pdf"))
-    job.pop("tailored_pdf", None)
-    fj = job.get("freshness_json")
-    if fj and isinstance(fj, str):
-        try:
-            job["freshness"] = json.loads(fj)
-            job.pop("freshness_json", None)
-        except (json.JSONDecodeError, TypeError):
-            pass
-    # Fix match_score NA
-    if job.get("match_score") is None:
-        vj = job.get("validation_json")
-        if vj and isinstance(vj, str):
-            try:
-                v = json.loads(vj)
-                job["match_score"] = v.get("match_score", 0.0)
-                job["validation"] = v
-            except (json.JSONDecodeError, TypeError):
-                job["match_score"] = 0.0
-        else:
-            job["match_score"] = 0.0
-    if "validation_json" in job and isinstance(job["validation_json"], str):
-        try:
-            job["validation"] = json.loads(job["validation_json"])
-        except (json.JSONDecodeError, TypeError):
-            job["validation"] = None
-    return {"job": job}
-
-
-@router.delete("/jobs/{job_id}")
-async def delete_job_endpoint(job_id: str):
-    """Delete a single job listing by ID."""
-    success = await db.delete_job(job_id)
-    if not success:
-        raise HTTPException(404, "Job not found or already deleted")
-    await ws_manager.broadcast({
-        "agent": "system",
-        "event_type": "job_deleted",
-        "job_id": job_id,
-        "message": f"Job {job_id[:8]} deleted.",
-    })
-    return {"status": "ok", "job_id": job_id}
-
-
-@router.post("/jobs/clear")
-@router.delete("/jobs")
-async def clear_jobs_endpoint(status: str = ""):
-    """Clear all jobs (or jobs matching optional status filter) from the database."""
-    count = await db.clear_jobs(status=status or None)
-    await ws_manager.broadcast({
-        "agent": "system",
-        "event_type": "jobs_cleared",
-        "message": f"Cleared {count} jobs.",
-    })
-    return {"status": "ok", "cleared_count": count}
-
-
-@router.post("/jobs/{job_id}/apply")
-async def apply_single_job(job_id: str):
-    """Run the per-job pipeline when the user clicks 'Apply' on a job card.
-
-    Clicking Apply is an explicit request to apply, so the full pipeline runs
-    in both modes: validate/tailor (resume PDF) → contact search → email
-    draft → browser agent. The pipeline mode ('manual' vs 'automatic') only
-    controls whether discovery auto-applies without a click.
-    """
-    from jobhunterx.agents.graph import run_single_job_apply
-
-    job = await db.get_job(job_id)
-    if not job:
-        raise HTTPException(404, "Job not found")
-
-    async def _run():
-        try:
-            result = await run_single_job_apply(
-                job_id,
-                include_browser=True,
-            )
-            log.info("single_job_apply_complete", job_id=job_id, result_keys=list(result.keys()) if isinstance(result, dict) else str(result))
-        except Exception as exc:
-            log.error("single_job_apply_error", job_id=job_id, error=str(exc))
-            await ws_manager.broadcast({
-                "agent": "system",
-                "event_type": "error",
-                "job_id": job_id,
-                "message": f"Apply error: {str(exc)[:200]}",
-            })
-
-    # Run in background so the HTTP response returns immediately
-    task = asyncio.create_task(_run())
-    _apply_tasks[job_id] = task
-    # Clean up reference when done
-    task.add_done_callback(lambda _: _apply_tasks.pop(job_id, None))
-
-    return {"status": "started", "job_id": job_id, "message": "Application pipeline launched."}
-
-
-@router.get("/jobs/{job_id}/resume-pdf")
-async def download_resume_pdf(job_id: str):
-    """Download the tailored resume PDF for a job, named after candidate + company."""
-    from fastapi.responses import Response
-    import re as _re
-
-    job = await db.get_job(job_id)
-    if not job or not job.get("tailored_pdf"):
-        raise HTTPException(404, "No tailored resume for this job")
-
-    # Build a readable filename: <Name>_<Company>_<Role>.pdf
-    def _slug(s: str) -> str:
-        s = (s or "").strip().replace(" ", "_")
-        return _re.sub(r"[^A-Za-z0-9_\-]", "", s)[:40] or "resume"
-
-    parts = [_slug(job.get("company", "")), _slug(job.get("role", ""))]
-    fname = "_".join(p for p in parts if p) or f"resume_{job_id[:8]}"
-    fname = fname + ".pdf"
-
-    return Response(
-        content=job["tailored_pdf"],
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
-    )
-
-
-@router.get("/status")
-async def get_status():
-    """Overall system status and token usage summary."""
-    token_usage = await db.get_token_usage_summary()
-    jobs = await db.get_jobs(limit=1000)
-    companies = await db.get_companies()
-    status_counts = {}
-    for j in jobs:
-        s = j.get("status", "unknown")
-        status_counts[s] = status_counts.get(s, 0) + 1
-
-    return {
-        "status": "running" if _sync_task and not _sync_task.done() else "idle",
-        "job_counts": status_counts,
-        "total_jobs": len(jobs),
-        "total_companies": len(companies),
-        "companies_with_ats": sum(1 for c in companies if c.get("ats") not in ("", "none")),
-        "token_usage": token_usage,
-        "pipeline_mode": _pipeline_mode,
-    }
-
-
-@router.api_route("/pipeline-mode", methods=["GET", "POST"])
-async def pipeline_mode_endpoint(mode: str | None = None):
-    """Get or set the pipeline execution mode ('automatic' or 'manual')."""
-    global _pipeline_mode
-    if mode:
-        target_mode = mode.lower()
-        if target_mode in ("automatic", "manual"):
-            _pipeline_mode = target_mode
-            await ws_manager.broadcast({
-                "agent": "system",
-                "event_type": "pipeline_mode_changed",
-                "message": f"Pipeline mode set to: {target_mode}",
-                "data": {"mode": target_mode},
-            })
-            return {"status": "ok", "mode": _pipeline_mode}
-        else:
-            raise HTTPException(400, "Mode must be 'automatic' or 'manual'")
-    return {"mode": _pipeline_mode}
-
-
-class ModelSelectionInput(BaseModel):
-    chain: str
-    model_id: str
-
-
-@router.get("/models")
-async def get_models_endpoint():
-    """Get model configuration, active chain models, and provider statuses."""
-    from jobhunterx.config.llm_router import get_model_config
-    return get_model_config()
-
-
-@router.post("/models")
-async def set_model_endpoint(input_data: ModelSelectionInput):
-    """Set model selection for a specific agent chain."""
-    from jobhunterx.config.llm_router import set_model_config, get_model_config
-    set_model_config(input_data.chain, input_data.model_id)
-    await ws_manager.broadcast({
-        "agent": "system",
-        "event_type": "model_config_updated",
-        "message": f"Model for agent '{input_data.chain}' changed to: {input_data.model_id}",
-        "data": {"chain": input_data.chain, "model_id": input_data.model_id},
-    })
-    return {"status": "ok", "config": get_model_config()}
-
-
-
-@router.post("/reset")
-async def reset_system():
-    """Cancel any active search task and clear the entire database."""
-    global _sync_task, _current_profile, _apply_tasks
-    if _sync_task and not _sync_task.done():
-        _sync_task.cancel()
-        try:
-            await asyncio.wait_for(asyncio.shield(_sync_task), timeout=2.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError):
-            pass
-        _sync_task = None
-    
-    # Cancel active application tasks
-    for job_id, task in list(_apply_tasks.items()):
-        if not task.done():
-            task.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
-            except Exception:
-                pass
-    _apply_tasks.clear()
-    
-    # Clear active pipelines cache
-    graph._active_pipelines.clear()
-    
-    await db.clear_database()
-    _current_profile = None
-    
-    await ws_manager.broadcast({
-        "agent": "system",
-        "event_type": "reset",
-        "message": "System halted and database successfully reset.",
-    })
-    return {"status": "ok"}
-
-
-@router.get("/profile")
-async def get_profile():
-    """Get the current loaded profile details."""
-    global _current_profile
-    # Always try DB first for fresh data, fall back to in-memory
-    profile = await db.get_latest_profile()
-    if profile is not None:
-        _current_profile = profile
-    return {"profile": _current_profile}
-
-
-@router.post("/profile")
-async def update_profile(profile_data: dict):
-    """Save/update the candidate profile details."""
-    global _current_profile
-    profile_id = await db.insert_profile(profile_data)
-    _current_profile = profile_data
-    
-    await ws_manager.broadcast({
-        "agent": "system",
-        "event_type": "profile_updated",
-        "message": f"Profile updated: {profile_data.get('name', 'Candidate')}",
-    })
-    return {"status": "ok", "profile_id": profile_id, "profile": profile_data}
-
-class OutreachSaveInput(BaseModel):
-    contact_name: str = ""
-    contact_role: str = ""
-    subject: str = ""
-    body: str = ""
-
-
-@router.get("/outreach")
-async def get_outreach():
-    """Get active outreach drafts."""
-    drafts = await db.get_outreach_drafts()
-    return {"drafts": drafts}
-
-
-@router.post("/outreach/{draft_id}/discard")
-async def discard_outreach(draft_id: str):
-    """Discard an outreach draft."""
-    conn = await db.get_connection()
-    try:
-        await conn.execute("UPDATE outreach_drafts SET status = 'discarded' WHERE id = ?", (draft_id,))
-        await conn.commit()
-    finally:
-        await conn.close()
-    return {"status": "ok"}
-
-
-@router.post("/outreach/{draft_id}/save")
-async def save_outreach(draft_id: str, data: OutreachSaveInput):
-    """Save changes to an outreach draft."""
-    conn = await db.get_connection()
-    try:
-        await conn.execute(
-            "UPDATE outreach_drafts SET contact_name = ?, contact_role = ?, subject = ?, body = ? WHERE id = ?",
-            (data.contact_name, data.contact_role, data.subject, data.body, draft_id)
-        )
-        await conn.commit()
-    finally:
-        await conn.close()
-    return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# Intervention Sessions
-# ---------------------------------------------------------------------------
-
 @router.get("/interventions")
-async def get_interventions():
-    """Get all pending intervention sessions."""
-    sessions = await db.get_pending_interventions()
-    return {"interventions": sessions}
+async def interventions():
+    return {"interventions": await db.get_pending_interventions()}
 
 
 @router.post("/interventions/{session_id}/resolve")
-async def resolve_intervention(session_id: int, status: str = "resolved"):
-    """Mark an intervention session as resolved and clean up paused session."""
+async def resolve_intervention(session_id: int, status: Literal["resolved", "skipped"] = "resolved"):
     from jobhunterx.agents import browser_agent as ba
     sessions = await db.get_pending_interventions()
     target = next((s for s in sessions if s.get("id") == session_id), None)
-    if target and target.get("job_id"):
-        await ba.clear_paused_session(target["job_id"])
+    if not target:
+        raise HTTPException(404, "Intervention not found")
+    await ba.clear_paused_session(target["job_id"])
     await db.resolve_intervention(session_id, status)
     return {"status": "ok"}
 
 
 @router.post("/interventions/{job_id}/focus")
-async def focus_intervention_browser(job_id: str):
-    """Bring active browser window/tab for job_id to the front for manual intervention."""
+async def focus_intervention(job_id: str):
     from jobhunterx.agents import browser_agent as ba
-    focused = await ba.focus_browser_session(job_id)
-    return {"status": "ok", "focused": focused}
+    return {"status": "ok", "focused": await ba.focus_browser_session(job_id)}
 
 
 @router.get("/screenshots/{job_id}")
-async def get_screenshot(job_id: str):
-    """Serve a browser screenshot for a given job ID."""
-    from pathlib import Path
-    import re as _re
-    from fastapi.responses import FileResponse
+async def screenshot(job_id: str):
     from jobhunterx.config.settings import get_settings
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
+        raise HTTPException(404, "Screenshot not found")
+    path = Path(get_settings().screenshots_full_path) / f"{job_id}.png"
+    if not path.exists():
+        raise HTTPException(404, "Screenshot not found")
+    return FileResponse(str(path), media_type="image/png")
 
-    if not _re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
-        raise HTTPException(status_code=404, detail="Screenshot not found")
 
-    screenshot_path = Path(get_settings().screenshots_full_path) / f"{job_id}.png"
-    if screenshot_path.exists():
-        return FileResponse(str(screenshot_path), media_type="image/png")
-    raise HTTPException(status_code=404, detail="Screenshot not found")
+@router.post("/reset")
+async def reset():
+    await search_manager.cancel()
+    await apply_svc.cancel_all()
+    await db.clear_database()
+    await storage.migrate()
+    await emit({"type": "log", "message": "All data was reset.", "data": {"level": "warn", "source": "system"}})
+    return {"status": "ok"}

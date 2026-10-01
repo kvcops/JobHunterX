@@ -13,7 +13,7 @@ from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Project root (jobhunterx/): settings.py lives at jobhunterx/vellum/config/settings.py
+# Project root (jobhunterx/): settings.py lives at jobhunterx/jobhunterx/config/settings.py
 _BASE_DIR = Path(__file__).resolve().parents[2]
 
 
@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     tavily_search_depth: str = "basic"
     exa_search_num_results: int = 10
 
+
+    # --- Matching / discovery tuning (JSON overrides, see intelligence/policy.py) ---
+    match_policy_json: str = ""
+    max_jobs_per_search: int = 60
+    max_llm_jd_extractions_per_search: int = 40
+    fetch_timeout_s: float = 12.0
+    allow_private_network_fetch: bool = False   # SSRF guard; keep False
 
     # --- Storage Paths ---
     db_path: str = str(_BASE_DIR / "data" / "jobhunterx.db")

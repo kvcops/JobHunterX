@@ -7,6 +7,7 @@ Broadcasts real-time agent events to connected UI clients.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import WebSocket
@@ -33,7 +34,14 @@ class ConnectionManager:
         log.info("ws_client_disconnected", total=len(self.active_connections))
 
     async def broadcast(self, data: dict[str, Any]):
-        """Send an event to all connected clients."""
+        """Send an event to all connected clients.
+
+        Legacy browser-agent events ({agent, event_type, ...}) are wrapped as
+        {type: "browser", data: <event>} per the v2 WebSocket contract.
+        """
+        if "type" not in data:
+            data = {"type": "browser", "job_id": data.get("job_id"), "message": data.get("message", ""),
+                    "data": data, "ts": datetime.now(timezone.utc).isoformat()}
         message = json.dumps(data, default=str)
         disconnected = []
         for connection in self.active_connections:

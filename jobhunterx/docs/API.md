@@ -58,19 +58,25 @@ type CandidateSnapshot = {
   total_years: number; professional_years: number;
   years_source: "dates"|"override"|"stated"|"unknown";
   seniority: Seniority;
-  role_families: string[];           // e.g. ["genai_engineering","ml_engineering"]
-  target_titles: string[];           // concrete titles the search will use
-  skills: { name: string; key: string; category: string; sources: string[]; strength: number }[];
-  education_level: "none"|"diploma"|"bachelor"|"master"|"phd";
-  locations: string[]; home_country: string; work_modes: string[];
+  role_families: { label: string; closeness: number; evidence: string }[];   // AI-derived career tracks, closeness 0–1
+  target_titles: string[]; adjacent_titles: string[];
+  skills: { name: string; key: string; aliases: string[]; adjacent: string[]; sources: string[]; strength: number }[];
+  domains: string[];
+  education_level: "none"|"diploma"|"bachelor"|"master"|"phd"|"unknown";
+  locations: { city: string; region: string; country: string; aliases: string[] }[];
+  home_country: string; work_modes: string[];
   open_to_international: boolean; willing_to_relocate: boolean;
   min_annual_salary: number|null; salary_currency: string; notice_period_days: number|null;
-  excluded_companies: string[]; domain_keywords: string[];
+  employment_types: string[]; excluded_companies: string[]; career_direction: string;
+  method: "llm"|"fallback"; llm_model: string;   // fallback = AI unavailable, lower confidence
   notes: string[];                   // how values were derived, shown in UI
 };
 ```
 
-Role family labels: `GET /api/meta` returns `{ role_families: {key,label}[], locations: {key,label}[], tracking_statuses: string[] }`.
+Nothing in the product uses fixed lists of skills, titles or cities: role families, titles and
+location names all come from the AI understanding of the candidate's own profile.
+`GET /api/meta` returns `{ tracking_statuses: string[] }`.
+
 
 ---
 
@@ -174,10 +180,10 @@ type JobDetail = JobSummary & {
   requirements: {
     required_skills: string[]; preferred_skills: string[];
     experience_min: number|null; experience_max: number|null; experience_evidence: string;
-    education_level: string; education_mandatory: boolean; education_evidence: string;
+    education_level: string /* unknown|none|diploma|bachelor|master|phd */; education_mandatory: boolean; education_evidence: string;
     notice_period_max_days: number|null;
     responsibilities: string[]; requirement_lines: string[]; domain_keywords: string[];
-    method: string; llm_model: string;
+    method: "pending"|"llm"|"fallback"; llm_model: string;   // fallback = partial analysis
   };
   validation: ValidationReport;
   match: MatchAssessment | null;
@@ -201,6 +207,7 @@ type MatchAssessment = {
   matched_preferred: string[]; missing_preferred: string[];
   experience: MatchSummary["experience"];
   rejected_reasons: string[];
+  role_fit: number; role_track: string; method: "llm"|"fallback";
   profile_hash: string; engine_version: string; scored_at: string;
 };
 ```

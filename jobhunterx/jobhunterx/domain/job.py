@@ -88,19 +88,21 @@ class ValidationReport(BaseModel):
 class Requirements(BaseModel):
     """Structured requirements extracted from the JD."""
 
-    required_skills: list[str] = Field(default_factory=list)      # canonical keys
-    preferred_skills: list[str] = Field(default_factory=list)     # canonical keys
+    required_skills: list[str] = Field(default_factory=list)      # names as written in the JD
+    preferred_skills: list[str] = Field(default_factory=list)
+    must_have_skills: list[str] = Field(default_factory=list)     # subset of required stated as mandatory
+    skill_aliases: dict[str, list[str]] = Field(default_factory=dict)
     experience_min: Optional[float] = None
     experience_max: Optional[float] = None
     experience_evidence: str = ""
-    education_level: str = "none"          # none | diploma | bachelor | master | phd
+    education_level: str = "unknown"       # unknown | none | diploma | bachelor | master | phd
     education_mandatory: bool = False
     education_evidence: str = ""
     notice_period_max_days: Optional[int] = None
     responsibilities: list[str] = Field(default_factory=list)
     requirement_lines: list[str] = Field(default_factory=list)
     domain_keywords: list[str] = Field(default_factory=list)
-    method: str = "heuristic"              # heuristic | llm+heuristic | structured
+    method: str = "pending"                # pending | llm | fallback
     llm_model: str = ""
 
 
@@ -114,6 +116,7 @@ class JobPosting(BaseModel):
     location_raw: str = ""
     locations: list[str] = Field(default_factory=list)   # normalized city names
     countries: list[str] = Field(default_factory=list)
+    remote_countries: list[str] = Field(default_factory=list)  # remote restricted to these
     work_mode: WorkMode = WorkMode.UNKNOWN
     employment_type: str = ""             # full_time | part_time | contract | internship | temporary
     seniority: Seniority = Seniority.UNKNOWN

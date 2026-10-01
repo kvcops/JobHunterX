@@ -61,6 +61,9 @@ class MatchAssessment(BaseModel):
     missing_preferred: list[str] = Field(default_factory=list)
     experience: ExperienceFit = Field(default_factory=ExperienceFit)
     rejected_reasons: list[str] = Field(default_factory=list)
+    role_fit: float = 0.0
+    role_track: str = ""
+    method: str = ""                   # llm | fallback — how the JD/role fit were understood
     profile_hash: str = ""
     engine_version: str = ""
     scored_at: datetime = Field(default_factory=utcnow)

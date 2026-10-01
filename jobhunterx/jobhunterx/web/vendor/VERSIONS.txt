@@ -1,0 +1,8 @@
+Vendored ES module builds (no build step; served as static files).
+
+preact 10.29.8   dist/preact.module.js  -> preact.module.js   (MIT, LICENSE.preact)
+preact/hooks     hooks/dist/hooks.module.js -> hooks.module.js (MIT, LICENSE.preact)
+                 local edit: bare import "preact" rewritten to "./preact.module.js"
+htm 3.1.1        dist/htm.module.js     -> htm.module.js      (Apache-2.0, LICENSE.htm)
+
+Source-map comments removed (maps not vendored).

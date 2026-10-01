@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>{% include "_base.css.j2" %}
+.section-title { font-size: 10.5pt; border-bottom: 2px solid #1e3a8a; color: #1e3a8a; margin-bottom: 5px; }
+.section { margin-top: 10px; }
+</style></head>
+<body>
+{% set c = doc %}
+<div class="name" style="text-align:center">{{ c.header.name }}</div>
+{% if c.headline %}<div class="headline" style="text-align:center">{{ c.headline }}</div>{% endif %}
+<div class="contact" style="text-align:center">{{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}
+{% for l in c.header.links %} · <a href="{{ l.url }}">{{ l.url }}</a>{% endfor %}</div>
+{% if c.summary %}<div class="section"><div class="section-title">Profile</div><div>{{ c.summary }}</div></div>{% endif %}
+{% if c.experience %}<div class="section"><div class="section-title">Professional Experience</div>
+{% for e in c.experience %}
+<table><tr><td class="row-title">{{ e.role }}</td><td class="right">{{ e.start }}{% if e.start or e.end %} – {% endif %}{{ e.end }}</td></tr>
+<tr><td class="row-sub">{{ e.company }}{% if e.location %}, {{ e.location }}{% endif %}</td><td></td></tr></table>
+{% if e.bullets %}<ul>{% for b in e.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+{% endfor %}</div>{% endif %}
+{% if c.projects %}<div class="section"><div class="section-title">Projects</div>
+{% for p in c.projects %}
+<div class="row-title">{{ p.title }}</div>
+{% if p.description %}<div>{{ p.description }}</div>{% endif %}
+{% if p.technologies %}<div class="row-sub">Technologies: {{ p.technologies | join(', ') }}</div>{% endif %}
+{% if p.url %}<div class="row-sub"><a href="{{ p.url }}">{{ p.url }}</a></div>{% endif %}
+<div style="height:4px"></div>
+{% endfor %}</div>{% endif %}
+{% if c.education %}<div class="section"><div class="section-title">Education</div>
+{% for e in c.education %}
+<table><tr><td class="row-title">{{ e.degree }}</td><td class="right">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}</td></tr>
+<tr><td class="row-sub">{{ e.institution }}{% if e.grade %} · {{ e.grade }}{% endif %}</td><td></td></tr></table>
+{% if e.details %}<div>{{ e.details }}</div>{% endif %}
+{% endfor %}</div>{% endif %}
+{% if c.skills %}<div class="section"><div class="section-title">Technical Skills</div>
+<table class="skills">{% for g in c.skills %}<tr><td class="skill-cat">{{ g.category }}</td><td>{{ g["items"] | join(', ') }}</td></tr>{% endfor %}</table></div>{% endif %}
+{% if c.certifications %}<div class="section"><div class="section-title">Certifications</div><ul>{% for x in c.certifications %}<li>{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+{% if c.achievements %}<div class="section"><div class="section-title">Achievements &amp; Awards</div><ul>{% for x in c.achievements %}<li>{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+{% if c.competitions %}<div class="section"><div class="section-title">Competitions &amp; Hackathons</div><ul>{% for x in c.competitions %}<li>{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+{% if c.languages %}<div class="section"><div class="section-title">Languages</div><div>{{ c.languages | join(', ') }}</div></div>{% endif %}
+</body></html>

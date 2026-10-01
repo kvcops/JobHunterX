@@ -3,7 +3,7 @@ JobHunterX — Sequential Search Router & Safety Bounded Dispatcher
 
 Executes queries sequentially across prioritized providers (TinyFish -> Tavily -> Exa -> DDGS),
 evaluating local availability, zero-spend safety, rate limits, transport verdicts,
-and context-aware Quality Gate passing conditions.
+and returns the first provider's non-empty result set.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import time
 from typing import Any, Dict, List, Optional
 
 from jobhunterx.config.logging import get_logger
-from jobhunterx.tools.quality_gate import QualityDecision, QualityGateResult, SearchContext, evaluate_serp_quality
 from jobhunterx.tools.search_providers import (
     BaseSearchProvider,
     BraveProvider,
@@ -48,10 +47,16 @@ class SearchRouter:
         self.backoff_until: Dict[str, float] = {}
 
     def get_priority_order(self) -> List[str]:
-        return ["tinyfish", "tavily", "exa", "ddgs"]
+        """Configured primary provider first, then the rest; DDGS (free) last."""
+        order = ["tinyfish", "tavily", "exa", "brave"]
+        primary = str(self.config.get("PRIMARY_SEARCH_PROVIDER") or "").lower()
+        if primary in order:
+            order.remove(primary)
+            order.insert(0, primary)
+        return order + ["ddgs"]
 
     async def execute_query(
-        self, query: str, context: SearchContext, max_results: int = 10,
+        self, query: str, max_results: int = 10,
         providers: Optional[List[str]] = None,
     ) -> List[SearchResultItem]:
         """Execute a single search query following sequential fallback priority.
@@ -60,8 +65,7 @@ class SearchRouter:
         provider rotation). Defaults to the full priority order.
         """
         priority_list = providers or self.get_priority_order()
-        collected_items: List[SearchResultItem] = []
-
+        
         for p_name in priority_list:
             provider = self.providers.get(p_name)
             if not provider:
@@ -111,21 +115,10 @@ class SearchRouter:
                 blocked_reason=resp.error_message or "",
             )
 
-            # 4. Handle Transport Verdicts
+            # 4. Handle transport verdicts: first provider that returns results wins.
             if resp.verdict == TransportVerdict.SUCCESS:
-                collected_items.extend(resp.results)
-                # 5. Evaluate Deterministic Quality Gate
-                quality: QualityGateResult = evaluate_serp_quality(
-                    resp.results,
-                    context=context,
-                    threshold=float(self.config.get("QUALITY_SCORE_THRESHOLD", 0.60)),
-                )
-                if quality.decision == QualityDecision.PASS:
-                    log.info("search_router_quality_gate_passed", provider=p_name, score=quality.score)
+                if resp.results:
                     return resp.results
-                else:
-                    log.info("search_router_quality_gate_insufficient", provider=p_name, score=quality.score)
-
             elif resp.verdict == TransportVerdict.RATE_LIMITED:
                 retry_sec = resp.retry_after_seconds or 10.0
                 self.backoff_until[p_name] = now + retry_sec
@@ -135,82 +128,9 @@ class SearchRouter:
                 self.session_disabled[p_name] = True
                 log.error("search_router_auth_error_disabled", provider=p_name)
 
-        return collected_items
+        return []
 
 
-async def route_search_queries(
-    queries: List[str], context: SearchContext, config: Optional[Dict[str, Any]] = None
-) -> List[SearchResultItem]:
-    """Execute search queries using router with safety bounds.
-
-    Paid/primary providers are ROTATED across queries (never one provider for the
-    whole run): every configured provider gets a fair share, capped per run by
-    MAX_REQUESTS_PER_PROVIDER_PER_RUN (default 2 for Tavily/Exa/Brave; TinyFish
-    and DDGS are unlimited since they cost 0 credits). If a query's provider
-    fails or the quality gate rejects its SERP, DDGS runs as the free safety net.
-    """
-    cfg = config or {}
-    router = SearchRouter(config=cfg)
-
-    max_queries = int(cfg.get("MAX_SEARCH_QUERIES_PER_RUN", 5))
-    bounded_queries = queries[:max_queries]
-    all_results: List[SearchResultItem] = []
-    seen_urls: set[str] = set()
-
-    # Which providers actually have keys/are enabled for this run
-    available = [
-        p for p in router.get_priority_order()
-        if p in router.providers
-        and router.providers[p].is_available(cfg, session_disabled=False)
-    ]
-    rotation_pool = [p for p in available if p != "ddgs"]
-    ddgs_available = "ddgs" in available
-
-    # Cap usage of paid providers so no single one dominates the run
-    max_per_provider = max(1, int(cfg.get("MAX_REQUESTS_PER_PROVIDER_PER_RUN", 2)))
-    paid_provider = {"tavily", "exa", "brave"}
-    used: Dict[str, int] = {}
-
-    for i, q in enumerate(bounded_queries):
-        # Rotate starting provider across queries; skip providers that hit their cap.
-        chosen: Optional[str] = None
-        if rotation_pool:
-            for k in range(len(rotation_pool)):
-                cand = rotation_pool[(i + k) % len(rotation_pool)]
-                if cand in paid_provider and used.get(cand, 0) >= max_per_provider:
-                    continue
-                chosen = cand
-                break
-            # Paid caps exhausted but more queries remain -> fall back to TinyFish/DDG
-            if chosen is None:
-                chosen = next((p for p in rotation_pool if p not in paid_provider), None)
-
-        if chosen:
-            used[chosen] = used.get(chosen, 0) + 1
-            log.info("search_router_provider_chosen", query_i=i, provider=chosen)
-            if ddgs_available:
-                res_items = await router.execute_query(
-                    q, context=context, max_results=10, providers=[chosen, "ddgs"]
-                )
-            else:
-                res_items = await router.execute_query(
-                    q, context=context, max_results=10, providers=[chosen]
-                )
-        elif ddgs_available:
-            res_items = await router.execute_query(
-                q, context=context, max_results=10, providers=["ddgs"]
-            )
-        else:
-            res_items = await router.execute_query(q, context=context, max_results=10)
-
-        for item in res_items:
-            url_norm = item.url.strip().rstrip("/").lower()
-            if url_norm not in seen_urls:
-                seen_urls.add(url_norm)
-                all_results.append(item)
-
-    log.info(
-        "route_search_queries_complete", queries_count=len(bounded_queries),
-        total_unique_results=len(all_results), provider_usage=used,
-    )
-    return all_results
+async def search_one(router: "SearchRouter", query: str, max_results: int = 10) -> List[SearchResultItem]:
+    """Run one query through the configured providers in priority order."""
+    return await router.execute_query(query, max_results=max_results)

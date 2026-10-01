@@ -184,42 +184,6 @@ async def get_connection() -> aiosqlite.Connection:
     return conn
 
 
-async def clean_existing_database_jobs() -> None:
-    """Clean company names and titles for existing job rows in database."""
-    from jobhunterx.utils.job_cleaner import clean_job_title_and_company
-    async with aiosqlite.connect(_db_path) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("SELECT id, company, role, jd_text, apply_url, validation_json FROM jobs")
-        rows = await cursor.fetchall()
-        for row in rows:
-            job_id = row["id"]
-            co = row["company"]
-            ro = row["role"]
-            vj = row["validation_json"]
-            v_dict = {}
-            if vj and isinstance(vj, str):
-                try:
-                    v_dict = json.loads(vj)
-                except Exception:
-                    log.warning("invalid_validation_json", job_id=job_id, exc_info=True)
-
-            val_co = v_dict.get("company_name") if isinstance(v_dict, dict) else ""
-            val_ro = v_dict.get("job_role") if isinstance(v_dict, dict) else ""
-
-            clean_co, clean_ro = clean_job_title_and_company(
-                raw_title=val_ro or ro,
-                raw_company=val_co or co,
-                snippet=row["jd_text"] or "",
-                apply_url=row["apply_url"] or "",
-            )
-            if clean_co != co or clean_ro != ro:
-                await db.execute(
-                    "UPDATE jobs SET company = ?, role = ? WHERE id = ?",
-                    (clean_co, clean_ro, job_id),
-                )
-        await db.commit()
-
-
 async def init_db() -> None:
     """Create tables and indexes if they don't already exist."""
     log.info("initialising_database", path=_db_path)
@@ -242,10 +206,8 @@ async def init_db() -> None:
         log.info("database_ready")
     finally:
         await conn.close()
-    try:
-        await clean_existing_database_jobs()
-    except Exception as exc:
-        log.warning("clean_database_jobs_failed", error=str(exc))
+    from jobhunterx import storage
+    await storage.migrate()
 
 
 # ---------------------------------------------------------------------------

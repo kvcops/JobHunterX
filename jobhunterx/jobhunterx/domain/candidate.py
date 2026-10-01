@@ -121,7 +121,7 @@ class CandidatePreferences(_Lenient):
     )
     willing_to_relocate: bool = False
     open_to_international: bool = False                         # roles outside home country
-    home_country: str = "India"
+    home_country: str = ""
     min_annual_salary: Optional[float] = None                   # in salary_currency, per year
     salary_currency: str = "INR"
     notice_period_days: Optional[int] = None
@@ -229,48 +229,74 @@ class CandidateProfile(_Lenient):
 
 
 class SkillEvidence(BaseModel):
-    """A canonical skill the candidate has, with where it was demonstrated."""
+    """A skill the candidate has, with where it was demonstrated."""
 
-    name: str                       # canonical display name
-    key: str                        # canonical key (lowercase)
-    category: str = "other"
-    sources: list[str] = Field(default_factory=list)  # e.g. "experience: ML Engineer @ Acme"
-    strength: float = 0.0           # 0–1; listed-only < used in a project < used at work
+    name: str
+    key: str                                   # normalized lowercase name
+    aliases: list[str] = Field(default_factory=list)
+    adjacent: list[str] = Field(default_factory=list)   # closely related skills (partial credit)
+    sources: list[str] = Field(default_factory=list)    # e.g. "experience: ML Engineer @ Acme"
+    strength: float = 0.0                       # 0–1: listed < project < professional use
 
-    @property
-    def demonstrated(self) -> bool:
-        return any(not s.startswith("skills list") for s in self.sources)
+    def forms(self) -> set[str]:
+        return {norm_term(x) for x in [self.name, self.key, *self.aliases] if x}
+
+
+class RoleFamilyFit(BaseModel):
+    label: str
+    closeness: float = 1.0                      # 1 = primary career direction
+    evidence: str = ""
+
+
+class PlaceRef(BaseModel):
+    city: str = ""
+    region: str = ""
+    country: str = ""
+    aliases: list[str] = Field(default_factory=list)
+
+
+def norm_term(s: str) -> str:
+    """Generic normalization for comparing names produced by different sources."""
+    import re as _re
+    s = (s or "").lower().strip()
+    s = _re.sub(r"[\s_]+", " ", s)
+    s = _re.sub(r"(?<=\w)[\-](?=\w)", " ", s)
+    s = s.strip(" .,;:()")
+    return s
 
 
 class CandidateSnapshot(BaseModel):
-    """Deterministically derived view of the profile used by the engine."""
+    """Derived view of the profile used by search, matching and generation."""
 
     profile_hash: str
     total_years: float = 0.0
-    professional_years: float = 0.0        # excludes internships / academic work
-    years_source: str = "unknown"          # dates | override | stated | unknown
+    professional_years: float = 0.0             # excludes internships
+    years_source: str = "unknown"               # dates | override | stated | unknown
     seniority: Seniority = Seniority.ENTRY
-    role_families: list[str] = Field(default_factory=list)   # ranked family keys
-    target_titles: list[str] = Field(default_factory=list)   # concrete titles to search
+    role_families: list[RoleFamilyFit] = Field(default_factory=list)
+    target_titles: list[str] = Field(default_factory=list)
+    adjacent_titles: list[str] = Field(default_factory=list)
     skills: list[SkillEvidence] = Field(default_factory=list)
-    education_level: str = "none"          # none | diploma | bachelor | master | phd
-    locations: list[str] = Field(default_factory=list)       # normalized acceptable cities
-    home_country: str = "India"
+    domains: list[str] = Field(default_factory=list)
+    education_level: str = "none"               # none | diploma | bachelor | master | phd
+    locations: list[PlaceRef] = Field(default_factory=list)
+    home_country: str = ""
     work_modes: list[WorkMode] = Field(default_factory=list)
     open_to_international: bool = False
     willing_to_relocate: bool = False
     min_annual_salary: Optional[float] = None
-    salary_currency: str = "INR"
+    salary_currency: str = ""
     notice_period_days: Optional[int] = None
+    employment_types: list[str] = Field(default_factory=list)
     excluded_companies: list[str] = Field(default_factory=list)
-    domain_keywords: list[str] = Field(default_factory=list)  # e.g. "genai", "computer vision"
-    notes: list[str] = Field(default_factory=list)            # how values were derived
+    career_direction: str = ""
+    method: str = "fallback"                    # llm | fallback
+    llm_model: str = ""
+    notes: list[str] = Field(default_factory=list)
 
-    def skill_keys(self) -> set[str]:
-        return {s.key for s in self.skills}
-
-    def skill(self, key: str) -> Optional[SkillEvidence]:
+    def skill_index(self) -> dict[str, SkillEvidence]:
+        idx: dict[str, SkillEvidence] = {}
         for s in self.skills:
-            if s.key == key:
-                return s
-        return None
+            for f in s.forms():
+                idx.setdefault(f, s)
+        return idx
