@@ -216,8 +216,12 @@ async def browser_websocket(websocket: WebSocket):
                 msg = json.loads(await websocket.receive_text())
             except ValueError:
                 continue
-            if isinstance(msg, dict) and msg.get("type") in ("mouse", "wheel", "keyboard", "paste"):
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("type") in ("mouse", "wheel", "keyboard", "paste"):
                 await ba.forward_input(msg)
+            elif msg.get("type") == "viewport":
+                await ba.resize_view(msg.get("w"), msg.get("h"))
     except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     except Exception as exc:

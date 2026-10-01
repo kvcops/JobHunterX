@@ -24,6 +24,52 @@ _main_loop: Optional[asyncio.AbstractEventLoop] = None
 _clients: set[Any] = set()
 _latest_frame: Optional[str] = None          # last frame message (JSON) for late joiners
 _frame_meta: dict[str, float] = {}           # deviceWidth / deviceHeight of the last frame
+_panel: tuple[int, int] = (0, 0)             # size of the live-view area in the app (CSS px)
+
+VIEWPORT_WIDTH = 1280                        # desktop layout for every site; the height follows the panel's shape
+
+
+def set_panel(w: Any, h: Any) -> bool:
+    """Remember the live-view area's size. True when the shape changed enough to resize the browser."""
+    global _panel
+    try:
+        w, h = int(w), int(h)
+    except (TypeError, ValueError):
+        return False
+    if w < 200 or h < 200:
+        return False
+    old = _panel
+    _panel = (w, h)
+    if not old[0]:
+        return True
+    return abs(old[1] / old[0] - h / w) > 0.04
+
+
+def viewport_size() -> tuple[int, int]:
+    """Browser viewport with the same shape as the panel, so the picture fills it edge to edge.
+
+    The width stays a desktop width (sites switch to mobile layouts below ~1024px) but is kept
+    close to the panel's width, so text in the live view is shown as large as possible.
+    """
+    w, h = _panel
+    if not w:
+        return VIEWPORT_WIDTH, 900
+    width = max(1024, min(VIEWPORT_WIDTH, round(w * 1.25)))
+    return width, max(600, min(1800, round(width * h / w)))
+
+
+async def apply_viewport(browser_session: Any) -> None:
+    """Resize the open browser to the panel's shape (runs on the worker loop)."""
+    width, height = viewport_size()
+    profile = getattr(browser_session, "browser_profile", None)
+    try:
+        if profile is not None and getattr(profile, "viewport", None) is not None:
+            profile.viewport.width, profile.viewport.height = width, height     # new tabs get it too
+    except Exception:
+        pass
+    cdp = await browser_session.get_or_create_cdp_session(focus=False)
+    await cdp.cdp_client.send.Emulation.setDeviceMetricsOverride(
+        params={"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False}, session_id=cdp.session_id)
 
 
 def bind_main_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -103,7 +149,7 @@ def frame_size() -> tuple[float, float]:
 class Screencast:
     """Keeps a CDP screencast running on whichever tab the agent is focused on."""
 
-    PARAMS = {"format": "jpeg", "quality": 62, "maxWidth": 1440, "maxHeight": 900, "everyNthFrame": 1}
+    PARAMS = {"format": "jpeg", "quality": 62, "maxWidth": 1280, "maxHeight": 1600, "everyNthFrame": 1}
 
     def __init__(self, browser_session: Any):
         self.session = browser_session

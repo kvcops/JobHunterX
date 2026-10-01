@@ -1150,3 +1150,49 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
   .option-cards, .xp-tiles { grid-template-columns: 1fr; }
   .health-list li { grid-template-columns: 12px minmax(0, 1fr); } .health-list li .muted { grid-column: 2; }
 }
+
+/* -------------------------------------------------------------------------- auto-apply: compact, full-height layout */
+.view-browser { gap: 0; }
+.split-browser { grid-template-columns: minmax(0, 1fr) 344px; gap: 14px; height: 100%; }
+.view-browser .bw-chrome { padding: 8px 12px; gap: 12px; }
+.view-browser .bw-url { height: 30px; }
+.view-browser .bw-stage { background: color-mix(in srgb, var(--bg) 70%, var(--card-solid)); }
+.view-browser .bw-stage canvas { object-position: top center; }
+.view-browser .agent-panel .ap-head { padding: 16px 16px 14px; gap: 10px; max-height: none; overflow: visible; }
+.ap-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ap-title { font-size: 1.25rem; letter-spacing: -.03em; margin: 0; white-space: nowrap; }
+.ap-top .ap-status { align-self: center; padding: 4px 10px; font-size: .74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.view-browser .ap-job { padding: 8px 10px; gap: 10px; border-radius: 14px; }
+.view-browser .ap-job strong { font-size: .88rem; }
+.view-browser .ap-job .job-company { font-size: .74rem; }
+.view-browser .phases { margin-top: 2px; }
+.view-browser .ph-label { font-size: .66rem; }
+.view-browser .ap-now { padding: 8px 10px; font-size: .8rem; }
+.view-browser .ap-controls .btn { min-height: 34px; }
+.view-browser .ap-sec { padding: 10px 16px 2px; gap: 6px; }
+.view-browser .ap-log-head { padding: 12px 16px 0; }
+.view-browser .ap-log { padding: 8px 16px 16px; flex: 1; min-height: 0; overflow-y: auto; }
+.view-browser .step { padding: 6px 0; }
+.ap-guide { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ap-guide li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 14px; background: var(--card-solid); border: 1px solid var(--line);
+  animation: fadeUp .4s var(--ease) both; }
+.ap-guide li:nth-child(2) { animation-delay: .06s; } .ap-guide li:nth-child(3) { animation-delay: .12s; }
+.ap-guide span { width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--ink); color: var(--on-ink); font-size: .7rem; font-weight: 600; }
+.ap-guide div { display: flex; flex-direction: column; gap: 2px; } .ap-guide strong { font-size: .85rem; font-weight: 600; } .ap-guide small { font-size: .76rem; color: var(--text-3); line-height: 1.35; }
+@media (max-width: 1100px) { .split-browser { grid-template-columns: minmax(0, 1fr) 300px; } }
+@media (max-width: 900px) { .split-browser { grid-template-columns: 1fr; height: auto; } }
+.view-browser .watch-banner { top: auto; bottom: 12px; }
+.ap-tips { display: flex; flex-direction: column; gap: 9px; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); animation: fade .6s .2s both; }
+.ap-tips > div { display: flex; gap: 10px; align-items: flex-start; font-size: .8rem; color: var(--text-2); line-height: 1.4; }
+.ap-tips .icon { color: var(--accent); flex: none; margin-top: 2px; } .ap-tips strong { color: var(--text); font-weight: 600; }
+/* live screencast container: the stream uses every pixel */
+.view-browser .browser-window { overflow: hidden; }
+.view-browser .bw-chrome { padding: 6px 10px; gap: 10px; }
+.view-browser .bw-lights i { width: 10px; height: 10px; }
+.view-browser .bw-url { height: 28px; font-size: .76rem; }
+.view-browser .live-pill { padding: 3px 9px; font-size: .66rem; }
+.view-browser .bw-stage { display: block; }
+.view-browser .bw-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: top center; image-rendering: auto; }
+.view-browser .watch-banner { top: auto; bottom: 10px; right: 10px; opacity: .85; }
+.view-browser .control-banner { top: auto; bottom: 14px; }
+.view-browser .bw-idle { position: absolute; inset: 0; }

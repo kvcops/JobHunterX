@@ -237,7 +237,15 @@ function useLiveFrames(canvas) {
       ctx.drawImage(img, 0, 0); setFrame(true); drawing = false;
       if (pending) { const p = pending; pending = null; drawing = true; img.src = p; }
     };
+    const sendSize = () => {
+      const r = canvas.current && canvas.current.parentElement.getBoundingClientRect();
+      if (r && r.width > 0) sock.current && sock.current.send({ type: 'viewport', w: Math.round(r.width), h: Math.round(r.height) });
+    };
+    let t = 0;
+    const ro = new ResizeObserver(() => { clearTimeout(t); t = setTimeout(sendSize, 350); });
+    ro.observe(canvas.current.parentElement);
     sock.current = new ReconnectingSocket('/ws/browser', {
+      onOpen: sendSize,
       onMessage: (m) => {
         if (m.type === 'idle') { setFrame(false); return; }
         if (m.type !== 'frame' || typeof m.data !== 'string') return;
@@ -247,7 +255,7 @@ function useLiveFrames(canvas) {
       },
     });
     sock.current.connect();
-    return () => sock.current.close();
+    return () => { ro.disconnect(); clearTimeout(t); sock.current.close(); };
   }, []);
   return [frame, (msg) => sock.current && sock.current.send(msg)];
 }
@@ -293,7 +301,7 @@ export function BrowserView() {
   }
 
   return html`<div class="view view-browser">
-    <${PageHead} title=${html`Auto-apply <span class="serif">agent</span>`} sub="Documents first, then the agent fills the form — live, right here. Stop or take over any time." />
+    <h1 class="sr-only">Auto-apply agent</h1>
     <div class="split split-browser">
       <section class=${`pane browser-window ${youDrive ? 'takeover' : ''} ${showFrame && working ? 'is-live' : ''}`} aria-label="Live browser">
         <div class="bw-chrome">
@@ -317,8 +325,7 @@ export function BrowserView() {
             <div class="bw-illus" aria-hidden="true"><${Orb} size=${150} active=${WORKING.includes(status)} done=${status === 'applied'} />
               ${status === 'idle' ? html`<span class="bw-cursor"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6z" fill="#111" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></span>` : null}</div>
             ${!sess ? html`<h2>The agent is <span class="serif">resting</span></h2>
-              <p class="muted">Press Auto-apply on any job. You'll see every click and keystroke here — no extra windows.</p>
-              <ol class="bw-how"><li><span>1</span>Open a job in Discover</li><li><span>2</span>Press Auto-apply</li><li><span>3</span>We check & write your resume, letter and CV</li><li><span>4</span>Watch it apply, live</li></ol>
+              <p class="muted">Press Auto-apply on any job. You'll see every click and keystroke right here — no extra windows.</p>
               <${Button} variant="primary" onClick=${() => navigate('#/discover')}>Pick a job <${Icon} name="arrow" size=${16} /></${Button}>`
             : status === 'preparing' ? html`<h2>Getting your <span class="serif">documents</span> ready</h2><p class="muted">${sess.message}</p>`
             : status === 'launching' ? html`<h2>Opening a private <span class="serif">browser</span>…</h2><p class="muted">The live view appears as soon as the page loads.</p>`
@@ -329,19 +336,26 @@ export function BrowserView() {
       </section>
       <aside class="pane card agent-panel" aria-label="Agent">
         <div class="ap-head">
-          <div class="row space"><div class=${`ap-status tone-${meta.tone} ${WORKING.includes(status) ? 'is-working' : ''}`}><span class="ap-dot"></span>${meta.label}</div>
-            ${sess && sess.runs > 1 ? html`<span class="muted small">Run ${sess.runs}</span>` : null}</div>
-          ${sess ? html`<div class="ap-job"><${Monogram} name=${sess.company} size=${36} /><div class="grow"><div class="job-company">${sess.company}</div>
+          <div class="ap-top"><h2 class="ap-title">Auto-apply <span class="serif">agent</span></h2>
+            <div class=${`ap-status tone-${meta.tone} ${WORKING.includes(status) ? 'is-working' : ''}`}><span class="ap-dot"></span>${meta.label}</div></div>
+          ${sess ? html`<div class="ap-job"><${Monogram} name=${sess.company} size=${30} /><div class="grow"><div class="job-company">${sess.company}${sess.runs > 1 ? html` · run ${sess.runs}` : ''}</div>
             <strong>${sess.role}</strong></div>${sess.apply_url ? html`<a class="icon-btn" href=${safeUrl(sess.apply_url)} target="_blank" rel="noopener" title="Open the posting"><${Icon} name="external" size=${15} /></a>` : null}</div>
-            <${PhaseStepper} sess=${sess} />` : html`<p class="muted small">No application yet.</p>`}
+            <${PhaseStepper} sess=${sess} />` : html`<ol class="ap-guide"><li><span>1</span><div><strong>Pick a job</strong><small>Open any job in Discover and press Auto-apply</small></div></li>
+              <li><span>2</span><div><strong>Documents first</strong><small>Resume (1 page), cover letter and CV are checked and written if missing</small></div></li>
+              <li><span>3</span><div><strong>Watch it apply</strong><small>The browser shows here — stop or take over any time</small></div></li></ol>
+              <div class="ap-tips"><span class="sec-title">Good to know</span>
+                <div><${Icon} name="stop" size=${14} /><span><strong>Stop</strong> is instant — every step is saved</span></div>
+                <div><${Icon} name="hand" size=${14} /><span><strong>Take over</strong> for a CAPTCHA, login or tricky field</span></div>
+                <div><${Icon} name="play" size=${14} /><span><strong>Continue</strong> picks up from the last page, even after a restart</span></div>
+                <div><${Icon} name="shield" size=${14} /><span>Nothing is invented — every document is fact-checked</span></div></div>`}
           ${sess && sess.message && WORKING.includes(status) ? html`<div class="ap-now" key=${sess.message}><${Spinner} size=${14} /><span>${sess.message}</span></div>` : null}
           ${sess && sess.notice ? html`<${Notice} tone=${status === 'failed' ? 'warning' : 'info'}>${sess.notice}</${Notice}>` : null}
           ${controls ? html`<div class="ap-controls">${controls}</div>` : null}
           ${waiting && status !== 'needs_you' ? html`<a class="ap-alert" href="#/interventions"><${Icon} name="alert" size=${15} /> ${waiting} application${waiting === 1 ? '' : 's'} waiting for you <${Icon} name="arrow" size=${14} /></a>` : null}
         </div>
         ${sess && sess.kit && Object.keys(sess.kit).length ? html`<div class="ap-sec"><span class="sec-title">Application kit</span><${KitList} kit=${sess.kit} /></div>` : null}
-        <div class="ap-log-head"><span class="sec-title">What the agent did</span><span class="muted small">${steps.length} step${steps.length === 1 ? '' : 's'}</span></div>
-        <${StepLog} steps=${steps} live=${status === 'running'} />
+        ${sess ? html`<div class="ap-log-head"><span class="sec-title">What the agent did</span><span class="muted small">${steps.length} step${steps.length === 1 ? '' : 's'}</span></div>
+        <${StepLog} steps=${steps} live=${status === 'running'} />` : null}
       </aside>
     </div></div>`;
 }

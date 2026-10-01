@@ -138,7 +138,7 @@ def _build_stealth_profile(settings: Settings) -> Any:
         headless=not getattr(settings, "browser_show_window", False),
         user_data_dir=resolved_dir,
         user_agent=_STEALTH_USER_AGENT,
-        viewport={"width": 1920, "height": 1080},
+        viewport=dict(zip(("width", "height"), live_view.viewport_size())),   # same shape as the in-app panel
         enable_default_extensions=False,  # DISABLED: extension downloads from Chrome Web Store hang on Windows, blocking CDP
         disable_security=False,
         captcha_solver=False,  # DISABLED: cloud-only feature that adds startup overhead locally
@@ -857,6 +857,19 @@ async def forward_input(msg: dict) -> None:
         await browser_worker.run(live_view.dispatch_input(sess.browser_session, msg))
     except Exception as exc:
         log.debug("live_input_failed", error=str(exc)[:120])
+
+
+async def resize_view(w: Any, h: Any) -> None:
+    """The live-view panel changed size: match the browser's shape to it."""
+    if not live_view.set_panel(w, h):
+        return
+    sess = current_session()
+    if not sess or not _alive(sess):
+        return
+    try:
+        await browser_worker.run(live_view.apply_viewport(sess.browser_session))
+    except Exception as exc:
+        log.debug("live_resize_failed", error=str(exc)[:120])
 
 
 async def stop_all_active_browsers() -> None:
