@@ -7,7 +7,7 @@ import {
 } from '../actions.js';
 import {
   Button, Badge, ScoreRing, Skeleton, EmptyState, ErrorBox, ChipsInput, Tabs, Icon, Field, Notice, PageHead, Popover, Seg,
-  Monogram, Orb, CountUp, VERDICT_TONE,
+  Monogram, Orb, CountUp, Select, VERDICT_TONE,
 } from '../components/ui.js';
 import { JobDetail } from './jobdetail.js';
 import {
@@ -205,12 +205,12 @@ function Filters() {
         <div class="stack" style=${{ gap: '12px', minWidth: '240px' }}>
           ${run ? html`<label class="switch"><input type="checkbox" checked=${list.scope === 'run'}
             onChange=${(e) => setList(e.currentTarget.checked ? { scope: 'run', runId: run.id } : { scope: 'all' })} /><span class="switch-ui"></span> Latest search only</label>` : null}
-          <${Field} label="Work mode">${(id) => html`<select id=${id} class="input" aria-label="Work mode filter" value=${list.work_mode} onChange=${(e) => setList({ work_mode: e.currentTarget.value })}>
-            <option value="">Any work mode</option>${WORK_MODES.map((m) => html`<option value=${m}>${WORK_MODE_LABEL[m]}</option>`)}</select>`}</${Field}>
-          <${Field} label="Minimum score">${(id) => html`<select id=${id} class="input" aria-label="Minimum score" value=${String(list.min_score || 0)} onChange=${(e) => setList({ min_score: Number(e.currentTarget.value) })}>
-            <option value="0">Any score</option><option value="45">45+</option><option value="60">60+</option><option value="75">75+</option></select>`}</${Field}>
-          <${Field} label="Sort">${(id) => html`<select id=${id} class="input" aria-label="Sort" value=${list.sort} onChange=${(e) => setList({ sort: e.currentTarget.value })}>
-            <option value="score">Best match</option><option value="recent">Most recent</option></select>`}</${Field}>
+          <${Field} label="Work mode">${(id) => html`<${Select} id=${id} block label="Work mode filter" value=${list.work_mode} onChange=${(v) => setList({ work_mode: v })}
+            options=${[['', 'Any work mode'], ...WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])]} />`}</${Field}>
+          <${Field} label="Minimum score">${(id) => html`<${Select} id=${id} block label="Minimum score" value=${String(list.min_score || 0)} onChange=${(v) => setList({ min_score: Number(v) })}
+            options=${[['0', 'Any score'], ['45', '45 and above', 'Includes stretch roles'], ['60', '60 and above', 'Good matches'], ['75', '75 and above', 'Strong matches only']]} />`}</${Field}>
+          <${Field} label="Sort">${(id) => html`<${Select} id=${id} block label="Sort" value=${list.sort} onChange=${(v) => setList({ sort: v })}
+            options=${[['score', 'Best match'], ['recent', 'Most recent']]} />`}</${Field}>
         </div>
       </${Popover}>
     </div>
@@ -261,7 +261,7 @@ export function DiscoverView() {
   // Esc closes the open job (unless a dialog or popover is handling it).
   useEffect(() => {
     if (!route.jobId) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay, .popover')) overview(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay, .popover, .select-list')) overview(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [route.jobId]);

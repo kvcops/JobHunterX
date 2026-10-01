@@ -792,13 +792,13 @@ async def _run_impl(state: dict) -> dict:
             except Exception as exc:
                 return ActionResult(error=f"Email OTP error: {str(exc)}")
 
-        # Primary LLM: gemini-3.1-flash-lite — 250K TPM, 15 RPM, 500 RPD on free tier
+        # Primary LLM: gemini-3.5-flash-lite — 250K TPM, 15 RPM, 500 RPD on free tier
         # (gemma-4-31b-it has only 16K TPM which causes constant 429 RESOURCE_EXHAUSTED)
         _settings = get_settings()
         google_api_key = _settings.google_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
         llm = ChatGoogle(
-            model="gemini-3.1-flash-lite",
+            model="gemini-3.5-flash-lite",
             api_key=google_api_key,
             temperature=0.2,
             max_retries=10,

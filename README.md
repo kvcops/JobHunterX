@@ -122,7 +122,10 @@ Dark theme is one click away.
 <br/><sub><i>Profile — understanding on the left, a tabbed editor on the right</i></sub>
 <br/><br/>
 <img src="assets/ui_tracker.png" alt="Application tracker" width="90%"/>
-<br/><sub><i>Tracker — a horizontal board from Saved to Offer; change a status to move a card</i></sub>
+<br/><sub><i>Tracker — pipeline summary on top, drag-and-drop lanes from Saved to Offer, colour-coded status dropdowns on every card</i></sub>
+<br/><br/>
+<img src="assets/ui_browser.png" alt="Auto-apply agent" width="90%"/>
+<br/><sub><i>Auto-apply agent — a live browser window with LIVE badge and take-over mode, plus agent status, current step and an activity timeline</i></sub>
 <br/><br/>
 <img src="assets/ui_mobile.png" alt="Mobile" width="280"/>
 <br/><sub><i>Fully responsive — on phones the sidebar becomes a floating bottom bar</i></sub>
@@ -220,7 +223,7 @@ JobHunterX uses a **multi-provider LLM router** (`llm_router.py`) with automatic
 graph LR
     subgraph Google["☁️ Google AI Studio (Free Tier)"]
         G1["gemma-4-26b-a4b-it"]
-        G2["gemini-3.1-flash-lite"]
+        G2["gemini-3.5-flash-lite"]
         G3["gemma-4-27b-it"]
     end
 
@@ -252,11 +255,11 @@ graph LR
 
 | Chain Name | Purpose | Model Sequence |
 |:-----------|:--------|:---------------|
-| `fast` | Quick operations (search planning, scoring) | Gemma 4 26B → Gemini 3.1 Flash Lite |
-| `reasoning` | Deep analysis (validation, match evaluation) | Gemma 4 26B → Gemini 3.1 Flash Lite |
-| `tailoring` | Resume rewriting & bullet transforms | Gemma 4 26B → Gemini 3.1 Flash Lite |
-| `extraction` | PDF resume parsing & profile construction | Gemma 4 26B → Gemini 3.1 Flash Lite |
-| `browser` | Browser agent form-filling decisions | Gemini 3.1 Flash Lite |
+| `fast` | Quick operations (search planning, scoring) | Gemma 4 26B → Gemini 3.5 Flash Lite |
+| `reasoning` | Deep analysis (validation, match evaluation) | Gemma 4 26B → Gemini 3.5 Flash Lite |
+| `tailoring` | Resume rewriting & bullet transforms | Gemma 4 26B → Gemini 3.5 Flash Lite |
+| `extraction` | PDF resume parsing & profile construction | Gemma 4 26B → Gemini 3.5 Flash Lite |
+| `browser` | Browser agent form-filling decisions | Gemini 3.5 Flash Lite |
 | Browser fallback | When primary browser LLM fails | Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B |
 
 <br/>
@@ -270,7 +273,7 @@ graph LR
 | Model ID | RPM Limit | Min Delay | TPM Limit | RPD Limit (Requests Per Day) |
 |:---------|:----------|:----------|:----------|:-----------------------------|
 | **Gemma 4 26B** (`gemma-4-26b-a4b-it`) | 30 RPM | 2.0s | 16K TPM | **14,400 RPD** (14.4K req/day) |
-| **Gemini 3.1 Flash Lite** (`gemini-3.1-flash-lite`) | 15 RPM | 4.0s | 250K TPM | **500 RPD** (500 req/day) |
+| **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) | 15 RPM | 4.0s | 250K TPM | **500 RPD** (500 req/day) |
 
 </details>
 
@@ -514,7 +517,7 @@ LOG_LEVEL=INFO
 
 > [!TIP]
 > **Getting API keys (all free):**
-> - **Google AI Studio**: [aistudio.google.com](https://aistudio.google.com/) — Create key → Use Gemma 4 & Gemini 3.1 Flash Lite
+> - **Google AI Studio**: [aistudio.google.com](https://aistudio.google.com/) — Create key → Use Gemma 4 & Gemini 3.5 Flash Lite
 > - **Groq**: [console.groq.com](https://console.groq.com/) — Free tier with Llama 3.3 70B
 > - **Mistral**: [console.mistral.ai](https://console.mistral.ai/) — Free tier with Mistral Large
 

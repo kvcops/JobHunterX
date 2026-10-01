@@ -4,7 +4,7 @@ import {
   loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, generateDocument, autoApply, deleteJob, navigate,
 } from '../actions.js';
 import {
-  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, VERDICT_TONE,
+  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, Select, VERDICT_TONE,
 } from '../components/ui.js';
 import {
   VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, CHECK_LABEL, CHECK_STATUS_LABEL, CHECK_STATUS_TONE,
@@ -170,10 +170,8 @@ export function JobDetail({ jobId, onClose }) {
       </div>
       <div class="action-bar">
         ${apply ? html`<a class="btn btn-primary btn-sm" href=${apply} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${15} /><span>Open posting</span></a>` : null}
-        <label class="inline-select"><span class="sr-only">Tracking status</span>
-          <select class="input input-sm" value=${job.tracking_status} disabled=${!!pending.track[jobId]} onChange=${(e) => setTracking(jobId, e.currentTarget.value)}>
-            ${tracking.map((t) => html`<option value=${t}>${TRACKING_LABEL[t] || humanize(t)}</option>`)}
-          </select></label>
+        <${Select} size="sm" label="Tracking status" tone=${`s-${job.tracking_status}`} value=${job.tracking_status} disabled=${!!pending.track[jobId]}
+          onChange=${(v) => setTracking(jobId, v)} options=${tracking.map((t) => [t, TRACKING_LABEL[t] || humanize(t)])} />
         <${Button} size="sm" icon="refresh" busy=${!!pending.verify[jobId]} onClick=${() => verifyJob(jobId)}>Re-verify</${Button}>
         <${Button} size="sm" icon="bolt" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score</${Button}>
         <${Button} size="sm" icon="globe" busy=${!!pending.apply[jobId]} onClick=${() => autoApply(jobId)}>Auto-apply</${Button}>

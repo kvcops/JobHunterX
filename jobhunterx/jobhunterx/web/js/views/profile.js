@@ -2,7 +2,7 @@ import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { uploadResume, saveProfile, loadProfile } from '../actions.js';
 import {
-  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHead, Stat, Seg, ScanDoc, RotatingText, EmptyState,
+  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHead, Stat, Seg, Select, ScanDoc, RotatingText, EmptyState,
 } from '../components/ui.js';
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
 import { WORK_MODES, WORK_MODE_LABEL, SENIORITIES, YEARS_SOURCE_LABEL, humanize } from '../lib/format.js';
@@ -129,8 +129,9 @@ function Editor({ profile }) {
       <${Field} label="Companies to exclude" wide><${ChipsInput} label="Excluded companies" value=${p.excluded_companies} onChange=${(v) => set(['preferences', 'excluded_companies'], v)} /></${Field}>
       <${TextField} draft=${draft} path=${['preferences', 'career_direction']} label="Career direction" set=${set} textarea wide hint="Where you want to grow — this shapes which tracks are searched." />
       <${TextField} draft=${draft} path=${['preferences', 'years_experience_override']} label="Years of experience (override)" type="number" set=${set} hint="Only if the computed value is wrong." />
-      <${Field} label="Seniority (override)">${(id) => html`<select id=${id} class="input" value=${p.seniority_override || ''} onChange=${(e) => set(['preferences', 'seniority_override'], e.currentTarget.value || null)}>
-        <option value="">Automatic</option>${SENIORITIES.filter((x) => x !== 'unknown').map((x) => html`<option value=${x}>${humanize(x)}</option>`)}</select>`}</${Field}>
+      <${Field} label="Seniority (override)">${(id) => html`<${Select} id=${id} block label="Seniority override" value=${p.seniority_override || ''}
+        onChange=${(v) => set(['preferences', 'seniority_override'], v || null)}
+        options=${[['', 'Automatic', 'Computed from your experience'], ...SENIORITIES.filter((x) => x !== 'unknown').map((x) => [x, humanize(x)])]} />`}</${Field}>
     </div>` : null}
     ${tab === 'exp' ? html`<${ListEditor} draft=${draft} set=${set} path=${['experience']} title="Experience"
       empty=${{ role: '', company: '', location: '', start: '', end: '', employment_type: '', bullets: [] }}

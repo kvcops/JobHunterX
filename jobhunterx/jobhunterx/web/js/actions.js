@@ -65,7 +65,7 @@ function onRoute(route) {
   if (route.jobId) loadDetail(route.jobId);
   if (route.page === 'documents') { loadDocuments(); if (route.docId) loadDocument(route.docId); }
   if (route.page === 'tracker') loadTracker();
-  if (route.page === 'interventions') loadInterventions();
+  if (route.page === 'interventions' || route.page === 'browser') loadInterventions();
   if (route.page === 'settings') { loadSettings(); loadModels(); loadUsage(); loadPipelineMode(); }
 }
 export function setTheme(theme) {

@@ -43,36 +43,36 @@ REASONING_EFFORT_MODELS = {"groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"
 THINKING_PARAM_MODELS: set[str] = set()
 
 # Provider → model fallback chains using updated August 2026 model IDs.
-# Google AI Studio models (Gemma 4 26B, Gemini 3.1 Flash Lite) are primary;
+# Google AI Studio models (Gemma 4 26B, Gemini 3.5 Flash Lite) are primary;
 # Groq (Llama 3.3 70B, Llama 3.1 8B) and Mistral (mistral-small-2603, mistral-large-2512, codestral-2508)
 # provide cross-provider failover.
 FALLBACK_CHAINS: Dict[str, List[str]] = {
     "fast": [
         "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.1-flash-lite",
+        "gemini/gemini-3.5-flash-lite",
         "groq/llama-3.1-8b-instant",
         "mistral/mistral-small-2603",
     ],
     "reasoning": [
         "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.1-flash-lite",
+        "gemini/gemini-3.5-flash-lite",
         "groq/llama-3.3-70b-versatile",
         "mistral/mistral-large-2512",
     ],
     "tailoring": [
         "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.1-flash-lite",
+        "gemini/gemini-3.5-flash-lite",
         "groq/llama-3.3-70b-versatile",
         "mistral/codestral-2508",
     ],
     "extraction": [
         "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.1-flash-lite",
+        "gemini/gemini-3.5-flash-lite",
         "groq/llama-3.1-8b-instant",
         "mistral/mistral-small-2603",
     ],
     "browser": [
-        "gemini/gemini-3.1-flash-lite",
+        "gemini/gemini-3.5-flash-lite",
         "groq/llama-3.3-70b-versatile",
         "mistral/mistral-small-2603",
     ],
@@ -92,7 +92,7 @@ def get_model_config() -> Dict[str, Any]:
 
     all_models = [
         {"id": "gemini/gemma-4-26b-a4b-it", "name": "Gemma 4 26B (Google)", "provider": "google"},
-        {"id": "gemini/gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite (Google)", "provider": "google"},
+        {"id": "gemini/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite (Google)", "provider": "google"},
         {"id": "groq/llama-3.3-70b-versatile", "name": "Llama 3.3 70B (Groq)", "provider": "groq"},
         {"id": "groq/llama-3.1-8b-instant", "name": "Llama 3.1 8B (Groq)", "provider": "groq"},
         {"id": "mistral/mistral-small-2603", "name": "Mistral Small (Mistral)", "provider": "mistral"},
@@ -133,7 +133,7 @@ _semaphores: Dict[int, Dict[str, asyncio.Semaphore]] = {}
 # Minimum delay (seconds) between requests per provider to respect RPM limits.
 # Groq free: 30 RPM → 1 req per 2s minimum
 # Mistral free: ~60 RPM → 1 req per 1s minimum
-# Gemini 3.1 Flash Lite free: 15 RPM (250K TPM / 500 RPD) → 1 req per 4.0s minimum
+# Gemini 3.5 Flash Lite free: 15 RPM (250K TPM / 500 RPD) → 1 req per 4.0s minimum
 _PROVIDER_MIN_DELAY: Dict[str, float] = {
     "groq": 3.2,
     "mistral": 2.0,

@@ -1,5 +1,5 @@
 // Shared presentational components and motion hooks. No data fetching here.
-import { html, useState, useEffect, useLayoutEffect, useRef, useId } from '../lib/preact.js';
+import { html, render, useState, useEffect, useLayoutEffect, useRef, useId } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { closeConfirm, dismissToast } from '../actions.js';
 import { VERDICT_LABEL } from '../lib/format.js';
@@ -336,7 +336,7 @@ export function Popover({ open, onClose, children, label, align = 'left' }) {
   const ref = useRef();
   useEffect(() => {
     if (!open) return undefined;
-    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest('[data-popover-anchor]')) onClose(); };
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest('[data-popover-anchor], .select-list')) onClose(); };
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('pointerdown', onDown, true);
     document.addEventListener('keydown', onKey);
@@ -350,4 +350,83 @@ export function Popover({ open, onClose, children, label, align = 'left' }) {
 export function PageHead({ title, sub, actions }) {
   return html`<div class="page-head"><div class="page-head-text"><h1>${title}</h1>${sub ? html`<p class="page-sub">${sub}</p>` : null}</div>
     ${actions ? html`<div class="page-actions">${actions}</div>` : null}</div>`;
+}
+
+// ---------------------------------------------------------------------------- portal + select
+/** Renders children into <body> so dropdowns are never clipped by scrolling panes or transformed cards. */
+function Portal({ children }) {
+  const host = useRef(null);
+  if (!host.current) { host.current = document.createElement('div'); host.current.className = 'portal'; }
+  useEffect(() => {
+    document.body.appendChild(host.current);
+    return () => { render(null, host.current); host.current.remove(); };
+  }, []);
+  useEffect(() => { render(children, host.current); });
+  return null;
+}
+
+/**
+ * Styled dropdown replacing native <select>. options: [[value, label, hint?], ...].
+ * Keyboard: ↑/↓ move, Enter/Space pick, Esc closes, typing a letter jumps.
+ */
+export function Select({ value, options, onChange, label, id, size, disabled, icon, block, tone }) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const [pos, setPos] = useState(null);
+  const wrap = useRef();
+  const btn = useRef();
+  const idx = options.findIndex((o) => String(o[0]) === String(value));
+  const cur = options[idx];
+  const place = () => {
+    const r = btn.current.getBoundingClientRect();
+    const h = Math.min(320, options.length * 38 + 12);
+    const below = window.innerHeight - r.bottom - 12;
+    const up = below < h && r.top > below;
+    setPos({ left: Math.min(r.left, window.innerWidth - Math.max(r.width, 200) - 8), width: r.width,
+      ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }), up });
+  };
+  const show = () => { if (disabled) return; place(); setHi(idx < 0 ? 0 : idx); setOpen(true); };
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (!wrap.current.contains(e.target) && !e.target.closest('.select-list')) setOpen(false); };
+    const onScroll = (e) => { if (!(e.target.closest && e.target.closest('.select-list'))) setOpen(false); };
+    document.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => { document.removeEventListener('pointerdown', onDown, true); window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
+  }, [open]);
+  const pick = (v) => { setOpen(false); if (String(v) !== String(value)) onChange(v); btn.current && btn.current.focus(); };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { show(); return; }
+      setHi((h) => (h + (e.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (open) pick(options[hi][0]); else show();
+    } else if (e.key === 'Escape' && open) {
+      e.preventDefault(); e.stopPropagation(); setOpen(false);
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    } else if (e.key.length === 1 && /\S/.test(e.key)) {
+      const j = options.findIndex((o) => String(o[1]).toLowerCase().startsWith(e.key.toLowerCase()));
+      if (j >= 0) { if (open) setHi(j); else onChange(options[j][0]); }
+    }
+  };
+  const listId = `${useId()}-list`;
+  return html`<div class=${`select ${size === 'sm' ? 'select-sm' : ''} ${block ? 'select-block' : ''} ${open ? 'open' : ''} ${tone || ''}`} ref=${wrap}>
+    <button type="button" id=${id} ref=${btn} class="select-btn" role="combobox" aria-haspopup="listbox" aria-expanded=${open ? 'true' : 'false'}
+      aria-controls=${listId} aria-label=${label} disabled=${disabled} onClick=${() => (open ? setOpen(false) : show())} onKeyDown=${onKey}>
+      ${tone ? html`<span class="select-dot"></span>` : icon ? html`<${Icon} name=${icon} size=${15} />` : null}
+      <span class="select-value">${cur ? cur[1] : 'Choose…'}</span>
+      <svg class="select-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5" /></svg>
+    </button>
+    ${open && pos ? html`<${Portal}><ul id=${listId} class=${`select-list ${pos.up ? 'up' : ''}`} role="listbox" aria-label=${label}
+        style=${{ left: `${pos.left}px`, minWidth: `${Math.max(pos.width, 180)}px`, ...(pos.up ? { bottom: `${pos.bottom}px` } : { top: `${pos.top}px` }) }}>
+      ${options.map(([v, l, hint], i) => html`<li key=${String(v)} role="option" aria-selected=${i === idx ? 'true' : 'false'}
+          class=${`${i === hi ? 'hi' : ''} ${i === idx ? 'sel' : ''}`} style=${{ '--i': i }} onPointerEnter=${() => setHi(i)} onClick=${() => pick(v)}>
+        <span class="opt-text"><span>${l}</span>${hint ? html`<small>${hint}</small>` : null}</span>
+        ${i === idx ? html`<${Icon} name="check" size=${15} />` : null}</li>`)}
+    </ul></${Portal}>` : null}
+  </div>`;
 }
