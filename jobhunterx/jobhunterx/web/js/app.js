@@ -3,7 +3,7 @@
 import { html, render, useEffect, useLayoutEffect, useRef, useState } from './lib/preact.js';
 import { useStore } from './state/store.js';
 import { boot, navigate, setTheme, retryBoot } from './actions.js';
-import { Icon, ConfirmDialog, Toasts, Orb, Button } from './components/ui.js';
+import { Icon, ConfirmDialog, Toasts, Button } from './components/ui.js';
 import { DiscoverView } from './views/discover.js';
 import { JobDetailDrawer } from './views/jobdetail.js';
 import { ProfileView } from './views/profile.js';
@@ -36,7 +36,8 @@ function Ambient() {
 
 function Splash() {
   return html`<div class="splash" role="status" aria-live="polite">
-    <${Orb} size=${120} />
+    <div class="splash-mark" aria-hidden="true"><span class="orb-wave"></span><span class="orb-wave w2"></span><span class="orb-wave w3"></span>
+      <img class="splash-logo" src="/assets/logo.svg" alt="" width="72" height="72" /></div>
     <div class="splash-name">JobHunter<span class="serif">X</span></div>
     <div class="splash-line"><span></span></div>
     <span class="sr-only">Loading</span>
@@ -78,7 +79,7 @@ function Sidebar() {
   return html`<aside class="sidebar">
     <nav class="sidebar-card" aria-label="Main">
       <a class="brand" href="#/discover" aria-label="JobHunterX home">
-        <span class="brand-mark"><img src="/assets/logo.svg" alt="" width="20" height="20" /></span>
+        <span class="brand-mark"><img src="/assets/logo.svg" alt="" width="34" height="34" /></span>
         <span class="brand-name">JobHunter<span class="serif">X</span></span>
       </a>
       <div class="nav-groups" ref=${groupsRef}>

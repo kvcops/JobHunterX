@@ -1,13 +1,12 @@
 <div align="center">
 
-<img src="assets/hero_banner.jpg" alt="JobHunterX — AI Career Intelligence Agent" width="100%"/>
+<img src="assets/banner.png" alt="JobHunterX — roles that genuinely fit you" width="100%"/>
 
 <br/>
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=120&section=header&text=&fontSize=0" width="100%"/>
 
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Outfit&weight=800&size=30&duration=3000&pause=1000&color=A855F7&center=true&vCenter=true&width=700&height=60&lines=%E2%9A%A1+JOBHUNTERX+%E2%80%94+AI+CAREER+HUNTER;Understands+Your+Career;Finds+%26+Verifies+Real+Jobs;Explains+Every+Match;Honest+Resume+%C2%B7+CV+%C2%B7+Cover+Letter" alt="Typing SVG" />
+  <img src="https://readme-typing-svg.demolab.com?font=Geist&weight=600&size=28&duration=3000&pause=1000&color=EE6B33&center=true&vCenter=true&width=700&height=60&lines=%E2%9A%A1+JOBHUNTERX+%E2%80%94+AI+CAREER+HUNTER;Understands+Your+Career;Finds+%26+Verifies+Real+Jobs;Explains+Every+Match;Honest+Resume+%C2%B7+CV+%C2%B7+Cover+Letter" alt="Typing SVG" />
 </p>
 
 <h3 align="center">🚀 AI career intelligence: understands your career, finds roles that genuinely fit, explains every match, and prepares honest application material</h3>

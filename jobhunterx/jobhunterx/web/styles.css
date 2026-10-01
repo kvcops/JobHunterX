@@ -131,10 +131,15 @@ html.vt .view { animation: none; }
   background: var(--card); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--edge); border-radius: var(--radius); box-shadow: var(--shadow); }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 10px 16px; text-decoration: none; color: var(--ink); }
-.brand-mark { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none;
-  background: radial-gradient(circle at 30% 30%, #ffd7c4, var(--accent) 70%); box-shadow: 0 6px 16px -6px var(--accent); transition: transform .5s var(--spring); }
-.brand:hover .brand-mark { transform: rotate(-12deg) scale(1.06); }
-.brand-mark img { width: 20px; height: 20px; filter: brightness(0) invert(1); }
+.brand-mark { width: 34px; height: 34px; display: grid; place-items: center; flex: none; border-radius: 11px;
+  box-shadow: 0 8px 18px -8px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.6); transition: transform .5s var(--spring); }
+.brand:hover .brand-mark { transform: rotate(-8deg) scale(1.06); }
+.brand-mark img { width: 34px; height: 34px; display: block; }
+:root[data-theme="dark"] .brand-mark { box-shadow: 0 0 0 1px rgba(255,255,255,.1); }
+.splash-logo { width: 72px; height: 72px; border-radius: 22px; box-shadow: 0 20px 40px -18px rgba(0,0,0,.6); animation: pop .7s var(--spring) both; }
+.splash-mark { position: relative; display: grid; place-items: center; width: 150px; height: 150px; }
+.splash-mark .orb-wave { inset: 30%; border-radius: 30%; animation: wave 2.6s cubic-bezier(.2,.6,.4,1) infinite; }
+.splash-mark .orb-wave.w2 { animation-delay: .87s; } .splash-mark .orb-wave.w3 { animation-delay: 1.73s; }
 .brand-name { font-size: 1.12rem; font-weight: 600; letter-spacing: -.04em; }
 .brand-name .serif { font-size: 1.2em; margin-left: 1px; }
 .nav-label { font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--text-3); font-weight: 600; padding: 12px 12px 6px; }

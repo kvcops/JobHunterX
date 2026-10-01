@@ -149,7 +149,7 @@ export function OnboardingView() {
   const [title, lead] = COPY[step];
   return html`<div class="onboarding">
     <aside class="ob-side">
-      <div class="brand"><span class="brand-mark"><img src="/assets/logo.svg" alt="" width="20" height="20" /></span>
+      <div class="brand"><span class="brand-mark"><img src="/assets/logo.svg" alt="" width="34" height="34" /></span>
         <span class="brand-name">JobHunter<span class="serif">X</span></span></div>
       <div class="ob-copy" key=${step}><h1>${title}</h1><p class="lead">${lead}</p></div>
       <${Stepper} step=${step} />
