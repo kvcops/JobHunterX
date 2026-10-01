@@ -118,7 +118,7 @@ def _check_sync(path: str, repair: bool) -> dict[str, Any]:
         add("Foreign keys", "ok" if not fk else "warn", "All references valid." if not fk else f"{len(fk)} broken references.")
 
         tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
-        required = {"profiles", "jobs", "documents", "search_runs", "snapshots", "people", "app_state", "schema_meta"}
+        required = {"profiles", "jobs", "documents", "search_runs", "snapshots", "people", "app_state", "schema_meta", "apply_sessions"}
         missing = sorted(required - tables)
         add("Tables", "ok" if not missing else "error", "All present." if not missing else "Missing: " + ", ".join(missing))
 

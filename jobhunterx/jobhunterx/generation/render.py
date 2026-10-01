@@ -37,22 +37,31 @@ def _render(template: str, **ctx) -> str:
     return _env().get_template(template).render(**ctx)
 
 
-def render_resume(content: dict) -> tuple[bytes, int]:
-    """One page: shrink typography first, then trim lowest-relevance items."""
+def _fit_one_page(template: str, content: dict, steps: list[dict], kind: str) -> tuple[bytes, int]:
+    """Try each layout until the document fits on one page; otherwise keep the shortest result."""
     best: tuple[bytes, int] | None = None
-    steps = [dict(sp) for sp in SHRINK_PROFILES] + [{**SHRINK_PROFILES[-1], **t} for t in _TRIM_STEPS]
     for sp in steps:
-        pdf, pages = _html_to_pdf(_render("resume.html", doc=content, **sp))
+        pdf, pages = _html_to_pdf(_render(template, doc=content, **sp))
         if pages == 1:
             return pdf, 1
         if best is None or pages < best[1]:
             best = (pdf, pages)
-    log.warning("resume_multi_page", pages=best[1] if best else 0)
+    log.warning(f"{kind}_multi_page", pages=best[1] if best else 0)
     return best  # type: ignore[return-value]
 
 
+def render_resume(content: dict) -> tuple[bytes, int]:
+    """One page: shrink typography first, then trim lowest-relevance items."""
+    steps = [dict(sp) for sp in SHRINK_PROFILES] + [{**SHRINK_PROFILES[-1], **t} for t in _TRIM_STEPS]
+    return _fit_one_page("resume.html", content, steps, "resume")
+
+
 def render_cv(content: dict) -> tuple[bytes, int]:
-    return _html_to_pdf(_render("cv.html", doc=content, **_CV_LAYOUT))
+    """A CV gets a roomier layout, but is still squeezed onto one page when it can be."""
+    roomy = {**_CV_LAYOUT, "margin_section": "10px"}
+    steps = [roomy] + [dict(sp) for sp in SHRINK_PROFILES] \
+        + [{**SHRINK_PROFILES[-1], **t} for t in _TRIM_STEPS]
+    return _fit_one_page("cv.html", content, steps, "cv")
 
 
 def render_cover_letter(content: dict, header: dict) -> tuple[bytes, int]:

@@ -3,11 +3,12 @@ import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import {
   loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention,
-  stopBrowser, setTakeover, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
+  applyControl, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
   loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion,
 } from '../actions.js';
 import { PeopleManager } from './people.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice, reduced } from '../components/ui.js';
+import { api } from '../lib/api.js';
 import { TRACKING_LABEL, DEFAULT_TRACKING, relTime, humanize, fmtNum, safeUrl } from '../lib/format.js';
 import { setTheme } from '../actions.js';
 import { ReconnectingSocket } from '../lib/ws.js';
@@ -137,83 +138,210 @@ export function TrackerView() {
   </div>`;
 }
 
-// ---------------------------------------------------------------------------- browser agent
-function agentState(b, waiting) {
-  if (waiting) return { key: 'help', label: 'Needs you', tone: 'warning' };
-  if (b.active) return { key: 'work', label: 'Working', tone: 'accent' };
-  if (b.steps.length) return { key: 'done', label: 'Finished', tone: 'success' };
-  return { key: 'idle', label: 'Idle', tone: 'neutral' };
+// ---------------------------------------------------------------------------- browser agent (auto-apply)
+const PHASES = [
+  { key: 'kit', label: 'Documents' }, { key: 'open', label: 'Open browser' },
+  { key: 'fill', label: 'Fill the form' }, { key: 'submit', label: 'Submit' },
+];
+const STATUS_META = {
+  idle: { label: 'Idle', tone: 'neutral' }, preparing: { label: 'Getting documents ready', tone: 'accent' },
+  launching: { label: 'Opening the browser', tone: 'accent' }, running: { label: 'Working', tone: 'accent' },
+  paused: { label: 'You are driving', tone: 'info' }, stopping: { label: 'Stopping…', tone: 'warning' },
+  stopped: { label: 'Stopped — progress saved', tone: 'warning' }, needs_you: { label: 'Needs you', tone: 'warning' },
+  applied: { label: 'Applied', tone: 'success' }, failed: { label: 'Could not finish', tone: 'danger' },
+  closed: { label: 'Browser closed', tone: 'neutral' },
+};
+const WORKING = ['preparing', 'launching', 'running', 'stopping'];
+
+function phaseIndex(sess) {
+  if (!sess) return -1;
+  const st = sess.status;
+  if (st === 'applied') return 4;
+  if (st === 'preparing') return 0;
+  if (st === 'launching') return 1;
+  if (st === 'needs_you') return 3;
+  const kit = Object.values(sess.kit || {});
+  const kitDone = kit.length && kit.every((k) => !['checking', 'generating'].includes(k.status)) && !kit.some((k) => k.status === 'failed');
+  if (!sess.steps || !sess.steps.length) return kitDone || sess.runs ? 1 : 0;
+  return 2;
 }
 
-export function BrowserView() {
-  const b = useStore((s) => s.browser);
-  const job = useStore((s) => (s.browser.jobId ? s.jobs.byId[s.browser.jobId] : null));
-  const waiting = useStore((s) => s.interventions.items.length);
-  const canvas = useRef();
+function PhaseStepper({ sess }) {
+  const at = phaseIndex(sess);
+  const halted = sess && ['stopped', 'failed', 'needs_you', 'closed'].includes(sess.status);
+  return html`<ol class="phases" aria-label="Progress">${PHASES.map((p, i) => {
+    const state = i < at ? 'done' : i === at ? (halted ? 'halt' : 'now') : 'todo';
+    return html`<li key=${p.key} class=${`ph ph-${state}`}><span class="ph-dot">${state === 'done' ? html`<${Icon} name="check" size=${12} />`
+      : state === 'halt' ? html`<${Icon} name=${sess.status === 'failed' ? 'x' : 'stop'} size=${10} />` : i + 1}</span><span class="ph-label">${p.label}</span></li>`;
+  })}</ol>`;
+}
+
+const KIT_ORDER = ['resume', 'cover_letter', 'cv'];
+const KIT_STATE = {
+  checking: { text: 'Checking…', icon: null }, generating: { text: 'Writing…', icon: null },
+  found: { text: 'Ready', icon: 'check' }, made: { text: 'Written now', icon: 'spark' },
+  skipped: { text: 'Skipped', icon: 'x' }, failed: { text: 'Failed', icon: 'alert' },
+};
+function KitList({ kit }) {
+  const keys = KIT_ORDER.filter((k) => kit && kit[k]);
+  if (!keys.length) return null;
+  const settled = keys.every((k) => !['checking', 'generating', 'failed'].includes(kit[k].status));
+  if (settled) {
+    return html`<div class="kit-compact">${keys.map((k) => {
+      const it = kit[k]; const ok = it.status !== 'skipped';
+      const chip = html`<${Icon} name=${ok ? 'check' : 'x'} size=${12} />${it.label}${it.pages ? html`<em>${it.pages}p</em>` : null}`;
+      return it.doc_id ? html`<a key=${k} class=${`kit-chip ${ok ? 'ok' : 'off'} ${it.pages > 1 ? 'long' : ''}`} href=${api.documentPdfUrl(it.doc_id)} target="_blank" rel="noopener" title=${`${it.note || ''} — open PDF`}>${chip}</a>`
+        : html`<span key=${k} class=${`kit-chip ${ok ? 'ok' : 'off'}`} title=${it.note || ''}>${chip}</span>`;
+    })}</div>`;
+  }
+  return html`<ul class="kit">${keys.map((k) => {
+    const it = kit[k]; const m = KIT_STATE[it.status] || KIT_STATE.checking;
+    const busy = it.status === 'checking' || it.status === 'generating';
+    return html`<li key=${k} class=${`kit-row k-${it.status}`}>
+      <span class="kit-ic">${busy ? html`<${Spinner} size=${14} />` : html`<${Icon} name=${m.icon} size=${14} />`}</span>
+      <span class="grow"><strong>${it.label}</strong><span class="muted small">${it.note || m.text}</span></span>
+      ${it.pages ? html`<span class=${`kit-pages ${it.pages === 1 ? 'one' : ''}`}>${it.pages} page${it.pages === 1 ? '' : 's'}</span>` : null}
+      ${it.doc_id ? html`<a class="kit-open" href=${api.documentPdfUrl(it.doc_id)} target="_blank" rel="noopener" title="Open PDF"><${Icon} name="eye" size=${15} /></a>` : null}
+    </li>`;
+  })}</ul>`;
+}
+
+const VERB_ICON = [['Click', 'cursor'], ['Type', 'type'], ['Upload', 'upload'], ['Open', 'globe'], ['Choose', 'list'], ['Look', 'list'],
+  ['Scroll', 'scroll'], ['Press', 'type'], ['Wait', 'refresh'], ['Read', 'eye'], ['Go back', 'back'], ['Switch', 'layers'], ['Finish', 'check']];
+const verbIcon = (a) => (VERB_ICON.find(([v]) => a.startsWith(v)) || [null, 'bolt'])[1];
+
+function StepLog({ steps, live }) {
+  const box = useRef();
+  const last = steps.length ? `${steps[steps.length - 1].n}:${steps[steps.length - 1].repeat}:${steps[steps.length - 1].status}` : '';
+  useEffect(() => { if (box.current) box.current.scrollTo({ top: box.current.scrollHeight, behavior: reduced() ? 'auto' : 'smooth' }); }, [last]);
+  if (!steps.length) return html`<div class="ap-log"><div class="ap-empty"><${Icon} name="info" size=${16} /> Each step appears here in plain words — what the agent is trying, what it clicked and typed, and whether it worked.</div></div>`;
+  return html`<div class="scroll ap-log" ref=${box}><ol class="steps">${steps.map((s) => html`<li key=${s.n} class=${`step s-${s.status} ${live && s.status === 'running' ? 'is-now' : ''}`}>
+    <span class="step-n">${s.status === 'running' && live ? html`<${Spinner} size=${13} />` : s.status === 'done' ? html`<${Icon} name="check" size=${12} />`
+      : s.status === 'failed' ? html`<${Icon} name="x" size=${12} />` : s.n}</span>
+    <div class="step-body">
+      <div class="step-goal">${s.goal || 'Looking at the page'}${s.repeat > 1 ? html`<span class="step-rep" title="Tried this more than once">×${s.repeat}</span>` : null}</div>
+      ${s.actions && s.actions.length ? html`<div class="step-acts">${s.actions.map((a, i) => html`<span class="act" key=${i}><${Icon} name=${verbIcon(a)} size=${12} />${a}</span>`)}</div>` : null}
+      ${s.note ? html`<div class="step-note">${s.note}</div>` : null}
+    </div></li>`)}</ol></div>`;
+}
+
+function useLiveFrames(canvas) {
+  const [frame, setFrame] = useState(false);
   const sock = useRef();
-  const [hasFrame, setHasFrame] = useState(false);
   useEffect(() => {
     const ctx = canvas.current.getContext('2d');
     const img = new Image();
-    img.onload = () => { canvas.current.width = img.width; canvas.current.height = img.height; ctx.drawImage(img, 0, 0); setHasFrame(true); };
+    let pending = null; let drawing = false;
+    img.onload = () => {
+      if (canvas.current.width !== img.width || canvas.current.height !== img.height) { canvas.current.width = img.width; canvas.current.height = img.height; }
+      ctx.drawImage(img, 0, 0); setFrame(true); drawing = false;
+      if (pending) { const p = pending; pending = null; drawing = true; img.src = p; }
+    };
     sock.current = new ReconnectingSocket('/ws/browser', {
-      onMessage: (m) => { if (m.type === 'frame' && typeof m.data === 'string') img.src = `data:image/jpeg;base64,${m.data}`; },
+      onMessage: (m) => {
+        if (m.type === 'idle') { setFrame(false); return; }
+        if (m.type !== 'frame' || typeof m.data !== 'string') return;
+        const src = `data:image/jpeg;base64,${m.data}`;
+        if (drawing) { pending = src; return; }          // drop stale frames instead of queueing them
+        drawing = true; img.src = src;
+      },
     });
     sock.current.connect();
     return () => sock.current.close();
   }, []);
-  const coords = (e) => {
-    const r = canvas.current.getBoundingClientRect();
-    return { x: Math.round(((e.clientX - r.left) / r.width) * canvas.current.width), y: Math.round(((e.clientY - r.top) / r.height) * canvas.current.height) };
-  };
-  const send = (msg) => b.takeover && sock.current && sock.current.send(msg);
-  const st = agentState(b, waiting);
+  return [frame, (msg) => sock.current && sock.current.send(msg)];
+}
+
+export function BrowserView() {
+  const b = useStore((s) => s.browser);
+  const waiting = useStore((s) => s.interventions.items.length);
+  const sess = b.session;
+  const canvas = useRef();
+  const [hasFrame, send] = useLiveFrames(canvas);
+  const status = sess ? sess.status : 'idle';
+  const meta = STATUS_META[status] || STATUS_META.idle;
+  const working = WORKING.includes(status) || status === 'paused';
+  const youDrive = !!sess && sess.control === 'you';
+  const canType = !!sess && sess.live && (youDrive || !WORKING.includes(status));
+  const showFrame = hasFrame && sess && sess.live;
+  const pos = (e) => { const r = canvas.current.getBoundingClientRect(); return { fx: (e.clientX - r.left) / r.width, fy: (e.clientY - r.top) / r.height }; };
+  const input = (msg) => canType && send(msg);
   let host = '';
-  try { host = b.url ? new URL(b.url).host : ''; } catch { host = b.url; }
+  try { host = sess && sess.url ? new URL(sess.url).host : ''; } catch { host = sess.url; }
+  const steps = (sess && sess.steps) || [];
+  const busy = b.busy;
+  const ctl = (action, label, opts = {}) => html`<${Button} size="sm" variant=${opts.variant || 'secondary'} icon=${opts.icon}
+    busy=${busy === action} disabled=${!!busy && busy !== action} onClick=${() => applyControl(action)}>${label}</${Button}>`;
+
+  let controls = null;
+  if (sess) {
+    if (['preparing', 'launching', 'running'].includes(status)) {
+      controls = html`${ctl('stop', 'Stop now', { variant: 'danger', icon: 'stop' })}
+        ${status !== 'preparing' ? ctl('take-over', 'Take over', { icon: 'hand' }) : null}`;
+    } else if (status === 'paused') {
+      controls = html`${ctl('release', 'Give back to agent', { variant: 'primary', icon: 'play' })}${ctl('stop', 'Stop', { variant: 'danger', icon: 'stop' })}`;
+    } else if (['stopped', 'needs_you', 'failed'].includes(status)) {
+      controls = html`${ctl('continue', 'Continue', { variant: 'primary', icon: 'play' })}
+        ${sess.live && !youDrive ? ctl('take-over', 'Take over', { icon: 'hand' }) : null}
+        ${ctl('done', 'I submitted it', { icon: 'check' })}
+        ${sess.live ? ctl('close', 'Close browser', { icon: 'x' }) : null}`;
+    } else if (status === 'applied' || status === 'closed') {
+      controls = html`<${Button} size="sm" variant="primary" icon="search" onClick=${() => navigate('#/discover')}>Find the next job</${Button}>
+        ${status === 'closed' ? ctl('continue', 'Start again', { icon: 'refresh' }) : null}
+        ${sess.live ? ctl('close', 'Close browser', { icon: 'x' }) : null}`;
+    }
+  }
+
   return html`<div class="view view-browser">
-    <${PageHead} title=${html`Auto-apply <span class="serif">agent</span>`} sub="Watch the agent fill applications live. Take over any time to type or solve a CAPTCHA yourself." />
+    <${PageHead} title=${html`Auto-apply <span class="serif">agent</span>`} sub="Documents first, then the agent fills the form — live, right here. Stop or take over any time." />
     <div class="split split-browser">
-      <section class=${`pane browser-window ${b.takeover ? 'takeover' : ''} ${b.active ? 'is-live' : ''}`} aria-label="Live browser">
+      <section class=${`pane browser-window ${youDrive ? 'takeover' : ''} ${showFrame && working ? 'is-live' : ''}`} aria-label="Live browser">
         <div class="bw-chrome">
           <span class="bw-lights" aria-hidden="true"><i></i><i></i><i></i></span>
-          <div class="bw-url"><${Icon} name="shield" size=${13} /><span class="bw-host">${host || 'about:blank'}</span>
-            ${b.title ? html`<span class="bw-title">${b.title}</span>` : null}</div>
-          ${b.active ? html`<span class="live-pill"><i></i>Live</span>` : html`<span class="live-pill off"><i></i>Offline</span>`}
+          <div class="bw-url"><${Icon} name="shield" size=${13} /><span class="bw-host">${host || (sess ? sess.company || 'Preparing' : 'Waiting for a job')}</span>
+            ${sess && sess.title ? html`<span class="bw-title">${sess.title}</span>` : null}</div>
+          ${showFrame ? html`<span class=${`live-pill ${youDrive ? 'you' : ''}`}><i></i>${youDrive ? 'You' : working ? 'Live' : 'Open'}</span>`
+            : html`<span class="live-pill off"><i></i>${sess && WORKING.includes(status) ? 'Starting' : 'Offline'}</span>`}
         </div>
         <div class="bw-stage">
-          <canvas ref=${canvas} tabindex="0" aria-label="Live browser view" class=${hasFrame ? 'on' : ''}
-            onClick=${(e) => send({ type: 'mouse', action: 'click', ...coords(e), button: 0 })}
-            onWheel=${(e) => { if (b.takeover) { e.preventDefault(); send({ type: 'wheel', deltaX: e.deltaX, deltaY: e.deltaY }); } }}
-            onKeyDown=${(e) => { if (b.takeover) { e.preventDefault(); send({ type: 'keyboard', action: 'keyDown', key: e.key, text: e.key.length === 1 ? e.key : '' }); } }}
-            onKeyUp=${(e) => b.takeover && send({ type: 'keyboard', action: 'keyUp', key: e.key })}></canvas>
-          ${b.takeover ? html`<div class="control-banner"><${Icon} name="hand" size=${15} /> You're in control — clicks and keys go straight to the page</div>` : null}
-          ${!hasFrame ? html`<div class="bw-idle">
-            <div class="bw-illus" aria-hidden="true"><${Orb} size=${150} active=${b.active} /><span class="bw-cursor"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6z" fill="#111" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></span></div>
-            <h2>${b.active ? html`Connecting to the <span class="serif">browser</span>…` : html`The agent is <span class="serif">resting</span>`}</h2>
-            <p class="muted">${b.active ? 'The live view appears as soon as the first page loads.' : 'Start Auto-apply on any job and you will see every click and keystroke here, live.'}</p>
-            ${!b.active ? html`<ol class="bw-how"><li><span>1</span>Open a job in Discover</li><li><span>2</span>Generate its tailored resume</li><li><span>3</span>Press Auto-apply and watch</li></ol>
-              <${Button} variant="primary" onClick=${() => navigate('#/discover')}>Pick a job <${Icon} name="arrow" size=${16} /></${Button}>` : null}
+          <canvas ref=${canvas} tabindex="0" aria-label="Live browser view" class=${`${showFrame ? 'on' : ''} ${canType ? 'interactive' : ''}`}
+            onMouseDown=${(e) => { canvas.current.focus(); }}
+            onClick=${(e) => input({ type: 'mouse', action: 'click', button: 0, ...pos(e) })}
+            onDblClick=${(e) => input({ type: 'mouse', action: 'dblclick', button: 0, ...pos(e) })}
+            onWheel=${(e) => { if (canType) { e.preventDefault(); input({ type: 'wheel', deltaX: e.deltaX, deltaY: e.deltaY, ...pos(e) }); } }}
+            onKeyDown=${(e) => { if (canType && !e.metaKey && !(e.ctrlKey && e.key !== 'v')) { e.preventDefault(); input({ type: 'keyboard', action: 'keyDown', key: e.key }); } }}
+            onPaste=${(e) => { if (canType) { e.preventDefault(); input({ type: 'paste', text: e.clipboardData.getData('text') }); } }}></canvas>
+          ${showFrame && youDrive ? html`<div class="control-banner"><${Icon} name="hand" size=${15} /> You're driving — click and type right here. Press “Give back” when done.</div>` : null}
+          ${showFrame && !youDrive && working ? html`<div class="watch-banner"><${Icon} name="eye" size=${14} /> Watching the agent</div>` : null}
+          ${!showFrame ? html`<div class="bw-idle">
+            <div class="bw-illus" aria-hidden="true"><${Orb} size=${150} active=${WORKING.includes(status)} done=${status === 'applied'} />
+              ${status === 'idle' ? html`<span class="bw-cursor"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6z" fill="#111" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg></span>` : null}</div>
+            ${!sess ? html`<h2>The agent is <span class="serif">resting</span></h2>
+              <p class="muted">Press Auto-apply on any job. You'll see every click and keystroke here — no extra windows.</p>
+              <ol class="bw-how"><li><span>1</span>Open a job in Discover</li><li><span>2</span>Press Auto-apply</li><li><span>3</span>We check & write your resume, letter and CV</li><li><span>4</span>Watch it apply, live</li></ol>
+              <${Button} variant="primary" onClick=${() => navigate('#/discover')}>Pick a job <${Icon} name="arrow" size=${16} /></${Button}>`
+            : status === 'preparing' ? html`<h2>Getting your <span class="serif">documents</span> ready</h2><p class="muted">${sess.message}</p>`
+            : status === 'launching' ? html`<h2>Opening a private <span class="serif">browser</span>…</h2><p class="muted">The live view appears as soon as the page loads.</p>`
+            : status === 'applied' ? html`<h2>Application <span class="serif">sent</span> 🎉</h2><p class="muted">${sess.company} · ${sess.role}</p>`
+            : html`<h2>${meta.label}</h2><p class="muted">${sess.live ? 'Waiting for the next frame…' : 'The browser is closed. Your steps are saved — press Continue to pick up from the last page.'}</p>`}
           </div>` : null}
         </div>
       </section>
       <aside class="pane card agent-panel" aria-label="Agent">
         <div class="ap-head">
-          <div class=${`ap-status st-${st.key}`}><span class="ap-dot"></span>${st.label}</div>
-          ${job ? html`<div class="ap-job"><${Monogram} name=${job.company} size=${36} /><div class="grow"><div class="job-company">${job.company}</div>
-            <strong>${job.title}</strong></div></div>` : html`<p class="muted small">No application in progress.</p>`}
-          ${b.lastMessage ? html`<div class="ap-now" key=${b.lastMessage}>${b.active ? html`<${Spinner} size=${14} />` : html`<${Icon} name="check" size=${14} />`}<span>${b.lastMessage}</span></div>` : null}
-          <div class="ap-controls">
-            <${Button} size="sm" variant=${b.takeover ? 'primary' : 'secondary'} icon="hand" onClick=${() => setTakeover(!b.takeover)}>${b.takeover ? 'Release control' : 'Take over'}</${Button}>
-            <${Button} size="sm" variant="danger" icon="stop" disabled=${!b.active} onClick=${stopBrowser}>Stop</${Button}>
-          </div>
-          ${waiting ? html`<a class="ap-alert" href="#/interventions"><${Icon} name="alert" size=${15} /> The agent is waiting for you <${Icon} name="arrow" size=${14} /></a>` : null}
+          <div class="row space"><div class=${`ap-status tone-${meta.tone} ${WORKING.includes(status) ? 'is-working' : ''}`}><span class="ap-dot"></span>${meta.label}</div>
+            ${sess && sess.runs > 1 ? html`<span class="muted small">Run ${sess.runs}</span>` : null}</div>
+          ${sess ? html`<div class="ap-job"><${Monogram} name=${sess.company} size=${36} /><div class="grow"><div class="job-company">${sess.company}</div>
+            <strong>${sess.role}</strong></div>${sess.apply_url ? html`<a class="icon-btn" href=${safeUrl(sess.apply_url)} target="_blank" rel="noopener" title="Open the posting"><${Icon} name="external" size=${15} /></a>` : null}</div>
+            <${PhaseStepper} sess=${sess} />` : html`<p class="muted small">No application yet.</p>`}
+          ${sess && sess.message && WORKING.includes(status) ? html`<div class="ap-now" key=${sess.message}><${Spinner} size=${14} /><span>${sess.message}</span></div>` : null}
+          ${sess && sess.notice ? html`<${Notice} tone=${status === 'failed' ? 'warning' : 'info'}>${sess.notice}</${Notice}>` : null}
+          ${controls ? html`<div class="ap-controls">${controls}</div>` : null}
+          ${waiting && status !== 'needs_you' ? html`<a class="ap-alert" href="#/interventions"><${Icon} name="alert" size=${15} /> ${waiting} application${waiting === 1 ? '' : 's'} waiting for you <${Icon} name="arrow" size=${14} /></a>` : null}
         </div>
-        <div class="ap-log-head"><span class="sec-title">Activity</span><span class="muted small">${b.steps.length} step${b.steps.length === 1 ? '' : 's'}</span></div>
-        <div class="scroll ap-log">
-          ${b.steps.length ? html`<ol class="timeline-v">${b.steps.map((s, i) => html`<li key=${s.id} class=${i === 0 && b.active ? 'now' : ''}>
-            <span class="tv-dot"></span><div class="tv-body"><div>${s.message}</div><span class="muted small">${relTime(s.ts)}</span></div></li>`)}</ol>`
-            : html`<div class="ap-empty"><${Icon} name="info" size=${16} /> Steps appear here as the agent works — page loads, fields filled, buttons pressed.</div>`}
-        </div>
+        ${sess && sess.kit && Object.keys(sess.kit).length ? html`<div class="ap-sec"><span class="sec-title">Application kit</span><${KitList} kit=${sess.kit} /></div>` : null}
+        <div class="ap-log-head"><span class="sec-title">What the agent did</span><span class="muted small">${steps.length} step${steps.length === 1 ? '' : 's'}</span></div>
+        <${StepLog} steps=${steps} live=${status === 'running'} />
       </aside>
     </div></div>`;
 }
@@ -229,7 +357,7 @@ export function InterventionsView() {
     ${iv.status === 'ready' && !iv.items.length ? html`<div class="pane-center"><${EmptyState} icon="check" title="Nothing needs you">The agent is not waiting on anything.</${EmptyState}></div>` : null}
     <div class="stack">${iv.items.map((it) => html`<div class="iv-row row space wrap" key=${it.id}>
       <div><${Badge} tone="warning">${humanize(it.hitl_type)}</${Badge}> <strong>${it.role || 'Application'}</strong> <span class="muted">@ ${it.company || '—'} · ${relTime(it.created_at)}</span></div>
-      <div class="row gap"><${Button} onClick=${() => focusIntervention(it)}>Show browser</${Button}>
+      <div class="row gap"><${Button} onClick=${() => focusIntervention(it)}>Take over</${Button}>
         <${Button} variant="primary" onClick=${() => continueIntervention(it)}>Continue</${Button}>
         <${Button} onClick=${() => skipIntervention(it)}>Skip</${Button}></div></div>`)}</div>
     </div></section>
@@ -351,12 +479,54 @@ function TuningSection({ d }) {
       ${num('exa_search_num_results', 'Exa results per query', '1–50')}
       <${Field} label="Tavily depth">${(id) => html`<${Select} id=${id} block label="Tavily depth" value=${t.tavily_search_depth}
         onChange=${(v) => setT({ ...t, tavily_search_depth: v })} options=${[['basic', 'Basic', '1 credit'], ['advanced', 'Advanced', '2 credits']]} />`}</${Field}>
-      <div class="field"><span class="field-label">Browser agent window</span>
-        <label class="switch"><input type="checkbox" checked=${!!t.browser_use_headless} onChange=${(e) => setT({ ...t, browser_use_headless: e.currentTarget.checked })} /><span class="switch-ui"></span> Run headless (streamed here)</label></div>
     </div>
     <div class="row gap"><${Button} variant="primary" disabled=${!dirty} onClick=${() => saveSettings({ tunables: t })}>Save</${Button}>
       <${Button} disabled=${!dirty} onClick=${() => setT(d.tunables)}>Discard</${Button}></div>
   </section>`;
+}
+
+function AgentSection({ d, mode }) {
+  const t0 = d.tunables;
+  const [t, setT] = useState(t0);
+  const dirty = JSON.stringify(t) !== JSON.stringify(t0);
+  const sw = (k, label, hint) => html`<div class="set-toggle"><div><strong>${label}</strong><span class="muted small">${hint}</span></div>
+    <label class="switch"><input type="checkbox" checked=${!!t[k]} onChange=${(e) => setT({ ...t, [k]: e.currentTarget.checked })} /><span class="switch-ui"></span></label></div>`;
+  return html`<section class="set-section"><h2>Auto-apply</h2>
+    <p class="muted small">How the browser agent works: <strong>1</strong> check your documents → <strong>2</strong> write what is missing → <strong>3</strong> fill the form live in the Auto-apply tab.</p>
+    <h3 class="sub-title">Documents to attach</h3>
+    <div class="set-toggles">
+      <div class="set-toggle is-fixed"><div><strong>Resume</strong><span class="muted small">Always attached. Tailored to the job and kept to one page.</span></div><${Badge} tone="success">Always</${Badge}></div>
+      ${sw('apply_with_cover_letter', 'Cover letter', 'Written for the job and uploaded when the form has a place for it.')}
+      ${sw('apply_with_cv', 'CV', 'Your longer, general career story — used when a form asks for a CV.')}
+    </div>
+    <h3 class="sub-title">Agent behaviour</h3>
+    <div class="form-grid">
+      <${Field} label="Most steps per run" hint="10–150. The agent stops and asks you if it needs more.">${(id) => html`<input id=${id} class="input" type="number" min="10" max="150" value=${t.browser_max_steps}
+        onInput=${(e) => setT({ ...t, browser_max_steps: e.currentTarget.value })} />`}</${Field}>
+      <${Field} label="Pause between steps (s)" hint="A small pause looks more human and stays inside free AI limits.">${(id) => html`<input id=${id} class="input" type="number" min="0" max="20" step="0.5" value=${t.browser_step_delay_s}
+        onInput=${(e) => setT({ ...t, browser_step_delay_s: e.currentTarget.value })} />`}</${Field}>
+    </div>
+    <div class="set-toggles">${sw('browser_show_window', 'Also show a separate Chrome window', 'Off = the browser is shown only inside the app (recommended). Turn on just for debugging.')}</div>
+    <div class="row gap"><${Button} variant="primary" disabled=${!dirty} onClick=${() => saveSettings({ tunables: t })}>Save</${Button}>
+      <${Button} disabled=${!dirty} onClick=${() => setT(t0)}>Discard</${Button}></div>
+    <h3 class="sub-title">When to apply</h3>
+    <${Seg} label="Pipeline mode" options=${[['manual', 'Only when I press Auto-apply'], ['automatic', 'Automatically for strong matches']]} value=${mode.mode} onChange=${setPipelineMode} />
+  </section>`;
+}
+
+function SettingsOverview({ d }) {
+  if (!d) return null;
+  const llm = ['google', 'groq', 'mistral'];
+  const search = d.search_providers || [];
+  const on = (kind, p) => !d.providers || !d.providers[kind] || d.providers[kind][p] !== false;
+  const llmReady = llm.filter((p) => d[`${p}_configured`] && on('llm', p)).length;
+  const searchReady = search.filter((p) => (p === 'ddgs' || d[`${p}_configured`]) && on('search', p)).length;
+  const item = (ok, label, value) => html`<div class=${`ov-item ${ok ? 'ok' : 'warn'}`}><span class="ov-dot"></span><span class="grow">${label}</span><strong>${value}</strong></div>`;
+  return html`<div class="set-overview">
+    ${item(llmReady > 0, 'AI providers', `${llmReady}/${llm.length}`)}
+    ${item(searchReady > 0, 'Web search', `${searchReady}/${search.length}`)}
+    ${item(true, 'Auto-apply', d.tunables && d.tunables.browser_show_window ? 'window + in-app' : 'in-app')}
+  </div>`;
 }
 
 function DataSection() {
@@ -396,7 +566,7 @@ export function SettingsView() {
   const motion = useStore((s) => s.motion);
   const [sec, setSec] = useState('ai');
   const d = st.data;
-  const needData = ['ai', 'search', 'tuning'].includes(sec);
+  const needData = ['ai', 'search', 'tuning', 'agent'].includes(sec);
   const body = () => {
     if (needData && !d) return st.status === 'error' ? html`<${ErrorBox} message=${st.error} onRetry=${loadSettings} />` : html`<${Skeleton} lines=${6} />`;
     switch (sec) {
@@ -410,9 +580,7 @@ export function SettingsView() {
           <p class="muted small">Gemma today: ${usage.data.gemma_budget.requests_today} / ${usage.data.gemma_budget.requests_cap} requests (${usage.data.gemma_budget.model}).</p>`
           : usage.status === 'error' ? html`<${ErrorBox} message=${usage.error} />` : html`<${Skeleton} lines=${3} />`}</section>`;
       case 'profiles': return html`<${PeopleManager} />`;
-      case 'agent': return html`<section class="set-section"><h2>Auto-apply mode</h2>
-        <${Seg} label="Pipeline mode" options=${[['manual', 'Manual'], ['automatic', 'Automatic']]} value=${mode.mode} onChange=${setPipelineMode} />
-        <p class="muted small" style=${{ marginTop: '12px' }}>Manual: the agent only applies when you click Auto-apply on a job.</p></section>`;
+      case 'agent': return html`<${AgentSection} key=${JSON.stringify(d.tunables)} d=${d} mode=${mode} />`;
       case 'look': return html`<section class="set-section"><h2>Appearance</h2>
         <div class="field"><span class="field-label">Theme</span><${Seg} label="Theme" options=${[['light', 'Light'], ['dark', 'Dark']]} value=${theme} onChange=${setTheme} /></div>
         <div class="field" style=${{ marginTop: '16px' }}><span class="field-label">Motion</span>
@@ -428,7 +596,7 @@ export function SettingsView() {
     <div class="split split-settings">
       <nav class="pane card set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map((x) => html`<button type="button" key=${x.key}
         class=${`set-link ${sec === x.key ? 'active' : ''}`} aria-current=${sec === x.key ? 'true' : undefined} onClick=${() => setSec(x.key)}>
-        <${Icon} name=${x.icon} size=${16} />${x.label}</button>`)}</nav>
+        <${Icon} name=${x.icon} size=${16} />${x.label}</button>`)}<${SettingsOverview} d=${d} /></nav>
       <section class="pane card"><div class="scroll pane-pad set-body" key=${sec}>${body()}</div></section>
     </div>
   </div>`;

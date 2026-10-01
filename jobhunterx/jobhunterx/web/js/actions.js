@@ -75,6 +75,7 @@ function onRoute(route) {
   if (route.page === 'documents') { loadDocuments(); if (route.docId) loadDocument(route.docId); }
   if (route.page === 'tracker') loadTracker();
   if (route.page === 'interventions' || route.page === 'browser') loadInterventions();
+  if (route.page === 'browser') loadApplySession();
   if (route.page === 'settings') { loadSettings(); loadModels(); loadUsage(); loadPipelineMode(); loadPeople().catch(() => {}); }
 }
 export function setTheme(theme) {
@@ -428,11 +429,21 @@ export async function clearJobs(scope) {
 }
 export async function autoApply(jobId) {
   if (getState().pending.apply[jobId]) return;
-  if (!(await confirmAction({ title: 'Start the browser agent?', body: 'A browser will open the application form and fill it using your profile and this job\'s tailored resume. You can watch and take over at any time.', confirm: 'Start applying' }))) return;
+  const cur = getState().browser.session;
+  if (cur && cur.job_id === jobId && ['needs_you', 'stopped'].includes(cur.status)) {
+    navigate('#/browser');
+    return;
+  }
+  if (!(await confirmAction({
+    title: 'Apply with the browser agent?',
+    body: 'First we check your resume, cover letter and CV for this job and write any that are missing (resume on one page). Then the agent opens the application right inside the Auto-apply tab — you can watch, stop, or take over any time.',
+    confirm: 'Check documents & start',
+  }))) return;
   setPending('apply', jobId, true);
   try {
-    await api.applyJob(jobId);
-    toast('Browser agent started — watch it in "Browser agent".', 'success');
+    const { session } = await api.applyJob(jobId);
+    if (session) setSlice('browser', { status: 'ready', session, error: null });
+    navigate('#/browser');
   } catch (err) {
     toast(errorText(err), 'danger');
   } finally {
@@ -626,9 +637,10 @@ export async function loadInterventions() {
 }
 export async function continueIntervention(item) {
   try {
-    await api.resumeAgent(item.job_id, 'done');
+    const { session } = await api.applyAction(item.job_id, 'continue');
+    if (session) setSlice('browser', { status: 'ready', session });
     await api.resolveIntervention(item.id, 'resolved');
-    toast('Agent resumed.', 'success');
+    navigate('#/browser');
   } catch (err) { toast(errorText(err), 'danger'); }
   loadInterventions();
 }
@@ -640,41 +652,56 @@ export async function skipIntervention(item) {
   loadInterventions();
 }
 export async function focusIntervention(item) {
-  try { await api.focusIntervention(item.job_id); } catch (err) { toast(errorText(err), 'danger'); }
-}
-export async function stopBrowser() {
   try {
-    await api.stopBrowser();
-    setSlice('browser', { active: false, takeover: false });
-    toast('Browser agent stopped.', 'info');
-  } catch (err) { toast(errorText(err), 'danger'); }
+    const { session } = await api.applyAction(item.job_id, 'take-over');
+    if (session) setSlice('browser', { status: 'ready', session });
+  } catch { /* the browser may be closed; the Auto-apply tab still shows the saved run */ }
+  navigate('#/browser');
 }
-export async function setTakeover(on) {
-  const jobId = getState().browser.jobId;
+export async function loadApplySession() {
+  setSlice('browser', (b) => ({ ...b, status: b.session ? 'refreshing' : 'loading', error: null }));
   try {
-    if (on) await api.takeover(jobId); else await api.release(jobId);
-    setSlice('browser', { takeover: on });
-  } catch (err) { toast(errorText(err), 'danger'); }
+    const { session } = await api.applyCurrent();
+    setSlice('browser', { status: 'ready', session: session || null });
+  } catch (err) {
+    setSlice('browser', { status: 'error', error: errorText(err) });
+  }
+}
+const APPLY_DONE_TEXT = { stop: null, 'take-over': 'You have control — click and type right in the view.', release: 'Handed back to the agent.',
+  continue: 'Continuing from where it stopped…', close: 'Browser closed.', done: 'Marked as applied 🎉' };
+export async function applyControl(action) {
+  const s = getState().browser.session;
+  if (!s || getState().browser.busy) return;
+  setSlice('browser', { busy: action });
+  try {
+    const { session } = await api.applyAction(s.job_id, action);
+    if (session) setSlice('browser', { session });
+    if (APPLY_DONE_TEXT[action]) toast(APPLY_DONE_TEXT[action], action === 'done' ? 'success' : 'info');
+    if (action === 'continue' || action === 'done') loadInterventions();
+  } catch (err) {
+    toast(errorText(err), 'danger');
+  } finally {
+    setSlice('browser', { busy: '' });
+  }
+}
+function onApplySession(session) {
+  if (!session) return;
+  const s = getState();
+  if (session.person_id && s.people.active && session.person_id !== s.people.active) return;
+  const prev = s.browser.session;
+  setSlice('browser', { status: 'ready', session });
+  const changed = !prev || prev.job_id !== session.job_id || prev.status !== session.status;
+  if (!changed) return;
+  if (session.status === 'applied') toast(`Applied to ${session.company || 'the job'} 🎉`, 'success', 7000);
+  if (session.status === 'needs_you') {
+    toast(session.notice || 'The agent needs your help.', 'warning', 8000);
+    loadInterventions();
+  }
+  if (session.status === 'failed') toast(session.notice || 'The agent could not finish.', 'danger', 8000);
 }
 function handleBrowserEvent(ev) {
-  if (!ev || typeof ev !== 'object') return;
-  const type = ev.event_type;
-  const data = ev.data || {};
-  if (type === 'browser_step' || type === 'progress') {
-    setSlice('browser', (b) => ({
-      ...b, active: true, jobId: ev.job_id || b.jobId,
-      url: data.url || b.url, title: data.title || b.title,
-      lastMessage: ev.message || b.lastMessage,
-      steps: ev.message ? [{ id: Date.now() + Math.random(), message: ev.message, ts: new Date().toISOString() }, ...b.steps].slice(0, 60) : b.steps,
-    }));
-  } else if (type === 'hitl_request') {
-    toast('The browser agent needs your help (login/CAPTCHA). Open "Interventions".', 'warning', 8000);
-    loadInterventions();
-  } else if (type === 'complete' || type === 'error') {
-    setSlice('browser', (b) => ({ ...b, active: false, lastMessage: ev.message || b.lastMessage }));
-  }
-  if (ev.job_id && type === 'job_status_changed' && data.status) upsertJobs([{ id: ev.job_id, pipeline_status: data.status }]);
-  if (ev.message) activity(ev.message, type === 'error' ? 'error' : 'info', ev.agent || 'browser');
+  // Step-by-step progress now arrives as `apply.session`; only the "needs you" nudge is still a browser event.
+  if (ev && ev.event_type === 'hitl_request') loadInterventions();
 }
 
 // ---------------------------------------------------------------------------
@@ -748,6 +775,9 @@ function onMessage(msg) {
     case 'browser':
       handleBrowserEvent(msg.data);
       return;
+    case 'apply.session':
+      onApplySession(msg.data && msg.data.session);
+      return;
     default:
   }
 }
@@ -756,7 +786,7 @@ export function connectSocket() {
     onMessage,
     onStatus: (conn) => setState((s) => ({ ...s, conn })),
     onOpen: (isReconnect) => {
-      if (isReconnect) { loadCurrentRun(); loadList(); }
+      if (isReconnect) { loadCurrentRun(); loadList(); if (getState().route.page === 'browser') loadApplySession(); }
     },
   });
   socket.connect();

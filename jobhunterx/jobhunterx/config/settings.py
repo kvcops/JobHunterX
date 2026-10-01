@@ -41,8 +41,14 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
-    browser_use_headless: bool = True   # headless mode, streamed to frontend canvas
+    browser_use_headless: bool = True   # legacy; the live view always runs headless unless BROWSER_SHOW_WINDOW=true
     browser_use_headless_original: bool = False # fallback reference
+    # --- Auto-apply ---
+    browser_show_window: bool = False   # also open a real Chrome window (debugging); default: live view in the app only
+    browser_max_steps: int = 40         # agent steps per run before it hands back to you
+    browser_step_delay_s: float = 3.0   # pause between agent steps (keeps free-tier LLMs under their RPM)
+    apply_with_cover_letter: bool = True  # prepare a cover letter before applying
+    apply_with_cv: bool = True            # prepare a full CV too (uploaded only where a form asks for a separate CV)
     browser_use_cloud: bool = False     # set True + BROWSER_USE_API_KEY in .env to use stealth cloud browsers
 
     # --- Web Search API Provider Keys & Router Settings ---

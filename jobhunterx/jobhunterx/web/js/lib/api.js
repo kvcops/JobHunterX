@@ -186,8 +186,8 @@ export const api = {
   resolveIntervention: (id, status = 'resolved', o) => request(`/interventions/${enc(id)}/resolve`, { method: 'POST', query: { status }, ...o }),
   focusIntervention: (jobId, o) => request(`/interventions/${enc(jobId)}/focus`, { method: 'POST', ...o }),
   resumeAgent: (jobId, action, o) => request('/resume-agent', { method: 'POST', body: { job_id: jobId, action }, timeout: 60_000, ...o }),
-  stopBrowser: (o) => request('/stop-browser', { method: 'POST', ...o }),
-  takeover: (jobId, o) => request('/browser/takeover', { method: 'POST', query: { job_id: jobId || undefined }, ...o }),
-  release: (jobId, o) => request('/browser/release', { method: 'POST', query: { job_id: jobId || undefined }, ...o }),
+  applyCurrent: (o) => request('/apply/current', o),
+  // action: stop | take-over | release | continue | close | done
+  applyAction: (jobId, action, o) => request(`/apply/${enc(jobId)}/${action}`, { method: 'POST', timeout: 30_000, ...o }),
   screenshotUrl: (jobId) => `/api/screenshots/${enc(jobId)}`,
 };

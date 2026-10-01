@@ -134,7 +134,7 @@ Stage keys, in order: `understand`, `plan`, `discover`, `normalize`, `dedupe`,
 | POST | `/api/jobs/{id}/rescore` | – | `{ job: JobDetail }` (re-match against current profile) |
 | DELETE | `/api/jobs/{id}` | – | `{ ok: true }` |
 | DELETE | `/api/jobs?scope=unsaved\|all` | – | `{ deleted: number }` |
-| POST | `/api/jobs/{id}/apply` | – | `{ status: "started" }` — launches browser auto-apply agent (409 if already running) |
+| POST | `/api/jobs/{id}/apply` | – | `{ status: "started", session: ApplySession }` — checks the kit (resume, cover letter, CV), writes what is missing, then starts the browser agent; all in the background (409 if already running) |
 
 `view`: `recommended` (default; verdict strong/good/stretch, not closed),
 `all`, `rejected` (verdict incompatible or closed/invalid), `saved`, `applied`
@@ -296,11 +296,43 @@ type WsMessage = {
 * `document.status` — `data: { job_id, kind, status: "generating"|"ready"|"failed", document_id?, error? }`.
 * `profile.updated` — `data: ProfileEnvelope`.
 * `log` — `data: { level: "info"|"warn"|"error", source: string }`, `message` — activity feed line.
-* `browser` — `data` is the legacy browser-agent event `{ agent, event_type, job_id, message, data }`
-  (event_type: `progress`, `browser_step`, `hitl_request`, `job_status_changed`, `complete`, `error`).
+* `apply.session` — `data: { session: ApplySession }` every time an auto-apply session changes (status, kit, a step).
+* `browser` — `data` is a browser-agent event `{ agent, event_type, job_id, message }`; only `hitl_request` is sent now.
 
-`/ws/browser` (unchanged): binary-free JSON frames `{type:"frame", data:<base64 jpeg>, width, height}`;
-client sends `{type:"mouse"|"wheel"|"keyboard", ...}` input events.
+`/ws/browser`: the live view of the agent's browser. Server → client: `{type:"frame", data:<base64 jpeg>, w, h}` and
+`{type:"idle"}` when the browser closes. Client → server (accepted only while the user has control or the agent is not
+running): `{type:"mouse", action:"click"|"dblclick"|"move", fx, fy, button}`, `{type:"wheel", fx, fy, deltaX, deltaY}`,
+`{type:"keyboard", action:"keyDown", key}`, `{type:"paste", text}` — `fx`/`fy` are 0–1 positions on the frame.
+
+---
+
+## Auto-apply
+
+```ts
+ApplySession {
+  job_id: string; company: string; role: string; apply_url: string; person_id: string | null;
+  status: "preparing"|"launching"|"running"|"paused"|"stopping"|"stopped"|"needs_you"|"applied"|"failed"|"closed";
+  message: string; notice: string; result: string;
+  control: "agent" | "you";        // who drives the browser right now
+  live: boolean;                   // a browser is open and streaming
+  url: string; title: string;      // last page
+  kit: { [kind in "resume"|"cover_letter"|"cv"]?: { label, status: "checking"|"generating"|"found"|"made"|"skipped"|"failed", pages, doc_id, note } };
+  steps: { n, ts, goal, actions: string[], status: "running"|"done"|"failed"|"stopped", url, repeat, note? }[];
+  runs: number; started_at: string; updated_at: string;
+}
+```
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/api/apply/current` | `{ session: ApplySession \| null }` — the live session, else the last saved one for the active profile |
+| POST | `/api/apply/{job_id}/stop` | Stops immediately; browser stays open; steps saved → `{ session }` |
+| POST | `/api/apply/{job_id}/take-over` | Pauses the agent, you drive → `{ session }` |
+| POST | `/api/apply/{job_id}/release` | Gives control back to the agent → `{ session }` |
+| POST | `/api/apply/{job_id}/continue` | Continues from the last page (reuses the open browser when there is one) → `{ status, session }` |
+| POST | `/api/apply/{job_id}/close` | Closes the browser → `{ session }` |
+| POST | `/api/apply/{job_id}/done` | You submitted it yourself; marks the job applied → `{ session }` |
+
+Sessions are stored in the `apply_sessions` table; on restart, running ones become `stopped` so they can be continued.
 
 ---
 
@@ -309,8 +341,8 @@ client sends `{type:"mouse"|"wheel"|"keyboard", ...}` input events.
 `GET /api/meta`, `GET /api/status`, `GET|POST /api/settings`, `GET|POST /api/models`,
 `GET /api/usage`, `GET|POST /api/pipeline-mode?mode=`, `POST /api/reset`,
 `GET /api/interventions`, `POST /api/interventions/{id}/resolve`, `POST /api/interventions/{job_id}/focus`,
-`POST /api/resume-agent {job_id, action}`, `POST /api/stop-browser`,
-`POST /api/browser/takeover?job_id=`, `POST /api/browser/release?job_id=`, `GET /api/screenshots/{job_id}`.
+`GET /api/screenshots/{job_id}`. Older aliases still work: `POST /api/resume-agent {job_id, action}` (= continue / skip),
+`POST /api/stop-browser` (= stop), `POST /api/browser/takeover?job_id=`, `POST /api/browser/release?job_id=`.
 
 
 ## Additions (profiles, providers, health)

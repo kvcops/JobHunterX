@@ -66,7 +66,7 @@ export function initialState() {
     activity: [],
     toasts: [],
     confirm: null,
-    browser: { active: false, jobId: '', url: '', title: '', steps: [], takeover: false, lastMessage: '', wsStatus: 'closed', hasFrame: false },
+    browser: { status: 'idle', session: null, busy: '', error: null },   // session = the auto-apply run (kit, steps, control)
     interventions: { status: 'idle', items: [], error: null },
     settings: { status: 'idle', data: null, error: null },
     models: { status: 'idle', data: null, error: null },

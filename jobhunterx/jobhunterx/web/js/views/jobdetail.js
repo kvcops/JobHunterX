@@ -1,7 +1,7 @@
-import { html, useState } from '../lib/preact.js';
-import { useStore } from '../state/store.js';
+import { html, useState, useEffect } from '../lib/preact.js';
+import { useStore, getState } from '../state/store.js';
 import {
-  loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, generateDocument, autoApply, deleteJob, navigate,
+  loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, generateDocument, generateCv, loadDocuments, autoApply, deleteJob, navigate,
 } from '../actions.js';
 import {
   Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, Select, VERDICT_TONE,
@@ -103,6 +103,8 @@ function RequirementsTab({ job }) {
 
 function DocActions({ job }) {
   const gen = useStore((s) => s.gen);
+  const docs = useStore((s) => s.docs.items);
+  useEffect(() => { if (getState().docs.status === 'idle') loadDocuments(); }, []);
   const row = (kind) => {
     const g = gen[genKey(job.id, kind)];
     const docId = (g && g.documentId) || (job.documents && job.documents[kind]);
@@ -122,8 +124,22 @@ function DocActions({ job }) {
           ${g && g.status === 'failed' ? 'Retry' : docId ? 'Regenerate' : 'Generate'}</${Button}>
       </div></div>`;
   };
-  return html`<div class="stack"><p class="muted small">Every AI edit is checked against your profile; anything it cannot back up is rejected and your original wording is kept.</p>
-    ${row('resume')}${row('cover_letter')}</div>`;
+  const cvGen = gen[genKey(null, 'cv')];
+  const cvDoc = docs.find((d) => d.kind === 'cv');
+  const cvBusy = cvGen && cvGen.status === 'generating';
+  const cvId = (cvGen && cvGen.documentId) || (cvDoc && cvDoc.id);
+  const cvRow = html`<div class=${`kit-item ${cvBusy ? 'is-busy' : ''}`} key="cv">
+    <div class="kit-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>${cvBusy ? html`<span class="scan-beam"></span>` : null}</div>
+    <div class="grow"><strong>CV</strong>
+      <div class="muted small">${cvBusy ? 'Writing your CV…' : cvDoc ? `Made ${relTime(cvDoc.created_at)} · your full career story, shared by every application` : 'Your full career story (not job-specific). Some forms ask for it.'}</div>
+      ${cvGen && cvGen.status === 'failed' ? html`<div class="error-text small" role="alert">${cvGen.error}</div>` : null}</div>
+    <div class="row gap">
+      ${cvId ? html`<${Button} size="sm" onClick=${() => navigate(`#/documents/${cvId}`)}>Open</${Button}>` : null}
+      <${Button} size="sm" variant=${cvId ? 'secondary' : 'primary'} icon="spark" busy=${cvBusy} onClick=${() => generateCv('')}>${cvId ? 'Regenerate' : 'Generate'}</${Button}>
+    </div></div>`;
+  return html`<div class="stack"><p class="muted small"><strong>Resume</strong> = one page, tailored to this job. <strong>CV</strong> = your longer, general career story.
+    Every AI edit is checked against your profile; anything it cannot back up is rejected. Auto-apply makes any missing ones for you.</p>
+    ${row('resume')}${row('cover_letter')}${cvRow}</div>`;
 }
 
 const TABS = [

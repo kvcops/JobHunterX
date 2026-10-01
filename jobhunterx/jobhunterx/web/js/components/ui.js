@@ -37,6 +37,12 @@ const ICONS = {
   key: 'M14.5 4a5.5 5.5 0 1 1-4.9 8L4 17.5V20h3v-2h2v-2h2l1.1-1.1A5.5 5.5 0 0 1 14.5 4zm1.5 4h.01',
   chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   bolt: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  play: 'M7 4.5v15l12-7.5z',
+  cursor: 'M5 3l14 7-6 2-2 6z',
+  type: 'M5 7V5h14v2M12 5v14M9 19h6',
+  eye: 'M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7zm9.5 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
+  scroll: 'M12 4v16m-4-4 4 4 4-4M8 8l4-4 4 4',
 };
 
 export function Icon({ name, size = 18, label }) {

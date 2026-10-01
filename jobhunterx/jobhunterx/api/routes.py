@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 
 from jobhunterx import storage
 from jobhunterx.agents import extractor
-from jobhunterx.agents.browser_agent import stop_all_active_browsers
 from jobhunterx.api.ws import manager as ws_manager
 from jobhunterx.config import database as db
 from jobhunterx.config.logging import get_logger
@@ -346,14 +345,86 @@ async def delete_jobs(scope: Literal["unsaved", "all"] = "unsaved"):
 
 @router.post("/jobs/{job_id}/apply")
 async def apply_job(job_id: str):
+    """Check the kit → write what is missing → open the browser agent (all in the background)."""
     await _profile_or_400()
     if not await storage.get_row(job_id):
         raise HTTPException(404, "Job not found")
     try:
-        await apply_svc.start(job_id, emit)
-    except RuntimeError as exc:
+        session = await apply_svc.start(job_id, emit)
+    except apply_svc.ApplyError as exc:
         raise HTTPException(409, str(exc))
-    return {"status": "started"}
+    return {"status": "started", "session": session}
+
+
+# ---------------------------------------------------------------------------
+# Auto-apply session controls
+# ---------------------------------------------------------------------------
+
+@router.get("/apply/current")
+async def apply_current():
+    return {"session": await apply_svc.current()}
+
+
+def _session_or_404(snap):
+    if snap is None:
+        raise HTTPException(404, "No auto-apply session for this job")
+    return {"session": snap}
+
+
+@router.post("/apply/{job_id}/stop")
+async def apply_stop(job_id: str):
+    return _session_or_404(await apply_svc.stop(job_id))
+
+
+@router.post("/apply/{job_id}/take-over")
+async def apply_take_over(job_id: str):
+    from jobhunterx.agents import browser_agent as ba
+    return _session_or_404(await ba.take_over(job_id))
+
+
+@router.post("/apply/{job_id}/release")
+async def apply_release(job_id: str):
+    from jobhunterx.agents import browser_agent as ba
+    return _session_or_404(await ba.release(job_id))
+
+
+@router.post("/apply/{job_id}/continue")
+async def apply_continue(job_id: str):
+    """Let the agent pick up from where it stopped (same browser if it is still open)."""
+    await _profile_or_400()
+    if not await storage.get_row(job_id):
+        raise HTTPException(404, "Job not found")
+    try:
+        return {"status": "started", "session": await apply_svc.start(job_id, emit, continuing=True)}
+    except apply_svc.ApplyError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@router.post("/apply/{job_id}/close")
+async def apply_close(job_id: str):
+    from jobhunterx.agents import browser_agent as ba
+    snap = await ba.close(job_id)
+    if snap is None:
+        snap = await storage.get_apply_session(job_id)
+    return _session_or_404(snap)
+
+
+@router.post("/apply/{job_id}/done")
+async def apply_mark_done(job_id: str):
+    """You finished the application yourself."""
+    from jobhunterx.agents import browser_agent as ba
+    await storage.set_tracking(job_id, "applied")
+    await db.update_job(job_id, status="applied")
+    sess = ba.get_session(job_id)
+    if sess:
+        sess.update(status="applied", message="You submitted it 🎉", notice="")
+        return {"session": sess.snapshot()}
+    snap = await storage.get_apply_session(job_id)
+    if snap:
+        snap.update(status="applied", message="You submitted it 🎉", notice="", live=False)
+        await storage.save_apply_session(snap)
+        await emit({"type": "apply.session", "job_id": job_id, "data": {"session": snap}})
+    return {"session": snap}
 
 
 # ---------------------------------------------------------------------------
@@ -509,7 +580,11 @@ _TUNABLES = {
     "fetch_timeout_s": ("FETCH_TIMEOUT_S", float, 3, 60),
     "tavily_search_depth": ("TAVILY_SEARCH_DEPTH", str, None, None),
     "exa_search_num_results": ("EXA_SEARCH_NUM_RESULTS", int, 1, 50),
-    "browser_use_headless": ("BROWSER_USE_HEADLESS", bool, None, None),
+    "browser_show_window": ("BROWSER_SHOW_WINDOW", bool, None, None),
+    "browser_max_steps": ("BROWSER_MAX_STEPS", int, 10, 150),
+    "browser_step_delay_s": ("BROWSER_STEP_DELAY_S", float, 0, 20),
+    "apply_with_cover_letter": ("APPLY_WITH_COVER_LETTER", bool, None, None),
+    "apply_with_cv": ("APPLY_WITH_CV", bool, None, None),
 }
 
 
@@ -739,38 +814,41 @@ class ResumeAgentRequest(BaseModel):
 
 @router.post("/resume-agent")
 async def resume_agent(body: ResumeAgentRequest):
-    from jobhunterx.agents import browser_agent as ba
-    await ba.clear_paused_session(body.job_id)
     if body.action == "skip":
+        from jobhunterx.agents import browser_agent as ba
+        await ba.close(body.job_id)
         await db.update_job(body.job_id, status="skipped")
         return {"status": "ok"}
     try:
-        await apply_svc.start(body.job_id, emit)
-    except RuntimeError as exc:
+        return {"status": "started", "session": await apply_svc.start(body.job_id, emit, continuing=True)}
+    except apply_svc.ApplyError as exc:
         raise HTTPException(409, str(exc))
-    return {"status": "started"}
 
 
 @router.post("/stop-browser")
 async def stop_browser():
-    await apply_svc.cancel_all()
-    await stop_all_active_browsers()
+    from jobhunterx.agents import browser_agent as ba
+    sess = ba.current_session()
+    if sess:
+        await apply_svc.stop(sess.data["job_id"])
     return {"status": "ok"}
 
 
 @router.post("/browser/takeover")
 async def browser_takeover(job_id: str = ""):
     from jobhunterx.agents import browser_agent as ba
-    if job_id:
-        ba.pause_streaming(job_id)
+    sess = ba.get_session(job_id) if job_id else ba.current_session()
+    if sess:
+        await ba.take_over(sess.data["job_id"])
     return {"status": "ok"}
 
 
 @router.post("/browser/release")
 async def browser_release(job_id: str = ""):
     from jobhunterx.agents import browser_agent as ba
-    if job_id:
-        ba.resume_streaming(job_id)
+    sess = ba.get_session(job_id) if job_id else ba.current_session()
+    if sess:
+        await ba.release(sess.data["job_id"])
     return {"status": "ok"}
 
 
@@ -781,12 +859,10 @@ async def interventions():
 
 @router.post("/interventions/{session_id}/resolve")
 async def resolve_intervention(session_id: int, status: Literal["resolved", "skipped"] = "resolved"):
-    from jobhunterx.agents import browser_agent as ba
     sessions = await db.get_pending_interventions()
     target = next((s for s in sessions if s.get("id") == session_id), None)
     if not target:
         raise HTTPException(404, "Intervention not found")
-    await ba.clear_paused_session(target["job_id"])
     await db.resolve_intervention(session_id, status)
     return {"status": "ok"}
 

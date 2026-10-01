@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS people (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT
 );
 CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS apply_sessions (
+    job_id TEXT PRIMARY KEY, person_id TEXT, status TEXT NOT NULL, data_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 """
 
 SCHEMA_VERSION = 4
@@ -200,7 +203,7 @@ async def delete_person(pid: str) -> None:
     for jid in ids:
         await legacy.delete_job(jid)
     async with _conn() as db:
-        for table in ("profiles", "documents", "search_runs"):
+        for table in ("profiles", "documents", "search_runs", "apply_sessions"):
             await db.execute(f"DELETE FROM {table} WHERE person_id = ?", (pid,))
         await db.execute("DELETE FROM people WHERE id = ?", (pid,))
         await db.commit()
@@ -413,6 +416,54 @@ async def mark_interrupted_runs() -> None:
             run = json.loads(data)
             run.update(status="failed", error="Interrupted by a server restart.", finished_at=_now())
             await db.execute("UPDATE search_runs SET status = 'failed', data_json = ? WHERE id = ?", (json.dumps(run), rid))
+        await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Auto-apply sessions (what the browser agent did, so you can continue later)
+# ---------------------------------------------------------------------------
+
+_APPLY_ACTIVE = ("preparing", "launching", "running", "paused", "stopping")
+
+
+async def save_apply_session(snap: dict) -> None:
+    async with _conn() as db:
+        await db.execute(
+            "INSERT INTO apply_sessions (job_id, person_id, status, data_json, updated_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(job_id) DO UPDATE SET status = excluded.status, data_json = excluded.data_json, "
+            "updated_at = excluded.updated_at, person_id = COALESCE(excluded.person_id, apply_sessions.person_id)",
+            (snap["job_id"], snap.get("person_id"), snap.get("status", ""), json.dumps(snap, default=str), _now()))
+        await db.commit()
+
+
+async def get_apply_session(job_id: str) -> Optional[dict]:
+    async with _conn() as db:
+        cur = await db.execute("SELECT data_json FROM apply_sessions WHERE job_id = ?", (job_id,))
+        row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+
+async def latest_apply_session() -> Optional[dict]:
+    where, params = _scope()
+    async with _conn() as db:
+        cur = await db.execute(f"SELECT data_json FROM apply_sessions WHERE {where} ORDER BY updated_at DESC LIMIT 1", params)
+        row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+
+async def mark_interrupted_apply_sessions() -> None:
+    """A browser from a previous process is gone; keep the steps so the user can start again from there."""
+    async with _conn() as db:
+        cur = await db.execute("SELECT job_id, status, data_json FROM apply_sessions")
+        for jid, status, data in await cur.fetchall():
+            snap = json.loads(data)
+            if status in _APPLY_ACTIVE:
+                snap.update(status="stopped", message="Stopped",
+                            notice="The app restarted while this was running. Press Continue to pick up from the last page.")
+            elif not snap.get("live"):
+                continue
+            snap.update(live=False, control="agent")
+            await db.execute("UPDATE apply_sessions SET status = ?, data_json = ? WHERE job_id = ?", (snap["status"], json.dumps(snap), jid))
         await db.commit()
 
 

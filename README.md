@@ -16,7 +16,7 @@
 <p align="center">
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" /></a>
   <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-0.140+-009688?style=for-the-badge&logo=fastapi&logoColor=white" /></a>
-  <a href="https://playwright.dev"><img src="https://img.shields.io/badge/Playwright-Stealth_Browser-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" /></a>
+  <a href="https://github.com/browser-use/browser-use"><img src="https://img.shields.io/badge/browser--use-Live_In--App_Agent-2EAD33?style=for-the-badge&logo=googlechrome&logoColor=white" /></a>
 </p>
 
 <p align="center">
@@ -48,135 +48,229 @@
 <table>
 <tr><td align="center">
 
-*Upload your resume. Pick a city. Go grab coffee.*
-**JobHunterX** discovers jobs, scores them against your skills, tailors a pixel-perfect PDF resume for each one, opens a stealth Chrome browser, fills every form field, and applies — streaming every frame live to your dashboard so you can take over the keyboard whenever a CAPTCHA or login wall shows up.
+*Upload your resume once. Press search. Go grab a coffee.* ☕
 
-### 💜 *It's the job-hunting wingman you always wished you had.* 💜
+**JobHunterX** reads your resume, finds real jobs that truly fit you, tells you *why* each one fits (or doesn't),
+writes an honest one-page resume, a cover letter and a CV for you — and then a browser agent fills the application
+**live, right inside the app**, while you watch. Stuck on a CAPTCHA or a login? Just take over, fix it, and hand it back. 🙌
+
+### 💜 *The job-hunting buddy you always wished you had.* 💜
 
 </td></tr>
 </table>
 
 <br/>
 
-<a href="#-quickstart"><img src="https://img.shields.io/badge/🚀_Get_Started-A855F7?style=for-the-badge&logoColor=white" /></a>
-<a href="#-how-it-works--career-intelligence-not-keyword-search"><img src="https://img.shields.io/badge/🧠_How_It_Works-06B6D4?style=for-the-badge&logoColor=white" /></a>
-<a href="#-api-reference"><img src="https://img.shields.io/badge/🔌_API_Docs-10B981?style=for-the-badge&logoColor=white" /></a>
-<a href="#-testing"><img src="https://img.shields.io/badge/🧪_Tests-F59E0B?style=for-the-badge&logoColor=white" /></a>
+<a href="#-quickstart"><img src="https://img.shields.io/badge/🚀_Get_Started-EE6B33?style=for-the-badge&logoColor=white" /></a>
+<a href="#️-the-whole-journey"><img src="https://img.shields.io/badge/🗺️_The_Journey-A855F7?style=for-the-badge&logoColor=white" /></a>
+<a href="#-auto-apply--the-browser-agent"><img src="https://img.shields.io/badge/🤖_Auto--apply-06B6D4?style=for-the-badge&logoColor=white" /></a>
+<a href="#-api-reference"><img src="https://img.shields.io/badge/🔌_API-10B981?style=for-the-badge&logoColor=white" /></a>
 
-</div>
-
-<br/>
-
-<div align="center">
-<img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/>
 </div>
 
 <br/>
 
 <details open>
-<summary><b>📚 Table of Contents</b></summary>
+<summary><b>📚 What's inside</b></summary>
 <br/>
 
-- [🖥️ Dashboard Preview](#️-dashboard-preview)
-- [✨ Browser Agent Preview](#-browser-agent-preview)
-- [🧠 How It Works](#-how-it-works--career-intelligence-not-keyword-search)
-- [🤖 LLM Models & Provider Architecture](#-llm-models--provider-architecture)
-- [🌐 Job Sources & Verification](#-job-sources--verification)
-- [🔄 Pipeline Modes](#-pipeline-modes-automatic-vs-manual)
-- [🛡️ Human-in-the-Loop System](#️-human-in-the-loop-hitl-system)
-- [📐 Architecture](#-architecture)
-- [⚡ Quickstart](#-quickstart)
-- [🔌 API Reference](#-api-reference)
-- [🧪 Testing](#-testing)
-- [🛡️ Stealth Browser Architecture](#️-stealth-browser-architecture)
-- [📜 License](#-license)
+| Start here | Under the hood | For developers |
+|:--|:--|:--|
+| 🗺️ [The whole journey](#️-the-whole-journey) | 🧠 [How matching works](#-how-matching-works) | 📐 [Architecture](#-architecture) |
+| 📸 [A tour, step by step](#-a-tour-step-by-step) | 📄 [Resume vs CV vs cover letter](#-resume-vs-cv-vs-cover-letter) | 🔌 [API reference](#-api-reference) |
+| 🤖 [Auto-apply](#-auto-apply--the-browser-agent) | 🤖 [AI models & free limits](#-llm-models--provider-architecture) | 🧪 [Testing](#-testing) |
+| ⚡ [Quickstart](#-quickstart) | 🌐 [Job sources](#-job-sources--verification) | 🎨 [Design: fonts & themes](#-design-fonts--themes) |
 
 </details>
 
 <br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
-## 🖥️ Dashboard Preview
+## 🗺️ The whole journey
 
-A calm, light-first **app-style** interface: warm off-white canvas with a soft pastel wash, white cards, a floating
-sidebar, black pill actions, one warm orange accent and an elegant serif accent word in each heading.
-Every screen fits the window — lists, details and editors scroll inside their own panes, so you never scroll a long page.
-Dark theme is one click away.
+Everything happens in this order — the sidebar is ordered the same way. 👇
+
+```mermaid
+flowchart LR
+    A(["📄 Upload resume<br/><sub>once</sub>"]) --> B["🙋 Check what<br/>we understood"]
+    B --> C["🎯 Your goals<br/><sub>titles · cities · remote · CTC</sub>"]
+    C --> D["🔎 Search<br/><sub>live progress</sub>"]
+    D --> E["⭐ Pick a job<br/><sub>see why it fits</sub>"]
+    E --> F["📝 Documents<br/><sub>resume · letter · CV</sub>"]
+    F --> G["🤖 Auto-apply<br/><sub>live in the app</sub>"]
+    G -->|"CAPTCHA / login"| H["🙌 You take over"]
+    H -->|"give back"| G
+    G --> I(["🎉 Applied!<br/><sub>tracked for you</sub>"])
+
+    classDef start fill:#EE6B33,stroke:#c4501d,color:#fff,stroke-width:2px;
+    classDef step fill:#fff7f2,stroke:#EE6B33,color:#1f1f24,stroke-width:1.5px;
+    classDef agent fill:#1f1f24,stroke:#1f1f24,color:#fff,stroke-width:2px;
+    classDef you fill:#fde9b8,stroke:#c4860f,color:#1f1f24,stroke-width:1.5px;
+    classDef done fill:#2f9a68,stroke:#21754f,color:#fff,stroke-width:2px;
+    class A start; class B,C,D,E,F step; class G agent; class H you; class I done;
+```
+
+| Step | What you do | What JobHunterX does |
+|:--:|:--|:--|
+| 1️⃣ | Upload your resume PDF | Reads it in the background (with live progress) and builds your profile |
+| 2️⃣ | Check "how we see you" | Shows total experience, **with and without internships**, every role, contact and location |
+| 3️⃣ | Add goals | Many job titles, many cities, remote / hybrid / relocation, current & expected CTC, notice period |
+| 4️⃣ | Press **Search now** | Finds postings, checks they are real and still open, reads each one, scores it — live |
+| 5️⃣ | Open a job | Explains the score: what fits, what's missing, what's unknown |
+| 6️⃣ | Press **Auto-apply** | Checks your documents → writes the missing ones → opens the browser agent **inside the app** |
+| 7️⃣ | Watch (or take over) | The agent fills the form; you can stop, take over, continue or finish it yourself |
+| 8️⃣ | Relax 😌 | The job moves to **Applied** in your tracker |
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
+
+## 📸 A tour, step by step
 
 <div align="center">
+
+#### 1 · Who's searching? 👥
 <img src="assets/ui_picker.png" alt="Profile picker" width="90%"/>
-<br/><sub><i>Returning? Pick a profile — each one keeps its own resume, matches, tracker and documents</i></sub>
+<br/><sub><i>Several people (or personas) can use one install — each profile keeps its own resume, matches, tracker and documents.</i></sub>
 <br/><br/>
+
+#### 2 · Upload your resume — only once 📄
 <img src="assets/ui_onboarding.png" alt="One-time onboarding" width="90%"/>
-<br/><sub><i>First run — a one-time, 4-step setup: upload your resume → check what was understood → set preferences → first search</i></sub>
+<br/><sub><i>A short 5-step setup: resume → about you → goals → pay & availability → first search. Reload any time; it remembers where you were.</i></sub>
 <br/><br/>
+
+#### 3 · "Here's how we see you" 🙋
 <img src="assets/ui_onboarding_review.png" alt="What we understood" width="90%"/>
-<br/><sub><i>"Here's how we see you" — total vs professional vs internship experience with every role, contact details and current location</i></sub>
+<br/><sub><i>Experience is calculated from your dates — total, professional only, and internships — so the numbers are never guessed.</i></sub>
 <br/><br/>
-<img src="assets/ui_discover.png" alt="Discover — mission control" width="90%"/>
-<br/><sub><i>Live search — progress %, elapsed time, which agent is working right now, and a plain-English activity feed of what is happening (“AI Engineer at Acme is live and accepting applications”)</i></sub>
+
+#### 4 · Search, live 🔎
+<img src="assets/ui_discover.png" alt="Live search" width="90%"/>
+<br/><sub><i>Progress %, a timer, which agent is working right now, and a plain-English feed of what is happening.</i></sub>
 <br/><br/>
+
+#### 5 · Why this score? ⭐
 <img src="assets/ui_match.png" alt="Why this score" width="90%"/>
-<br/><sub><i>Select a job and it opens beside the list — hard requirements, weighted score, requirements, verification and the application kit</i></sub>
+<br/><sub><i>Click a job and it opens beside the list: hard requirements, the weighted score, requirements, verification and the application kit.</i></sub>
 <br/><br/>
-<img src="assets/ui_documents.png" alt="Fact-checked resume" width="90%"/>
-<br/><sub><i>Documents — library on the left, live preview on the right, plus "What changed": every AI edit accepted or rejected by the fact-checker</i></sub>
+
+#### 6 · Honest documents 📝
+<img src="assets/ui_documents.png" alt="Documents" width="90%"/>
+<br/><sub><i>Every AI edit is fact-checked against your profile. "What changed" shows each edit — accepted or rejected, and why.</i></sub>
 <br/><br/>
-<img src="assets/ui_profile.png" alt="How JobHunterX understands you" width="90%"/>
-<br/><sub><i>Profile — understanding on the left, a tabbed editor on the right</i></sub>
+
+#### 7 · Auto-apply: documents first ✅
+<img src="assets/ui_apply_kit.png" alt="Getting documents ready" width="90%"/>
+<br/><sub><i>Before the browser opens, the kit is checked: resume (one page), cover letter and CV. Anything missing is written right then.</i></sub>
 <br/><br/>
-<img src="assets/ui_tracker.png" alt="Application tracker" width="90%"/>
-<br/><sub><i>Tracker — the whole journey in one stage bar, a grouped list with one-click “move to next stage”, and the job (or a pipeline overview with next steps) beside it — no sideways scrolling</i></sub>
+
+#### 8 · Auto-apply: watch it work, live 🤖
+<img src="assets/ui_browser.png" alt="Live browser agent" width="90%"/>
+<br/><sub><i>No extra Chrome window — the browser is streamed into the app. Every step is listed in plain words, with what was clicked and typed.</i></sub>
 <br/><br/>
-<img src="assets/ui_browser.png" alt="Auto-apply agent" width="90%"/>
-<br/><sub><i>Auto-apply agent — a live browser window with LIVE badge and take-over mode, plus agent status, current step and an activity timeline</i></sub>
+
+#### 9 · When it needs you 🙌
+<img src="assets/ui_apply_help.png" alt="Needs you" width="90%"/>
+<br/><sub><i>CAPTCHA or login? Take over, click and type right in the view, then press Continue. Progress is saved, so nothing starts over.</i></sub>
 <br/><br/>
-<img src="assets/ui_settings.png" alt="Settings" width="90%"/>
-<br/><sub><i>Settings — turn providers on/off, add or replace keys (loaded from .env), pick a model per task with its free-tier limits</i></sub>
+
+#### 10 · Track everything 📊
+<img src="assets/ui_tracker.png" alt="Tracker" width="90%"/>
+<br/><sub><i>The whole journey in one stage bar, one-click "next stage", and the job beside the list — no sideways scrolling.</i></sub>
+<br/><br/>
+
+#### 11 · Your profile, your settings ⚙️
+<img src="assets/ui_profile.png" alt="Profile" width="90%"/>
+<br/><br/>
+<img src="assets/ui_settings.png" alt="Settings — AI providers" width="90%"/>
+<br/><br/>
+<img src="assets/ui_settings_apply.png" alt="Settings — Auto-apply" width="90%"/>
+<br/><sub><i>Turn providers on/off, add keys (loaded from <code>.env</code>), pick a model per task, choose which documents Auto-apply attaches.</i></sub>
+<br/><br/>
+
+#### 12 · Dark mode & phones 🌙📱
+<img src="assets/ui_dark.png" alt="Dark theme" width="90%"/>
 <br/><br/>
 <img src="assets/ui_mobile.png" alt="Mobile" width="280"/>
-<br/><sub><i>Fully responsive — on phones the sidebar becomes a floating bottom bar</i></sub>
-</div>
+<br/><sub><i>One click for dark mode. On phones the sidebar becomes a floating bottom bar.</i></sub>
 
-### UI highlights
-
-| | |
-|---|---|
-| **Flow** | Lifecycle-driven: boot splash → one-time onboarding (resumes where you left off after a reload) → app. Sidebar is ordered like the work: Profile → Discover → Documents → Tracker |
-| **No long scrolling** | Split workspaces (list ⇄ detail, library ⇄ preview, nav ⇄ settings); options live in popovers, sections in tabs |
-| **Profiles** | Several people (or personas) on one install: a "Who's searching?" picker on start, a switcher in the sidebar; each profile has its own resume, preferences, matches, tracker and documents |
-| **Setup** | One-time 5-step onboarding: resume (background read with live stages) → about you (experience **total vs professional vs internships**, contact, current location) → goals (many titles and cities, remote / relocation / abroad) → pay & availability (current & expected CTC, minimum salary, notice period) → first search |
-| **Providers** | Turn each AI or web-search provider on/off, reorder search providers, choose a search strategy (fallback · spread · combine), add or replace keys — values loaded from `.env` are shown with their source |
-| **Database health** | Checked on every start (integrity, schema version, search index, orphans, ownership) and repaired automatically; damaged files are set aside in `data/backups/` and recovered; one-click backup in Settings → Data |
-| **Live progress** | Real-time percentage and timer, agent rail (Profile analyst → Planner → Scout → Reader → Curator → Verifier → Analyst → Ranker) with the active agent "typing", and a human-readable activity feed generated from what the pipeline actually did — filterable by verdicts and issues, survives reloads |
-| **Motion** | Signature orbit loader for live search, resume "scan" animation while reading, springy sliding tab and sidebar indicators, count-up numbers, self-drawing score rings, staggered list entrances, glow on freshly streamed jobs, shimmer skeletons, page transitions via the View Transitions API (with CSS fallback) |
-| **Design system** | Quiet white cards on a warm canvas, a single orange accent, bundled fonts (Geist · Instrument Serif · Geist Mono — no CDN at runtime), light + dark themes, full `prefers-reduced-motion` support |
-| **Explainable cards** | Thin score ring coloured by verdict, verification badge, skills matched x/y, experience fit, source and freshness |
-| **Reliable state** | One central store with an explicit app phase; results from an old search can never leak into a new one; late responses are ignored; failed saves roll back |
-| **Accessible** | Keyboard navigation (arrow keys in tabs, Esc closes details, popovers and dialogs), focus-trapped dialogs, ARIA live regions for progress and toasts |
-
-<br/>
-<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
-<br/>
-
-## ✨ Browser Agent Preview
-
-<div align="center">
-<img src="assets/browser_agent.jpg" alt="JobHunterX Browser Agent — Live Browser Canvas, Job Cards, Activity Feed" width="90%"/>
-<br/>
-<sub><i>Live browser canvas streaming, and real-time agent activity feed</i></sub>
 </div>
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
 
-## 🧠 How It Works — Career Intelligence, Not Keyword Search
+## 🤖 Auto-apply — the browser agent
 
-JobHunterX does not search for "Python + AI" and rank pages by how many keywords they share.
-It **understands the candidate**, **finds and verifies real postings**, **reads each job**, and
-**explains** whether it genuinely fits — then prepares honest, job-specific application material.
+Press **Auto-apply** on any job and three things happen, in this order:
 
-Every search run shows these stages live in the UI:
+```mermaid
+flowchart TD
+    S(["▶️ Auto-apply"]) --> K{"📂 Check the kit"}
+    K -->|"resume missing?"| R["✍️ Write a one-page resume"]
+    K -->|"cover letter missing?"| L["✍️ Write a cover letter"]
+    K -->|"CV missing?"| V["✍️ Write the CV"]
+    K -->|"all ready"| O
+    R --> O
+    L --> O
+    V --> O
+    O["🌐 Open a private browser<br/><sub>streamed into the app</sub>"] --> F["⌨️ Fill the form<br/><sub>step by step</sub>"]
+    F -->|"submitted"| A(["🎉 Applied"])
+    F -->|"CAPTCHA · login · code"| N["🙌 Needs you"]
+    F -->|"⏹ you press Stop"| X["⏸ Stopped — progress saved"]
+    N -->|"take over, then Continue"| F
+    X -->|"Continue"| F
+
+    classDef go fill:#EE6B33,stroke:#c4501d,color:#fff;
+    classDef kit fill:#fff7f2,stroke:#EE6B33,color:#1f1f24;
+    classDef run fill:#1f1f24,stroke:#1f1f24,color:#fff;
+    classDef wait fill:#fde9b8,stroke:#c4860f,color:#1f1f24;
+    classDef ok fill:#2f9a68,stroke:#21754f,color:#fff;
+    class S go; class K,R,L,V kit; class O,F run; class N,X wait; class A ok;
+```
+
+| Button | What it does |
+|:--|:--|
+| ⏹ **Stop now** | Stops **at once** (it does not wait for the current step). The browser stays open and every step is saved. |
+| ✋ **Take over** | Pauses the agent. Your clicks, scrolling and typing go straight to the page in the live view. |
+| ▶️ **Give back to agent** | The agent carries on from exactly where you left it. |
+| ▶️ **Continue** | After a stop, a CAPTCHA or even an app restart: starts again **from the last page**, knowing what was already done. |
+| ✅ **I submitted it** | You finished it yourself — the job is marked **Applied**. |
+| ✖️ **Close browser** | Closes the private browser. Your steps stay saved. |
+
+**Why it feels calm and clean** ✨
+
+- 🪟 **No separate Chrome window.** The page is streamed with Chrome's own screencast into the Auto-apply tab. (Want a real window for debugging? Settings → Auto-apply → *Also show a separate Chrome window*.)
+- 🧾 **Readable steps.** Each step shows the goal in plain words ("Fill in email and phone") with small chips for what was done ("Type … into Email", "Upload Asha_Rao_Resume.pdf"). Repeats are counted (×2) instead of listed again.
+- 🧵 **One owner for the browser.** The agent, the live view and your clicks all run on one dedicated browser thread, so they never fight over the connection (this fixed the old *"navigation timed out"* and *"duplicate response"* errors).
+- 💾 **Saved state.** Status, the kit, every step and the last page are stored in the database — reload the app, restart it, or switch tabs and pick up right where you were.
+- 🐢 **Polite pacing.** A small pause between steps looks human and keeps you inside free AI limits (`BROWSER_STEP_DELAY_S`).
+
+<details>
+<summary><b>🛡️ Stealth & safety details</b></summary>
+<br/>
+
+- 🍪 Persistent private profile (`data/browser_profile`) so cookies build trust over time
+- 🖥️ Normal desktop user-agent, automation flags hidden
+- 🧹 Old/zombie Chrome processes and stale lock files are cleaned before each launch
+- 🔐 Passwords and one-time codes are shown as `••••` in the step log
+- 🔑 Optional email OTP reader for verification codes (`EMAIL_*` settings)
+
+</details>
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
+
+## 🧠 How matching works
+
+JobHunterX does **not** just count shared keywords. It understands you, finds and checks real postings, reads each job,
+and explains whether it genuinely fits.
+
+<details>
+<summary><b>🔍 The 9 stages of every search (click to open)</b></summary>
+<br/>
 
 | # | Stage | What happens | Where |
 |---|-------|--------------|-------|
@@ -195,6 +289,8 @@ Every search run shows these stages live in the UI:
 > Knowledge comes from the AI (schema-validated and verified against the source text); the code only compares and checks.
 > Scoring weights and tolerances live in one tunable place: `intelligence/policy.py` (override with `MATCH_POLICY_JSON`).
 
+</details>
+
 ### Example: one candidate, five jobs
 
 Candidate: ~1.5 years professional AI/ML experience, Hyderabad, not relocating.
@@ -209,18 +305,19 @@ Candidate: ~1.5 years professional AI/ML experience, Hyderabad, not relocating.
 
 This exact scenario runs in the test suite (`tests/test_scenarios.py`).
 
-### Resume vs CV vs cover letter — three different documents
+## 📄 Resume vs CV vs cover letter
 
-| | **Resume** | **CV** | **Cover letter** |
+They are three different documents — JobHunterX makes all three, and Auto-apply checks for them before it starts.
+
+| | 📄 **Resume** | 📚 **CV** | ✉️ **Cover letter** |
 |---|---|---|---|
-| Scope | One job | Whole career | One job |
-| Length | One page (typography shrinks, then least-relevant items are trimmed) | Multi-page | < 300 words |
-| Content | Most relevant bullets/projects for *this* JD, rewritten to foreground what it asks for | Every role with all bullets, every project with links and tech, education, certifications, achievements, competitions, languages | Ties your real evidence to the job's requirements; does not claim gaps |
+| For | One job | Your whole career | One job |
+| Length | **One page** (text shrinks first, then the least relevant points are trimmed) | Kept to **one page when possible** (roomy layout first, then tighter) | Under 300 words |
+| What's in it | The points that matter most for *this* job | Every role, project, education, certificates, achievements | Links your real experience to what the job asks for |
 | Code | `generation/resume.py` | `generation/cv.py` | `generation/cover_letter.py` |
 
-**Evidence-based:** every AI-written line is fact-checked (`generation/evidence.py`). A rewrite that adds a number,
-tool, employer or claim that is not in your profile — or attaches a job keyword to an experience that never mentioned it —
-is rejected and your original text is kept. The Documents view shows each change (accepted or rejected, and why).
+✅ **Nothing invented:** every AI-written line is fact-checked (`generation/evidence.py`). A new number, tool, employer
+or claim that isn't in your profile is rejected and your own words are kept.
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -317,121 +414,16 @@ Search providers are tried in priority order (primary first, DuckDuckGo last) wi
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
 
-## 🔄 Pipeline Modes: Automatic vs. Manual
+## 🎨 Design: fonts & themes
 
-JobHunterX runs in two modes, switchable at any time from the dashboard or via the `/api/pipeline-mode` endpoint.
-
-```mermaid
-flowchart TD
-    START([📄 Upload Resume]) --> DISCOVER
-    DISCOVER["🕵️ Discover & Score Jobs"]
-
-    DISCOVER -->|Automatic Mode| AUTO_PIPE
-    DISCOVER -->|Manual Mode| MANUAL_PIPE
-
-    subgraph AUTO ["🤖 AUTOMATIC MODE"]
-        AUTO_PIPE["Auto-qualify jobs<br/>match_score ≥ 0.3"]
-        AUTO_PIPE --> TAILOR_A["✨ Tailor Resume PDF"]
-        TAILOR_A --> BROWSER_A["🥷 Browser Agent Applies"]
-        BROWSER_A -->|CAPTCHA/Login/MFA| HITL_A["⚠️ HITL Takeover"]
-        HITL_A -->|User resolves| BROWSER_A
-        BROWSER_A --> DONE_A(["✅ Applied!"])
-    end
-
-    subgraph MANUAL ["👤 MANUAL MODE"]
-        MANUAL_PIPE["Review scored job cards"]
-        MANUAL_PIPE --> REVIEW["Inspect tailored PDF<br/>& match breakdown"]
-        REVIEW -->|Click Apply| TAILOR_M["✨ Tailor Resume PDF"]
-        TAILOR_M --> BROWSER_M["🥷 Browser Agent Applies"]
-        BROWSER_M -->|CAPTCHA/Login/MFA| HITL_M["⚠️ HITL Takeover"]
-        HITL_M -->|User resolves| BROWSER_M
-        BROWSER_M --> DONE_M(["✅ Applied!"])
-    end
-
-    classDef auto fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px;
-    classDef manual fill:#0891b2,stroke:#0e7490,color:#fff,stroke-width:2px;
-    classDef shared fill:#1e293b,stroke:#475569,color:#e2e8f0,stroke-width:2px;
-    classDef hitl fill:#f59e0b,stroke:#d97706,color:#1e293b,stroke-width:2px;
-
-    class DISCOVER shared;
-    class AUTO_PIPE,TAILOR_A,BROWSER_A,DONE_A auto;
-    class MANUAL_PIPE,REVIEW,TAILOR_M,BROWSER_M,DONE_M manual;
-    class HITL_A,HITL_M hitl;
-```
-
-| Feature | 🤖 Automatic Mode | 👤 Manual Mode |
-|:--------|:------------------|:---------------|
-| **Discovery & Scoring** | Runs automatically across all tracked companies | Same — runs automatically |
-| **Application Trigger** | Jobs with `match_score ≥ 0.3` are auto-queued for apply | You review each job card and click **"Apply"** |
-| **Resume Tailoring** | Happens automatically before browser launch | Happens when you trigger apply |
-| **Browser Automation** | Launches immediately after tailoring | Launches only after your explicit click |
-| **HITL Takeover** | Agent pauses & alerts you on login/CAPTCHA/MFA | Same behavior |
-| **Best For** | Overnight autonomous job hunting | Careful, selective applications |
-
-<br/>
-<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
-<br/>
-
-## 🛡️ Human-in-the-Loop (HITL) System
-
-The browser agent doesn't panic when it hits a wall. It **gracefully pauses**, saves session state, captures a screenshot, and broadcasts an intervention event to your dashboard.
-
-```mermaid
-stateDiagram-v2
-    [*] --> BrowserRunning: Agent starts filling forms
-    BrowserRunning --> DetectObstacle: Login/CAPTCHA/MFA detected
-
-    DetectObstacle --> SaveSession: Save browser state & screenshot
-    SaveSession --> NotifyUser: Broadcast intervention event to UI
-    NotifyUser --> UserTakeover: User clicks "Take Over"
-
-    UserTakeover --> ManualControl: User controls real Chrome window
-    ManualControl --> UserDone: User clicks "Continue" in dashboard
-
-    UserDone --> BrowserRunning: Agent resumes from saved state
-    BrowserRunning --> [*]: Application submitted ✅
-```
-
-| HITL Type | Trigger Condition | What Happens |
-|:----------|:------------------|:-------------|
-| 🔐 `LOGIN` | Sign-in / password prompts detected | Browser pauses, Chrome window stays open for manual login |
-| 🤖 `CAPTCHA` | reCAPTCHA / hCaptcha / Turnstile detected | Screenshot captured, user solves in live Chrome window |
-| 📱 `MFA` | OTP / 2FA / authenticator prompt | Agent waits for user to enter verification code |
-| 📝 `MANUAL_FORM` | Complex custom form fields | User fills tricky fields, agent handles the rest |
-| ⚠️ `TOO_COMPLEX` | Unsupported multi-page portal | Session saved, user can complete manually |
-
-<br/>
-<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
-<br/>
-
-## 📐 Architecture
-
-```
-jobhunterx/jobhunterx/
-├── domain/          # First-class data contracts: CandidateProfile/Snapshot, JobPosting, MatchAssessment, GeneratedDocument
-├── intelligence/    # Understanding + judgement
-│   ├── llm_structured.py   # schema-validated LLM calls, repair, caching, untrusted-text fencing
-│   ├── candidate.py        # Stage 1: profile → snapshot (verified against the profile)
-│   ├── job.py              # Stage 7: JD understanding (verified against the JD) + batched role-fit
-│   ├── matching.py         # Stages 8–9: hard constraints, weighted components, explanations
-│   ├── policy.py           # all scoring weights / tolerances (tunable)
-│   └── text.py             # generic date/term helpers
-├── discovery/       # Stages 2–7: search, ATS adapters, page parsing, dedupe, validation, SSRF-safe fetch
-├── generation/      # Resume / CV / cover letter + fact-checking + PDF rendering (templates/)
-├── services/        # Orchestration: search runs, jobs, documents, profile, browser apply
-├── storage.py       # Persistence for the domain (extends the SQLite schema with migrations)
-├── api/             # FastAPI routes (docs/API.md), WebSocket, browser live-stream
-├── agents/          # PDF → profile extractor, browser auto-apply agent (browser-use)
-├── config/          # settings, LLM router (model chains), Gemma budget, logging, legacy DB helpers
-└── web/             # "Calm" UI: Preact + htm + bundled fonts (vendored, no build step)
-```
-
-* **One active search run**; starting another cancels it. Every job and WebSocket event carries the run id, so the
-  UI never mixes results from an old run into a new one.
-* **LLM cost control:** candidate understanding is cached per profile version, JD extraction per JD content hash,
-  role-fit is batched, out-of-location jobs skip AI analysis entirely, and the number of AI extractions per search is capped.
-* **Security:** CORS limited to the app's own origin, cross-site writes rejected (CSRF guard), WebSocket origin checks,
-  SSRF-safe fetching, upload type/size limits, Jinja autoescaping, no `innerHTML` in the UI, untrusted job text fenced in prompts.
+| | |
+|:--|:--|
+| 🔤 **Fonts** | **Geist** for text, **Instrument Serif** for the warm accent word in each heading, **Geist Mono** for links and numbers — all bundled, no CDN |
+| 🎨 **Colours** | Warm off-white canvas with a soft pastel wash, white cards, black pill buttons, one orange accent |
+| 🌙 **Themes** | Light and dark, one click in the sidebar (or Settings → Appearance) |
+| 🎞️ **Motion** | Orbit loader, resume "scan" beam, springy tabs, count-up numbers, self-drawing score rings, live step log. Settings → Appearance → Motion: *Full · Reduced · Follow system* |
+| 🧭 **No long scrolling** | Every screen fits the window: list ⇄ detail, library ⇄ preview, nav ⇄ settings — panes scroll on their own |
+| ♿ **Accessible** | Keyboard friendly, focus-trapped dialogs, live regions for progress and toasts |
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -439,67 +431,45 @@ jobhunterx/jobhunterx/
 
 ## ⚡ Quickstart
 
-### Prerequisites
+### What you need
 
-- **Python 3.11+**
-- **At least one LLM API key** (Google AI Studio recommended — it's free)
+- 🐍 **Python 3.11+**
+- 🔑 **One free AI key** — Google AI Studio is the easiest
 
-<br/>
-
-### ① Clone & Setup
+### ① Get the code
 
 ```bash
 git clone https://github.com/kvcops/jobhunterx.git
 cd jobhunterx
-
-# Create virtual environment
 python -m venv .venv
-
-# Activate (choose your OS)
-.venv\Scripts\activate          # Windows PowerShell
+.venv\Scripts\activate          # Windows
 source .venv/bin/activate       # Linux / macOS
 ```
 
-### ② Install Dependencies
+### ② Install
 
 ```bash
 pip install -r requirements.txt --prefer-binary
-playwright install chromium
+playwright install chromium     # the browser the agent uses
 ```
 
-> [!TIP]
-> `--prefer-binary` tells pip to pick the newest release that ships a prebuilt wheel instead of compiling from source. The flag is also baked into `requirements.txt`, so `pip install -r requirements.txt` alone already avoids the issue.
-
-### ③ Configure Environment
+### ③ Add your keys
 
 ```bash
 cp jobhunterx/.env.example jobhunterx/.env
 ```
 
-Edit `jobhunterx/.env` with your API keys:
-
 ```env
-# At minimum, set one of these (Google recommended for free tier):
-GOOGLE_API_KEY=your_google_ai_studio_key
-GROQ_API_KEY=your_groq_key           # Optional
-MISTRAL_API_KEY=your_mistral_key     # Optional
-
-# Application settings
-BROWSER_USE_HEADLESS=true
-HOST=127.0.0.1
-PORT=8000
-LOG_LEVEL=INFO
+GOOGLE_API_KEY=your_google_ai_studio_key   # free — recommended
+GROQ_API_KEY=your_groq_key                 # optional
+MISTRAL_API_KEY=your_mistral_key           # optional
 ```
 
 > [!TIP]
-> **Getting API keys (all free):**
-> - **Google AI Studio**: [aistudio.google.com](https://aistudio.google.com/) — Create key → Gemma 4 31B & Gemini 3.5 Flash Lite
-> - **Groq**: [console.groq.com](https://console.groq.com/) — Free tier with GPT-OSS, Kimi K2 and Qwen
-> - **Mistral**: [console.mistral.ai](https://console.mistral.ai/) — Free plan with Mistral Medium / Small / Large
->
-> Keys can also be added later in **Settings → AI providers / Web search** (they are written to `.env`).
+> **Free keys:** [Google AI Studio](https://aistudio.google.com/) · [Groq](https://console.groq.com/) · [Mistral](https://console.mistral.ai/).
+> You can also paste keys later in **Settings** — they are saved to `.env` for you.
 
-### ④ Launch 🚀
+### ④ Start 🚀
 
 ```bash
 cd jobhunterx
@@ -512,50 +482,78 @@ python -m jobhunterx.api.main
 
 </div>
 
+### ⚙️ Handy settings (`.env` or Settings page)
+
+| Setting | Default | What it means |
+|:--|:--|:--|
+| `APPLY_WITH_COVER_LETTER` | `true` | Write and attach a cover letter when applying |
+| `APPLY_WITH_CV` | `true` | Write and attach your CV when a form asks for one |
+| `BROWSER_MAX_STEPS` | `40` | Most steps per Auto-apply run |
+| `BROWSER_STEP_DELAY_S` | `3` | Pause between agent steps (seconds) |
+| `BROWSER_SHOW_WINDOW` | `false` | Also open a real Chrome window (debugging only) |
+| `MAX_JOBS_PER_SEARCH` | see `.env.example` | How many jobs one search analyses |
+| `MODEL_LIMITS_JSON` | — | Override any model's free-tier limits |
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
+
+## 📐 Architecture
+
+```
+jobhunterx/jobhunterx/
+├── domain/          # 📦 Data contracts: profile, snapshot, job posting, match, document
+├── intelligence/    # 🧠 Understanding + judgement (candidate, job, matching, policy)
+├── discovery/       # 🔎 Search, ATS adapters, page parsing, dedupe, validation, SSRF-safe fetch
+├── generation/      # 📝 Resume / CV / cover letter + fact-checking + one-page PDF rendering
+├── services/        # 🧩 Orchestration: search runs, jobs, documents, profiles, auto-apply kit
+├── agents/
+│   ├── browser_agent.py   # 🤖 Auto-apply session: steps, stop / take over / continue / close
+│   ├── browser_worker.py  # 🧵 One long-lived thread that owns the browser
+│   └── live_view.py       # 📺 Chrome screencast → the app, your clicks → the page
+├── storage.py       # 💾 SQLite: jobs, documents, people, search runs, apply sessions (+ migrations)
+├── db_health.py     # 🩺 Check, repair and back up the database on every start
+├── api/             # 🔌 FastAPI routes, WebSockets (/ws events, /ws/browser live view)
+├── config/          # ⚙️ Settings, model catalog & limits, LLM router, app state
+└── web/             # 🎨 Preact + htm UI with bundled fonts — no build step
+```
+
+* 🔁 **One search at a time**; every event carries its run id, so old results never leak into a new search.
+* 💸 **Low AI cost:** profile understanding and job reading are cached, role-fit is batched, out-of-area jobs skip AI.
+* 🔒 **Secure by default:** same-origin CORS, CSRF guard, WebSocket origin checks, SSRF-safe fetching, upload limits, autoescaped templates.
+
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
 
 ## 🔌 API Reference
 
-The full v2 contract (REST + WebSocket, request/response shapes, error format) is in
-[`jobhunterx/docs/API.md`](jobhunterx/docs/API.md). Main groups:
+The full contract (REST + WebSocket) is in [`jobhunterx/docs/API.md`](jobhunterx/docs/API.md).
 
 | Group | Endpoints |
 |-------|-----------|
-| Profile | `GET/PUT /api/profile`, `POST /api/profile/upload` |
-| Searches | `POST /api/searches`, `GET /api/searches/current`, `GET /api/searches/{id}`, `POST /api/searches/{id}/cancel` |
-| Jobs | `GET /api/jobs?view=recommended\|all\|rejected\|saved\|applied`, `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore`, `POST /api/jobs/{id}/apply` |
-| Documents | `POST /api/jobs/{id}/documents` (resume / cover letter), `POST /api/documents/cv`, `GET /api/documents`, `GET /api/documents/{id}`, `GET /api/documents/{id}/pdf` |
-| System | settings, models, usage, pipeline mode, interventions, browser control, reset |
+| 👤 Profile | `GET/PUT /api/profile`, `POST /api/profile/upload`, people: `GET/POST /api/people`, `POST /api/people/{id}/activate` |
+| 🔎 Searches | `POST /api/searches`, `GET /api/searches/current`, `GET /api/searches/{id}`, `POST /api/searches/{id}/cancel` |
+| 💼 Jobs | `GET /api/jobs`, `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore` |
+| 📝 Documents | `POST /api/jobs/{id}/documents`, `POST /api/documents/cv`, `GET /api/documents`, `GET /api/documents/{id}/pdf` |
+| 🤖 Auto-apply | `POST /api/jobs/{id}/apply`, `GET /api/apply/current`, `POST /api/apply/{job_id}/stop · take-over · release · continue · close · done`, `WS /ws/browser` |
+| ⚙️ System | settings, providers, models, usage, database health / repair / backup, interventions, reset |
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
 
 ## 🧪 Testing
 
 ```bash
 cd jobhunterx
 pip install pytest pytest-asyncio playwright
-python -m pytest -q                 # unit, scenario, API and browser tests
+python -m pytest -q
 ```
 
-* `tests/test_scenarios.py` — the full pipeline on a realistic candidate and good/bad jobs (fake network + fake LLM,
-  including deliberate LLM hallucinations that must be rejected).
-* `tests/test_api_v2.py` — API contract, error envelope, idempotency, cancellation, CSRF/WebSocket/SSRF guards.
-* `tests/frontend/test_ui.py` — Playwright against the real app: stale-run events, out-of-order responses,
-  save rollback, document/job association, retry, XSS, mobile layout.
-
-<br/>
-<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
-<br/>
-
-## 🛡️ Stealth Browser Architecture
-
-The browser agent doesn't show up on radar:
-
-- 🍪 **Persistent Chrome Profile** — Cookies, localStorage, and browsing history accumulate across sessions, building trust with Cloudflare and similar WAFs
-- 🖥️ **Desktop User-Agent** — `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36`
-- 🚫 **Anti-Automation Flags** — `--disable-blink-features=AutomationControlled`, disabled site isolation
-- 🧹 **Zombie Chrome Cleanup** — Automatically kills orphan Chrome processes and clears `SingletonLock` files before each launch
-- ☁️ **Cloud Browser Support** — Optional cloud stealth browser integration via `BROWSER_USE_API_KEY`
+* `tests/test_scenarios.py` — the full pipeline on a realistic candidate (fake network + fake AI, including made-up claims that must be rejected)
+* `tests/test_api_v2.py` — API contract, errors, cancellation, CSRF / WebSocket / SSRF guards
+* `tests/frontend/test_ui.py` — Playwright against the real app
 
 <br/>
 

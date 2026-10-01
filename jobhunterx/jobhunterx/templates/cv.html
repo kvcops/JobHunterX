@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{% include "_base.css.j2" %}
-.section-title { font-size: 10.5pt; border-bottom: 2px solid #1e3a8a; color: #1e3a8a; margin-bottom: 5px; }
-.section { margin-top: 10px; }
+.section-title { font-size: {{ font_size_section }}; border-bottom: 2px solid #1e3a8a; color: #1e3a8a; margin-bottom: 5px; }
+.section { margin-top: {{ margin_section | default('10px') }}; }
 </style></head>
 <body>
 {% set c = doc %}
