@@ -39,6 +39,7 @@ export function initialState() {
     search: {
       activeRunId: null, run: null, starting: false, startError: null, lastRequest: null,
       cancelling: false, cancelError: null, streamedIds: [],
+      feed: { runId: null, items: [] },   // plain-language live activity of the active run
     },
     jobs: { byId: {} },
     details: {},            // jobId -> { status, job, error }

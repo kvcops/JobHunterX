@@ -7,7 +7,7 @@ import {
 } from '../actions.js';
 import {
   Button, Badge, ScoreRing, Skeleton, EmptyState, ErrorBox, ChipsInput, Tabs, Icon, Field, Notice, PageHead, Popover, Seg,
-  Monogram, Orb, CountUp, Select, VERDICT_TONE,
+  Monogram, Orb, CountUp, Select, Spinner, VERDICT_TONE,
 } from '../components/ui.js';
 import { JobDetail } from './jobdetail.js';
 import {
@@ -73,26 +73,124 @@ function SearchBar() {
 }
 
 // ---------------------------------------------------------------------------- run status
+const AGENT_META = [
+  { stage: 'understand', name: 'Profile analyst', icon: 'user', h: 18 },
+  { stage: 'plan', name: 'Planner', icon: 'layers', h: 262 },
+  { stage: 'discover', name: 'Scout', icon: 'search', h: 205 },
+  { stage: 'normalize', name: 'Reader', icon: 'doc', h: 32 },
+  { stage: 'dedupe', name: 'Curator', icon: 'board', h: 292 },
+  { stage: 'validate', name: 'Verifier', icon: 'shield', h: 150 },
+  { stage: 'extract', name: 'Analyst', icon: 'spark', h: 340, also: ['match'] },
+  { stage: 'rank', name: 'Ranker', icon: 'chart', h: 46 },
+];
+const AGENT_BY_STAGE = Object.fromEntries(AGENT_META.flatMap((a) => [[a.stage, a], ...(a.also || []).map((x) => [x, a])]));
+
+/** Overall progress 0–100: finished stages plus the share of jobs already analysed in the streaming stages. */
 function runProgress(run) {
+  if (!ACTIVE.has(run.status)) return run.status === 'completed' ? 100 : Math.round((run.stages.filter((st) => st.status === 'done').length / run.stages.length) * 100);
+  const early = ['understand', 'plan', 'discover', 'normalize', 'dedupe'];
+  const doneEarly = run.stages.filter((st) => early.includes(st.key) && st.status === 'done').length;
+  const runningEarly = run.stages.some((st) => early.includes(st.key) && st.status === 'running') ? 0.5 : 0;
+  const share = run.total ? Math.min(1, run.counts.scored / run.total) : 0;
+  // first five stages ≈ 45% of the work, the per-job analysis ≈ 55%
+  return Math.min(99, Math.round(((doneEarly + runningEarly) / early.length) * 45 + share * 55));
+}
+
+function useNow(ms = 1000, on = true) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { if (!on) return undefined; const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [on, ms]);
+  return now;
+}
+
+function clock(sec) {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function ago(ts, now) {
+  const s = Math.max(0, (now - Date.parse(ts)) / 1000);
+  if (s < 4) return 'now';
+  if (s < 60) return `${Math.floor(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  return relTime(ts);
+}
+
+function Elapsed({ run }) {
   const active = ACTIVE.has(run.status);
-  const done = run.stages.filter((st) => st.status === 'done').length;
-  if (!active) return run.status === 'completed' ? 100 : Math.round((done / Math.max(1, run.stages.length)) * 100);
-  return Math.min(96, Math.round(((done + 0.5) / Math.max(1, run.stages.length)) * 100));
+  const now = useNow(1000, active);
+  const end = run.finished_at ? Date.parse(run.finished_at) : now;
+  return html`<span class="elapsed">${clock((end - Date.parse(run.started_at)) / 1000)}</span>`;
 }
 
 function RunStrip({ onOverview }) {
   const run = useStore((s) => s.search.run);
+  const last = useStore((s) => { const it = s.search.feed.items; return it.length ? it[it.length - 1] : null; });
   if (!run) return null;
   const active = ACTIVE.has(run.status);
-  const cur = run.stages.find((st) => st.status === 'running');
+  const pct = runProgress(run);
   return html`<button type="button" class=${`run-strip ${active ? 'is-active' : ''}`} onClick=${onOverview} aria-label="Open search overview">
     <div class="row space">
       <span class="run-strip-title">${active ? html`<span class="pulse"></span>` : html`<${Icon} name="check" size=${14} />`}
-        ${active ? (cur ? cur.label : 'Starting…') : run.status === 'completed' ? 'Search complete' : `Search ${run.status}`}</span>
+        ${active ? html`Searching · <${CountUp} value=${pct} />%` : run.status === 'completed' ? 'Search complete' : `Search ${run.status}`}</span>
       <span class="run-strip-counts"><strong><${CountUp} value=${run.counts.recommended} /></strong> fit · <${CountUp} value=${run.counts.scored} /> analysed</span>
     </div>
-    <div class=${`beam-bar ${active ? 'is-active' : ''}`}><div style=${{ width: `${runProgress(run)}%` }}></div></div>
+    <div class=${`beam-bar ${active ? 'is-active' : ''}`}><div style=${{ width: `${pct}%` }}></div></div>
+    ${last ? html`<div class="run-strip-now" key=${last.id}><span class=${`k-dot k-${last.kind}`}></span>${last.message}</div>` : null}
   </button>`;
+}
+
+function AgentRail({ run }) {
+  const speaking = useStore((s) => { const it = s.search.feed.items; return it.length ? it[it.length - 1].agent : ''; });
+  const active = ACTIVE.has(run.status);
+  const stateOf = (a) => {
+    const sts = run.stages.filter((st) => st.key === a.stage || (a.also || []).includes(st.key)).map((st) => st.status);
+    if (sts.includes('running')) return 'running';
+    if (sts.includes('failed')) return 'failed';
+    if (sts.length && sts.every((x) => x === 'done')) return 'done';
+    if (sts.includes('skipped')) return 'skipped';
+    return 'pending';
+  };
+  return html`<div class="agent-rail" aria-label="Agents">${AGENT_META.map((a, i) => {
+    const st = stateOf(a);
+    const talk = active && st === 'running' && speaking === a.name;
+    return html`<div class=${`agent-chip a-${st} ${talk ? 'a-talk' : ''}`} key=${a.name} style=${{ '--h': a.h, '--i': i }} title=${`${a.name}: ${st}`}>
+      <span class="agent-ava"><${Icon} name=${st === 'done' ? 'check' : a.icon} size=${13} /></span>
+      <span class="agent-name">${a.name}</span>${talk ? html`<span class="typing" aria-hidden="true"><i></i><i></i><i></i></span>` : null}</div>`;
+  })}</div>`;
+}
+
+function FeedItem({ it, now, live }) {
+  const a = AGENT_BY_STAGE[it.stage] || { name: it.agent, icon: 'spark', h: 20 };
+  const job = it.job;
+  const clickable = job && job.id && it.stage === 'match';
+  const body = html`<span class="feed-ava" style=${{ '--h': a.h }}><${Icon} name=${a.icon} size=${13} /></span>
+    <div class="feed-body">
+      <div class="feed-meta"><strong>${it.agent}</strong><span class="feed-time">${ago(it.ts, now)}</span></div>
+      <div class="feed-msg">${it.kind === 'work' && live ? html`<${Spinner} size=${12} />` : html`<span class=${`k-dot k-${it.kind}`}></span>`}<span>${it.message}</span></div>
+    </div>
+    ${job && typeof job.score === 'number' ? html`<${ScoreRing} score=${job.score} verdict=${job.verdict} size=${34} />` : null}`;
+  return clickable
+    ? html`<li class=${`feed-item k-${it.kind} is-link`}><button type="button" onClick=${() => navigate(`#/discover/job/${encodeURIComponent(job.id)}`)}>${body}</button></li>`
+    : html`<li class=${`feed-item k-${it.kind}`}>${body}</li>`;
+}
+
+function LiveFeed({ active }) {
+  const items = useStore((s) => s.search.feed.items);
+  const now = useNow(1000, true);
+  const [filter, setFilter] = useState('all');
+  const shown = items.filter((x) => filter === 'all' || (filter === 'jobs' ? x.stage === 'match' : x.kind === 'reject' || x.kind === 'warn'));
+  const list = shown.slice().reverse();
+  return html`<section class="feed" aria-label="Live activity">
+    <div class="feed-head">
+      <span class="feed-title">${active ? html`<span class="live-dot"></span>Live activity` : 'Activity'}</span>
+      <${Tabs} size="sm" label="Activity filter" value=${filter} onChange=${setFilter}
+        tabs=${[{ key: 'all', label: 'Everything' }, { key: 'jobs', label: 'Verdicts' }, { key: 'issues', label: 'Issues' }]} />
+    </div>
+    <ol class="feed-list" aria-live="polite">
+      ${list.length ? list.map((it, k) => html`<${FeedItem} key=${it.id} it=${it} now=${now} live=${active && k === 0} />`)
+        : html`<li class="feed-empty">${active ? 'Warming up…' : 'Nothing to show for this filter.'}</li>`}
+    </ol>
+  </section>`;
 }
 
 function MissionControl() {
@@ -104,7 +202,7 @@ function MissionControl() {
     return html`<div class="mission idle">
       <${Orb} size=${170} active=${false} />
       <h2>Ready when <span class="serif">you</span> are</h2>
-      <p class="muted">Each search reads every posting, verifies it is real and still open, and explains the score — including when a role is not a fit.</p>
+      <p class="muted">Each search reads every posting, verifies it is real and still open, and explains the score — including when a role is not a fit. You can watch every step live here.</p>
       <div class="mission-stats">
         <div><span class="n"><${CountUp} value=${counts.recommended || 0} /></span><span class="l">recommended</span></div>
         <div><span class="n"><${CountUp} value=${counts.saved || 0} /></span><span class="l">saved</span></div>
@@ -114,33 +212,38 @@ function MissionControl() {
   }
   const active = ACTIVE.has(run.status);
   const c = run.counts;
-  const cur = run.stages.find((st) => st.status === 'running');
-  return html`<div class=${`mission ${active ? 'is-active' : ''}`} aria-live="polite">
-    <div class="mission-hero">
-      <${Orb} size=${active ? 150 : 120} active=${active} done=${run.status === 'completed'} />
-      <div>
-        <span class="eyebrow">${active ? 'Live' : `Finished ${relTime(run.finished_at || run.started_at)}`}</span>
-        <h2>${active ? html`Discovery in <span class="serif">progress</span>` : run.status === 'completed' ? html`Search <span class="serif">complete</span>` : `Search ${run.status}`}</h2>
-        <p class="muted">${active ? (cur && cur.detail) || 'Warming up…' : `${c.recommended} roles fit you out of ${c.scored} analysed. ${c.duplicates} duplicates were merged.`}</p>
-        ${!active && firstId ? html`<${Button} variant="primary" onClick=${() => navigate(`#/discover/job/${encodeURIComponent(firstId)}`)}>Open best match <${Icon} name="arrow" size=${16} /></${Button}>` : null}
+  const pct = runProgress(run);
+  const idx = run.stages.findIndex((st) => st.status === 'running');
+  const cur = idx >= 0 ? run.stages[idx] : null;
+  return html`<div class=${`mission live ${active ? 'is-active' : ''}`}>
+    <div class="mc-top">
+      <div class="mc-hero">
+        <${Orb} size=${92} active=${active} done=${run.status === 'completed'} />
+        <div class="grow">
+          <span class="eyebrow">${active ? html`Live · <${Elapsed} run=${run} />` : html`Finished in <${Elapsed} run=${run} />`}</span>
+          <h2>${active ? html`Discovery in <span class="serif">progress</span>` : run.status === 'completed' ? html`Search <span class="serif">complete</span>` : `Search ${run.status}`}</h2>
+          <p class="muted small">${active ? (cur ? `Step ${idx + 1} of ${run.stages.length} · ${cur.label}${run.total && idx >= 5 ? ` · ${c.scored} of ${run.total} jobs analysed` : ''}` : 'Warming up…')
+            : `${c.recommended} roles fit you out of ${c.scored} analysed · ${c.duplicates} duplicates merged`}</p>
+        </div>
+        <div class="mc-pct"><span class="n"><${CountUp} value=${pct} /></span><span class="u">%</span></div>
       </div>
+      <div class=${`mc-bar ${active ? 'is-active' : ''}`} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${pct}>
+        <div class="mc-fill" style=${{ width: `${pct}%` }}></div>
+        ${run.stages.map((st, i) => html`<span class=${`mc-tick st-${st.status}`} style=${{ left: `${((i + 1) / run.stages.length) * 100}%` }} title=${st.label}></span>`)}
+      </div>
+      <${AgentRail} run=${run} />
+      <div class="mc-stats">
+        <div class="hl"><span class="n"><${CountUp} value=${c.recommended} /></span><span class="l">recommended</span></div>
+        <div><span class="n"><${CountUp} value=${c.scored} /></span><span class="l">analysed</span></div>
+        <div><span class="n"><${CountUp} value=${c.duplicates} /></span><span class="l">duplicates merged</span></div>
+        <div><span class="n"><${CountUp} value=${c.rejected} /></span><span class="l">not a fit</span></div>
+        ${!active && firstId ? html`<${Button} size="sm" variant="primary" onClick=${() => navigate(`#/discover/job/${encodeURIComponent(firstId)}`)}>Open best match <${Icon} name="arrow" size=${15} /></${Button}>` : null}
+      </div>
+      ${run.error ? html`<${ErrorBox} message=${run.error} />` : null}
     </div>
-    <div class="mission-stats">
-      <div class="hl"><span class="n"><${CountUp} value=${c.recommended} /></span><span class="l">recommended</span></div>
-      <div><span class="n"><${CountUp} value=${c.scored} /></span><span class="l">analysed</span></div>
-      <div><span class="n"><${CountUp} value=${c.duplicates} /></span><span class="l">duplicates merged</span></div>
-      <div><span class="n"><${CountUp} value=${c.rejected} /></span><span class="l">not a fit</span></div>
-    </div>
-    <ol class="timeline" aria-label="Search progress">
-      ${run.stages.map((st, i) => html`<li key=${st.key} class=${`tl st-${st.status}`} style=${{ '--i': i }}>
-        <span class="tl-dot">${st.status === 'done' ? html`<${Icon} name="check" size=${11} />` : st.status === 'failed' ? html`<${Icon} name="x" size=${11} />` : null}</span>
-        <span class="tl-label">${st.label}</span><span class="sr-only">${st.status}</span>
-        ${st.status === 'running' && st.detail ? html`<span class="tl-detail">${st.detail}</span>` : null}
-      </li>`)}
-    </ol>
-    ${run.error ? html`<${ErrorBox} message=${run.error} />` : null}
+    <${LiveFeed} active=${active} />
     ${run.plan ? html`<div class="plan-box">
-      <button type="button" class="link-btn" aria-expanded=${plan ? 'true' : 'false'} onClick=${() => setPlan(!plan)}>${plan ? 'Hide' : 'Show'} search plan</button>
+      <button type="button" class="link-btn" aria-expanded=${plan ? 'true' : 'false'} onClick=${() => setPlan(!plan)}>${plan ? 'Hide' : 'Show'} the exact search plan</button>
       ${plan ? html`<div class="plan">
         <div><div class="sec-title">Titles</div><div class="chip-row">${run.plan.titles.map((t) => html`<span class="chip">${t}</span>`)}</div></div>
         <div><div class="sec-title">Locations</div><div class="chip-row">${run.plan.locations.map((t) => html`<span class="chip">${t}</span>`)}</div></div>

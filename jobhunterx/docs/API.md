@@ -276,7 +276,7 @@ Server → client JSON messages:
 
 ```ts
 type WsMessage = {
-  type: "search.run" | "search.job" | "job.updated" | "job.deleted" | "document.status"
+  type: "search.run" | "search.job" | "search.activity" | "job.updated" | "job.deleted" | "document.status"
       | "profile.updated" | "log" | "browser" ;
   run_id?: string; job_id?: string;
   message?: string;
@@ -287,6 +287,10 @@ type WsMessage = {
 
 * `search.run` — `data: { run: SearchRun }` whenever stage/status/counts change (also final status).
 * `search.job` — `data: { job: JobSummary }` a job was added/updated by the run.
+* `search.activity` — `data: { item: { id, ts, stage, agent, kind, message, job? } }` one plain-language line
+  describing what the pipeline just did (e.g. "AI Engineer at Acme is live and accepting applications").
+  `kind` is `work | info | good | warn | reject | done`; `job` is `{ id, title, company, score?, verdict? }`.
+  The run object also carries the latest 150 lines as `activity` (for reloads) and `total` (jobs to analyse).
 * `job.updated` — `data: { job: JobSummary }` any job change outside a run (save, verify, rescore, apply status).
 * `job.deleted` — `data: { ids: string[] }`.
 * `document.status` — `data: { job_id, kind, status: "generating"|"ready"|"failed", document_id?, error? }`.

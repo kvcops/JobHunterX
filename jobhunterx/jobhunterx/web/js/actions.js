@@ -209,13 +209,25 @@ export async function saveProfile(profile, { quiet = false } = {}) {
 // ---------------------------------------------------------------------------
 // Search runs
 // ---------------------------------------------------------------------------
+const FEED_KEEP = 150;
+/** Merge activity lines (by increasing id) into the feed of `runId`; a new run starts a fresh feed. */
+function mergeFeed(runId, items) {
+  if (!items || !items.length) return;
+  setSlice('search', (sr) => {
+    const base = sr.feed.runId === runId ? sr.feed.items : [];
+    const last = base.length ? base[base.length - 1].id : 0;
+    const add = items.filter((x) => x.id > last);
+    if (!add.length && sr.feed.runId === runId) return sr;
+    return { ...sr, feed: { runId, items: [...base, ...add].slice(-FEED_KEEP) } };
+  });
+}
 export async function startSearch(req) {
   const s = getState().search;
   if (s.starting) return;
   setSlice('search', { starting: true, startError: null, lastRequest: req });
   try {
     const { run } = await api.startSearch(req);
-    setSlice('search', { starting: false, activeRunId: run.id, run, streamedIds: [] });
+    setSlice('search', { starting: false, activeRunId: run.id, run, streamedIds: [], feed: { runId: run.id, items: run.activity || [] } });
     setList({ scope: 'run', runId: run.id });
     activity(`Search started (${run.id.slice(0, 8)})`, 'info', 'search');
   } catch (err) {
@@ -240,7 +252,7 @@ async function loadCurrentRun() {
     const { run } = await api.currentSearch();
     if (!run) return;
     const active = getState().search.activeRunId;
-    if (!active || active === run.id) setSlice('search', { activeRunId: run.id, run });
+    if (!active || active === run.id) { setSlice('search', { activeRunId: run.id, run }); mergeFeed(run.id, run.activity); }
   } catch { /* non-fatal */ }
 }
 
@@ -610,6 +622,7 @@ function onMessage(msg) {
       if (!s.search.activeRunId && s.search.starting) return;                 // response will carry it
       const wasActive = s.search.run && ['queued', 'running'].includes(s.search.run.status);
       setSlice('search', { activeRunId: run.id, run });
+      mergeFeed(run.id, run.activity);
       if (wasActive && ['completed', 'failed', 'cancelled'].includes(run.status)) {
         activity(`Search ${run.status}: ${run.counts.recommended} recommended, ${run.counts.rejected} not a fit`, run.status === 'failed' ? 'error' : 'info', 'search');
         loadList();
@@ -622,6 +635,12 @@ function onMessage(msg) {
       upsertJobs([job]);
       setSlice('search', (sr) => ({ ...sr, streamedIds: sr.streamedIds.includes(job.id) ? sr.streamedIds : [...sr.streamedIds, job.id] }));
       reconcileListMembership(getState().jobs.byId[job.id]);
+      return;
+    }
+    case 'search.activity': {
+      const item = msg.data && msg.data.item;
+      if (!item || !msg.run_id || msg.run_id !== s.search.activeRunId) return;   // stale run
+      mergeFeed(msg.run_id, [item]);
       return;
     }
     case 'job.updated': {

@@ -110,7 +110,7 @@ Dark theme is one click away.
 <br/><sub><i>"Here's how we see you" — computed experience, level, career tracks and verified skills, editable before you continue</i></sub>
 <br/><br/>
 <img src="assets/ui_discover.png" alt="Discover — mission control" width="90%"/>
-<br/><sub><i>Discover — search and ranked results on the left, live mission control (9-stage pipeline, counters) on the right</i></sub>
+<br/><sub><i>Live search — progress %, elapsed time, which agent is working right now, and a plain-English activity feed of what is happening (“AI Engineer at Acme is live and accepting applications”)</i></sub>
 <br/><br/>
 <img src="assets/ui_match.png" alt="Why this score" width="90%"/>
 <br/><sub><i>Select a job and it opens beside the list — hard requirements, weighted score, requirements, verification and the application kit</i></sub>
@@ -137,6 +137,7 @@ Dark theme is one click away.
 |---|---|
 | **Flow** | Lifecycle-driven: boot splash → one-time onboarding (resumes where you left off after a reload) → app. Sidebar is ordered like the work: Profile → Discover → Documents → Tracker |
 | **No long scrolling** | Split workspaces (list ⇄ detail, library ⇄ preview, nav ⇄ settings); options live in popovers, sections in tabs |
+| **Live progress** | Real-time percentage and timer, agent rail (Profile analyst → Planner → Scout → Reader → Curator → Verifier → Analyst → Ranker) with the active agent "typing", and a human-readable activity feed generated from what the pipeline actually did — filterable by verdicts and issues, survives reloads |
 | **Motion** | Signature orbit loader for live search, resume "scan" animation while reading, springy sliding tab and sidebar indicators, count-up numbers, self-drawing score rings, staggered list entrances, glow on freshly streamed jobs, shimmer skeletons, page transitions via the View Transitions API (with CSS fallback) |
 | **Design system** | Quiet white cards on a warm canvas, a single orange accent, bundled fonts (Geist · Instrument Serif · Geist Mono — no CDN at runtime), light + dark themes, full `prefers-reduced-motion` support |
 | **Explainable cards** | Thin score ring coloured by verdict, verification badge, skills matched x/y, experience fit, source and freshness |
