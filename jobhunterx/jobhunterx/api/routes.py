@@ -7,13 +7,15 @@ logic lives in jobhunterx.services.*.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -78,25 +80,126 @@ async def put_profile(profile: CandidateProfile):
     return env
 
 
+_uploads: dict[str, dict] = {}   # upload id -> status (kept for the session so a reload can resume)
+
+
+async def _process_upload(up: dict, data: bytes) -> dict:
+    """Read a resume PDF into the active profile, publishing each stage as it happens."""
+    async def stage(name: str, **extra) -> None:
+        up.update(stage=name, **extra)
+        await emit({"type": "profile.upload", "data": {"upload": {k: v for k, v in up.items() if k != "result"}}})
+
+    try:
+        await stage("extracting")
+        profile, info = await extractor.extract_profile(data)
+        if info["status"] == "failed":
+            raise HTTPException(502, info["warnings"][0] if info["warnings"] else "Could not read the resume.")
+        existing = await profile_svc.get_profile()
+        if existing:  # keep what the user set that a resume cannot contain
+            profile.preferences = existing.preferences
+            profile.qa_memory = existing.qa_memory
+        await profile_svc.save_profile(profile)
+        await stage("understanding")
+        env = await profile_svc.envelope(profile)
+        await emit({"type": "profile.updated", "data": env})
+        up["result"] = {**env, "extraction": info}
+        await stage("done", status="done", finished_at=datetime.now(timezone.utc).isoformat())
+        return up["result"]
+    except HTTPException as exc:
+        await stage("failed", status="failed", error=str(exc.detail))
+        raise
+    except Exception as exc:
+        log.error("resume_upload_failed", error=str(exc)[:300])
+        await stage("failed", status="failed", error="Could not read the resume. The AI provider may be busy — please try again.")
+        raise HTTPException(502, up["error"])
+
+
 @router.post("/profile/upload")
 @router.post("/upload-resume")
-async def upload_resume(file: UploadFile = File(...)):
+async def upload_resume(file: UploadFile = File(...), background: bool = Query(False)):
+    """Read a resume. With ?background=1 it returns at once and streams `profile.upload` events
+    (extracting → understanding → done/failed); AI reading can take minutes on free tiers."""
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "The file is larger than 10 MB.")
     if not data.startswith(b"%PDF"):
         raise HTTPException(422, "Please upload a PDF resume.")
-    profile, info = await extractor.extract_profile(data)
-    if info["status"] == "failed":
-        raise HTTPException(502, info["warnings"][0] if info["warnings"] else "Could not read the resume.")
-    existing = await profile_svc.get_profile()
-    if existing:  # keep what the user set that a resume cannot contain
-        profile.preferences = existing.preferences
-        profile.qa_memory = existing.qa_memory
-    await profile_svc.save_profile(profile)
-    env = await profile_svc.envelope(profile)
-    await emit({"type": "profile.updated", "data": env})
-    return {**env, "extraction": info}
+    up = {"id": str(uuid.uuid4()), "status": "running", "stage": "received", "file_name": (file.filename or "resume.pdf")[:120],
+          "started_at": datetime.now(timezone.utc).isoformat(), "error": None}
+    _uploads[up["id"]] = up
+    if not background:
+        return await _process_upload(up, data)
+
+    async def _run():
+        try:
+            await _process_upload(up, data)
+        except Exception:
+            pass   # status already published
+    asyncio.create_task(_run())
+    return {"upload": up}
+
+
+@router.get("/profile/upload/{upload_id}")
+async def upload_status(upload_id: str):
+    up = _uploads.get(upload_id)
+    if not up:
+        raise HTTPException(404, "Upload not found")
+    return {"upload": {k: v for k, v in up.items() if k != "result"}, "result": up.get("result")}
+
+
+# ---------------------------------------------------------------------------
+# People (switchable profiles)
+# ---------------------------------------------------------------------------
+
+class PersonBody(BaseModel):
+    name: str = Field("", max_length=80)
+
+
+async def _people_payload() -> dict:
+    return {"people": await storage.list_people(), "active": storage.active_person()}
+
+
+@router.get("/people")
+async def list_people():
+    return await _people_payload()
+
+
+@router.post("/people", status_code=201)
+async def create_person(body: PersonBody):
+    await search_manager.cancel()
+    pid = await storage.create_person(body.name or "New profile")
+    await storage.activate_person(pid)
+    await emit({"type": "people.changed", "data": {"active": pid}})
+    return await _people_payload()
+
+
+@router.post("/people/{person_id}/activate")
+async def activate_person(person_id: str):
+    if not await storage.get_person(person_id):
+        raise HTTPException(404, "Profile not found")
+    if storage.active_person() != person_id:
+        await search_manager.cancel()     # a running search belongs to the previous person
+    await storage.activate_person(person_id)
+    await emit({"type": "people.changed", "data": {"active": person_id}})
+    return await _people_payload()
+
+
+@router.patch("/people/{person_id}")
+async def rename_person(person_id: str, body: PersonBody):
+    if not body.name.strip() or not await storage.rename_person(person_id, body.name):
+        raise HTTPException(404 if body.name.strip() else 422, "Profile not found" if body.name.strip() else "Name is required")
+    return await _people_payload()
+
+
+@router.delete("/people/{person_id}")
+async def delete_person(person_id: str):
+    if not await storage.get_person(person_id):
+        raise HTTPException(404, "Profile not found")
+    if storage.active_person() == person_id:
+        await search_manager.cancel()
+    await storage.delete_person(person_id)
+    await emit({"type": "people.changed", "data": {"active": storage.active_person()}})
+    return await _people_payload()
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +223,10 @@ async def start_search(req: SearchRequest):
 
 @router.get("/searches/current")
 async def current_search():
-    return {"run": search_manager.current or await storage.latest_run()}
+    run = search_manager.current
+    if run and run.get("person_id") != storage.active_person():
+        run = None                       # belongs to another profile
+    return {"run": run or await storage.latest_run()}
 
 
 @router.get("/searches/{run_id}")
@@ -376,17 +482,59 @@ _BOOL_FIELDS = {"enable_web_search_apis": "ENABLE_WEB_SEARCH_APIS", "brave_enabl
 _SEARCH_PROVIDERS = ("tinyfish", "tavily", "exa", "brave", "ddgs")
 
 
+def _env_file_keys() -> dict[str, str]:
+    from jobhunterx.config.settings import _BASE_DIR
+    path = _BASE_DIR / ".env"
+    out: dict[str, str] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def _source(env_names: list[str], file_keys: dict[str, str]) -> str:
+    if any(file_keys.get(n) for n in env_names):
+        return ".env file"
+    if any(os.environ.get(n) for n in env_names):
+        return "system environment"
+    return ""
+
+
+# Non-secret settings that can be edited from the UI (and are written back to .env).
+_TUNABLES = {
+    "max_jobs_per_search": ("MAX_JOBS_PER_SEARCH", int, 5, 200),
+    "max_llm_jd_extractions_per_search": ("MAX_LLM_JD_EXTRACTIONS_PER_SEARCH", int, 0, 200),
+    "fetch_timeout_s": ("FETCH_TIMEOUT_S", float, 3, 60),
+    "tavily_search_depth": ("TAVILY_SEARCH_DEPTH", str, None, None),
+    "exa_search_num_results": ("EXA_SEARCH_NUM_RESULTS", int, 1, 50),
+    "browser_use_headless": ("BROWSER_USE_HEADLESS", bool, None, None),
+}
+
+
 @router.get("/settings")
 async def get_settings_masked():
+    from jobhunterx.config import app_state
     from jobhunterx.config.settings import get_settings
     s = get_settings()
+    file_keys = _env_file_keys()
     out = {k: getattr(s, k) for k in _BOOL_FIELDS}
     out["primary_search_provider"] = s.primary_search_provider
     out["search_providers"] = list(_SEARCH_PROVIDERS)
-    for name in ("tinyfish", "tavily", "exa", "brave", "google", "groq", "mistral"):
+    names = {"google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"], "groq": ["GROQ_API_KEY"], "mistral": ["MISTRAL_API_KEY"],
+             "tinyfish": ["TINYFISH_API_KEY"], "tavily": ["TAVILY_API_KEY"], "exa": ["EXA_API_KEY"], "brave": ["BRAVE_API_KEY"]}
+    for name, env_names in names.items():
         val = getattr(s, f"{name}_api_key")
         out[f"{name}_configured"] = bool(val)
         out[f"{name}_key_masked"] = _mask(val)
+        out[f"{name}_source"] = _source(env_names, file_keys) if val else ""
+    out["tunables"] = {k: getattr(s, k) for k in _TUNABLES}
+    out["providers"] = {"llm": app_state.get("llm.providers"), "search": app_state.get("search.providers"),
+                        "search_order": app_state.get("search.order"), "search_strategy": app_state.get("search.strategy")}
+    from jobhunterx.config.settings import _BASE_DIR
+    out["env_file"] = str(_BASE_DIR / ".env")
+    out["env_file_exists"] = (_BASE_DIR / ".env").exists()
     return out
 
 
@@ -408,17 +556,23 @@ def _persist_env(updates: dict[str, str]) -> None:
 
 @router.post("/settings")
 async def update_settings(payload: dict):
+    from jobhunterx.config import models as M
     from jobhunterx.config.settings import get_settings
     s = get_settings()
     env: dict[str, str] = {}
+    keys_changed = False
     for field, (attr, env_names) in _KEY_FIELDS.items():
         if field in payload:
             key = str(payload[field] or "").strip()
             if not re.fullmatch(r"[A-Za-z0-9_\-.:]{0,256}", key):
                 raise HTTPException(422, f"{field} contains invalid characters")
             setattr(s, attr, key or None)
+            keys_changed = True
             for n in env_names:
-                os.environ[n] = key
+                if key:
+                    os.environ[n] = key
+                else:
+                    os.environ.pop(n, None)
                 env[n] = key
     for field, env_name in _BOOL_FIELDS.items():
         if field in payload:
@@ -431,18 +585,62 @@ async def update_settings(payload: dict):
             raise HTTPException(422, "Unknown search provider")
         s.primary_search_provider = val
         env["PRIMARY_SEARCH_PROVIDER"] = val
+    for field, (env_name, typ, lo, hi) in _TUNABLES.items():
+        if field in (payload.get("tunables") or {}):
+            raw = payload["tunables"][field]
+            try:
+                val = (raw if isinstance(raw, bool) else str(raw).lower() in ("1", "true", "yes")) if typ is bool else typ(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(422, f"{field} must be a {typ.__name__}")
+            if lo is not None and not (lo <= val <= hi):
+                raise HTTPException(422, f"{field} must be between {lo} and {hi}")
+            setattr(s, field, val)
+            env[env_name] = ("true" if val else "false") if typ is bool else str(val)
     if env:
         try:
             _persist_env(env)
         except OSError as exc:
             log.warning("persist_env_failed", error=str(exc))
+    if keys_changed:
+        asyncio.create_task(M.refresh_available(force=True))
+    return await get_settings_masked()
+
+
+class ProvidersBody(BaseModel):
+    llm: Optional[dict[str, bool]] = None
+    search: Optional[dict[str, bool]] = None
+    search_order: Optional[list[str]] = None
+    search_strategy: Optional[Literal["fallback", "spread", "combine"]] = None
+
+
+@router.post("/providers")
+async def update_providers(body: ProvidersBody):
+    """Turn LLM / search providers on or off, reorder search providers, choose the search strategy."""
+    from jobhunterx.config import app_state
+    if body.llm is not None:
+        cur = app_state.get("llm.providers")
+        cur.update({k: bool(v) for k, v in body.llm.items() if k in app_state.LLM_PROVIDERS})
+        await app_state.set("llm.providers", cur)
+    if body.search is not None:
+        cur = app_state.get("search.providers")
+        cur.update({k: bool(v) for k, v in body.search.items() if k in app_state.SEARCH_PROVIDERS})
+        await app_state.set("search.providers", cur)
+    if body.search_order is not None:
+        order = [p for p in body.search_order if p in app_state.SEARCH_PROVIDERS]
+        order += [p for p in app_state.SEARCH_PROVIDERS if p not in order]
+        await app_state.set("search.order", order)
+    if body.search_strategy is not None:
+        await app_state.set("search.strategy", body.search_strategy)
     return await get_settings_masked()
 
 
 @router.get("/models")
-async def get_models():
+async def get_models(refresh: bool = Query(False)):
+    from jobhunterx.config import models as M
     from jobhunterx.config.llm_router import get_model_config
-    return get_model_config()
+    if refresh:
+        await M.refresh_available(force=True)
+    return {**get_model_config(), "availability": M.availability()}
 
 
 class ModelSelection(BaseModel):
@@ -455,8 +653,32 @@ async def set_model(body: ModelSelection):
     from jobhunterx.config.llm_router import FALLBACK_CHAINS, get_model_config, set_model_config
     if body.chain not in FALLBACK_CHAINS or body.model_id not in {m["id"] for m in get_model_config()["all_models"]}:
         raise HTTPException(422, "Unknown chain or model")
-    set_model_config(body.chain, body.model_id)
+    await set_model_config(body.chain, body.model_id)
     return {"status": "ok", "config": get_model_config()}
+
+
+# ---------------------------------------------------------------------------
+# Database health
+# ---------------------------------------------------------------------------
+
+@router.get("/system/health")
+async def system_health():
+    from jobhunterx import db_health
+    return await db_health.check(db.get_db_path(), repair=False)
+
+
+@router.post("/system/repair")
+async def system_repair():
+    from jobhunterx import db_health
+    report = await db_health.check(db.get_db_path(), repair=True)
+    return report
+
+
+@router.post("/system/backup")
+async def system_backup():
+    from jobhunterx import db_health
+    path = await db_health.backup(db.get_db_path())
+    return {"path": path}
 
 
 @router.get("/usage")
@@ -591,6 +813,9 @@ async def reset():
     await search_manager.cancel()
     await apply_svc.cancel_all()
     await db.clear_database()
-    await storage.migrate()
+    await db.init_db()
+    from jobhunterx.config import app_state
+    await app_state.load(db.get_db_path())
+    await app_state.set("people.active", None)
     await emit({"type": "log", "message": "All data was reset.", "data": {"level": "warn", "source": "system"}})
     return {"status": "ok"}

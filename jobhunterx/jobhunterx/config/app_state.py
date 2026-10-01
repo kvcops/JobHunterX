@@ -1,0 +1,89 @@
+"""
+Small persistent key/value store for user preferences that are not secrets:
+provider on/off switches, search strategy, per-task model choices, active profile.
+
+Values live in the SQLite `app_state` table and are mirrored in memory, so hot
+paths (the LLM router, the search router) read them without touching the DB.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+from typing import Any
+
+import aiosqlite
+
+from jobhunterx.config.logging import get_logger
+
+log = get_logger("app_state")
+
+SEARCH_PROVIDERS = ["tinyfish", "tavily", "exa", "brave", "ddgs"]
+LLM_PROVIDERS = ["google", "groq", "mistral"]
+
+# Seeded on first start; later releases only ever add keys.
+DEFAULTS: dict[str, Any] = {
+    "llm.providers": {"google": True, "groq": True, "mistral": True},
+    "llm.overrides": {},                       # chain -> preferred first model id
+    "search.providers": {p: True for p in SEARCH_PROVIDERS},
+    "search.order": list(SEARCH_PROVIDERS),
+    # fallback: first provider that returns results wins (cheapest)
+    # spread:   rotate queries across enabled providers (shares free quotas)
+    # combine:  ask two providers per query and merge (widest coverage, uses more quota)
+    "search.strategy": "fallback",
+    "people.active": None,
+}
+
+_cache: dict[str, Any] = copy.deepcopy(DEFAULTS)
+_db_path: str | None = None
+
+
+async def load(db_path: str) -> None:
+    """Create the table, seed missing defaults and load everything into memory."""
+    global _db_path
+    _db_path = db_path
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
+        cur = await db.execute("SELECT key, value_json FROM app_state")
+        rows = {k: v for k, v in await cur.fetchall()}
+        for key, default in DEFAULTS.items():
+            if key not in rows:
+                await db.execute("INSERT INTO app_state (key, value_json) VALUES (?, ?)", (key, json.dumps(default)))
+                _cache[key] = copy.deepcopy(default)
+                continue
+            try:
+                val = json.loads(rows[key])
+            except ValueError:
+                log.warning("app_state_value_corrupt_reset", key=key)
+                val = copy.deepcopy(default)
+                await db.execute("UPDATE app_state SET value_json = ? WHERE key = ?", (json.dumps(val), key))
+            if isinstance(default, dict) and isinstance(val, dict):   # heal: add keys new releases introduced
+                val = {**default, **val} if key != "llm.overrides" else val
+            _cache[key] = val
+        await db.commit()
+    order = [p for p in _cache["search.order"] if p in SEARCH_PROVIDERS]
+    _cache["search.order"] = order + [p for p in SEARCH_PROVIDERS if p not in order]
+
+
+def get(key: str) -> Any:
+    return copy.deepcopy(_cache.get(key, DEFAULTS.get(key)))
+
+
+async def set(key: str, value: Any) -> None:  # noqa: A001 — mirrors dict API
+    _cache[key] = copy.deepcopy(value)
+    if not _db_path:
+        return
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("INSERT INTO app_state (key, value_json) VALUES (?, ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json", (key, json.dumps(value)))
+        await db.commit()
+
+
+def llm_provider_enabled(provider: str) -> bool:
+    return bool(_cache["llm.providers"].get(provider, True))
+
+
+def search_plan() -> tuple[list[str], str]:
+    """Enabled search providers in the user's order, plus the strategy."""
+    enabled = _cache["search.providers"]
+    return [p for p in _cache["search.order"] if enabled.get(p, True)], _cache["search.strategy"]

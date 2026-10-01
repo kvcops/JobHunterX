@@ -4,8 +4,10 @@ import { useStore } from '../state/store.js';
 import {
   loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention,
   stopBrowser, setTakeover, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
+  loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion,
 } from '../actions.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner } from '../components/ui.js';
+import { PeopleManager } from './people.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice } from '../components/ui.js';
 import { TRACKING_LABEL, DEFAULT_TRACKING, relTime, humanize, fmtNum, safeUrl } from '../lib/format.js';
 import { setTheme } from '../actions.js';
 import { ReconnectingSocket } from '../lib/ws.js';
@@ -234,23 +236,155 @@ export function InterventionsView() {
   </div>`;
 }
 
-function KeysForm({ data }) {
-  const [keys, setKeys] = useState({});
-  const fields = [['google_api_key', 'Google AI (Gemma / Gemini)', 'google'], ['groq_api_key', 'Groq', 'groq'], ['mistral_api_key', 'Mistral', 'mistral'],
-    ['tinyfish_api_key', 'TinyFish search', 'tinyfish'], ['tavily_api_key', 'Tavily search', 'tavily'], ['exa_api_key', 'Exa search', 'exa'], ['brave_api_key', 'Brave search', 'brave']];
-  const dirty = Object.values(keys).some((v) => v);
-  return html`<section class="set-section"><h2>API keys</h2><p class="muted small">Keys are stored in your local .env file and never shown again in full.</p>
-    <div class="form-grid">${fields.map(([k, label, n]) => html`<${Field} label=${label} hint=${data[`${n}_configured`] ? `Configured (${data[`${n}_key_masked`]})` : 'Not configured'}>
-      ${(id) => html`<input id=${id} class="input" type="password" autocomplete="off" value=${keys[k] || ''} placeholder=${data[`${n}_configured`] ? 'Leave empty to keep' : 'Paste key'} onInput=${(e) => setKeys({ ...keys, [k]: e.currentTarget.value })} />`}</${Field}>`)}</div>
-    <${Button} variant="primary" disabled=${!dirty} onClick=${async () => { const body = Object.fromEntries(Object.entries(keys).filter(([, v]) => v)); if (await saveSettings(body)) setKeys({}); }}>Save keys</${Button}>
+// ---------------------------------------------------------------------------- settings
+const LLM_META = {
+  google: { name: 'Google AI Studio', field: 'google_api_key', hint: 'Gemma 4 31B and Gemini 3.5 Flash Lite', url: 'aistudio.google.com' },
+  groq: { name: 'Groq', field: 'groq_api_key', hint: 'GPT-OSS, Kimi K2, Qwen3 — very fast', url: 'console.groq.com' },
+  mistral: { name: 'Mistral', field: 'mistral_api_key', hint: 'Mistral Medium / Small / Large (latest)', url: 'console.mistral.ai' },
+};
+const SEARCH_META = {
+  tinyfish: { name: 'TinyFish', field: 'tinyfish_api_key', hint: 'Search API — free utility credits' },
+  tavily: { name: 'Tavily', field: 'tavily_api_key', hint: 'Monthly free credits; good snippets' },
+  exa: { name: 'Exa', field: 'exa_api_key', hint: 'Neural search; free monthly credits' },
+  brave: { name: 'Brave Search', field: 'brave_api_key', hint: 'Independent index; free monthly queries' },
+  ddgs: { name: 'DuckDuckGo', field: null, hint: 'No key needed — always-available fallback' },
+};
+const STRATEGIES = [
+  ['fallback', 'Fallback', 'Ask providers in order; the first with results answers. Fewest calls.'],
+  ['spread', 'Spread', 'Rotate queries across providers so free quotas are shared.'],
+  ['combine', 'Combine', 'Two providers answer every query and results merge. Widest coverage, uses more quota.'],
+];
+const fmtLimit = (l) => [l.rpm && `${l.rpm} RPM`, l.rpd && `${fmtNum(l.rpd)}/day`, l.tpm && `${fmtNum(l.tpm)} TPM`, l.tpd && `${fmtNum(l.tpd)} TPD`].filter(Boolean).join(' · ') || 'account limits';
+
+function KeyField({ field, configured, masked, source, label }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async (v) => { setBusy(true); const ok = await saveSettings({ [field]: v }); setBusy(false); if (ok) { setEditing(false); setVal(''); } };
+  if (!editing) {
+    return html`<div class="key-row">
+      <span class=${`key-pill ${configured ? 'on' : ''}`}><${Icon} name="key" size=${13} />${configured ? masked : 'No key'}</span>
+      ${configured && source ? html`<span class="muted small">from ${source}</span>` : null}
+      <${Button} size="sm" onClick=${() => setEditing(true)}>${configured ? 'Replace' : 'Add key'}</${Button}>
+      ${configured ? html`<button type="button" class="link-btn small" onClick=${() => save('')}>Remove</button>` : null}
+    </div>`;
+  }
+  return html`<div class="key-row editing">
+    <input class="input" type="password" autocomplete="off" aria-label=${`${label} API key`} placeholder="Paste key" value=${val}
+      onInput=${(e) => setVal(e.currentTarget.value)} onKeyDown=${(e) => { if (e.key === 'Enter' && val.trim()) save(val.trim()); if (e.key === 'Escape') setEditing(false); }} />
+    <${Button} size="sm" variant="primary" busy=${busy} disabled=${!val.trim()} onClick=${() => save(val.trim())}>Save</${Button}>
+    <${Button} size="sm" onClick=${() => setEditing(false)}>Cancel</${Button}>
+  </div>`;
+}
+
+function Toggle({ on, onChange, label }) {
+  return html`<label class="switch" title=${label}><input type="checkbox" checked=${on} aria-label=${label} onChange=${(e) => onChange(e.currentTarget.checked)} /><span class="switch-ui"></span></label>`;
+}
+
+function AiSection({ d, models }) {
+  const md = models.data;
+  return html`<section class="set-section">
+    <div class="row space"><h2>AI providers</h2>
+      <${Button} size="sm" icon="refresh" busy=${models.status === 'refreshing' || models.status === 'loading'} onClick=${refreshModels}>Check available models</${Button}></div>
+    <p class="muted small">Turn a provider off to never use it. Keys are read from your .env file (or system environment) and can be changed here — they are written back to .env.</p>
+    <div class="prov-list">${Object.entries(LLM_META).map(([k, m]) => {
+      const st = md && md.providers[k];
+      const on = d.providers.llm[k] !== false;
+      return html`<div class=${`prov-card ${on ? '' : 'off'}`} key=${k}>
+        <div class="prov-head"><div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint} · keys at ${m.url}</div></div>
+          ${st && st.configured ? html`<span class=${`status-dot ${st.reachable === false ? 'bad' : st.reachable ? 'good' : ''}`}
+            title=${st.error || ''}>${st.reachable === false ? 'Key rejected / unreachable' : st.reachable ? `${st.models_listed} models available` : 'Not checked yet'}</span>` : null}
+          <${Toggle} on=${on} label=${`Use ${m.name}`} onChange=${(v) => setProviders({ llm: { [k]: v } })} /></div>
+        <${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />
+      </div>`;
+    })}</div>
+    <h3 class="sub-title">Model for each task</h3>
+    <p class="muted small">The chosen model is tried first; if it's busy, rate limited or unavailable the next one in the list takes over automatically. Free-tier limits are shown for each model.</p>
+    ${md ? html`<div class="form-grid">${Object.entries(md.chains).map(([key, ch]) => html`<${Field} label=${ch.name}>${(id) => html`<${Select} id=${id} block label=${ch.name}
+        value=${ch.selected} onChange=${(v) => setModel(key, v)}
+        options=${ch.options.map((mid) => { const m = md.all_models.find((x) => x.id === mid) || { name: mid, limits: {} };
+          return [mid, `${m.name}${m.reason ? ` — ${m.reason}` : ''}`, fmtLimit(m.limits || {})]; })} />`}</${Field}>`)}</div>`
+      : models.status === 'error' ? html`<${ErrorBox} message=${models.error} />` : html`<${Skeleton} lines=${3} />`}
+  </section>`;
+}
+
+function SearchSection({ d }) {
+  const order = d.providers.search_order;
+  const move = (p, dir) => {
+    const i = order.indexOf(p); const j = i + dir;
+    if (j < 0 || j >= order.length) return;
+    const next = order.slice(); [next[i], next[j]] = [next[j], next[i]];
+    setProviders({ search_order: next });
+  };
+  return html`<section class="set-section"><h2>Web search</h2>
+    <p class="muted small">Providers are asked in this order. Turn any off; DuckDuckGo needs no key and is the safety net.</p>
+    <div class="field" style=${{ margin: '12px 0 16px' }}><span class="field-label">Strategy</span>
+      <${Seg} label="Search strategy" options=${STRATEGIES.map(([k, l]) => [k, l])} value=${d.providers.search_strategy} onChange=${(v) => setProviders({ search_strategy: v })} />
+      <span class="field-hint">${(STRATEGIES.find((x) => x[0] === d.providers.search_strategy) || STRATEGIES[0])[2]}</span></div>
+    <div class="prov-list">${order.map((k, idx) => { const m = SEARCH_META[k]; if (!m) return null;
+      const on = d.providers.search[k] !== false;
+      return html`<div class=${`prov-card ${on ? '' : 'off'}`} key=${k}>
+        <div class="prov-head"><span class="order-n">${idx + 1}</span>
+          <div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint}</div></div>
+          <div class="order-btns"><button type="button" class="icon-btn" aria-label=${`Move ${m.name} up`} disabled=${idx === 0} onClick=${() => move(k, -1)}><${Icon} name="back" size=${14} /></button>
+            <button type="button" class="icon-btn" aria-label=${`Move ${m.name} down`} disabled=${idx === order.length - 1} onClick=${() => move(k, 1)}><${Icon} name="next" size=${14} /></button></div>
+          <${Toggle} on=${on} label=${`Use ${m.name}`} onChange=${(v) => setProviders({ search: { [k]: v } })} /></div>
+        ${m.field ? html`<${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />` : null}
+      </div>`; })}</div>
+    <div class="stack" style=${{ gap: '4px', marginTop: '16px' }}>
+      <label class="switch"><input type="checkbox" checked=${d.enable_web_search_apis} onChange=${(e) => saveSettings({ enable_web_search_apis: e.currentTarget.checked })} /><span class="switch-ui"></span> Use keyed search APIs (off = DuckDuckGo only)</label>
+      <label class="switch"><input type="checkbox" checked=${d.strict_zero_spend_protection} onChange=${(e) => saveSettings({ strict_zero_spend_protection: e.currentTarget.checked })} /><span class="switch-ui"></span> Zero-spend protection (never exceed a provider's free allowance)</label>
+    </div>
+  </section>`;
+}
+
+function TuningSection({ d }) {
+  const [t, setT] = useState(d.tunables);
+  const dirty = JSON.stringify(t) !== JSON.stringify(d.tunables);
+  const num = (k, label, hint, step = 1) => html`<${Field} label=${label} hint=${hint}>${(id) => html`<input id=${id} class="input" type="number" step=${step} value=${t[k]}
+    onInput=${(e) => setT({ ...t, [k]: e.currentTarget.value })} />`}</${Field}>`;
+  return html`<section class="set-section"><h2>Search tuning</h2><p class="muted small">Loaded from your .env file; saving writes them back.</p>
+    <div class="form-grid">
+      ${num('max_jobs_per_search', 'Jobs analysed per search', '5–200. More jobs = longer searches and more AI calls.')}
+      ${num('max_llm_jd_extractions_per_search', 'Deep AI reads per search', 'How many postings get a full AI read.')}
+      ${num('fetch_timeout_s', 'Page fetch timeout (s)', 'How long to wait for a job page.', 0.5)}
+      ${num('exa_search_num_results', 'Exa results per query', '1–50')}
+      <${Field} label="Tavily depth">${(id) => html`<${Select} id=${id} block label="Tavily depth" value=${t.tavily_search_depth}
+        onChange=${(v) => setT({ ...t, tavily_search_depth: v })} options=${[['basic', 'Basic', '1 credit'], ['advanced', 'Advanced', '2 credits']]} />`}</${Field}>
+      <div class="field"><span class="field-label">Browser agent window</span>
+        <label class="switch"><input type="checkbox" checked=${!!t.browser_use_headless} onChange=${(e) => setT({ ...t, browser_use_headless: e.currentTarget.checked })} /><span class="switch-ui"></span> Run headless (streamed here)</label></div>
+    </div>
+    <div class="row gap"><${Button} variant="primary" disabled=${!dirty} onClick=${() => saveSettings({ tunables: t })}>Save</${Button}>
+      <${Button} disabled=${!dirty} onClick=${() => setT(d.tunables)}>Discard</${Button}></div>
+  </section>`;
+}
+
+function DataSection() {
+  const db = useStore((s) => s.db);
+  useEffect(() => { loadDbHealth(); }, []);
+  const r = db.data;
+  return html`<section class="set-section"><div class="row space"><h2>Data & database</h2>
+      <div class="row gap"><${Button} size="sm" icon="download" onClick=${backupDb}>Back up</${Button}>
+        <${Button} size="sm" icon="refresh" busy=${db.status === 'refreshing'} onClick=${repairDb}>Check & repair</${Button}></div></div>
+    <p class="muted small">The database is checked every time JobHunterX starts; damaged files are set aside and recovered automatically.</p>
+    ${db.status === 'error' ? html`<${ErrorBox} message=${db.error} onRetry=${loadDbHealth} />` : null}
+    ${r ? html`<div class="health">
+      <div class=${`health-badge h-${r.status}`}><${Icon} name=${r.status === 'ok' ? 'check' : 'alert'} size=${16} />${r.status === 'ok' ? 'Healthy' : r.status === 'warn' ? 'Needs attention' : 'Problems found'}
+        <span class="muted small">schema v${r.schema_version || '?'} · ${(r.size_bytes / 1048576).toFixed(1)} MB · ${Object.entries(r.counts || {}).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(' · ')}</span></div>
+      ${r.preflight && r.preflight.status === 'recovered' ? html`<${Notice} tone="warning">${r.preflight.detail}</${Notice}>` : null}
+      <ul class="health-list">${r.checks.map((c) => html`<li key=${c.name} class=${`h-${c.status}`}><span class="h-dot"></span><strong>${c.name}</strong><span class="muted small">${c.detail}</span></li>`)}</ul>
+    </div>` : db.status !== 'error' ? html`<${Skeleton} lines=${4} />` : null}
+    <h3 class="sub-title">Clean up</h3>
+    <div class="row gap wrap"><${Button} onClick=${() => clearJobs('unsaved')}>Clear unsaved jobs</${Button}><${Button} onClick=${() => clearJobs('all')}>Clear all jobs</${Button}>
+      <${Button} variant="danger" onClick=${resetEverything}>Reset everything</${Button}></div>
   </section>`;
 }
 
 const SETTINGS_SECTIONS = [
-  { key: 'keys', label: 'API keys', icon: 'key' }, { key: 'search', label: 'Search', icon: 'search' },
-  { key: 'models', label: 'AI models', icon: 'spark' }, { key: 'usage', label: 'Usage', icon: 'chart' },
-  { key: 'agent', label: 'Auto-apply', icon: 'globe' }, { key: 'look', label: 'Appearance', icon: 'sun' },
-  { key: 'data', label: 'Data', icon: 'shield' },
+  { key: 'ai', label: 'AI providers', icon: 'spark' }, { key: 'search', label: 'Web search', icon: 'search' },
+  { key: 'tuning', label: 'Search tuning', icon: 'sliders' }, { key: 'usage', label: 'Usage', icon: 'chart' },
+  { key: 'profiles', label: 'Profiles', icon: 'user' }, { key: 'agent', label: 'Auto-apply', icon: 'globe' },
+  { key: 'look', label: 'Appearance', icon: 'sun' }, { key: 'data', label: 'Data', icon: 'shield' },
 ];
 
 export function SettingsView() {
@@ -259,38 +393,38 @@ export function SettingsView() {
   const usage = useStore((s) => s.usage);
   const mode = useStore((s) => s.pipelineMode);
   const theme = useStore((s) => s.theme);
-  const [sec, setSec] = useState('keys');
+  const motion = useStore((s) => s.motion);
+  const [sec, setSec] = useState('ai');
   const d = st.data;
+  const needData = ['ai', 'search', 'tuning'].includes(sec);
   const body = () => {
+    if (needData && !d) return st.status === 'error' ? html`<${ErrorBox} message=${st.error} onRetry=${loadSettings} />` : html`<${Skeleton} lines=${6} />`;
     switch (sec) {
-      case 'keys': return d ? html`<${KeysForm} data=${d} />` : st.status === 'error' ? html`<${ErrorBox} message=${st.error} />` : html`<${Skeleton} lines=${6} />`;
-      case 'search': return d ? html`<section class="set-section"><h2>Search</h2>
-        <label class="switch"><input type="checkbox" checked=${d.enable_web_search_apis} onChange=${(e) => saveSettings({ enable_web_search_apis: e.currentTarget.checked })} /><span class="switch-ui"></span> Use web search APIs (otherwise only the free DuckDuckGo fallback)</label>
-        <label class="switch"><input type="checkbox" checked=${d.strict_zero_spend_protection} onChange=${(e) => saveSettings({ strict_zero_spend_protection: e.currentTarget.checked })} /><span class="switch-ui"></span> Zero-spend protection (never exceed free allowances)</label>
-        <div style=${{ maxWidth: '340px', marginTop: '18px' }}><${Field} label="Primary search provider">${(id) => html`<${Select} id=${id} block label="Primary search provider"
-          value=${d.primary_search_provider} onChange=${(v) => saveSettings({ primary_search_provider: v })} options=${d.search_providers.map((p) => [p, humanize(p)])} />`}</${Field}></div>
-      </section>` : html`<${Skeleton} lines=${4} />`;
-      case 'models': return html`<section class="set-section"><h2>AI models</h2><p class="muted small">Pick the preferred first model for each task. If it is unavailable, the next one in the chain is used automatically.</p>
-        ${models.data ? html`<div class="form-grid">${Object.entries(models.data.chains).map(([key, ch]) => html`<${Field} label=${ch.name}>${(id) => html`<${Select} id=${id} block label=${ch.name} value=${ch.selected} onChange=${(v) => setModel(key, v)}
-          options=${ch.options.map((m, i) => [m, (models.data.all_models.find((x) => x.id === m) || {}).name || m, i === 0 ? 'Default first choice' : `Fallback ${i}`])} />`}</${Field}>`)}</div>`
-          : models.status === 'error' ? html`<${ErrorBox} message=${models.error} />` : html`<${Skeleton} lines=${3} />`}</section>`;
+      case 'ai': return html`<${AiSection} d=${d} models=${models} />`;
+      case 'search': return html`<${SearchSection} d=${d} />`;
+      case 'tuning': return html`<${TuningSection} key=${JSON.stringify(d.tunables)} d=${d} />`;
       case 'usage': return html`<section class="set-section"><div class="row space"><h2>Usage</h2><${Button} size="sm" icon="refresh" busy=${usage.status === 'refreshing'} onClick=${loadUsage}>Refresh</${Button}></div>
         ${usage.data ? html`<table class="checks"><thead><tr><th>Model</th><th>Calls</th><th>Tokens</th></tr></thead><tbody>
           ${usage.data.llm.rows.map((r) => html`<tr><td>${r.label}</td><td>${fmtNum(r.calls)}</td><td>${fmtNum(r.total_tokens)}</td></tr>`)}
           ${!usage.data.llm.rows.length ? html`<tr><td colspan="3" class="muted">No AI calls yet.</td></tr>` : null}</tbody></table>
-          <p class="muted small">Gemma today: ${usage.data.gemma_budget.requests_today} / ${usage.data.gemma_budget.requests_cap} requests.</p>` : usage.status === 'error' ? html`<${ErrorBox} message=${usage.error} />` : html`<${Skeleton} lines=${3} />`}</section>`;
+          <p class="muted small">Gemma today: ${usage.data.gemma_budget.requests_today} / ${usage.data.gemma_budget.requests_cap} requests (${usage.data.gemma_budget.model}).</p>`
+          : usage.status === 'error' ? html`<${ErrorBox} message=${usage.error} />` : html`<${Skeleton} lines=${3} />`}</section>`;
+      case 'profiles': return html`<${PeopleManager} />`;
       case 'agent': return html`<section class="set-section"><h2>Auto-apply mode</h2>
         <${Seg} label="Pipeline mode" options=${[['manual', 'Manual'], ['automatic', 'Automatic']]} value=${mode.mode} onChange=${setPipelineMode} />
         <p class="muted small" style=${{ marginTop: '12px' }}>Manual: the agent only applies when you click Auto-apply on a job.</p></section>`;
       case 'look': return html`<section class="set-section"><h2>Appearance</h2>
-        <${Seg} label="Theme" options=${[['light', 'Light'], ['dark', 'Dark']]} value=${theme} onChange=${setTheme} /></section>`;
-      default: return html`<section class="set-section"><h2>Data</h2><p class="muted small">Clearing jobs keeps your profile and documents. Reset removes everything.</p>
-        <div class="row gap wrap"><${Button} onClick=${() => clearJobs('unsaved')}>Clear unsaved jobs</${Button}><${Button} onClick=${() => clearJobs('all')}>Clear all jobs</${Button}>
-          <${Button} variant="danger" onClick=${resetEverything}>Reset everything</${Button}></div></section>`;
+        <div class="field"><span class="field-label">Theme</span><${Seg} label="Theme" options=${[['light', 'Light'], ['dark', 'Dark']]} value=${theme} onChange=${setTheme} /></div>
+        <div class="field" style=${{ marginTop: '16px' }}><span class="field-label">Motion</span>
+          <${Seg} label="Motion" options=${[['full', 'Full'], ['reduced', 'Reduced'], ['system', 'Follow system']]} value=${motion} onChange=${setMotion} />
+          <span class="field-hint">${motion === 'system' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'Your system currently asks for reduced motion (Windows: Settings → Accessibility → Visual effects → Animation effects), so animations are minimal.'
+            : 'Full keeps every animation; Reduced keeps only loading indicators.'}</span></div></section>`;
+      default: return html`<${DataSection} />`;
     }
   };
   return html`<div class="view view-settings">
-    <${PageHead} title=${html`Settings`} sub="Keys, search providers, AI model preferences and usage." />
+    <${PageHead} title=${html`Settings`} sub="Providers, keys, search behaviour, profiles and data — all in one place." />
     <div class="split split-settings">
       <nav class="pane card set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map((x) => html`<button type="button" key=${x.key}
         class=${`set-link ${sec === x.key ? 'active' : ''}`} aria-current=${sec === x.key ? 'true' : undefined} onClick=${() => setSec(x.key)}>

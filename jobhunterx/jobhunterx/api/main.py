@@ -64,8 +64,23 @@ async def lifespan(app: FastAPI):
 
     # Init database (+ v2 migrations); runs left "running" by a dead process are marked failed
     set_db_path(str(settings.db_full_path))
-    await init_db()
+    from jobhunterx import db_health
+    from jobhunterx.config import app_state
+    from jobhunterx.config import models as model_catalog
+    pre = await db_health.preflight(str(settings.db_full_path))   # recover a damaged file before opening it
+    if pre["status"] == "recovered":
+        log.error("database_recovered", detail=pre["detail"])
+    await init_db()                                                # create / migrate schema (idempotent)
+    await app_state.load(str(settings.db_full_path))               # seed defaults, load preferences
+    await storage.heal_active_person()
+    try:
+        health = await db_health.check(str(settings.db_full_path), repair=True)
+        log.info("database_health", status=health["status"], schema=health["schema_version"], **health["counts"])
+    except Exception as exc:          # a health check must never stop the app from starting
+        log.warning("database_health_check_failed", error=str(exc)[:200])
     await storage.mark_interrupted_runs()
+    # learn which models each configured provider offers (non-blocking)
+    asyncio.create_task(model_catalog.refresh_available())
 
     # Ensure directories
     settings.cache_full_path

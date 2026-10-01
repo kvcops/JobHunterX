@@ -271,6 +271,8 @@ class CandidateSnapshot(BaseModel):
     profile_hash: str
     total_years: float = 0.0
     professional_years: float = 0.0             # excludes internships
+    internship_years: float = 0.0               # internship time not overlapping professional work
+    experience_breakdown: list[dict] = Field(default_factory=list)   # per role: role, company, start, end, months, kind
     years_source: str = "unknown"               # dates | override | stated | unknown
     seniority: Seniority = Seniority.ENTRY
     role_families: list[RoleFamilyFit] = Field(default_factory=list)

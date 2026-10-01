@@ -2,9 +2,10 @@ import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { uploadResume, saveProfile, loadProfile } from '../actions.js';
 import {
-  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHead, Stat, Seg, Select, ScanDoc, RotatingText, EmptyState,
+  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHead, Stat, Seg, Select, AutoTextarea, ScanDoc, RotatingText, EmptyState,
 } from '../components/ui.js';
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
+import { ExperienceSummary } from '../components/experience.js';
 import { WORK_MODES, WORK_MODE_LABEL, SENIORITIES, YEARS_SOURCE_LABEL, humanize } from '../lib/format.js';
 
 function UploadButton() {
@@ -31,12 +32,13 @@ function Understanding({ snap }) {
     <div class="dna-head"><div><h2>How JobHunterX understands you</h2><p class="muted small">Derived from your profile. Every skill is checked against what you actually wrote.</p></div>
       <${Badge} tone=${snap.method === 'llm' ? 'success' : 'warning'}>${snap.method === 'llm' ? 'AI analysis' : 'Basic (AI unavailable)'}</${Badge}></div>
     <div class="stats">
-      <${Stat} label="Experience" value=${`${snap.professional_years} yrs`} hint=${YEARS_SOURCE_LABEL[snap.years_source]} />
       <${Stat} label="Level" value=${humanize(snap.seniority)} />
       <${Stat} label="Education" value=${humanize(snap.education_level)} />
       <${Stat} label="Locations" value=${snap.locations.map((p) => p.city || p.country).join(', ') || 'Not set'}
         hint=${`${snap.work_modes.map((m) => WORK_MODE_LABEL[m]).join(' · ')}${snap.willing_to_relocate ? ' · open to relocation' : ''}`} />
     </div>
+    <h3 class="sec-title" style=${{ marginTop: '20px' }}>Experience · ${YEARS_SOURCE_LABEL[snap.years_source] || ''}</h3>
+    <${ExperienceSummary} snap=${snap} />
     <h3 class="sec-title" style=${{ marginTop: '20px' }}>Career tracks</h3>
     <div class="tracks">${snap.role_families.map((f) => html`<div class="track" title=${f.evidence}>
       <div class="row space"><span>${f.label}</span><span class="track-pct">${Math.round(f.closeness * 100)}%</span></div><${Meter} value=${f.closeness} tone="ink" /></div>`)}</div>
@@ -53,7 +55,7 @@ function Understanding({ snap }) {
 function TextField({ draft, path, label, set, type = 'text', hint, textarea, wide }) {
   const v = getIn(draft, path);
   return html`<${Field} label=${label} hint=${hint} wide=${wide}>${(id) => textarea
-    ? html`<textarea id=${id} class="input" rows="4" value=${v || ''} onInput=${(e) => set(path, e.currentTarget.value)}></textarea>`
+    ? html`<${AutoTextarea} id=${id} rows=${3} value=${v || ''} onInput=${(e) => set(path, e.currentTarget.value)} />`
     : html`<input id=${id} class="input" type=${type} value=${v === null || v === undefined ? '' : v}
         onInput=${(e) => set(path, type === 'number' ? (e.currentTarget.value === '' ? null : Number(e.currentTarget.value)) : e.currentTarget.value)} />`}</${Field}>`;
 }
@@ -66,9 +68,9 @@ function ListEditor({ draft, set, path, fields, empty, title }) {
         <button type="button" class="icon-btn" aria-label=${`Remove ${title.toLowerCase()} ${i + 1}`} onClick=${() => set(path, items.filter((_, j) => j !== i))}><${Icon} name="trash" size=${16} /></button></div>
       <div class="form-grid">
         ${fields.map((f) => f.kind === 'lines'
-          ? html`<${Field} label=${f.label} hint="One per line" wide>${(id) => html`<textarea id=${id} class="input" rows="5" value=${(it[f.key] || []).join('\n')}
+          ? html`<${Field} label=${f.label} hint="One per line" wide>${(id) => html`<${AutoTextarea} id=${id} rows=${3} value=${(it[f.key] || []).join('\n')}
               onInput=${(e) => set([...path, i, f.key], e.currentTarget.value.split('\n'))}
-              onBlur=${(e) => set([...path, i, f.key], e.currentTarget.value.split('\n').map((x) => x.trim()).filter(Boolean))}></textarea>`}</${Field}>`
+              onBlur=${(e) => set([...path, i, f.key], e.currentTarget.value.split('\n').map((x) => x.trim()).filter(Boolean))} />`}</${Field}>`
           : f.kind === 'chips'
             ? html`<${Field} label=${f.label} wide><${ChipsInput} label=${f.label} value=${it[f.key] || []} onChange=${(v) => set([...path, i, f.key], v)} /></${Field}>`
             : html`<${TextField} draft=${draft} path=${[...path, i, f.key]} label=${f.label} set=${set} textarea=${f.kind === 'text'} wide=${f.kind === 'text'} />`)}

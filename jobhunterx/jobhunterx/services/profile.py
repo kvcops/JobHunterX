@@ -20,8 +20,15 @@ async def get_profile() -> Optional[CandidateProfile]:
     return CandidateProfile.model_validate(raw)
 
 
+_PLACEHOLDER_NAMES = {"", "my profile", "new profile", "profile"}
+
+
 async def save_profile(profile: CandidateProfile) -> CandidateProfile:
+    pid = await storage.ensure_active_person(profile.name)
     await db.insert_profile(profile.model_dump(mode="json"))
+    person = await storage.get_person(pid)
+    if person and profile.name.strip() and person["name"].strip().lower() in _PLACEHOLDER_NAMES:
+        await storage.rename_person(pid, profile.name)   # "New profile" becomes the person's real name
     return profile
 
 
@@ -33,11 +40,15 @@ async def get_snapshot(profile: CandidateProfile, *, use_llm: bool = True) -> Ca
     """
     h = profile.content_hash()
     cached = await storage.get_snapshot(h)
+    if cached and profile.experience and not cached.experience_breakdown:
+        cached = None          # snapshot from an older release: rebuild (the AI answer itself is cached)
     if cached and (cached.method == "llm" or not use_llm):
         return cached
     lock = _locks.setdefault(h, asyncio.Lock())
     async with lock:
         cached = await storage.get_snapshot(h)
+        if cached and profile.experience and not cached.experience_breakdown:
+            cached = None
         if cached and (cached.method == "llm" or not use_llm):
             return cached
         snap = await build_snapshot(profile, use_llm=use_llm)

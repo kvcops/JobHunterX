@@ -8,6 +8,7 @@ import { DiscoverView } from './views/discover.js';
 import { ProfileView } from './views/profile.js';
 import { DocumentsView } from './views/documents.js';
 import { OnboardingView } from './views/onboarding.js';
+import { PeoplePicker, ProfileSwitcher } from './views/people.js';
 import { TrackerView, BrowserView, InterventionsView, SettingsView } from './views/other.js';
 
 // Ordered the way the work flows: who you are → what fits → what you send → where it stands.
@@ -56,11 +57,8 @@ function BootError() {
 function Sidebar() {
   const route = useStore((s) => s.route);
   const theme = useStore((s) => s.theme);
-  const conn = useStore((s) => s.conn);
   const runActive = useStore((s) => !!(s.search.run && ['queued', 'running'].includes(s.search.run.status)));
   const ivCount = useStore((s) => s.interventions.items.length);
-  const name = useStore((s) => (s.profile.envelope && s.profile.envelope.profile ? s.profile.envelope.profile.name : ''));
-  const initials = (name || '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '—';
   // One highlight that glides to the active item instead of jumping.
   const groupsRef = useRef();
   const [ind, setInd] = useState(null);
@@ -93,9 +91,7 @@ function Sidebar() {
           ${n.page === 'interventions' && ivCount ? html`<span class="nav-count">${ivCount}</span>` : null}</a></li>`)}</ul>
       </div>`)}</div>
       <div class="sidebar-foot">
-        <a class="me" href="#/profile" title=${name || 'Your profile'}><span class="avatar">${initials}</span>
-          <span class="me-text"><strong>${name || 'Your profile'}</strong>
-          <span class=${`conn conn-${conn}`}>${conn === 'open' ? 'Live' : conn === 'reconnecting' ? 'Reconnecting…' : 'Offline'}</span></span></a>
+        <${ProfileSwitcher} />
         <button type="button" class="icon-btn theme-btn" aria-label=${`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick=${() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
           <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} size=${17} /></button>
       </div>
@@ -120,9 +116,11 @@ function AppShell() {
 function Root() {
   const phase = useStore((s) => s.app.phase);
   const theme = useStore((s) => s.theme);
+  const motion = useStore((s) => s.motion);
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => { document.documentElement.dataset.motion = motion; }, [motion]);
   return html`<${Ambient} />
-    ${phase === 'booting' ? html`<${Splash} />` : phase === 'error' ? html`<${BootError} />` : phase === 'onboarding' ? html`<${OnboardingView} />` : html`<${AppShell} />`}
+    ${phase === 'booting' ? html`<${Splash} />` : phase === 'error' ? html`<${BootError} />` : phase === 'pick' ? html`<${PeoplePicker} />` : phase === 'onboarding' ? html`<${OnboardingView} />` : html`<${AppShell} />`}
     <${ConfirmDialog} /><${Toasts} />`;
 }
 

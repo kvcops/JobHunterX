@@ -311,3 +311,22 @@ client sends `{type:"mouse"|"wheel"|"keyboard", ...}` input events.
 `GET /api/interventions`, `POST /api/interventions/{id}/resolve`, `POST /api/interventions/{job_id}/focus`,
 `POST /api/resume-agent {job_id, action}`, `POST /api/stop-browser`,
 `POST /api/browser/takeover?job_id=`, `POST /api/browser/release?job_id=`, `GET /api/screenshots/{job_id}`.
+
+
+## Additions (profiles, providers, health)
+
+| Method & path | Purpose |
+|---|---|
+| `POST /api/profile/upload?background=1` | Start reading a resume; returns `{upload}` at once. Progress arrives as `profile.upload` events (`stage`: extracting → understanding → done / failed). |
+| `GET /api/profile/upload/{id}` | Upload status + result (polling fallback / after reconnect). |
+| `GET /api/people` | `{people: [{id, name, headline, location, jobs, saved, has_profile, last_used_at}], active}` |
+| `POST /api/people` `{name}` | Create a profile and make it active (cancels a running search). |
+| `POST /api/people/{id}/activate` | Switch the active profile. Emits `people.changed`. |
+| `PATCH /api/people/{id}` `{name}` / `DELETE /api/people/{id}` | Rename / delete a profile and everything it owns. |
+| `GET /api/settings` | Masked keys with `*_source` (".env file" / "system environment"), provider switches, search order & strategy, tunables. |
+| `POST /api/settings` | Keys, flags and `tunables` (written back to `.env`). |
+| `POST /api/providers` | `{llm: {google: bool…}, search: {tavily: bool…}, search_order: [...], search_strategy: "fallback"\|"spread"\|"combine"}` |
+| `GET /api/models?refresh=1` | Providers (configured / enabled / reachable), chains, catalog with limits and `reason` a model is unusable. `refresh` re-asks each provider's `/models`. |
+| `GET /api/system/health` · `POST /api/system/repair` · `POST /api/system/backup` | Database checks, repairs, and a consistent backup (VACUUM INTO). |
+
+Every jobs, documents and search-run query is scoped to the active profile.

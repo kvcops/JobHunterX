@@ -106,25 +106,31 @@ def _profile_text(p: CandidateProfile) -> str:
     return "\n".join(x for x in parts if x)
 
 
-def _experience_years(p: CandidateProfile, internships: set[int], excluded: set[int]) -> tuple[float, float, list[str]]:
+def _experience_years(p: CandidateProfile, internships: set[int], excluded: set[int]) -> tuple[float, float, list[str], list[dict]]:
+    """Total (incl. internships) and professional years from dates, overlaps merged; plus a per-role breakdown."""
     today = date.today()
-    all_iv, pro_iv, notes = [], [], []
+    all_iv, pro_iv, notes, rows = [], [], [], []
     for i, e in enumerate(p.experience):
+        kind = "excluded" if i in excluded else "internship" if i in internships else "professional"
+        row = {"role": e.role, "company": e.company, "start": e.start, "end": e.end or "Present", "kind": kind, "months": None}
+        rows.append(row)
         s = parse_month(e.start)
         if not s:
             if e.start or e.end:
                 notes.append(f"Could not read dates for '{e.role} @ {e.company}' ({e.start} – {e.end}); not counted.")
+            row["kind"] = "undated"
             continue
         end = parse_month(e.end)
         if end is None:
             end = today        # "Present", "Current", empty → ongoing
         end = min(end, today)
+        row["months"] = max(0, (end.year - s.year) * 12 + end.month - s.month + 1)
         if i in excluded:
             continue
         all_iv.append((s, end))
         if i not in internships:
             pro_iv.append((s, end))
-    return merged_years(all_iv), merged_years(pro_iv), notes
+    return merged_years(all_iv), merged_years(pro_iv), notes, rows
 
 
 def _skill_strength(forms: list[str], p: CandidateProfile) -> tuple[float, list[str]]:
@@ -194,7 +200,7 @@ async def build_snapshot(profile: CandidateProfile, use_llm: bool = True) -> Can
     internships = {x.index for x in u.experiences if x.is_internship}
     internships |= {i for i, e in enumerate(profile.experience) if (e.employment_type or "").lower() == "internship"}
     excluded = {x.index for x in u.experiences if x.is_academic_or_volunteer}
-    total, professional, date_notes = _experience_years(profile, internships, excluded)
+    total, professional, date_notes, breakdown = _experience_years(profile, internships, excluded)
     notes += date_notes
 
     prefs = profile.preferences
@@ -240,6 +246,8 @@ async def build_snapshot(profile: CandidateProfile, use_llm: bool = True) -> Can
         profile_hash=profile.content_hash(),
         total_years=total if source == "dates" else years,
         professional_years=years,
+        internship_years=round(max(0.0, total - professional), 1) if source == "dates" else 0.0,
+        experience_breakdown=breakdown,
         years_source=source,
         seniority=seniority,
         role_families=families,

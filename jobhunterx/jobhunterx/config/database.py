@@ -228,9 +228,10 @@ async def insert_profile(data: dict) -> str:
     profile_id = _new_id()
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
+        from jobhunterx.config import app_state
         await db.execute(
-            "INSERT INTO profiles (id, data_json, created_at) VALUES (?, ?, ?)",
-            (profile_id, json.dumps(data), _now_iso()),
+            "INSERT INTO profiles (id, data_json, created_at, person_id) VALUES (?, ?, ?, ?)",
+            (profile_id, json.dumps(data), _now_iso(), app_state.get("people.active")),
         )
         await db.commit()
     return profile_id
@@ -240,12 +241,19 @@ async def get_latest_profile() -> Optional[dict]:
     """Return the most recently stored profile or None."""
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
+        from jobhunterx.config import app_state
+        pid = app_state.get("people.active")
+        if not pid:
+            return None
         cursor = await db.execute(
-            "SELECT data_json FROM profiles ORDER BY created_at DESC LIMIT 1"
+            "SELECT data_json FROM profiles WHERE person_id = ? ORDER BY created_at DESC LIMIT 1", (pid,)
         )
         row = await cursor.fetchone()
         if row:
-            return json.loads(row["data_json"])
+            try:
+                return json.loads(row["data_json"])
+            except ValueError:
+                log.warning("profile_row_corrupt_skipped")
     return None
 
 

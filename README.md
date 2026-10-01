@@ -20,8 +20,8 @@
 </p>
 
 <p align="center">
-  <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemma_4_26B-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
-  <a href="https://groq.com"><img src="https://img.shields.io/badge/Llama_3.3_70B-Groq-F55036?style=for-the-badge&logo=meta&logoColor=white" /></a>
+  <a href="https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api"><img src="https://img.shields.io/badge/Gemma_4_31B-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
+  <a href="https://groq.com"><img src="https://img.shields.io/badge/GPT--OSS_·_Kimi_K2_·_Qwen-Groq-F55036?style=for-the-badge" /></a>
   <a href="https://mistral.ai"><img src="https://img.shields.io/badge/Mistral_Large-Mistral-FF7000?style=for-the-badge&logo=mistral&logoColor=white" /></a>
   
 </p>
@@ -103,11 +103,14 @@ Every screen fits the window — lists, details and editors scroll inside their 
 Dark theme is one click away.
 
 <div align="center">
+<img src="assets/ui_picker.png" alt="Profile picker" width="90%"/>
+<br/><sub><i>Returning? Pick a profile — each one keeps its own resume, matches, tracker and documents</i></sub>
+<br/><br/>
 <img src="assets/ui_onboarding.png" alt="One-time onboarding" width="90%"/>
 <br/><sub><i>First run — a one-time, 4-step setup: upload your resume → check what was understood → set preferences → first search</i></sub>
 <br/><br/>
 <img src="assets/ui_onboarding_review.png" alt="What we understood" width="90%"/>
-<br/><sub><i>"Here's how we see you" — computed experience, level, career tracks and verified skills, editable before you continue</i></sub>
+<br/><sub><i>"Here's how we see you" — total vs professional vs internship experience with every role, contact details and current location</i></sub>
 <br/><br/>
 <img src="assets/ui_discover.png" alt="Discover — mission control" width="90%"/>
 <br/><sub><i>Live search — progress %, elapsed time, which agent is working right now, and a plain-English activity feed of what is happening (“AI Engineer at Acme is live and accepting applications”)</i></sub>
@@ -127,6 +130,9 @@ Dark theme is one click away.
 <img src="assets/ui_browser.png" alt="Auto-apply agent" width="90%"/>
 <br/><sub><i>Auto-apply agent — a live browser window with LIVE badge and take-over mode, plus agent status, current step and an activity timeline</i></sub>
 <br/><br/>
+<img src="assets/ui_settings.png" alt="Settings" width="90%"/>
+<br/><sub><i>Settings — turn providers on/off, add or replace keys (loaded from .env), pick a model per task with its free-tier limits</i></sub>
+<br/><br/>
 <img src="assets/ui_mobile.png" alt="Mobile" width="280"/>
 <br/><sub><i>Fully responsive — on phones the sidebar becomes a floating bottom bar</i></sub>
 </div>
@@ -137,6 +143,10 @@ Dark theme is one click away.
 |---|---|
 | **Flow** | Lifecycle-driven: boot splash → one-time onboarding (resumes where you left off after a reload) → app. Sidebar is ordered like the work: Profile → Discover → Documents → Tracker |
 | **No long scrolling** | Split workspaces (list ⇄ detail, library ⇄ preview, nav ⇄ settings); options live in popovers, sections in tabs |
+| **Profiles** | Several people (or personas) on one install: a "Who's searching?" picker on start, a switcher in the sidebar; each profile has its own resume, preferences, matches, tracker and documents |
+| **Setup** | One-time 5-step onboarding: resume (background read with live stages) → about you (experience **total vs professional vs internships**, contact, current location) → goals (many titles and cities, remote / relocation / abroad) → pay & availability (current & expected CTC, minimum salary, notice period) → first search |
+| **Providers** | Turn each AI or web-search provider on/off, reorder search providers, choose a search strategy (fallback · spread · combine), add or replace keys — values loaded from `.env` are shown with their source |
+| **Database health** | Checked on every start (integrity, schema version, search index, orphans, ownership) and repaired automatically; damaged files are set aside in `data/backups/` and recovered; one-click backup in Settings → Data |
 | **Live progress** | Real-time percentage and timer, agent rail (Profile analyst → Planner → Scout → Reader → Curator → Verifier → Analyst → Ranker) with the active agent "typing", and a human-readable activity feed generated from what the pipeline actually did — filterable by verdicts and issues, survives reloads |
 | **Motion** | Signature orbit loader for live search, resume "scan" animation while reading, springy sliding tab and sidebar indicators, count-up numbers, self-drawing score rings, staggered list entrances, glow on freshly streamed jobs, shimmer skeletons, page transitions via the View Transitions API (with CSS fallback) |
 | **Design system** | Quiet white cards on a warm canvas, a single orange accent, bundled fonts (Geist · Instrument Serif · Geist Mono — no CDN at runtime), light + dark themes, full `prefers-reduced-motion` support |
@@ -218,108 +228,73 @@ is rejected and your original text is kept. The Documents view shows each change
 
 ## 🤖 LLM Models & Provider Architecture
 
-JobHunterX uses a **multi-provider LLM router** (`llm_router.py`) with automatic failover, per-provider rate limiting, disk caching, and concurrency semaphores. Here's every model in the system:
+One router (`config/llm_router.py`) sends every AI call through a **task chain**: the first usable model answers, and the
+next one takes over if it is busy, rate limited, turned off or not on your account. The model catalog, chains and free-tier
+limits live in `config/models.py`.
 
 ```mermaid
 graph LR
-    subgraph Google["☁️ Google AI Studio (Free Tier)"]
-        G1["gemma-4-26b-a4b-it"]
+    subgraph Google["☁️ Google AI Studio"]
+        G1["gemma-4-31b-it"]
         G2["gemini-3.5-flash-lite"]
-        G3["gemma-4-27b-it"]
     end
-
-    subgraph Groq["⚡ Groq (Free Tier)"]
-        GR1["llama-3.3-70b-versatile"]
-        GR2["gpt-oss-120b"]
-        GR3["gpt-oss-20b"]
+    subgraph Groq["⚡ Groq"]
+        GR1["openai/gpt-oss-120b"]
+        GR2["moonshotai/kimi-k2-instruct-0905"]
+        GR3["qwen/qwen3.6-27b"]
+        GR4["openai/gpt-oss-20b"]
     end
-
-    subgraph Mistral["🌀 Mistral AI (Free Tier)"]
-        M1["mistral-large-latest"]
+    subgraph Mistral["🌀 Mistral"]
+        M1["mistral-medium-latest"]
+        M2["mistral-small-latest"]
     end
-
-    G1 -->|fallback| G2
-    G2 -->|fallback| GR1
-    GR1 -->|fallback| M1
-    M1 -->|fallback| G3
+    G1 -->|fallback| G2 -->|fallback| GR1 -->|fallback| M1
 
     classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px;
     classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px;
     classDef mistral fill:#FF7000,stroke:#cc5a00,color:#fff,stroke-width:2px;
-
-    class G1,G2,G3 google;
-    class GR1,GR2,GR3 groq;
-    class M1 mistral;
+    class G1,G2 google;
+    class GR1,GR2,GR3,GR4 groq;
+    class M1,M2 mistral;
 ```
 
-### Fallback Chains by Task
+### Task chains
 
-| Chain Name | Purpose | Model Sequence |
-|:-----------|:--------|:---------------|
-| `fast` | Quick operations (search planning, scoring) | Gemma 4 26B → Gemini 3.5 Flash Lite |
-| `reasoning` | Deep analysis (validation, match evaluation) | Gemma 4 26B → Gemini 3.5 Flash Lite |
-| `tailoring` | Resume rewriting & bullet transforms | Gemma 4 26B → Gemini 3.5 Flash Lite |
-| `extraction` | PDF resume parsing & profile construction | Gemma 4 26B → Gemini 3.5 Flash Lite |
-| `browser` | Browser agent form-filling decisions | Gemini 3.5 Flash Lite |
-| Browser fallback | When primary browser LLM fails | Llama 3.3 70B (Groq) → Mistral Large → Gemma 4 27B |
+| Task (Settings label) | Chain | Model order |
+|:--|:--|:--|
+| Quick tasks | `fast` | Gemma 4 31B → Gemini 3.5 Flash Lite → GPT-OSS 20B → Qwen3.6 27B / Qwen3 32B → Mistral Small |
+| Matching & analysis | `reasoning` | Gemma 4 31B → Gemini 3.5 Flash Lite → GPT-OSS 120B → Kimi K2 → Mistral Medium |
+| Resume & letter writing | `tailoring` | Gemma 4 31B → Gemini 3.5 Flash Lite → Kimi K2 → GPT-OSS 120B → Mistral Medium |
+| Resume reading | `extraction` | Gemma 4 31B → Gemini 3.5 Flash Lite → GPT-OSS 120B → Qwen3.6 27B / Qwen3 32B → Mistral Medium |
+| Browser agent | `browser` | Gemini 3.5 Flash Lite → GPT-OSS 120B → Mistral Small (→ Gemma 4 31B) |
 
-<br/>
+Llama models are deliberately not used. In **Settings → AI providers** you can turn any provider off, add or replace its key,
+pick the first model for each task, and press **Check available models** — the app asks each provider's `/models`
+endpoint with your key and skips models your account cannot call.
 
-### 💳 Rate Limiting & Budget Control
+### 💳 Free-tier limits the router respects
 
-<details open>
-<summary><b>🟢 Google AI Studio (Free Tier)</b></summary>
-<br/>
+Each model gets its own limiter: requests are spaced to its **RPM**, a rolling one-minute window keeps it under **TPM**, and
+daily **RPD / TPD** counters stop using it for the day once spent (the chain moves on). A 429 also puts the provider in a
+short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
+`MODEL_LIMITS_JSON={"gemini/gemma-4-31b-it": {"rpm": 30, "rpd": 14400}}` — limits differ per account and change often.
 
-| Model ID | RPM Limit | Min Delay | TPM Limit | RPD Limit (Requests Per Day) |
-|:---------|:----------|:----------|:----------|:-----------------------------|
-| **Gemma 4 26B** (`gemma-4-26b-a4b-it`) | 30 RPM | 2.0s | 16K TPM | **14,400 RPD** (14.4K req/day) |
-| **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`) | 15 RPM | 4.0s | 250K TPM | **500 RPD** (500 req/day) |
-
-</details>
-
-<details>
-<summary><b>⚡ Groq Cloud (Free Tier)</b></summary>
-<br/>
-
-| Model ID | RPM | RPD (Requests/Day) | TPM | TPD (Tokens/Day) |
-|:---------|:----|:-------------------|:----|:-----------------|
-| `llama-3.1-8b-instant` | 30 RPM | **14.4K RPD** | 6K TPM | 500K TPD |
-| `llama-3.3-70b-versatile` | 30 RPM | **1K RPD** | 12K TPM | 100K TPD |
-| `openai/gpt-oss-120b` | 30 RPM | **1K RPD** | 8K TPM | 200K TPD |
-| `openai/gpt-oss-20b` | 30 RPM | **1K RPD** | 8K TPM | 200K TPD |
-| `qwen/qwen3.6-27b` | 30 RPM | **1K RPD** | 8K TPM | 200K TPD |
-| `meta-llama/llama-prompt-guard-2-22m/86m` | 30 RPM | **14.4K RPD** | 15K TPM | 500K TPD |
-
-</details>
-
-<details>
-<summary><b>🌀 Mistral AI (Updated August 2026)</b></summary>
-<br/>
-
-| Model ID | RPS Limit | Approx RPM | TPM Limit | Category / Purpose |
-|:---------|:----------|:-----------|:----------|:-------------------|
-| `codestral-2508` | 2.08 RPS | ~125 RPM | 625K TPM | Code Generation & Agent Tooling |
-| `codestral-embed` | 1.00 RPS | 60 RPM | 50K TPM | Code Embeddings |
-| `devstral-2512` | 0.83 RPS | ~50 RPM | 1M TPM | Developer Agent Tasks |
-| `labs-leanstral-1-5-1` | 0.63 RPS | ~38 RPM | 5M TPM | Experimental / High Throughput |
-| `ministral-14b-2512` | 0.50 RPS | 30 RPM | 937.5K TPM | Edge / Fast Reasoning |
-| `ministral-3b-2512` | 12.50 RPS | 750 RPM | 1.3M TPM | Ultra-fast Micro Decisions |
-| `ministral-8b-2512` | 3.13 RPS | ~188 RPM | 625K TPM | High-Speed Lightweight Agent |
-| `mistral-embed-2312` | 1.00 RPS | 60 RPM | 20M TPM | Text Embeddings |
-| `mistral-large-2512` | 0.07 RPS | ~4 RPM | 250K TPM | Heavy Reasoning Fallback |
-| `mistral-medium-2505` | 0.42 RPS | ~25 RPM | 375K TPM | Mid-tier Reasoning |
-| `mistral-medium-2508` | 0.38 RPS | ~23 RPM | 356.25K TPM | Mid-tier Reasoning |
-| `mistral-medium-latest` | 0.83 RPS | ~50 RPM | 25K TPM | General Tasks |
-| `mistral-moderation-2603` | 1.67 RPS | ~100 RPM | 50K TPM | Content Moderation Guard |
-| `mistral-small-2603` | 0.83 RPS | ~50 RPM | 50K TPM | Fast General Fallback |
-
-</details>
-
-<br/>
+| Provider | Model | RPM | Per day | TPM | Notes |
+|:--|:--|:--|:--|:--|:--|
+| Google AI Studio | `gemma-4-31b-it` | 15 | 1,500 req | — | Gemma runs on the Gemini API ([guide](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api)); no system role, so instructions are sent inline |
+| Google AI Studio | `gemini-3.5-flash-lite` | 15 | 500 req | 250K | Fast; primary for the browser agent |
+| Groq | `openai/gpt-oss-120b` | 30 | 1K req · 200K tok | 8K | Reasoning effort set to low |
+| Groq | `moonshotai/kimi-k2-instruct-0905` | 60 | 1K req · 300K tok | 10K | Strong writing |
+| Groq | `qwen/qwen3.6-27b` · `qwen/qwen3-32b` | 30 · 60 | 1K req | 8K · 6K | Reasoning trace hidden |
+| Groq | `openai/gpt-oss-20b` | 30 | 1K req · 200K tok | 8K | Light and fast |
+| Mistral | `mistral-medium-latest` | 50 | — | 25K | Free plan limits are per account (Admin console → Limits) |
+| Mistral | `mistral-small-latest` | 50 | — | 50K | |
+| Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
 
 > [!NOTE]
-> **Gemma Budget System** (`gemma.py`): Enforces a hard daily cap of **14,400 requests/day** (14.4K RPD) and 30 RPM on `gemma-4-26b-a4b-it` to stay strictly within Google AI Studio's free tier. State is tracked in-memory. When the budget is exhausted, the other models in each chain take over; if no model is available, analysis falls back to the candidate's own data and is clearly marked as partial in the UI.
+> **Why you may see `500 INTERNAL` from Gemma:** Google occasionally returns a momentary internal error. The Gemma client
+> (`config/gemma.py`) retries with exponential backoff and jitter; if it keeps failing, the chain moves to the next model.
+> Resume upload runs in the background with live progress, so a slow free-tier call never times out the page.
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -518,9 +493,11 @@ LOG_LEVEL=INFO
 
 > [!TIP]
 > **Getting API keys (all free):**
-> - **Google AI Studio**: [aistudio.google.com](https://aistudio.google.com/) — Create key → Use Gemma 4 & Gemini 3.5 Flash Lite
-> - **Groq**: [console.groq.com](https://console.groq.com/) — Free tier with Llama 3.3 70B
-> - **Mistral**: [console.mistral.ai](https://console.mistral.ai/) — Free tier with Mistral Large
+> - **Google AI Studio**: [aistudio.google.com](https://aistudio.google.com/) — Create key → Gemma 4 31B & Gemini 3.5 Flash Lite
+> - **Groq**: [console.groq.com](https://console.groq.com/) — Free tier with GPT-OSS, Kimi K2 and Qwen
+> - **Mistral**: [console.mistral.ai](https://console.mistral.ai/) — Free plan with Mistral Medium / Small / Large
+>
+> Keys can also be added later in **Settings → AI providers / Web search** (they are written to `.env`).
 
 ### ④ Launch 🚀
 

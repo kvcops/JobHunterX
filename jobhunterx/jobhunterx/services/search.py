@@ -74,7 +74,7 @@ def new_run(profile_hash: str) -> dict:
         "counts": {k: 0 for k in ("queries", "search_results", "candidates", "duplicates", "fetched", "invalid",
                                   "scored", "recommended", "rejected")},
         "plan": None, "error": None, "profile_hash": profile_hash,
-        "total": 0, "activity": [],
+        "total": 0, "activity": [], "person_id": storage.active_person(),
     }
 
 

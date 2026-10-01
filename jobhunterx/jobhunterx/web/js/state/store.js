@@ -21,12 +21,23 @@ function readTheme() {
   return 'light';   // light-first design; dark is opt-in
 }
 
+function readMotion() {
+  try {
+    const m = localStorage.getItem('jhx-motion');
+    if (m === 'full' || m === 'reduced' || m === 'system') return m;
+  } catch { /* storage unavailable */ }
+  return 'full';   // animations on by default; "Follow system" is available in Settings → Appearance
+}
+
 export function initialState() {
   return {
     route: parseHash(),
     theme: readTheme(),
-    // App lifecycle: booting -> (onboarding | ready); 'error' when the backend cannot be reached.
+    // App lifecycle: booting -> (pick | onboarding | ready); 'error' when the backend cannot be reached.
     app: { phase: 'booting', error: null },
+    motion: readMotion(),
+    // Switchable profiles (people). `switching` holds the id being opened.
+    people: { status: 'idle', items: [], active: null, error: null, switching: null },
     // One-time setup flow. `dir` drives the slide direction of step transitions.
     onboarding: { step: 'upload', dir: 1 },
     conn: 'connecting',
@@ -34,7 +45,7 @@ export function initialState() {
     profile: {
       status: 'idle', envelope: null, error: null,
       saving: false, saveError: null, saveDetails: [],
-      upload: { status: 'idle', error: null, extraction: null, fileName: '' },
+      upload: { status: 'idle', stage: 'idle', id: null, error: null, extraction: null, fileName: '', startedAt: 0 },
     },
     search: {
       activeRunId: null, run: null, starting: false, startError: null, lastRequest: null,
@@ -59,6 +70,7 @@ export function initialState() {
     interventions: { status: 'idle', items: [], error: null },
     settings: { status: 'idle', data: null, error: null },
     models: { status: 'idle', data: null, error: null },
+    db: { status: 'idle', data: null, error: null },
     usage: { status: 'idle', data: null, error: null },
     pipelineMode: { status: 'idle', mode: null, error: null },
   };

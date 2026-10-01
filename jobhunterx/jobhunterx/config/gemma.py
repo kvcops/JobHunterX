@@ -1,11 +1,12 @@
 """
 JobHunterX — Gemma direct calling + budget tracker (Google AI Studio)
 
-Gemma models return 503s through LiteLLM on the free tier, so we call
-`google.genai` directly. This module manages the free-tier in-memory daily budget:
-15k RPD / 30 RPM without writing temporary JSON files to disk.
+Gemma runs on the Gemini API (see Google's "Gemma on Gemini API" guide). It has
+no system role, so instructions are sent inline. Calls go through `google.genai`
+directly; the router spaces requests to the model's RPM (config/models.py) and
+this module tracks the daily request budget and retries transient 5xx errors.
 
-Model: gemma-4-26b-a4b-it (thinkingLevel=minimal).
+Default model: gemma-4-31b-it (override with GEMMA_MODEL in .env).
 """
 
 from __future__ import annotations
@@ -21,15 +22,15 @@ from jobhunterx.config.settings import get_settings
 
 log = get_logger("gemma")
 
-MODEL = "gemma-4-26b-a4b-it"
+MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
 
-# Free-tier hard limits (Google AI Studio Free Tier: Gemma 4 26B)
-# Limits: 30 RPM / 16K TPM / 14.4K RPD (14,400 Requests Per Day)
-DEFAULT_DAILY_REQUESTS = 14400
-DEFAULT_RPM = 30
+# Free-tier limits for Gemma 4 31B on Google AI Studio (see config/models.py; editable via MODEL_LIMITS_JSON)
+DEFAULT_DAILY_REQUESTS = 1500
+DEFAULT_RPM = 15
 
-# Inter-request minimum gap for Google AI Studio Free Tier (2.0s respects 30 RPM)
-_MIN_INTERVAL_S = 2.0
+# Spacing is enforced by the router's per-model budget; this is only a floor between retries.
+_MIN_INTERVAL_S = 0.5
+_TRANSIENT = ("500", "502", "503", "504", "429", "RESOURCE_EXHAUSTED", "INTERNAL", "UNAVAILABLE", "DEADLINE", "overloaded")
 
 _tokens_used = 0
 _requests_today = 0
@@ -54,8 +55,8 @@ def _load_state() -> None:
 
 
 def _daily_rpd_cap() -> int:
-    settings = get_settings()
-    return int(getattr(settings, "gemma_daily_requests", None) or getattr(settings, "gemma_daily_tokens", None) or DEFAULT_DAILY_REQUESTS)
+    from jobhunterx.config.models import limits
+    return int(limits(f"gemini/{MODEL}").get("rpd") or getattr(get_settings(), "gemma_daily_requests", None) or DEFAULT_DAILY_REQUESTS)
 
 
 def _daily_cap() -> int:
@@ -63,8 +64,8 @@ def _daily_cap() -> int:
 
 
 def _rpm_cap() -> int:
-    settings = get_settings()
-    return int(getattr(settings, "gemma_rpm", None) or DEFAULT_RPM)
+    from jobhunterx.config.models import limits
+    return int(limits(f"gemini/{MODEL}").get("rpm") or getattr(get_settings(), "gemma_rpm", None) or DEFAULT_RPM)
 
 
 def budget_status() -> dict:
@@ -81,7 +82,7 @@ def budget_status() -> dict:
         "tokens_cap": rpd_cap,  # backward compatibility alias
         "requests_remaining": max(0, rpd_cap - _requests_today),
         "rpm_cap": rpm,
-        "tpm_cap": 16000,
+        "tpm_cap": None,
         "exhausted": _requests_today >= rpd_cap,
     }
 
@@ -110,6 +111,7 @@ async def call_gemma(
     system: str,
     user: str,
     *,
+    model: str | None = None,
     max_tokens: int = 1024,
     temperature: float | None = None,
     thinking_level: str = "minimal",
@@ -142,6 +144,7 @@ async def call_gemma(
         from google import genai
         _genai_client = genai.Client(api_key=api_key)
 
+    model = model or MODEL
     cfg = {"thinkingConfig": {"thinkingLevel": thinking_level}}
     if temperature is not None:
         cfg["temperature"] = temperature
@@ -150,8 +153,8 @@ async def call_gemma(
 
     async def _run_with_ratelimit() -> tuple[str, int, int]:
         global _last_request_mono
-        max_retries = 3
-        backoff = 3.0
+        max_retries = 4
+        backoff = 2.0
 
         for attempt in range(max_retries):
             async with _rate_lock_():
@@ -163,7 +166,7 @@ async def call_gemma(
 
                 def _sync_call() -> tuple[str, int, int]:
                     response = _genai_client.models.generate_content(
-                        model=MODEL,
+                        model=model,
                         contents=f"SYSTEM INSTRUCTIONS:\n{system}\n\nUSER:\n{user}",
                         config=cfg,
                     )
@@ -184,10 +187,16 @@ async def call_gemma(
                     return await asyncio.to_thread(_sync_call)
                 except Exception as exc:
                     err_str = str(exc)
-                    is_transient = any(code in err_str for code in ["500", "503", "429", "RESOURCE_EXHAUSTED", "INTERNAL"])
+                    if "thinking" in err_str.lower() and "thinkingConfig" in cfg:
+                        cfg.pop("thinkingConfig", None)        # model doesn't accept a thinking level: retry without it
+                        continue
+                    is_transient = any(code in err_str for code in _TRANSIENT)
                     if is_transient and attempt < max_retries - 1:
-                        log.warning("gemma_transient_error_retry", attempt=attempt+1, error=err_str[:120], backoff_s=backoff)
-                        await asyncio.sleep(backoff)
+                        # Google's 500 INTERNAL on Gemma is usually momentary; back off with jitter and retry.
+                        import random
+                        delay = backoff + random.uniform(0, backoff / 2)
+                        log.warning("gemma_transient_error_retry", attempt=attempt + 1, error=err_str[:120], backoff_s=round(delay, 1))
+                        await asyncio.sleep(delay)
                         backoff *= 2
                         continue
                     raise
@@ -213,7 +222,7 @@ async def call_gemma(
                 event_type="llm_call",
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
-                model=f"gemini/{MODEL}",
+                model=f"gemini/{model}",
                 latency_ms=round(latency_ms, 1),
             )
     except Exception as exc:

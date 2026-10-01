@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#f4f3f0" />
   <script>
     (function () {
-      var t = 'light'; try { t = localStorage.getItem('jhx-theme') || 'light'; } catch (e) {} document.documentElement.dataset.theme = t;
+      var t = 'light', m = 'full'; try { t = localStorage.getItem('jhx-theme') || 'light'; m = localStorage.getItem('jhx-motion') || 'full'; } catch (e) {} document.documentElement.dataset.theme = t; document.documentElement.dataset.motion = m;
     })();
   </script>
 </head>

@@ -51,10 +51,12 @@ function SearchBar() {
     <${Popover} open=${open} onClose=${() => setOpen(false)} label="Search options">
       <div class="stack" style=${{ gap: '14px' }}>
         <${Field} label="Locations" hint="Leave empty to use your profile preferences.">
-          <${ChipsInput} label="Locations" value=${req.locations} onChange=${(v) => setReq((r) => ({ ...r, locations: v }))} placeholder="Add a city…" />
+          <${ChipsInput} label="Locations" value=${req.locations} onChange=${(v) => setReq((r) => ({ ...r, locations: v }))} placeholder="Add a city…"
+            suggestions=${[...((env.profile.preferences || {}).locations || []), ...(snap ? snap.locations.map((p) => p.city) : []), (env.profile.location || '').split(',')[0].trim()]} />
         </${Field}>
         <${Field} label="Focus on roles (optional)">
-          <${ChipsInput} label="Role focus" value=${req.role_focus} onChange=${(v) => setReq((r) => ({ ...r, role_focus: v }))} placeholder=${(snap && snap.target_titles[0]) || 'e.g. a title you want'} />
+          <${ChipsInput} label="Role focus" value=${req.role_focus} onChange=${(v) => setReq((r) => ({ ...r, role_focus: v }))} placeholder=${(snap && snap.target_titles[0]) || 'e.g. a title you want'}
+            suggestions=${snap ? [...snap.target_titles, ...snap.adjacent_titles] : []} />
         </${Field}>
         <div class="field"><span class="field-label">Work mode</span>
           <${Seg} multi label="Work mode" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${req.work_modes} onChange=${(v) => setReq((r) => ({ ...r, work_modes: v }))} /></div>

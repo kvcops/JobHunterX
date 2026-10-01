@@ -141,22 +141,54 @@ class Lead:
     query: str
 
 
-async def run_queries(queries: list[str], per_query: int = 10) -> list[Lead]:
-    router = SearchRouter(config=router_config())
+def _provider_lists(router: SearchRouter, n_queries: int) -> tuple[list[list[str]], str]:
+    """Per-query provider order from the user's settings (order, on/off, strategy)."""
+    from jobhunterx.config import app_state
+    order, strategy = app_state.search_plan()
     if not get_settings().enable_web_search_apis:
-        router.session_disabled.update({k: True for k in router.providers if k != "ddgs"})
+        order = [p for p in order if p == "ddgs"]
+    usable = [p for p in order if p in router.providers
+              and router.providers[p].is_available(router.config, session_disabled=router.session_disabled.get(p, False))]
+    paid, free = [p for p in usable if p != "ddgs"], [p for p in usable if p == "ddgs"]
+    lists = []
+    for i in range(n_queries):
+        if strategy in ("spread", "combine") and paid:
+            k = i % len(paid)
+            rot = paid[k:] + paid[:k]          # each query starts at a different provider: quotas are shared
+        else:
+            rot = list(paid)
+        lists.append(rot + free)
+    return lists, strategy
+
+
+async def run_queries(queries: list[str], per_query: int = 10) -> list[Lead]:
+    """Run planned queries through the enabled search providers.
+
+    fallback — the first provider that returns results answers (fewest calls)
+    spread   — queries rotate across providers, sharing their free quotas
+    combine  — two providers answer each query and results are merged (widest coverage)
+    """
+    router = SearchRouter(config=router_config())
+    lists, strategy = _provider_lists(router, len(queries))
     leads: list[Lead] = []
     seen: set[str] = set()
-    for q in queries:
+    for q, providers in zip(queries, lists):
+        if not providers:
+            continue
+        batches = []
         try:
-            items = await router.execute_query(q, max_results=per_query)
+            batches.append(await router.execute_query(q, max_results=per_query, providers=providers))
+            if strategy == "combine" and len(providers) > 1:
+                answered = batches[0][0].provider if batches[0] else None
+                rest = [p for p in providers if p != answered]
+                batches.append(await router.execute_query(q, max_results=per_query, providers=rest))
         except Exception as exc:
             log.warning("search_query_failed", query=q[:60], error=str(exc)[:120])
-            continue
-        for it in items:
-            key = re.sub(r"[#?].*$", "", (it.url or "").strip().lower()).rstrip("/")
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            leads.append(Lead(url=it.url, title=it.title, snippet=it.snippet, provider=it.provider, query=q))
+        for items in batches:
+            for it in items:
+                key = re.sub(r"[#?].*$", "", (it.url or "").strip().lower()).rstrip("/")
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                leads.append(Lead(url=it.url, title=it.title, snippet=it.snippet, provider=it.provider, query=q))
     return leads

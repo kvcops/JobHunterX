@@ -66,8 +66,11 @@ def browser():
 
 
 @pytest.fixture
-def page(browser):
+def page(browser, server):
     ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    # Returning users see a profile picker once per browser session; tests open the active profile directly.
+    active = json.loads(urllib.request.urlopen(f"{server}/api/people", timeout=10).read())["active"]
+    ctx.add_init_script(f"try {{ sessionStorage.setItem('jhx-picked', '{active}'); }} catch (e) {{}}")
     pg = ctx.new_page()
     pg.errors = []
     pg.on("pageerror", lambda e: pg.errors.append(str(e)))
@@ -244,8 +247,20 @@ def test_onboarding_resumes_at_saved_step_and_advances(page, server):
     assert not page.errors
 
 
+def test_profile_picker_and_switching(browser, server):
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    pg = ctx.new_page()
+    pg.goto(server)
+    expect(pg.get_by_role("heading", name="Welcome back. Who's searching?")).to_be_visible()
+    pg.locator(".person-card").first.click()
+    expect(pg.locator(".view-discover")).to_be_visible()
+    ctx.close()
+
+
 def test_mobile_layout_has_no_horizontal_scroll(browser, server):
     ctx = browser.new_context(viewport={"width": 375, "height": 812})
+    active = json.loads(urllib.request.urlopen(f"{server}/api/people", timeout=10).read())["active"]
+    ctx.add_init_script(f"try {{ sessionStorage.setItem('jhx-picked', '{active}'); }} catch (e) {{}}")
     pg = ctx.new_page()
     for route in ("discover", "profile", "documents", "settings"):
         pg.goto(f"{server}/#/{route}")

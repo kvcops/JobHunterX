@@ -164,7 +164,7 @@ export function JobDetail({ jobId, onClose }) {
             ${job.match ? html`<${Badge} tone=${VERDICT_TONE[job.match.verdict]}>${VERDICT_LABEL[job.match.verdict]}</${Badge}>` : null}
             <${Badge} tone=${VALIDATION_TONE[job.validation.status]}>${VALIDATION_LABEL[job.validation.status]}</${Badge}>
             ${job.match && job.match.experience ? html`<span class="muted small">${experienceText(job.match.experience)}</span>` : null}
-            ${job.posted_at ? html`<span class="muted small">· Posted ${fmtDate(job.posted_at)}</span>` : null}
+            ${job.posted_at ? html`<span class="muted small">Posted ${fmtDate(job.posted_at)}</span>` : null}
           </div>
         </div>
       </div>

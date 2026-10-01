@@ -28,100 +28,81 @@ from jobhunterx.config.settings import get_settings
 log = get_logger("llm_router")
 
 # ---------------------------------------------------------------------------
-# Provider-specific reasoning configuration.
+# Models: catalog, chains and limits live in config/models.py; user choices in app_state.
 # ---------------------------------------------------------------------------
+import re as _re
 
-THINKING_MODELS = {
-    "groq/openai/gpt-oss-120b",
-    "groq/openai/gpt-oss-20b",
-}
+from jobhunterx.config import app_state
+from jobhunterx.config import models as M
 
-# Models that use reasoning_effort parameter (Groq GPT-OSS)
+# Groq GPT-OSS models take a reasoning_effort parameter; keep it low for free-tier latency.
 REASONING_EFFORT_MODELS = {"groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"}
-
-# Do not inject LiteLLM thinking into Mistral: the provider rejects it for these IDs.
+# Qwen3 on Groq: hide the reasoning trace so callers only see the answer.
+HIDDEN_REASONING_MODELS = {"groq/qwen/qwen3-32b", "groq/qwen/qwen3.6-27b"}
+THINKING_MODELS = REASONING_EFFORT_MODELS | HIDDEN_REASONING_MODELS
 THINKING_PARAM_MODELS: set[str] = set()
 
-# Provider → model fallback chains using updated August 2026 model IDs.
-# Google AI Studio models (Gemma 4 26B, Gemini 3.5 Flash Lite) are primary;
-# Groq (Llama 3.3 70B, Llama 3.1 8B) and Mistral (mistral-small-2603, mistral-large-2512, codestral-2508)
-# provide cross-provider failover.
-FALLBACK_CHAINS: Dict[str, List[str]] = {
-    "fast": [
-        "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.5-flash-lite",
-        "groq/llama-3.1-8b-instant",
-        "mistral/mistral-small-2603",
-    ],
-    "reasoning": [
-        "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.5-flash-lite",
-        "groq/llama-3.3-70b-versatile",
-        "mistral/mistral-large-2512",
-    ],
-    "tailoring": [
-        "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.5-flash-lite",
-        "groq/llama-3.3-70b-versatile",
-        "mistral/codestral-2508",
-    ],
-    "extraction": [
-        "gemini/gemma-4-26b-a4b-it",
-        "gemini/gemini-3.5-flash-lite",
-        "groq/llama-3.1-8b-instant",
-        "mistral/mistral-small-2603",
-    ],
-    "browser": [
-        "gemini/gemini-3.5-flash-lite",
-        "groq/llama-3.3-70b-versatile",
-        "mistral/mistral-small-2603",
-    ],
-}
+FALLBACK_CHAINS: Dict[str, List[str]] = M.CHAINS
+_THINK_RE = _re.compile(r"<think>.*?</think>\s*", _re.S | _re.I)
 
-_USER_MODEL_OVERRIDES: Dict[str, str] = {}
+
+def _overrides() -> Dict[str, str]:
+    return app_state.get("llm.overrides") or {}
 
 
 def get_model_config() -> Dict[str, Any]:
-    """Return model config for UI including available providers, active selections, and available choices."""
-    settings = get_settings()
-    providers = {
-        "google": bool(settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")),
-        "groq": bool(settings.groq_api_key or os.getenv("GROQ_API_KEY")),
-        "mistral": bool(settings.mistral_api_key or os.getenv("MISTRAL_API_KEY")),
-    }
-
-    all_models = [
-        {"id": "gemini/gemma-4-26b-a4b-it", "name": "Gemma 4 26B (Google)", "provider": "google"},
-        {"id": "gemini/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite (Google)", "provider": "google"},
-        {"id": "groq/llama-3.3-70b-versatile", "name": "Llama 3.3 70B (Groq)", "provider": "groq"},
-        {"id": "groq/llama-3.1-8b-instant", "name": "Llama 3.1 8B (Groq)", "provider": "groq"},
-        {"id": "mistral/mistral-small-2603", "name": "Mistral Small (Mistral)", "provider": "mistral"},
-        {"id": "mistral/mistral-large-2512", "name": "Mistral Large (Mistral)", "provider": "mistral"},
-        {"id": "mistral/codestral-2508", "name": "Codestral 2508 (Mistral)", "provider": "mistral"},
-    ]
-
-    chains_res = {}
-    for chain_key, default_list in FALLBACK_CHAINS.items():
-        selected = _USER_MODEL_OVERRIDES.get(chain_key) or default_list[0]
-        chains_res[chain_key] = {
-            "name": chain_key.title(),
-            "selected": selected,
-            "default": default_list[0],
-            "options": default_list,
-        }
-
-    return {
-        "providers": providers,
-        "chains": chains_res,
-        "all_models": all_models,
-    }
+    """Model config for the UI: providers (configured/enabled/reachable), chains and every model with its limits."""
+    avail = M.availability()
+    providers = {}
+    for p in app_state.LLM_PROVIDERS:
+        info = avail.get(p)
+        providers[p] = {"configured": bool(M.provider_key(p)), "enabled": app_state.llm_provider_enabled(p),
+                        "reachable": None if info is None else info["ok"], "error": info and info["error"],
+                        "models_listed": info["count"] if info else 0}
+    all_models = []
+    for m in M.CATALOG:
+        listed = M.is_listed(m["id"])
+        reason = _skip_reason(m["id"])
+        all_models.append({"id": m["id"], "name": f"{m['name']} ({m['provider'].title()})", "provider": m["provider"],
+                           "note": m.get("note", ""), "limits": M.limits(m["id"]), "listed": listed,
+                           "usable": reason is None, "reason": reason})
+    over = _overrides()
+    chains = {}
+    for key, default_list in FALLBACK_CHAINS.items():
+        options = list(default_list) + [m["id"] for m in M.CATALOG if m["id"] not in default_list]
+        chains[key] = {"name": M.CHAIN_LABELS.get(key, key.title()), "selected": over.get(key) or default_list[0],
+                       "default": default_list[0], "options": options, "order": _effective_chain(key)}
+    return {"providers": providers, "chains": chains, "all_models": all_models, "budgets": M.budgets_status()}
 
 
-def set_model_config(chain_key: str, model_id: str) -> None:
-    """Override preferred primary model for a specific agent chain."""
+async def set_model_config(chain_key: str, model_id: str) -> None:
+    """Persist the preferred first model for a task chain."""
     if chain_key in FALLBACK_CHAINS:
-        _USER_MODEL_OVERRIDES[chain_key] = model_id
+        over = _overrides()
+        over[chain_key] = model_id
+        await app_state.set("llm.overrides", over)
         log.info("model_override_updated", chain=chain_key, selected_model=model_id)
+
+
+def _effective_chain(chain_name: str) -> List[str]:
+    chain = list(FALLBACK_CHAINS.get(chain_name, FALLBACK_CHAINS["fast"]))
+    override = _overrides().get(chain_name)
+    if override:
+        if override in chain:
+            chain.remove(override)
+        chain.insert(0, override)
+    return chain
+
+
+def _skip_reason(model: str) -> str | None:
+    provider = M.provider_of(model)
+    if not M.provider_key(provider):
+        return "no API key"
+    if not app_state.llm_provider_enabled(provider):
+        return "provider turned off"
+    if M.is_listed(model) is False:
+        return "not available on this account"
+    return M.budget(model).exhausted()
 
 
 # ---------------------------------------------------------------------------
@@ -231,16 +212,9 @@ def _record_provider_success(model: str) -> None:
     _provider_rate_limited_until.pop(provider, None)
 
 
-async def _enforce_rate_limit(model: str) -> None:
-    """Sleep if needed to respect the provider's minimum inter-request delay."""
-    import time as _time
-    provider = _get_provider_key(model)
-    min_delay = _PROVIDER_MIN_DELAY.get(provider, 1.0)
-    now = _time.monotonic()
-    last = _provider_last_request.get(provider, 0.0)
-    target = max(now, last + min_delay)
-    _provider_last_request[provider] = target
-    await asyncio.sleep(max(0.0, target - _time.monotonic()))
+async def _enforce_rate_limit(model: str, est_tokens: int = 1000) -> None:
+    """Respect the model's free-tier RPM / TPM before sending a request."""
+    await M.budget(model).acquire(est_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +276,8 @@ def get_llm_params(model_name: str) -> Dict[str, Any]:
     # Auto-inject reasoning parameters for thinking models
     if model_name in REASONING_EFFORT_MODELS:
         params["reasoning_effort"] = "low"  # Keep fast for free tier
+    elif model_name in HIDDEN_REASONING_MODELS:
+        params["reasoning_format"] = "hidden"
     elif model_name in THINKING_PARAM_MODELS:
         params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
 
@@ -319,9 +295,10 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
     model = params.get("model", "")
     max_attempts = 5
 
+    est = sum(len(str(m.get("content", ""))) for m in params.get("messages", [])) // 4 + int(params.get("max_tokens") or 768)
     for attempt in range(max_attempts):
-        # Enforce per-provider minimum delay between requests
-        await _enforce_rate_limit(model)
+        # Respect the model's RPM / TPM budget
+        await _enforce_rate_limit(model, est)
 
         try:
             result = await litellm.acompletion(**params)
@@ -466,12 +443,14 @@ async def call_llm(
 
     # --- Direct Google GenAI SDK routing for ALL Gemini & Gemma models ---
     if model.startswith("gemini/") or model.startswith("google/") or "gemma" in model:
-        if model in ("gemini/gemma-4-26b-a4b-it", "gemma-4-26b-a4b-it"):
+        if "gemma" in model:
             from jobhunterx.config.gemma import call_gemma
             system_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
             user_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") != "system")
             t0 = time.monotonic()
+            await _enforce_rate_limit(model, (len(system_content) + len(user_content)) // 4 + int(kwargs.get("max_tokens", 1024)))
             content = await call_gemma(
+                model=model.split("/", 1)[-1],
                 system=system_content,
                 user=user_content,
                 max_tokens=kwargs.get("max_tokens", 1024),
@@ -487,8 +466,9 @@ async def call_llm(
                 "cache_hit": False,
             }
         else:
-            await _enforce_rate_limit(model)
+            await _enforce_rate_limit(model, sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024))
             result = await _call_google_genai(model, messages, **kwargs)
+        M.budget(model).record(result["tokens_in"] + result["tokens_out"])
 
         # Log token usage to database
         try:
@@ -536,7 +516,7 @@ async def call_llm(
 
     # --- Extract result ---
     choice = response.choices[0]
-    content = choice.message.content or ""
+    content = _THINK_RE.sub("", choice.message.content or "")
     usage = getattr(response, "usage", None)
     tokens_in = getattr(usage, "prompt_tokens", 0) if usage else 0
     tokens_out = getattr(usage, "completion_tokens", 0) if usage else 0
@@ -554,6 +534,7 @@ async def call_llm(
         "latency_ms": round(latency_ms, 1),
         "cache_hit": False,
     }
+    M.budget(model).record(result["tokens_in"] + result["tokens_out"])
 
     log.info(
         "llm_call",
@@ -608,23 +589,19 @@ async def call_llm_with_fallback(
     Raises:
         Exception: If all models in the chain fail.
     """
-    chain = list(FALLBACK_CHAINS.get(chain_name, FALLBACK_CHAINS["fast"]))
-    override_model = _USER_MODEL_OVERRIDES.get(chain_name)
-    if override_model:
-        if override_model in chain:
-            chain.remove(override_model)
-        chain.insert(0, override_model)
-        
-    settings = get_settings()
+    chain = _effective_chain(chain_name)
+    if not any(M.is_listed(m) is not None for m in chain):
+        try:   # first use: learn which models this account can call (cached for hours)
+            await asyncio.wait_for(M.refresh_available(), timeout=20)
+        except Exception:
+            pass
     last_err: Exception | None = None
+    skipped: list[str] = []
 
     for model in chain:
-        # Skip models whose provider key is missing
-        if model.startswith("gemini/") and not settings.google_api_key:
-            continue
-        if model.startswith("groq/") and not settings.groq_api_key:
-            continue
-        if model.startswith("mistral/") and not settings.mistral_api_key:
+        reason = _skip_reason(model)
+        if reason:
+            skipped.append(f"{model} ({reason})")
             continue
 
         # Skip providers currently in rate-limit cooldown
@@ -640,6 +617,7 @@ async def call_llm_with_fallback(
             log.warning("llm_fallback", model=model, error=str(exc))
             last_err = exc
 
-    raise RuntimeError(
-        f"All models in chain '{chain_name}' failed. Last error: {last_err}"
-    )
+    if last_err is None:
+        raise RuntimeError(f"No AI model is usable for '{chain_name}': " + "; ".join(skipped)
+                           + ". Add an API key or turn a provider on in Settings.")
+    raise RuntimeError(f"All models in chain '{chain_name}' failed. Last error: {last_err}")

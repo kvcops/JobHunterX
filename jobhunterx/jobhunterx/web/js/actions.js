@@ -4,11 +4,20 @@
 import { api, ApiError, isAbortError } from './lib/api.js';
 import { ReconnectingSocket } from './lib/ws.js';
 import {
-  getState, setState, setSlice, setEntry, setPending, parseHash,
+  getState, setState, setSlice, setEntry, setPending, parseHash, initialState,
 } from './state/store.js';
 import { matchesList, sortIds, summaryFromDetail, SUMMARY_SAFE_FIELDS, genKey } from './state/domain.js';
 
-const prefersReducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const prefersReducedMotion = () => {
+  const m = document.documentElement.dataset.motion;
+  if (m === 'reduced') return true;
+  if (m === 'full') return false;
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+};
+export function setMotion(motion) {
+  setState((s) => ({ ...s, motion }));
+  try { localStorage.setItem('jhx-motion', motion); } catch { /* ignore */ }
+}
 /** Run a state change inside a View Transition when the browser supports it (pure enhancement). */
 export function withTransition(apply) {
   if (!document.startViewTransition || prefersReducedMotion() || document.hidden) { apply(); return; }
@@ -66,7 +75,7 @@ function onRoute(route) {
   if (route.page === 'documents') { loadDocuments(); if (route.docId) loadDocument(route.docId); }
   if (route.page === 'tracker') loadTracker();
   if (route.page === 'interventions' || route.page === 'browser') loadInterventions();
-  if (route.page === 'settings') { loadSettings(); loadModels(); loadUsage(); loadPipelineMode(); }
+  if (route.page === 'settings') { loadSettings(); loadModels(); loadUsage(); loadPipelineMode(); loadPeople().catch(() => {}); }
 }
 export function setTheme(theme) {
   setState((s) => ({ ...s, theme }));
@@ -121,7 +130,7 @@ function removeJobs(ids) {
 // ---------------------------------------------------------------------------
 // The step is remembered so a reload in the middle of setup resumes where the user was.
 const ONB_KEY = 'jhx-onboarding';
-const ONB_STEPS = ['upload', 'review', 'prefs', 'launch'];
+const ONB_STEPS = ['upload', 'review', 'prefs', 'pay', 'launch'];
 function readOnb() { try { return localStorage.getItem(ONB_KEY); } catch { return null; } }
 function writeOnb(v) { try { if (v) localStorage.setItem(ONB_KEY, v); else localStorage.removeItem(ONB_KEY); } catch { /* ignore */ } }
 
@@ -157,8 +166,7 @@ function decidePhase() {
 }
 export async function retryBoot() {
   setSlice('app', { phase: 'booting', error: null });
-  await loadProfile();
-  decidePhase();
+  await startSession();
 }
 
 // ---------------------------------------------------------------------------
@@ -177,21 +185,57 @@ export async function loadProfile() {
     setSlice('profile', { status: 'error', error: errorText(err) });
   }
 }
+let uploadPoll = null;
+function finishUpload(up, result) {
+  clearInterval(uploadPoll); uploadPoll = null;
+  if (getState().profile.upload.id !== up.id) return;        // a newer upload replaced this one
+  if (up.status === 'failed') {
+    setSlice('profile', (p) => ({ ...p, upload: { ...p.upload, status: 'error', stage: 'failed', error: up.error || 'Could not read the resume.' } }));
+    return;
+  }
+  const { extraction, ...env } = result || {};
+  setSlice('profile', (p) => ({ ...p, status: 'ready', envelope: result ? env : p.envelope,
+    upload: { ...p.upload, status: 'done', stage: 'done', error: null, extraction: extraction || null } }));
+  loadPeople();
+  const partial = extraction && extraction.status === 'partial';
+  if (getState().app.phase === 'onboarding') setOnboardingStep('review');
+  toast(partial ? 'Resume read — please review the highlighted gaps.' : 'Resume read successfully.', partial ? 'warning' : 'success');
+}
+/** Background upload: the server answers at once and streams stages; we also poll in case a WS event is missed. */
 export async function uploadResume(file) {
   if (!file) return;
   if (getState().profile.upload.status === 'uploading') return;
-  setSlice('profile', (p) => ({ ...p, upload: { status: 'uploading', error: null, extraction: null, fileName: file.name } }));
+  setSlice('profile', (p) => ({ ...p, upload: { status: 'uploading', stage: 'sending', id: null, error: null, extraction: null, fileName: file.name, startedAt: Date.now() } }));
   try {
-    const res = await api.uploadProfile(file);
-    const { extraction, ...env } = res;
-    setSlice('profile', (p) => ({ ...p, status: 'ready', envelope: env, upload: { status: 'done', error: null, extraction, fileName: file.name } }));
-    const partial = extraction && extraction.status === 'partial';
-    if (getState().app.phase === 'onboarding') setOnboardingStep('review');
-    toast(partial ? 'Resume read — please review the highlighted gaps.' : 'Resume read successfully.', partial ? 'warning' : 'success');
+    const { upload } = await api.uploadProfile(file);
+    setSlice('profile', (p) => ({ ...p, upload: { ...p.upload, id: upload.id, stage: upload.stage } }));
+    clearInterval(uploadPoll);
+    uploadPoll = setInterval(async () => {
+      const cur = getState().profile.upload;
+      if (cur.id !== upload.id || cur.status !== 'uploading') { clearInterval(uploadPoll); return; }
+      try {
+        const res = await api.uploadStatus(upload.id);
+        onUploadEvent(res.upload, res.result);
+      } catch { /* transient — keep polling */ }
+    }, 5000);
   } catch (err) {
-    setSlice('profile', (p) => ({ ...p, upload: { status: 'error', error: errorText(err), extraction: null, fileName: file.name } }));
+    setSlice('profile', (p) => ({ ...p, upload: { ...p.upload, status: 'error', stage: 'failed', error: errorText(err) } }));
   }
 }
+function onUploadEvent(up, result) {
+  const cur = getState().profile.upload;
+  if (!up || cur.id !== up.id || cur.status !== 'uploading') return;
+  if (up.status === 'done' || up.status === 'failed') {
+    if (up.status === 'done' && !result) {   // WS event carries no payload: fetch the result once
+      api.uploadStatus(up.id).then((r) => finishUpload(r.upload, r.result)).catch(() => finishUpload(up, null));
+      return;
+    }
+    finishUpload(up, result);
+  } else {
+    setSlice('profile', (p) => ({ ...p, upload: { ...p.upload, stage: up.stage } }));
+  }
+}
+
 export async function saveProfile(profile, { quiet = false } = {}) {
   if (getState().profile.saving) return false;
   setSlice('profile', { saving: true, saveError: null, saveDetails: [] });
@@ -494,12 +538,37 @@ async function loadInto(slice, call) {
 }
 export const loadSettings = () => loadInto('settings', () => api.getSettings());
 export const loadModels = () => loadInto('models', () => api.getModels());
+export const refreshModels = () => loadInto('models', () => api.getModels(true));
+export const loadDbHealth = () => loadInto('db', () => api.dbHealth());
+export async function repairDb() {
+  setSlice('db', { status: 'refreshing' });
+  try {
+    const data = await api.dbRepair();
+    setSlice('db', { status: 'ready', data });
+    toast(data.status === 'ok' ? 'Database is healthy.' : 'Checks finished — see the details.', data.status === 'ok' ? 'success' : 'warning');
+  } catch (err) { setSlice('db', { status: 'error', error: errorText(err) }); }
+}
+export async function backupDb() {
+  try {
+    const { path } = await api.dbBackup();
+    toast(`Backup saved: ${path.split(/[\\/]/).pop()}`, 'success', 7000);
+  } catch (err) { toast(errorText(err), 'danger'); }
+}
+export async function setProviders(body) {
+  try {
+    const data = await api.setProviders(body);
+    setSlice('settings', { status: 'ready', data });
+    if (body.llm) loadModels();
+  } catch (err) { toast(errorText(err), 'danger'); }
+}
 export const loadUsage = () => loadInto('usage', () => api.usage());
 export async function saveSettings(body) {
   try {
     const data = await api.postSettings(body);
     setSlice('settings', { status: 'ready', data });
     toast('Settings saved.', 'success');
+    // a new key triggers a server-side model check; pick up the result shortly after
+    if (Object.keys(body).some((k) => k.endsWith('_api_key'))) setTimeout(loadModels, 3000);
     return true;
   } catch (err) {
     toast(errorText(err), 'danger');
@@ -661,8 +730,18 @@ function onMessage(msg) {
       return;
     }
     case 'profile.updated':
-      if (msg.data) setSlice('profile', { status: 'ready', envelope: msg.data });
+      if (msg.data && getState().app.phase !== 'pick') setSlice('profile', { status: 'ready', envelope: msg.data });
       return;
+    case 'profile.upload':
+      onUploadEvent(msg.data && msg.data.upload, null);
+      return;
+    case 'people.changed': {
+      const active = msg.data && msg.data.active;
+      loadPeople().catch(() => {});
+      // another tab switched profile: follow it so this tab never shows a mix of two people
+      if (active && active !== s.people.active && s.app.phase === 'ready') choosePerson(active);
+      return;
+    }
     case 'log':
       activity(msg.message || '', (msg.data && msg.data.level) || 'info', (msg.data && msg.data.source) || 'server');
       return;
@@ -686,13 +765,127 @@ export function connectSocket() {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
-export async function boot() {
-  connectSocket();
-  initRouting();
-  await Promise.all([loadProfile(), loadCurrentRun(), api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {})]);
+// ---------------------------------------------------------------------------
+// People (switchable profiles) and session start
+// ---------------------------------------------------------------------------
+const PICK_KEY = 'jhx-picked';   // per browser session: which profile the user chose
+function readPicked() { try { return sessionStorage.getItem(PICK_KEY); } catch { return null; } }
+function writePicked(id) { try { if (id) sessionStorage.setItem(PICK_KEY, id); else sessionStorage.removeItem(PICK_KEY); } catch { /* ignore */ } }
+
+export async function loadPeople() {
+  setSlice('people', (p) => ({ ...p, status: p.items.length ? 'refreshing' : 'loading', error: null }));
+  try {
+    const { people, active } = await api.people();
+    setSlice('people', { status: 'ready', items: people, active });
+    return { people, active };
+  } catch (err) {
+    setSlice('people', { status: 'error', error: errorText(err) });
+    throw err;
+  }
+}
+
+/** Forget everything that belongs to the previous person (jobs, runs, documents…). */
+function resetPersonState() {
+  const fresh = initialState();
+  listSeq++; docsSeq++; trackerSeq++;
+  listCtrl?.abort();
+  setState((s) => ({
+    ...s,
+    profile: fresh.profile, search: fresh.search, jobs: fresh.jobs, details: fresh.details, list: fresh.list,
+    pending: fresh.pending, gen: fresh.gen, docs: fresh.docs, docDetails: fresh.docDetails, tracker: fresh.tracker,
+  }));
+}
+
+async function loadSessionData() {
+  await Promise.all([loadProfile(), loadCurrentRun()]);
   decidePhase();
   const run = getState().search.run;
   if (run && ['queued', 'running'].includes(run.status)) setSlice('list', { scope: 'run', runId: run.id });
   loadList();
   loadDocuments();
+  if (getState().route.page === 'tracker') loadTracker();
+}
+
+async function startSession() {
+  let people;
+  try {
+    ({ people } = await loadPeople());
+  } catch (err) {
+    setSlice('app', { phase: 'error', error: errorText(err) });
+    return;
+  }
+  if (!people.length) {                     // first run ever: straight to setup
+    setSlice('profile', { status: 'ready', envelope: { profile: null, snapshot: null, profile_hash: null } });
+    decidePhase();
+    return;
+  }
+  const active = getState().people.active;
+  if (!readPicked() || readPicked() !== active) {   // returning user: ask which profile to open
+    setSlice('app', { phase: 'pick', error: null });
+    return;
+  }
+  await loadSessionData();
+}
+
+export async function choosePerson(id) {
+  if (getState().people.switching) return;
+  setSlice('people', { switching: id });
+  try {
+    if (getState().people.active !== id) await api.activatePerson(id);
+    writePicked(id);
+    setSlice('people', { active: id });
+    resetPersonState();
+    setSlice('app', { phase: 'booting' });   // set synchronously: a deferred transition could land after 'ready'
+    await loadSessionData();
+    loadPeople();
+  } catch (err) {
+    toast(errorText(err), 'danger');
+  } finally {
+    setSlice('people', { switching: null });
+  }
+}
+
+export async function createPerson(name = '') {
+  try {
+    const { active, people } = await api.createPerson(name || 'New profile');
+    writePicked(active);
+    writeOnb('upload');
+    setSlice('people', { items: people, active });
+    resetPersonState();
+    setSlice('profile', { status: 'ready', envelope: { profile: null, snapshot: null, profile_hash: null } });
+    withTransition(() => { setSlice('onboarding', { step: 'upload', dir: 1 }); setSlice('app', { phase: 'onboarding' }); });
+  } catch (err) {
+    toast(errorText(err), 'danger');
+  }
+}
+
+export async function renamePerson(id, name) {
+  try {
+    const { people } = await api.renamePerson(id, name);
+    setSlice('people', { items: people });
+  } catch (err) { toast(errorText(err), 'danger'); }
+}
+
+export async function deletePerson(id) {
+  const person = getState().people.items.find((p) => p.id === id);
+  if (!(await confirmAction({ title: `Delete “${person ? person.name : 'this profile'}”?`,
+    body: 'Its resume, jobs, tracker and documents are deleted. Other profiles are not affected.', confirm: 'Delete profile', tone: 'danger', typeToConfirm: 'DELETE' }))) return;
+  const wasActive = getState().people.active === id;
+  try {
+    const { people, active } = await api.deletePerson(id);
+    setSlice('people', { items: people, active });
+    toast('Profile deleted.', 'success');
+    if (wasActive) {
+      writePicked(null);
+      resetPersonState();
+      await startSession();
+    }
+  } catch (err) { toast(errorText(err), 'danger'); }
+}
+
+export async function boot() {
+  connectSocket();
+  initRouting();
+  api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {});
+  await startSession();
 }

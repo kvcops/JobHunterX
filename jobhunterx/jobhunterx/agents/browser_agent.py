@@ -792,10 +792,12 @@ async def _run_impl(state: dict) -> dict:
             except Exception as exc:
                 return ActionResult(error=f"Email OTP error: {str(exc)}")
 
-        # Primary LLM: gemini-3.5-flash-lite — 250K TPM, 15 RPM, 500 RPD on free tier
-        # (gemma-4-31b-it has only 16K TPM which causes constant 429 RESOURCE_EXHAUSTED)
+        # Primary LLM: gemini-3.5-flash-lite (high TPM suits long page snapshots).
+        # Fallbacks follow config/models.py and respect the provider on/off switches in Settings.
+        from jobhunterx.config import app_state as _app_state
         _settings = get_settings()
-        google_api_key = _settings.google_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        google_api_key = (_settings.google_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) \
+            if _app_state.llm_provider_enabled("google") else None
 
         llm = ChatGoogle(
             model="gemini-3.5-flash-lite",
@@ -805,48 +807,53 @@ async def _run_impl(state: dict) -> dict:
             retry_base_delay=5.0,
             retry_max_delay=60.0,
             retryable_status_codes=[429, 500, 502, 503, 504],
-        )
+        ) if google_api_key else None
 
         # Fallback LLM setup (Groq / Mistral / Gemini Flash) if primary model rate-limits
         fallback_llm = None
-        groq_key = _settings.groq_api_key or os.getenv("GROQ_API_KEY")
-        mistral_key = _settings.mistral_api_key or os.getenv("MISTRAL_API_KEY")
+        groq_key = (_settings.groq_api_key or os.getenv("GROQ_API_KEY")) if _app_state.llm_provider_enabled("groq") else None
+        mistral_key = (_settings.mistral_api_key or os.getenv("MISTRAL_API_KEY")) if _app_state.llm_provider_enabled("mistral") else None
 
         if groq_key and ChatGroq is not None:
             try:
                 fallback_llm = ChatGroq(
-                    model="llama-3.3-70b-versatile",
+                    model="openai/gpt-oss-120b",
                     api_key=groq_key,
                     temperature=0.2,
                     max_retries=10,
                 )
-                log.info("configured_fallback_llm", provider="groq", model="llama-3.3-70b-versatile")
+                log.info("configured_fallback_llm", provider="groq", model="openai/gpt-oss-120b")
             except Exception as f_exc:
                 log.warning("fallback_llm_groq_init_failed", error=str(f_exc))
         if fallback_llm is None and mistral_key and ChatMistral is not None:
             try:
                 fallback_llm = ChatMistral(
-                    model="mistral-small-2603",
+                    model="mistral-small-latest",
                     api_key=mistral_key,
                     temperature=0.2,
                     max_retries=10,
                 )
-                log.info("configured_fallback_llm", provider="mistral", model="mistral-small-2603")
+                log.info("configured_fallback_llm", provider="mistral", model="mistral-small-latest")
             except Exception as f_exc:
                 log.warning("fallback_llm_mistral_init_failed", error=str(f_exc))
         if fallback_llm is None and google_api_key:
             try:
                 fallback_llm = ChatGoogle(
-                    model="gemma-4-27b-it",
+                    model="gemma-4-31b-it",
                     api_key=google_api_key,
                     temperature=0.2,
                     max_retries=10,
                     retry_base_delay=5.0,
                     retry_max_delay=60.0,
                 )
-                log.info("configured_fallback_llm", provider="google", model="gemma-4-27b-it")
+                log.info("configured_fallback_llm", provider="google", model="gemma-4-31b-it")
             except Exception as f_exc:
                 log.warning("fallback_llm_google_init_failed", error=str(f_exc))
+
+        if llm is None:   # Google is off or has no key: promote the first configured fallback
+            llm, fallback_llm = fallback_llm, None
+        if llm is None:
+            raise RuntimeError("No AI provider is available for the browser agent. Add a key or turn a provider on in Settings.")
 
         # Build comprehensive candidate credential memory for the task
         # --- Education History ---

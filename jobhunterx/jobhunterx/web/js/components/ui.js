@@ -46,7 +46,13 @@ export function Icon({ name, size = 18, label }) {
 }
 
 // ---------------------------------------------------------------------------- motion hooks
-const reduced = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Motion preference: html[data-motion] = full | reduced | system (system follows the OS setting).
+export const reduced = () => {
+  const m = document.documentElement.dataset.motion;
+  if (m === 'reduced') return true;
+  if (m === 'full') return false;
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+};
 
 /** Animate a number towards `value` (ease-out cubic). Starts from the previous value, so live counters glide. */
 export function useCountUp(value, ms = 900) {
@@ -179,27 +185,55 @@ export function Monogram({ name, size }) {
   return html`<span class="monogram" style=${{ '--h': h, ...(size ? { width: `${size}px`, height: `${size}px` } : {}) }} aria-hidden="true">${ch}</span>`;
 }
 
-/** Free-text chips (no fixed vocabulary): Enter/comma adds, Backspace removes last. */
-export function ChipsInput({ value = [], onChange, placeholder, label }) {
+/**
+ * Free-text chips (no fixed vocabulary). Enter, comma or Tab adds; pasting "Pune, Hyderabad; Remote" adds all;
+ * Backspace on an empty field removes the last. `suggestions` are one-click additions shown underneath.
+ */
+export function ChipsInput({ value = [], onChange, placeholder, label, suggestions = [], max = 30 }) {
   const [draft, setDraft] = useState('');
+  const inputRef = useRef();
+  const has = (x) => value.some((v) => v.toLowerCase() === x.toLowerCase());
   const add = (raw) => {
-    const parts = raw.split(',').map((x) => x.trim()).filter(Boolean);
+    const parts = String(raw).split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
     const next = [...value];
-    parts.forEach((p) => { if (!next.some((v) => v.toLowerCase() === p.toLowerCase())) next.push(p); });
+    parts.forEach((p) => { if (next.length < max && !next.some((v) => v.toLowerCase() === p.toLowerCase())) next.push(p); });
     if (next.length !== value.length) onChange(next);
     setDraft('');
   };
-  return html`<div class="chips-input">
-    ${value.map((v, i) => html`<span class="chip chip-pop" key=${v}>${v}
-      <button type="button" class="chip-x" aria-label=${`Remove ${v}`} onClick=${() => onChange(value.filter((_, j) => j !== i))}><${Icon} name="x" size=${12} /></button></span>`)}
-    <input aria-label=${label || placeholder} value=${draft} placeholder=${value.length ? '' : placeholder}
-      onInput=${(e) => setDraft(e.currentTarget.value)}
-      onKeyDown=${(e) => {
-        if ((e.key === 'Enter' || e.key === ',') && draft.trim()) { e.preventDefault(); add(draft); }
-        else if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1));
-      }}
-      onBlur=${() => draft.trim() && add(draft)} />
+  const sugg = [...new Map(suggestions.filter((x) => x && String(x).trim()).map((x) => [String(x).trim().toLowerCase(), String(x).trim()])).values()]
+    .filter((x) => !has(x)).slice(0, 8);
+  return html`<div class="chips-wrap">
+    <div class="chips-input" onClick=${(e) => { if (e.target === e.currentTarget) inputRef.current && inputRef.current.focus(); }}>
+      ${value.map((v, i) => html`<span class="chip chip-pop" key=${v}>${v}
+        <button type="button" class="chip-x" aria-label=${`Remove ${v}`} onClick=${() => onChange(value.filter((_, j) => j !== i))}><${Icon} name="x" size=${12} /></button></span>`)}
+      <input ref=${inputRef} aria-label=${label || placeholder} value=${draft} placeholder=${value.length ? 'Add another…' : placeholder}
+        onInput=${(e) => { const v = e.currentTarget.value; if (/[,;]/.test(v)) add(v); else setDraft(v); }}
+        onPaste=${(e) => { const t = (e.clipboardData || window.clipboardData).getData('text'); if (/[,;\n]/.test(t)) { e.preventDefault(); add(t); } }}
+        onKeyDown=${(e) => {
+          if ((e.key === 'Enter' || (e.key === 'Tab' && draft.trim())) && draft.trim()) { e.preventDefault(); add(draft); }
+          else if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1));
+        }}
+        onBlur=${() => draft.trim() && add(draft)} />
+      ${draft.trim() ? html`<button type="button" class="chip-add" onMouseDown=${(e) => e.preventDefault()} onClick=${() => add(draft)}>
+        <${Icon} name="plus" size=${12} /> Add “${draft.trim()}”</button>` : null}
+    </div>
+    ${sugg.length ? html`<div class="chip-suggest" aria-label="Suggestions">${sugg.map((x) => html`<button type="button" key=${x} class="chip chip-ghost"
+      onClick=${() => add(x)}><${Icon} name="plus" size=${11} />${x}</button>`)}</div>` : null}
   </div>`;
+}
+
+/** Textarea that grows with its content (no inner scrollbar, no manual resizing). */
+export function AutoTextarea({ value, onInput, rows = 2, ...rest }) {
+  const ref = useRef();
+  const fit = () => { const el = ref.current; if (!el) return; el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; };
+  useLayoutEffect(fit, [value]);
+  useEffect(() => {
+    if (!window.ResizeObserver || !ref.current) return undefined;
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return html`<textarea ref=${ref} class="input auto-grow" rows=${rows} value=${value} onInput=${(e) => { onInput && onInput(e); fit(); }} ...${rest}></textarea>`;
 }
 
 export function Seg({ options, value, onChange, label, multi }) {

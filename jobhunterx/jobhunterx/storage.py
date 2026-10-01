@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 import aiosqlite
 
+from jobhunterx.config import app_state
 from jobhunterx.config import database as legacy
 from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.documents import GeneratedDocument
@@ -44,7 +45,15 @@ CREATE INDEX IF NOT EXISTS idx_documents_job ON documents(job_id, kind);
 CREATE TABLE IF NOT EXISTS snapshots (
     profile_hash TEXT PRIMARY KEY, data_json TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS people (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
+
+SCHEMA_VERSION = 4
+# Tables whose rows belong to one person (a "profile" in the UI). Every query on them is scoped.
+_PERSON_TABLES = ("profiles", "jobs", "documents", "search_runs")
 
 
 def _now() -> str:
@@ -65,7 +74,139 @@ async def migrate() -> None:
         await db.executescript(_SCHEMA)
         for col in ("fingerprint", "ats_key", "canonical_url", "run_id"):
             await db.execute(f"CREATE INDEX IF NOT EXISTS idx_jobs_{col} ON jobs({col})")
+        # v4: multiple people. Add person_id everywhere, then give legacy rows an owner.
+        for table in _PERSON_TABLES:
+            cur = await db.execute(f"PRAGMA table_info({table})")
+            if "person_id" not in {r[1] for r in await cur.fetchall()}:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN person_id TEXT")
+            await db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_person ON {table}(person_id)")
+        orphans = 0
+        for table in _PERSON_TABLES:
+            orphans += (await (await db.execute(f"SELECT COUNT(*) FROM {table} WHERE person_id IS NULL")).fetchone())[0]
+        if orphans:
+            row = await (await db.execute("SELECT id FROM people ORDER BY COALESCE(last_used_at, created_at) DESC LIMIT 1")).fetchone()
+            pid = row[0] if row else None
+            if pid is None:
+                name = "My profile"
+                prof = await (await db.execute("SELECT data_json FROM profiles ORDER BY created_at DESC LIMIT 1")).fetchone()
+                if prof:
+                    try:
+                        name = (json.loads(prof[0]).get("name") or "").strip() or name
+                    except ValueError:
+                        pass
+                pid = str(uuid.uuid4())
+                await db.execute("INSERT INTO people (id, name, created_at, last_used_at) VALUES (?, ?, ?, ?)", (pid, name, _now(), _now()))
+            for table in _PERSON_TABLES:
+                await db.execute(f"UPDATE {table} SET person_id = ? WHERE person_id IS NULL", (pid,))
+        await db.execute("INSERT INTO schema_meta (key, value) VALUES ('version', ?) "
+                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (str(SCHEMA_VERSION),))
         await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# People (the profiles you can switch between)
+# ---------------------------------------------------------------------------
+
+def active_person() -> Optional[str]:
+    return app_state.get("people.active")
+
+
+def _scope(where: str = "", params: tuple = ()) -> tuple[str, tuple]:
+    """Prefix a WHERE clause with the active person filter."""
+    pid = active_person()
+    clause = "person_id = ?" if pid else "person_id IS NULL"
+    p = (pid,) if pid else ()
+    return (f"{clause} AND ({where})" if where else clause), (*p, *params)
+
+
+async def list_people() -> list[dict]:
+    """Every person with a few facts for the picker (headline, location, job counts)."""
+    async with _conn() as db:
+        db.row_factory = aiosqlite.Row
+        people = [dict(r) for r in await (await db.execute(
+            "SELECT p.*, "
+            "(SELECT COUNT(*) FROM jobs j WHERE j.person_id = p.id) AS jobs, "
+            "(SELECT COUNT(*) FROM jobs j WHERE j.person_id = p.id AND j.saved_at IS NOT NULL) AS saved "
+            "FROM people p ORDER BY COALESCE(p.last_used_at, p.created_at) DESC")).fetchall()]
+        for r in people:
+            row = await (await db.execute("SELECT data_json FROM profiles WHERE person_id = ? ORDER BY created_at DESC LIMIT 1",
+                                          (r["id"],))).fetchone()
+            prof: dict = {}
+            if row:
+                try:
+                    prof = json.loads(row[0])
+                except ValueError:   # a corrupt profile row must never hide the person
+                    prof = {}
+            r["has_profile"] = bool(row)
+            r["headline"] = (prof.get("suggested_role") or "").strip()
+            r["location"] = (prof.get("location") or "").strip()
+    return people
+
+
+async def get_person(pid: str) -> Optional[dict]:
+    async with _conn() as db:
+        db.row_factory = aiosqlite.Row
+        row = await (await db.execute("SELECT * FROM people WHERE id = ?", (pid,))).fetchone()
+        return dict(row) if row else None
+
+
+async def create_person(name: str) -> str:
+    pid = str(uuid.uuid4())
+    async with _conn() as db:
+        await db.execute("INSERT INTO people (id, name, created_at, last_used_at) VALUES (?, ?, ?, ?)",
+                         (pid, (name or "").strip()[:80] or "New profile", _now(), _now()))
+        await db.commit()
+    return pid
+
+
+async def rename_person(pid: str, name: str) -> bool:
+    async with _conn() as db:
+        cur = await db.execute("UPDATE people SET name = ? WHERE id = ?", ((name or "").strip()[:80] or "Profile", pid))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def activate_person(pid: Optional[str]) -> None:
+    if pid:
+        async with _conn() as db:
+            await db.execute("UPDATE people SET last_used_at = ? WHERE id = ?", (_now(), pid))
+            await db.commit()
+    await app_state.set("people.active", pid)
+
+
+async def ensure_active_person(default_name: str = "") -> str:
+    """Return the active person, creating one when the app has none yet (first upload / first save)."""
+    pid = active_person()
+    if pid and await get_person(pid):
+        return pid
+    people = await list_people()
+    pid = people[0]["id"] if people else await create_person(default_name or "My profile")
+    await activate_person(pid)
+    return pid
+
+
+async def heal_active_person() -> None:
+    """At startup: the remembered person may have been deleted — fall back to the most recent one."""
+    pid = active_person()
+    if pid and await get_person(pid):
+        return
+    people = await list_people()
+    await app_state.set("people.active", people[0]["id"] if people else None)
+
+
+async def delete_person(pid: str) -> None:
+    async with _conn() as db:
+        ids = [r[0] for r in await (await db.execute("SELECT id FROM jobs WHERE person_id = ?", (pid,))).fetchall()]
+    for jid in ids:
+        await legacy.delete_job(jid)
+    async with _conn() as db:
+        for table in ("profiles", "documents", "search_runs"):
+            await db.execute(f"DELETE FROM {table} WHERE person_id = ?", (pid,))
+        await db.execute("DELETE FROM people WHERE id = ?", (pid,))
+        await db.commit()
+    if active_person() == pid:
+        await app_state.set("people.active", None)
+        await heal_active_person()
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +220,8 @@ def _ats_key(job: JobPosting) -> str:
 async def find_existing(db, job: JobPosting) -> Optional[str]:
     for col, val in (("ats_key", _ats_key(job)), ("canonical_url", job.canonical_url), ("fingerprint", job.fingerprint)):
         if val:
-            cur = await db.execute(f"SELECT id FROM jobs WHERE {col} = ? LIMIT 1", (val,))
+            where, params = _scope(f"{col} = ?", (val,))
+            cur = await db.execute(f"SELECT id FROM jobs WHERE {where} LIMIT 1", params)
             row = await cur.fetchone()
             if row:
                 return row[0]
@@ -94,7 +236,9 @@ async def save_job(job: JobPosting, match: Optional[MatchAssessment], run_id: Op
         posting_json = job.model_dump_json()
         match_json = match.model_dump_json() if match else None
         url = job.apply_url or job.canonical_url
-        legacy_hash = hashlib.sha256(url.encode()).hexdigest() if url else None
+        pid = active_person()
+        # the legacy UNIQUE hash is per person, so two people can track the same posting
+        legacy_hash = hashlib.sha256(f"{pid or ''}|{url}".encode()).hexdigest() if url else None
         vals = {
             "company": job.company or "Unknown company", "role": job.title, "location": job.location_raw,
             "career_page_url": job.canonical_url, "apply_url": url, "jd_text": job.description,
@@ -122,7 +266,7 @@ async def save_job(job: JobPosting, match: Optional[MatchAssessment], run_id: Op
                                      (*vals.values(), run_id, _now(), job.id))
                     await db.commit()
                     return job.id
-            vals.update({"id": job.id, "apply_url_hash": legacy_hash, "status": "discovered", "run_id": run_id,
+            vals.update({"id": job.id, "apply_url_hash": legacy_hash, "status": "discovered", "run_id": run_id, "person_id": pid,
                          "tracking_status": "new", "created_at": _now(), "updated_at": _now()})
             cols = ", ".join(vals)
             await db.execute(f"INSERT INTO jobs ({cols}) VALUES ({', '.join('?' for _ in vals)})", tuple(vals.values()))
@@ -178,8 +322,8 @@ async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score
     sql = "SELECT id, company, role, location, apply_url, status, posting_json, match_json, run_id, saved_at, " \
           "tracking_status, verdict, fit_score, profile_hash, validation_status, created_at, updated_at, " \
           "(tailored_pdf IS NOT NULL) AS has_legacy_pdf FROM jobs"
-    if where:
-        sql += f" WHERE {where}"
+    where, params = _scope(where, params)
+    sql += f" WHERE {where}"
     sql += f" ORDER BY {order} LIMIT ?"
     async with _conn() as db:
         db.row_factory = aiosqlite.Row
@@ -188,8 +332,9 @@ async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score
 
 
 async def count(where: str = "", params: tuple = ()) -> int:
+    where, params = _scope(where, params)
     async with _conn() as db:
-        cur = await db.execute("SELECT COUNT(*) FROM jobs" + (f" WHERE {where}" if where else ""), params)
+        cur = await db.execute(f"SELECT COUNT(*) FROM jobs WHERE {where}", params)
         return (await cur.fetchone())[0]
 
 
@@ -220,11 +365,9 @@ async def set_tracking(job_id: str, status: str) -> bool:
 
 async def delete_jobs(scope: str) -> int:
     async with _conn() as db:
-        if scope == "all":
-            ids = [r[0] for r in await (await db.execute("SELECT id FROM jobs")).fetchall()]
-        else:
-            ids = [r[0] for r in await (await db.execute(
-                "SELECT id FROM jobs WHERE saved_at IS NULL AND COALESCE(tracking_status,'new') IN ('new','archived')")).fetchall()]
+        where, params = _scope("1 = 1" if scope == "all" else
+                               "saved_at IS NULL AND COALESCE(tracking_status,'new') IN ('new','archived')")
+        ids = [r[0] for r in await (await db.execute(f"SELECT id FROM jobs WHERE {where}", params)).fetchall()]
     for jid in ids:
         await legacy.delete_job(jid)
     if ids:
@@ -241,9 +384,9 @@ async def delete_jobs(scope: str) -> int:
 async def save_run(run: dict) -> None:
     async with _conn() as db:
         await db.execute(
-            "INSERT INTO search_runs (id, status, data_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?) "
+            "INSERT INTO search_runs (id, status, data_json, created_at, updated_at, person_id) VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET status = excluded.status, data_json = excluded.data_json, updated_at = excluded.updated_at",
-            (run["id"], run["status"], json.dumps(run, default=str), run.get("started_at") or _now(), _now()))
+            (run["id"], run["status"], json.dumps(run, default=str), run.get("started_at") or _now(), _now(), run.get("person_id")))
         await db.commit()
 
 
@@ -256,7 +399,8 @@ async def get_run(run_id: str) -> Optional[dict]:
 
 async def latest_run() -> Optional[dict]:
     async with _conn() as db:
-        cur = await db.execute("SELECT data_json FROM search_runs ORDER BY created_at DESC LIMIT 1")
+        where, params = _scope()
+        cur = await db.execute(f"SELECT data_json FROM search_runs WHERE {where} ORDER BY created_at DESC LIMIT 1", params)
         row = await cur.fetchone()
         return json.loads(row[0]) if row else None
 
@@ -304,10 +448,10 @@ async def save_document(doc: GeneratedDocument, pdf: Optional[bytes]) -> str:
     doc.has_pdf = bool(pdf)
     async with _conn() as db:
         await db.execute(
-            "INSERT OR REPLACE INTO documents (id, kind, job_id, title, focus, profile_hash, data_json, pdf, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO documents (id, kind, job_id, title, focus, profile_hash, data_json, pdf, created_at, person_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (doc.id, doc.kind, doc.job_id, doc.title, doc.focus, doc.profile_hash, doc.model_dump_json(), pdf,
-             doc.created_at.isoformat()))
+             doc.created_at.isoformat(), active_person()))
         if doc.kind == "resume" and doc.job_id and pdf:
             # keep the legacy column in sync: the browser agent uploads this file
             await db.execute("UPDATE jobs SET tailored_pdf = ? WHERE id = ?", (pdf, doc.job_id))
@@ -337,9 +481,10 @@ async def list_documents(job_id: Optional[str] = None, kind: Optional[str] = Non
     if kind:
         where.append("kind = ?")
         params.append(kind)
-    sql = "SELECT data_json FROM documents" + (f" WHERE {' AND '.join(where)}" if where else "") + " ORDER BY created_at DESC"
+    w, p = _scope(" AND ".join(where), tuple(params))
+    sql = f"SELECT data_json FROM documents WHERE {w} ORDER BY created_at DESC"
     async with _conn() as db:
-        cur = await db.execute(sql, params)
+        cur = await db.execute(sql, p)
         return [GeneratedDocument.model_validate_json(r[0]) for r in await cur.fetchall()]
 
 

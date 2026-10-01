@@ -128,8 +128,17 @@ export const api = {
   uploadProfile: (file, o) => {
     const form = new FormData();
     form.append('file', file);
-    return request('/profile/upload', { method: 'POST', form, timeout: 120_000, ...o });
+    // background=1: returns at once; progress arrives as `profile.upload` WebSocket events
+    return request('/profile/upload', { method: 'POST', form, query: { background: 1 }, timeout: 60_000, ...o });
   },
+  uploadStatus: (id, o) => request(`/profile/upload/${enc(id)}`, o),
+
+  // people (switchable profiles)
+  people: (o) => request('/people', o),
+  createPerson: (name, o) => request('/people', { method: 'POST', body: { name }, ...o }),
+  activatePerson: (id, o) => request(`/people/${enc(id)}/activate`, { method: 'POST', ...o }),
+  renamePerson: (id, name, o) => request(`/people/${enc(id)}`, { method: 'PATCH', body: { name }, ...o }),
+  deletePerson: (id, o) => request(`/people/${enc(id)}`, { method: 'DELETE', timeout: 60_000, ...o }),
 
   // searches
   startSearch: (req, o) => request('/searches', { method: 'POST', body: req, timeout: 30_000, ...o }),
@@ -161,7 +170,11 @@ export const api = {
   status: (o) => request('/status', o),
   getSettings: (o) => request('/settings', o),
   postSettings: (body, o) => request('/settings', { method: 'POST', body, ...o }),
-  getModels: (o) => request('/models', o),
+  getModels: (refresh, o) => request('/models', { query: refresh ? { refresh: 1 } : undefined, timeout: 45_000, ...o }),
+  setProviders: (body, o) => request('/providers', { method: 'POST', body, ...o }),
+  dbHealth: (o) => request('/system/health', o),
+  dbRepair: (o) => request('/system/repair', { method: 'POST', timeout: 60_000, ...o }),
+  dbBackup: (o) => request('/system/backup', { method: 'POST', timeout: 60_000, ...o }),
   setModel: (chain, modelId, o) => request('/models', { method: 'POST', body: { chain, model_id: modelId }, ...o }),
   usage: (o) => request('/usage', o),
   getPipelineMode: (o) => request('/pipeline-mode', o),
