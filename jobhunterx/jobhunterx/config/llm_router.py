@@ -94,6 +94,20 @@ def _effective_chain(chain_name: str) -> List[str]:
     return chain
 
 
+# A model that would make a call wait longer than this is passed over for the next free model in the chain:
+# one busy free tier (e.g. Flash Lite at 15 requests/minute) must not queue every call while Kilo, NIM and Groq sit idle.
+SPILL_WAIT_S = 2.0
+MAX_INFLIGHT = 3          # calls one model handles at once before the next free model takes the overflow
+_inflight: Dict[str, int] = {}
+
+
+def _eta(model: str) -> float:
+    wait = M.budget(model).eta()
+    if model.startswith("nim/"):
+        wait = max(wait, M.budget(M.NIM_ACCOUNT).eta())     # NIM's 40/min is shared by all its models
+    return wait
+
+
 def _skip_reason(model: str) -> str | None:
     provider = M.provider_of(model)
     if not M.provider_key(provider):
@@ -651,6 +665,7 @@ async def call_llm_with_fallback(
     last_err: Exception | None = None
     skipped: list[str] = []
     rested: list[str] = []
+    usable: list[str] = []
 
     for model in chain:
         reason = _skip_reason(model)
@@ -666,7 +681,17 @@ async def call_llm_with_fallback(
             remaining = max(0, _provider_rate_limited_until.get(provider, 0) - time.monotonic())
             log.info("llm_fallback_skip_cooldown", model=model, provider=provider, cooldown_remaining_s=round(remaining, 1))
             continue
+        usable.append(model)
 
+    # Chain order among models that can answer now; busy ones go last, least busy first.
+    etas = {m: _eta(m) for m in usable}
+    ready = [m for m in usable if etas[m] <= SPILL_WAIT_S and _inflight.get(m, 0) < MAX_INFLIGHT]
+    order = ready + sorted((m for m in usable if m not in ready), key=lambda m: (etas[m], _inflight.get(m, 0)))
+    if order and usable and order[0] != usable[0]:
+        log.info("llm_spill", chain=chain_name, busy=usable[0], wait_s=round(etas[usable[0]], 1), to=order[0])
+
+    for model in order:
+        _inflight[model] = _inflight.get(model, 0) + 1
         try:
             result = await call_llm(model, messages, **kwargs)
             M.mark_success(model)
@@ -675,6 +700,8 @@ async def call_llm_with_fallback(
             rest = M.mark_failure(model, str(exc))
             log.warning("llm_fallback", model=model, error=str(exc)[:200], next_try_in_s=int(rest) if rest else None)
             last_err = exc
+        finally:
+            _inflight[model] -= 1
 
     for model in rested if last_err is None else []:   # everything is resting: better to try than to fail
         try:

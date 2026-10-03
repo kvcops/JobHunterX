@@ -92,8 +92,9 @@ _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:fre
 _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "kilo/inclusionai/ling-3.1-flash",
                "kilo/poolside/laguna-s-2.1:free", "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
 CHAINS: dict[str, list[str]] = {
+    # quick tasks want speed: Gemma (often 12-120 s on the free tier) only after the fast Groq models
     "fast": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST, "nim/nvidia/nemotron-nano-3-30b-a3b", "nim/openai/gpt-oss-20b",
-             "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b", "mistral/mistral-small-latest"],
+             "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b", "gemini/gemma-4-31b-it", "mistral/mistral-small-latest"],
     "reasoning": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash",
                   "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
                   "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest"],
@@ -234,6 +235,7 @@ class _ModelBudget:
         self.day = ""
         self.req_today = 0
         self.tok_today = 0
+        self.waiting = 0                       # calls queued for this model right now
 
     def _roll_day(self) -> None:
         d = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -255,7 +257,28 @@ class _ModelBudget:
             return "daily token limit reached"
         return None
 
+    def eta(self, est_tokens: int = 0) -> float:
+        """Seconds a new call would wait for this model's free-tier limits (queued calls included)."""
+        lim = limits(self.model)
+        now = time.monotonic()
+        wait = 0.0
+        if lim["rpm"]:
+            gap = 60.0 / lim["rpm"]
+            wait = max(0.0, self.last + gap - now) + self.waiting * gap
+        if lim["tpm"] and self.window:
+            used = sum(t for ts, t in self.window if now - ts <= 60)
+            if used + est_tokens > lim["tpm"]:
+                wait = max(wait, 60 - (now - self.window[0][0]))
+        return wait
+
     async def acquire(self, est_tokens: int) -> None:
+        self.waiting += 1
+        try:
+            await self._acquire(est_tokens)
+        finally:
+            self.waiting -= 1
+
+    async def _acquire(self, est_tokens: int) -> None:
         lim = limits(self.model)
         async with self.lock:
             now = time.monotonic()

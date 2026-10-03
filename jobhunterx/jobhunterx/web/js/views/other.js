@@ -550,6 +550,28 @@ function AgentSection({ d, mode }) {
   </section>`;
 }
 
+const PROVIDER_NAMES = { google: 'Google', kilo: 'Kilo (free)', nvidia: 'NVIDIA NIM', groq: 'Groq', mistral: 'Mistral' };
+const SEARCH_NAMES = { tinyfish: 'TinyFish', tavily: 'Tavily', exa: 'Exa', brave: 'Brave Search', deep: 'Deep Search (free)', ddgs: 'DuckDuckGo (free)' };
+
+function UsageBody({ u }) {
+  const rows = u.llm.rows;
+  const total = rows.reduce((a, r) => a + r.calls, 0) || 1;
+  const search = u.web_search.providers.filter((p) => p.calls);
+  return html`<p class="muted small">Each task asks its first model; when that model is busy (free tiers allow only a few calls a minute),
+      the call goes straight to the next free model in the chain — so backups appear here once searches run several things at once.
+      Answers served from the cache are not counted.</p>
+    <table class="checks"><thead><tr><th>Model</th><th>Provider</th><th>Calls</th><th>Share</th><th>Tokens</th></tr></thead><tbody>
+      ${rows.map((r) => html`<tr><td>${r.label}</td><td class="muted">${PROVIDER_NAMES[r.provider] || r.provider || '—'}</td><td>${fmtNum(r.calls)}</td>
+        <td>${Math.round((r.calls / total) * 100)}%</td><td>${fmtNum(r.total_tokens)}</td></tr>`)}
+      ${!rows.length ? html`<tr><td colspan="5" class="muted">No AI calls yet.</td></tr>` : null}</tbody></table>
+    <h3 class="sub-title">Web search</h3>
+    <table class="checks"><thead><tr><th>Provider</th><th>Calls</th><th>This month</th><th>Last used</th></tr></thead><tbody>
+      ${search.map((p) => html`<tr><td>${SEARCH_NAMES[p.name] || p.name}</td><td>${fmtNum(p.calls)}</td><td>${fmtNum(p.calls_this_month || 0)}</td>
+        <td class="muted">${p.last_used ? relTime(p.last_used.replace(' ', 'T') + 'Z') : '—'}</td></tr>`)}
+      ${!search.length ? html`<tr><td colspan="4" class="muted">No web searches yet.</td></tr>` : null}</tbody></table>
+    <p class="muted small">Gemma today: ${u.gemma_budget.requests_today} / ${u.gemma_budget.requests_cap} requests (${u.gemma_budget.model}).</p>`;
+}
+
 function SettingsOverview({ d }) {
   if (!d) return null;
   const llm = ['google', 'kilo', 'nvidia', 'groq', 'mistral'];
@@ -610,10 +632,7 @@ export function SettingsView() {
       case 'search': return html`<${SearchSection} d=${d} />`;
       case 'tuning': return html`<${TuningSection} key=${JSON.stringify(d.tunables)} d=${d} />`;
       case 'usage': return html`<section class="set-section"><div class="row space"><h2>Usage</h2><${Button} size="sm" icon="refresh" busy=${usage.status === 'refreshing'} onClick=${loadUsage}>Refresh</${Button}></div>
-        ${usage.data ? html`<table class="checks"><thead><tr><th>Model</th><th>Calls</th><th>Tokens</th></tr></thead><tbody>
-          ${usage.data.llm.rows.map((r) => html`<tr><td>${r.label}</td><td>${fmtNum(r.calls)}</td><td>${fmtNum(r.total_tokens)}</td></tr>`)}
-          ${!usage.data.llm.rows.length ? html`<tr><td colspan="3" class="muted">No AI calls yet.</td></tr>` : null}</tbody></table>
-          <p class="muted small">Gemma today: ${usage.data.gemma_budget.requests_today} / ${usage.data.gemma_budget.requests_cap} requests (${usage.data.gemma_budget.model}).</p>`
+        ${usage.data ? html`<${UsageBody} u=${usage.data} />`
           : usage.status === 'error' ? html`<${ErrorBox} message=${usage.error} />` : html`<${Skeleton} lines=${3} />`}</section>`;
       case 'profiles': return html`<${PeopleManager} />`;
       case 'agent': return html`<${AgentSection} key=${JSON.stringify(d.tunables)} d=${d} mode=${mode} />`;
