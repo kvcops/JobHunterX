@@ -1,0 +1,3 @@
+robot.glb — "RobotExpressive" by Tomás Laulhé (Quaternius), CC0 1.0 (public domain).
+Facial morph targets and conversion by Don McCurdy. Source: three.js r169 examples/models/gltf/RobotExpressive.
+Used by the 3D "Agents at work" view; body colour is tinted per agent at runtime.

@@ -96,40 +96,52 @@ function World3D({ run, items, states, lastLine }) {
   const tags = useRef({});
   const [mode, setMode] = useState('loading');      // loading | ready | fallback
   const [big, setBig] = useState(false);
+  const [follow, setFollow] = useState(true);
+  const [said, setSaid] = useState({});             // agent key -> { text, until }: what each robot is saying right now
+  const [, tick] = useState(0);
   const c = run.counts || {};
-  const p = run.progress;
 
   useEffect(() => {
     let alive = true;
-    import('./world3d.js').then((m) => {
-      if (!alive || !host.current) return;
-      try {
-        world.current = m.createWorld(host.current, { dark: isDark(), reducedMotion: reduced() });
-      } catch (err) {
-        setMode('fallback');
-        return;
-      }
-      world.current.onFrame((pos) => {
-        for (const [key, pt] of Object.entries(pos)) {
-          const el = tags.current[key];
-          if (!el) continue;
-          el.style.transform = `translate(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px) translate(-50%, -100%)`;
-          el.style.opacity = pt.visible ? '1' : '0';
-          el.style.zIndex = String(1000 - Math.round(pt.depth * 900));
-        }
-      });
-      setMode('ready');
-    }).catch(() => setMode('fallback'));
+    const onSay = (key, text, secs) => {
+      setSaid((cur) => ({ ...cur, [key]: { text, until: Date.now() + secs * 1000 } }));
+      setTimeout(() => alive && tick((n) => n + 1), secs * 1000 + 50);
+    };
+    import('./world3d.js')
+      .then((m) => m.createWorld(host.current, { dark: isDark(), reducedMotion: reduced(), onSay }))
+      .then((w) => {
+        if (!alive) { w.dispose(); return; }
+        world.current = w;
+        w.onFrame((pos) => {
+          for (const [key, pt] of Object.entries(pos)) {
+            const el = tags.current[key];
+            if (!el) continue;
+            el.style.transform = `translate(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px) translate(-50%, -100%)`;
+            el.style.opacity = pt.visible ? '1' : '0';
+            el.style.zIndex = String(1000 - Math.round(pt.depth * 900));
+          }
+        });
+        setMode('ready');
+      })
+      .catch(() => alive && setMode('fallback'));      // no WebGL, or the model could not load
     const mo = new MutationObserver(() => world.current && world.current.setTheme(isDark()));
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => { alive = false; mo.disconnect(); if (world.current) world.current.dispose(); world.current = null; };
   }, []);
 
+  // live run -> world: stage states every render, new activity lines become scenes
   useEffect(() => {
-    if (!world.current) return;
-    world.current.update(Object.fromEntries(DESKS.map((d, i) => [STAGE_KEY[d.key], states[i]])),
+    const w = world.current;
+    if (!w) return;
+    w.update(Object.fromEntries(DESKS.map((d, i) => [STAGE_KEY[d.key], states[i]])),
       { scoredRatio: run.total ? Math.min(1, (c.scored || 0) / run.total) : 0 });
+    const active = ['queued', 'running'].includes(run.status);
+    const justFinished = run.finished_at && Date.now() - Date.parse(run.finished_at) < 30000;
+    const young = run.started_at && Date.now() - Date.parse(run.started_at) < 180000;
+    // a search that started in the last few minutes is replayed from the start; older ones from the latest events
+    w.feed(items, run.id, !active, young && (active || justFinished) ? 'all' : (active || justFinished));
   });
+  useEffect(() => { if (world.current) world.current.setFollow(follow); }, [follow, mode]);
 
   useEffect(() => {
     if (!big) return undefined;
@@ -139,6 +151,7 @@ function World3D({ run, items, states, lastLine }) {
   }, [big]);
 
   if (mode === 'fallback') return html`<${AgentDesks} run=${run} items=${items} states=${states} lastLine=${lastLine} />`;
+  const now = Date.now();
   const busy = DESKS.filter((_, i) => states[i] === 'running').map((d) => d.name);
   return html`<div class=${`aw3d ${big ? 'is-big' : ''}`} aria-label="Agents at work, in 3D">
     ${big ? html`<div class="aw3d-backdrop" onClick=${() => setBig(false)}></div>` : null}
@@ -147,25 +160,27 @@ function World3D({ run, items, states, lastLine }) {
       <div class="aw3d-tags" aria-hidden="true">
         ${DESKS.map((d, i) => {
           const st = states[i];
-          const say = st === 'running' ? ((p && p.label && d.stages.includes(p.stage) ? p.label : lastLine(d)) || d.role)
-            : st === 'done' ? (d.metric(c, run) || 'Done') : null;
-          return html`<div key=${d.key} class=${`aw3d-tag is-${st}`} style=${{ '--h': d.hue, opacity: 0 }} ref=${(el) => { tags.current[STAGE_KEY[d.key]] = el; }}>
-            ${say ? html`<div class="aw3d-say">${say}</div>` : st === 'pending' ? html`<div class="aw3d-zzz">z<span>z</span><span>z</span></div>` : null}
+          const key = STAGE_KEY[d.key];
+          const say = said[key] && said[key].until > now ? said[key].text : null;
+          return html`<div key=${d.key} class=${`aw3d-tag is-${st} ${say ? 'talking' : ''}`} style=${{ '--h': d.hue, opacity: 0 }} ref=${(el) => { tags.current[key] = el; }}>
+            ${say ? html`<div class="aw3d-say">${say}</div>` : null}
             <div class="aw3d-name"><span class="dot"></span>${d.name}</div>
           </div>`;
         })}
       </div>
-      ${mode === 'loading' ? html`<div class="aw3d-loading">Building the office…</div>` : null}
+      ${mode === 'loading' ? html`<div class="aw3d-loading">Opening the office…</div>` : null}
       <div class="aw3d-bar">
         <span class="aw3d-hint">${busy.length ? html`<strong>${busy.join(', ')}</strong> working now` : states.every((x) => x === 'done') ? 'Everyone has finished' : 'Waiting to start'}
           <span class="muted"> · drag to look around · scroll to zoom</span></span>
         <div class="row gap">
+          <button type="button" class="aw3d-btn" aria-pressed=${follow ? 'true' : 'false'} onClick=${() => setFollow(!follow)}
+            title="Move the camera to wherever agents are working together">${follow ? '● Following the action' : 'Follow the action'}</button>
           <button type="button" class="aw3d-btn" onClick=${() => world.current && world.current.resetView()} title="Reset the camera">Reset view</button>
           <button type="button" class="aw3d-btn" onClick=${() => setBig(!big)} aria-pressed=${big ? 'true' : 'false'}>${big ? 'Close' : 'Expand'}</button>
         </div>
       </div>
     </div>
-    <p class="sr-only" aria-live="polite">${busy.length ? `${busy.join(', ')} working now. ${p && p.label ? p.label : ''}` : 'No agent is working right now.'}</p>
+    <p class="sr-only" aria-live="polite">${busy.length ? `${busy.join(', ')} working now.` : 'No agent is working right now.'}</p>
   </div>`;
 }
 

@@ -1487,6 +1487,10 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 /* small panel: only the agents working right now speak; results show when expanded */
 .aw3d-frame { container: aw3dframe / size; }
 @container aw3dframe (max-height: 520px) {
-  .aw3d-tag.is-done .aw3d-say, .aw3d-tag.is-pending .aw3d-zzz { display: none; }
   .aw3d-tag.is-pending .aw3d-name { opacity: .55; }
+  .aw3d-say { max-width: 190px !important; font-size: .66rem; }
 }
+/* robots speak only while something is happening; names stay small */
+.aw3d-tag.talking .aw3d-say { animation: pop .3s var(--spring); }
+.aw3d-tag .aw3d-say { color: var(--ink); border-color: hsl(var(--h) 70% 62%); max-width: 240px; font-weight: 500; }
+.aw3d-btn[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
