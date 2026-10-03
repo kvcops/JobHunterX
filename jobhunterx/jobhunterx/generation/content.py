@@ -12,7 +12,8 @@ from jobhunterx.domain.candidate import Project
 
 def short_url(url: str, limit: int = 42) -> str:
     """'https://www.github.com/asha/rag/' -> 'github.com/asha/rag' (what a reader can type from a printout)."""
-    text = re.sub(r"^https?://(www\.)?", "", (url or "").strip(), flags=re.I).rstrip("/")
+    text = re.sub(r"^https?://(www\.)?", "", (url or "").strip(), flags=re.I)
+    text = re.sub(r"[?#].*$", "", text).rstrip("/")      # tracking queries (?utm=…, ?originalSubdomain=in) are noise on paper
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -92,7 +93,8 @@ def _web(url: str) -> bool:
 
 
 def header_for(p: CandidateProfile, max_links: int = 6) -> Header:
-    """Contact line: LinkedIn, GitHub, portfolio, then other profiles — printed as short addresses, clickable."""
+    """Contact line: LinkedIn, GitHub, portfolio, then other profiles — printed as full short addresses, clickable.
+    Never cut with "…": a recruiter reading a printout must be able to type the address."""
     links: list[Link] = []
     seen: set[str] = set()
     named = [("LinkedIn", p.linkedin), ("GitHub", p.github), ("Portfolio", p.portfolio)]
@@ -100,7 +102,7 @@ def header_for(p: CandidateProfile, max_links: int = 6) -> Header:
         key = short_url(url, 500).lower()
         if _web(url) and key not in seen:
             seen.add(key)
-            links.append(Link(label=label or _host(url), url=url, text=short_url(url, 38)))
+            links.append(Link(label=label or _host(url), url=url, text=short_url(url, 90)))
     return Header(name=p.name, email=p.email, phone=p.phone, location=p.location, links=links[:max_links])
 
 

@@ -4,6 +4,7 @@ body { font-family: Helvetica, Arial, sans-serif; font-size: {{ font_size_body }
 .headline { font-size: {{ font_size_section }}; color: #374151; }
 .contact { font-size: {{ font_size_small }}; color: #4b5563; }
 .contact a, a { color: #1d4ed8; text-decoration: none; }
+.contact a { white-space: nowrap; }   /* a long address moves to the next line whole, never split mid-URL */
 .section { margin-top: {{ margin_section }}; }
 .section-title { font-size: {{ font_size_section }}; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
   color: #111827; border-bottom: 1px solid #111827; padding-bottom: 1px; margin-bottom: 3px; }
