@@ -1295,3 +1295,26 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
   .ob-side { position: static; min-height: 0; }
   .ob-main { min-height: 0; }
 }
+
+/* onboarding: clickable steps */
+.stepper-btn { all: unset; box-sizing: border-box; display: flex; gap: 14px; align-items: center; cursor: pointer; border-radius: 12px; padding: 2px 8px 2px 0; }
+.stepper-btn:hover .stepper-text strong { color: var(--accent); }
+.stepper-btn:hover .stepper-dot { border-color: var(--accent); }
+.stepper-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+/* onboarding: final check before the first search */
+.ob-launch { display: flex; flex-direction: column; align-items: stretch; gap: 16px; padding: 0; }
+.ob-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ob-sum { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: var(--radius-md); background: var(--card-solid); border: 1px solid var(--line); }
+.ob-sum-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ob-sum-head .sec-title { margin: 0; }
+.ob-sum-head .link-btn { display: inline-flex; align-items: center; gap: 5px; }
+.ob-sum p { margin: 0; }
+.ob-facts { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: .86rem; color: var(--text-2); }
+.ob-facts li { position: relative; padding-left: 14px; line-height: 1.45; }
+.ob-facts li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--line-strong); }
+.ob-facts strong { color: var(--ink); font-weight: 500; }
+.ob-next { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card-solid)); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line)); font-size: .88rem; }
+.ob-next ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--text-2); }
+@media (max-width: 760px) { .ob-summary { grid-template-columns: 1fr; } }

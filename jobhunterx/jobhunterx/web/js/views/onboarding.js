@@ -4,10 +4,11 @@ import { html, useState, useRef, useEffect } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { uploadResume, saveProfile, setOnboardingStep, finishOnboarding } from '../actions.js';
 import {
-  Button, Icon, ChipsInput, Field, Notice, Meter, Seg, Skeleton, ScanDoc, Orb, ErrorBox, AutoTextarea, Spinner, Elapsed, UPLOAD_STAGES,
+  Button, Icon, ChipsInput, Field, Notice, Meter, Seg, Skeleton, ScanDoc, ErrorBox, AutoTextarea, Spinner, Elapsed, UPLOAD_STAGES,
 } from '../components/ui.js';
 import { ExperienceSummary } from '../components/experience.js';
 import { normalizeProfile, setIn, defaultSearchRequest } from '../state/domain.js';
+import { api } from '../lib/api.js';
 import { WORK_MODES, WORK_MODE_LABEL, humanize, safeUrl } from '../lib/format.js';
 
 const STEPS = [
@@ -22,17 +23,22 @@ const COPY = {
   review: [html`Here's how we <span class="serif">see</span> you`, 'Experience is computed from your dates — internships are counted separately — and every skill is checked against what you actually wrote.'],
   prefs: [html`Where do you want to <span class="serif">go</span>?`, 'Add every title and city you would consider. These are hard rules: roles outside them are filtered out, not ranked high by keyword luck.'],
   pay: [html`Pay & <span class="serif">availability</span>`, 'Used to filter roles below your minimum and to fill application forms. Stays on your machine.'],
-  launch: [html`You're all <span class="serif">set</span>`, 'Your first search reads each posting, checks it is real and open, and explains every score. Results stream in live.'],
+  launch: [html`Check, then <span class="serif">search</span>`, 'This is exactly what your first search will look for. Something wrong? Press Edit on that part, or click any step on the left.'],
 };
 const uniq = (xs) => [...new Map(xs.filter(Boolean).map((x) => [String(x).trim().toLowerCase(), String(x).trim()])).values()].filter(Boolean);
 const city = (loc) => (loc || '').split(',')[0].trim();
 
-function Stepper({ step }) {
+/** Steps on the left. Once the resume is read, any step can be opened to change something (current edits are saved first). */
+function Stepper({ step, onGo }) {
   const idx = STEPS.findIndex((s) => s.key === step);
   return html`<ol class="stepper" aria-label="Setup progress">
-    ${STEPS.map((s, i) => html`<li key=${s.key} class=${i < idx ? 'done' : i === idx ? 'current' : ''} aria-current=${i === idx ? 'step' : undefined}>
-      <span class="stepper-dot">${i < idx ? html`<${Icon} name="check" size=${13} />` : i + 1}</span>
-      <span class="stepper-text"><strong>${s.label}</strong><span>${s.hint}</span></span></li>`)}
+    ${STEPS.map((s, i) => {
+      const inner = html`<span class="stepper-dot">${i < idx ? html`<${Icon} name="check" size=${13} />` : i + 1}</span>
+        <span class="stepper-text"><strong>${s.label}</strong><span>${s.hint}</span></span>`;
+      const go = onGo && i !== idx;
+      return html`<li key=${s.key} class=${`${i < idx ? 'done' : i === idx ? 'current' : ''} ${go ? 'clickable' : ''}`} aria-current=${i === idx ? 'step' : undefined}>
+        ${go ? html`<button type="button" class="stepper-btn" onClick=${() => onGo(s.key)} title=${`Go to: ${s.label}`}>${inner}</button>` : inner}</li>`;
+    })}
     <span class="stepper-fill" style=${{ '--k': idx / (STEPS.length - 1) }} aria-hidden="true"></span>
   </ol>`;
 }
@@ -178,16 +184,68 @@ function PayStep({ draft, set }) {
   </div>`;
 }
 
-function LaunchStep() {
+const lpa = (v) => (v == null || v === '' ? null : `${(Number(v) / 100000).toFixed(Number(v) % 100000 ? 1 : 0)} LPA`);
+const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+function SummaryCard({ title, onEdit, children }) {
+  return html`<section class="ob-sum">
+    <div class="ob-sum-head"><span class="sec-title">${title}</span>
+      <button type="button" class="link-btn small" onClick=${onEdit}>Edit</button></div>
+    ${children}
+  </section>`;
+}
+
+/** Final check before the first search: a plain summary of what will be searched, each part editable. */
+function LaunchStep({ draft, goTo }) {
   const env = useStore((s) => s.profile.envelope);
   const snap = env && env.snapshot;
-  const req = defaultSearchRequest(snap);
+  const p = draft.preferences;
+  const q = draft.qa_memory;
+  const [watch, setWatch] = useState(null);
+  useEffect(() => { api.watchlist('mine').then(setWatch).catch(() => setWatch(null)); }, []);
+  const titles = p.target_roles || [];
+  const extra = (snap ? snap.target_titles : []).filter((t) => !titles.some((x) => same(x, t))).slice(0, 4);
+  const modes = WORK_MODES.filter((m) => p.work_modes.includes(m)).map((m) => WORK_MODE_LABEL[m]);
+  const country = p.home_country || (snap && snap.home_country) || '';
+  const years = snap ? snap.professional_years : null;
+  const companies = watch ? watch.companies.length : null;
   return html`<div class="ob-launch">
-    <${Orb} size=${150} />
-    <div class="ob-plan">
-      <div><span class="sec-title">Titles</span><div class="chip-row">${(snap ? [...snap.target_titles, ...snap.adjacent_titles].slice(0, 6) : []).map((t, i) => html`<span class="chip chip-pop" style=${{ '--i': i }}>${t}</span>`)}</div></div>
-      <div><span class="sec-title">Where</span><div class="chip-row">${req.locations.length ? req.locations.map((t) => html`<span class="chip"><${Icon} name="pin" size=${12} /> ${t}</span>`) : html`<span class="muted small">Your profile location</span>`}
-        ${req.work_modes.map((m) => html`<span class="chip soft">${WORK_MODE_LABEL[m]}</span>`)}</div></div>
+    <div class="ob-summary">
+      <${SummaryCard} title="Roles you want" onEdit=${() => goTo('prefs')}>
+        <div class="chip-row">${titles.length ? titles.map((t) => html`<span class="chip">${t}</span>`) : html`<span class="muted small">None picked — your resume's titles are used</span>`}</div>
+        ${extra.length ? html`<p class="muted small">Also searched, from your resume: ${extra.join(', ')}</p>` : null}
+      </${SummaryCard}>
+      <${SummaryCard} title="Where" onEdit=${() => goTo('prefs')}>
+        <div class="chip-row">${(p.locations || []).map((c) => html`<span class="chip"><${Icon} name="pin" size=${12} /> ${c}</span>`)}</div>
+        <ul class="ob-facts">
+          <li>Work modes: <strong>${modes.length ? modes.join(', ') : 'any'}</strong></li>
+          ${p.work_modes.includes('remote') ? html`<li>Remote roles: <strong>anywhere in ${country || 'your country'}</strong></li>` : null}
+          <li>Relocation: <strong>${p.willing_to_relocate ? 'yes, other cities too' : 'no'}</strong></li>
+          <li>Country: <strong>${p.open_to_international ? `${country || 'home'} and abroad` : `${country || 'your country'} only`}</strong></li>
+        </ul>
+      </${SummaryCard}>
+      <${SummaryCard} title="Pay & notice" onEdit=${() => goTo('pay')}>
+        <ul class="ob-facts">
+          <li>Minimum pay: <strong>${lpa(p.min_annual_salary) || 'no minimum'}</strong>${p.min_annual_salary ? html` <span class="muted">(roles that clearly pay less are left out)</span>` : null}</li>
+          <li>Current CTC: <strong>${q.current_ctc || '—'}</strong> · Expected: <strong>${q.expected_ctc || '—'}</strong></li>
+          <li>Notice period: <strong>${p.notice_period_days != null ? `${p.notice_period_days} days` : 'not set'}</strong>${p.notice_period_days ? html` <span class="muted">("immediate joiner" roles get flagged)</span>` : null}</li>
+        </ul>
+      </${SummaryCard}>
+      <${SummaryCard} title="You" onEdit=${() => goTo('review')}>
+        <ul class="ob-facts">
+          <li><strong>${draft.name || 'Name not set'}</strong>${draft.location ? ` · ${draft.location}` : ''}</li>
+          ${years != null ? html`<li>Experience: <strong>${years} yrs professional</strong> · ${humanize(snap.seniority)} level <span class="muted">(jobs asking for much more are marked "not a fit")</span></li>` : null}
+        </ul>
+      </${SummaryCard}>
+    </div>
+    <div class="ob-next">
+      <strong>When you press “Find my roles”</strong>
+      <ol>
+        <li>It searches job sites${companies ? html` and the own career pages of <strong>${companies} researched companies</strong> in ${watch.cities.join(', ')}` : ''}.</li>
+        <li>It opens every job, checks it is real and still open, and reads what it asks for.</li>
+        <li>Each job gets a <strong>fit score</strong> and a <strong>chance to be seen</strong>, with the reasons. You watch it happen live — it takes a few minutes.</li>
+      </ol>
+      ${companies ? html`<span class="muted small">After that, those companies are checked again every few hours while the app is open, and new roles show up in the “New” tab.</span>` : null}
     </div>
   </div>`;
 }
@@ -220,7 +278,7 @@ export function OnboardingView() {
       <div class="brand"><span class="brand-mark"><img src="/assets/logo.svg" alt="" width="34" height="34" /></span>
         <span class="brand-name">JobHunter<span class="serif">X</span></span></div>
       <div class="ob-copy" key=${step}><h1>${title}</h1><p class="lead">${lead}</p></div>
-      <${Stepper} step=${step} />
+      <${Stepper} step=${step} onGo=${profile ? (k) => saveThen(k) : null} />
     </aside>
     <section class="ob-main">
       <div class=${`ob-card card step-anim ${dir < 0 ? 'from-left' : 'from-right'}`} key=${step}>
@@ -229,7 +287,7 @@ export function OnboardingView() {
           ${step === 'review' ? html`<${ReviewStep} draft=${draft} set=${set} />` : null}
           ${step === 'prefs' ? html`<${PrefsStep} draft=${draft} set=${set} />` : null}
           ${step === 'pay' ? html`<${PayStep} draft=${draft} set=${set} />` : null}
-          ${step === 'launch' ? html`<${LaunchStep} />` : null}
+          ${step === 'launch' ? html`<${LaunchStep} draft=${draft} goTo=${saveThen} />` : null}
           ${saveError && ['review', 'prefs', 'pay'].includes(step) ? html`<${ErrorBox} message=${saveError} />` : null}
         </div>
         ${step !== 'upload' ? html`<footer class="ob-foot">
@@ -239,7 +297,7 @@ export function OnboardingView() {
           ${step === 'prefs' ? html`<${Button} variant="primary" busy=${saving} onClick=${() => saveThen('pay')}>Continue <${Icon} name="arrow" size=${16} /></${Button}>` : null}
           ${step === 'pay' ? html`<${Button} variant="primary" busy=${saving} onClick=${() => saveThen('launch')}>Continue <${Icon} name="arrow" size=${16} /></${Button}>` : null}
           ${step === 'launch' ? html`<div class="row gap">
-            <${Button} onClick=${() => finishOnboarding()}>Explore first</${Button}>
+            <${Button} onClick=${() => finishOnboarding()} title="Finish setup without searching — you can search any time from Discover">Not now, open the app</${Button}>
             <${Button} variant="primary" size="lg" onClick=${() => finishOnboarding({ search: defaultSearchRequest(snap) })}>Find my roles <${Icon} name="arrow" size=${16} /></${Button}></div>` : null}
         </footer>` : null}
       </div>
