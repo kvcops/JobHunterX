@@ -76,12 +76,41 @@ writes an honest one-page resume, a cover letter and a CV for you — and then a
 
 | Start here | Under the hood | For developers |
 |:--|:--|:--|
-| 🗺️ [The whole journey](#️-the-whole-journey) | 🧠 [How matching works](#-how-matching-works) | 📐 [Architecture](#-architecture) |
-| 📸 [A tour, step by step](#-a-tour-step-by-step) | 📄 [Resume vs CV vs cover letter](#-resume-vs-cv-vs-cover-letter) | 🔌 [API reference](#-api-reference) |
-| 🤖 [Auto-apply](#-auto-apply--the-browser-agent) | 🤖 [AI models & free limits](#-llm-models--provider-architecture) | 🧪 [Testing](#-testing) |
-| ⚡ [Quickstart](#-quickstart) | 🌐 [Job sources](#-job-sources--verification) | 🎨 [Design: fonts & themes](#-design-fonts--themes) |
+| 🇮🇳 [Built for Indian job seekers](#-built-for-indian-job-seekers) | 📡 [Chance to be seen](#-chance-to-be-seen-reach) | 📐 [Architecture](#-architecture) |
+| ⚡ [Quickstart — one command](#-quickstart) | 🧠 [How matching works](#-how-matching-works) | 🔌 [API reference](#-api-reference) |
+| 🗺️ [The whole journey](#️-the-whole-journey) | 📄 [Resume vs CV vs cover letter](#-resume-vs-cv-vs-cover-letter) | 🧪 [Testing](#-testing) |
+| 📸 [A tour, step by step](#-a-tour-step-by-step) | 🤖 [AI models & free limits](#-llm-models--provider-architecture) | 🎨 [Design: fonts & themes](#-design-fonts--themes) |
+| 🤖 [Auto-apply](#-auto-apply--the-browser-agent) | 🌐 [Job sources](#-job-sources--verification) | |
 
 </details>
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
+
+## 🇮🇳 Built for Indian job seekers
+
+JobHunterX is made for people like this: **1–3 years of experience, living in South India
+(Hyderabad / Bengaluru first), who can't move North or abroad for a job.**
+
+**The real problem it solves:** a public LinkedIn / Naukri / Indeed post now gets hundreds to thousands
+of applicants within days. Recruiters read the first few dozen and filter on years, current company and
+notice period. With 1–2 years of experience you are filtered out unread — your skills never reach a human.
+So "apply to more jobs" does not work. **Being seen early, on the right channel, does.**
+
+| What it does | Why it helps |
+|:--|:--|
+| 🏢 **Company watchlist** — 130 researched companies in Hyderabad, Bengaluru and remote-India (AI startups, product companies, GCCs) | Each one has: what real AI work happens there, whether it hires 1–3 year engineers, AmbitionBox / Glassdoor ratings, what employees say, red flags (layoffs, bad reviews), how crowded applying is |
+| ⏱️ **Checks their own job boards every 4 hours** while the app is open | New roles land in the **New** tab within hours — you apply among the first, not as applicant #1,500 |
+| 📡 **Chance-to-be-seen score** next to every fit score | A fresh post on the company's site = good chance. A 3-week-old LinkedIn post with 300 applicants = low chance. You see this before you spend time |
+| 🚫 **Mass IT-services recruiters are excluded** (TCS, Infosys, Wipro, HCL, Cognizant, Accenture…) | Bulk hiring, huge crowds, little real product AI work — marked "Not a fit" with the reason |
+| 💰 **Indian salaries understood** — "12–18 LPA", "₹12L", "1.2 Cr", per month | Your minimum CTC is checked properly (type `14` in the salary box and it means 14 LPA) |
+| ⏳ **Notice period aware** | "Immediate joiners only" posts are flagged when your notice is 45+ days |
+| 🌍 **India only** | Jobs outside your country are dropped before scoring, so they never push out Indian roles |
+
+> [!NOTE]
+> The watchlist covers **Hyderabad, Bengaluru and remote-India** today. More South Indian cities (Chennai, Kochi,
+> Coimbatore, Vizag…) come next. The research lives in `jobhunterx/jobhunterx/watchlist/companies.json`.
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -93,9 +122,10 @@ Everything happens in this order — the sidebar is ordered the same way. 👇
 
 ```mermaid
 flowchart LR
-    A(["📄 Upload resume<br/><sub>once</sub>"]) --> B["🙋 Check what<br/>we understood"]
+    K(["🔑 Free AI key<br/><sub>first screen</sub>"]) --> A(["📄 Upload resume<br/><sub>once</sub>"])
+    A --> B["🙋 Check what<br/>we understood"]
     B --> C["🎯 Your goals<br/><sub>titles · cities · remote · CTC</sub>"]
-    C --> D["🔎 Search<br/><sub>live progress</sub>"]
+    C --> D["🔎 Search + watchlist<br/><sub>real live progress</sub>"]
     D --> E["⭐ Pick a job<br/><sub>see why it fits</sub>"]
     E --> F["📝 Documents<br/><sub>resume · letter · CV</sub>"]
     F --> G["🤖 Auto-apply<br/><sub>live in the app</sub>"]
@@ -108,16 +138,18 @@ flowchart LR
     classDef agent fill:#1f1f24,stroke:#1f1f24,color:#fff,stroke-width:2px;
     classDef you fill:#fde9b8,stroke:#c4860f,color:#1f1f24,stroke-width:1.5px;
     classDef done fill:#2f9a68,stroke:#21754f,color:#fff,stroke-width:2px;
-    class A start; class B,C,D,E,F step; class G agent; class H you; class I done;
+    class K,A start; class B,C,D,E,F step; class G agent; class H you; class I done;
 ```
 
 | Step | What you do | What JobHunterX does |
 |:--:|:--|:--|
+| 0️⃣ | Paste one free AI key | The first screen links to Google AI Studio / Groq / Mistral, tests the key and saves it |
 | 1️⃣ | Upload your resume PDF | Reads it in the background (with live progress) and builds your profile |
 | 2️⃣ | Check "how we see you" | Shows total experience, **with and without internships**, every role, contact and location |
 | 3️⃣ | Add goals | Many job titles, many cities, remote / hybrid / relocation, current & expected CTC, notice period |
-| 4️⃣ | Press **Search now** | Finds postings, checks they are real and still open, reads each one, scores it — live |
-| 5️⃣ | Open a job | Explains the score: what fits, what's missing, what's unknown |
+| 4️⃣ | Press **Search now** | Finds postings (web + your watchlist companies' own boards), checks they are real and open, reads each one, scores fit **and** chance to be seen — live |
+| ⏱️ | Nothing — it runs by itself | Every 4 hours it checks the watchlist companies again; new matches appear in the **New** tab |
+| 5️⃣ | Open a job | Explains the score (what fits, what's missing, what's unknown), the chance a person reads your application, and what the company is like |
 | 6️⃣ | Press **Auto-apply** | Checks your documents → writes the missing ones → opens the browser agent **inside the app** |
 | 7️⃣ | Watch (or take over) | The agent fills the form; you can stop, take over, continue or finish it yourself |
 | 8️⃣ | Relax 😌 | The job moves to **Applied** in your tracker |
@@ -129,6 +161,11 @@ flowchart LR
 ## 📸 A tour, step by step
 
 <div align="center">
+
+#### 0 · First run: one free AI key 🔑
+<img src="assets/ui_setup_keys.png" alt="Free AI key setup" width="90%"/>
+<br/><sub><i>No key yet? The first screen shows where to get each one free, tests it with one call and saves it to <code>.env</code>. Placeholder values never count as a key.</i></sub>
+<br/><br/>
 
 #### 1 · Who's searching? 👥
 <img src="assets/ui_picker.png" alt="Profile picker" width="90%"/>
@@ -146,13 +183,23 @@ flowchart LR
 <br/><br/>
 
 #### 4 · Search, live 🔎
-<img src="assets/ui_discover.png" alt="Live search" width="90%"/>
-<br/><sub><i>Progress %, a timer, which agent is working right now, and a plain-English feed of what is happening.</i></sub>
+<img src="assets/ui_live_progress.png" alt="Live search" width="90%"/>
+<br/><sub><i>Real progress only: the bar and the text move with real counts the server reports — "Web searches: 7 of 15", "Company job boards: 21 of 33", "Jobs analysed: 3 of 20 · reading 'AI Engineer' at …". Nothing is estimated from time.</i></sub>
 <br/><br/>
 
 #### 5 · Why this score? ⭐
 <img src="assets/ui_match.png" alt="Why this score" width="90%"/>
 <br/><sub><i>Click a job and it opens beside the list: hard requirements, the weighted score, requirements, verification and the application kit.</i></sub>
+<br/><br/>
+
+#### 5b · Chance to be seen + what the company is like 📡
+<img src="assets/ui_reach.png" alt="Chance to be seen" width="70%"/>
+<br/><sub><i>Every signal is listed with its points: how fresh the post is, which channel it is on, applicant counts (only when the page shows one), email routes, notice period, competition — plus the researched company card.</i></sub>
+<br/><br/>
+
+#### 5c · Companies to watch 🏢
+<img src="assets/ui_companies.png" alt="Companies to watch" width="90%"/>
+<br/><sub><i>The researched watchlist for your cities: verdict, competition, early-career hiring, ratings, red flags. "Check for new roles now" shows the check live, step by step.</i></sub>
 <br/><br/>
 
 #### 6 · Honest documents 📝
@@ -276,17 +323,18 @@ and explains whether it genuinely fits.
 |---|-------|--------------|-------|
 | 1 | **Understand** | The AI reads your profile into a validated structure: career tracks (with how close adjacent tracks are), realistic titles, skills with *evidence* (used at work / in projects / only listed), normalized locations. Years of experience are **computed from your dates** (overlaps merged, internships separate). Every AI claim is checked against your profile — invented skills are dropped. | `intelligence/candidate.py` |
 | 2 | **Plan** | Diverse queries from your own titles and places, anchored on employers' own hiring systems (`site:` Greenhouse / Lever / Ashby / …). | `discovery/search.py` |
-| 3 | **Discover** | Web search results are treated as *leads only*. Employer job boards found in results are expanded via their public APIs. | `discovery/search.py`, `discovery/ats.py` |
+| 3 | **Discover** | Web search results are treated as *leads only*. Employer job boards found in results — and every watchlist company's board in your cities — are read via their public APIs. Jobs outside your country are dropped here. | `discovery/search.py`, `discovery/ats.py`, `discovery/watchlist.py` |
 | 4 | **Normalize** | Every lead becomes one `JobPosting`: ATS API → schema.org JSON-LD → page text, in that order of trust. | `discovery/page.py` |
 | 5 | **Dedupe** | Same job from many places is merged (ATS id, canonical URL, company+title+place, near-identical text); the first-party source wins and all sources are kept. | `discovery/dedupe.py` |
 | 6 | **Validate** | Is it real, reachable, current, open? Per-field status: *verified / inferred / unverified / unknown / failed*. Unknown stays unknown. | `discovery/validate.py` |
 | 7 | **Extract** | The AI reads the JD into a schema (required vs nice-to-have vs mandatory skills, experience, education, notice period, salary…). A skill is accepted only if it appears in the JD; experience/salary only with a verbatim quote that contains the number. Cached per JD. | `intelligence/job.py` |
 | 8 | **Match** | Hard constraints first (career track, experience gap, seniority, location/work mode, mandatory skills, education, job open, notice, salary, excluded companies). **A failed hard constraint caps the score** — keyword overlap can never lift an incompatible job. Then weighted components (role, required/preferred skills by evidence strength, experience fit, responsibility overlap, seniority, location). | `intelligence/matching.py`, `intelligence/policy.py` |
-| 9 | **Rank & explain** | Score 0–100, verdict (strong / good / stretch / weak / incompatible), strengths, gaps, unknowns and the exact reason a job was rejected. | UI: job drawer → "Why this score" |
+| 9 | **Rank & explain** | Score 0–100, verdict (strong / good / stretch / weak / incompatible), strengths, gaps, unknowns, the exact reason a job was rejected — plus the separate chance-to-be-seen score. | `intelligence/reach.py`, UI: "Why this score" |
 
 > [!NOTE]
-> **No hardcoded vocabularies.** There are no fixed lists of skills, job titles, cities or companies in the code.
-> Knowledge comes from the AI (schema-validated and verified against the source text); the code only compares and checks.
+> **No hardcoded skill or title vocabularies.** Skills, titles and career tracks come from the AI (schema-validated and
+> verified against the source text); the code only compares and checks. The only fixed lists are deliberate, researched data:
+> the company watchlist (`watchlist/companies.json`), the city names it covers, and the mass-recruiter exclusion list.
 > Scoring weights and tolerances live in one tunable place: `intelligence/policy.py` (override with `MATCH_POLICY_JSON`).
 
 </details>
@@ -300,10 +348,26 @@ Candidate: ~1.5 years professional AI/ML experience, Hyderabad, not relocating.
 | AI Engineer · 0–2 yrs · Python/LLM/RAG · Hyderabad | **Strong match** | Same track, experience fits, all required skills demonstrated |
 | Senior AI Engineer · 6+ yrs · same skills | **Incompatible** | "Requires 6+ years; you have ~1.6" — identical skills do not help |
 | Frontend Engineer · React/TypeScript | **Incompatible** | Different career track |
-| AI Engineer · 1–3 yrs · Berlin on-site | **Incompatible** | Not one of your locations |
+| AI Engineer · 1–3 yrs · Berlin on-site | **Dropped** | Outside India — removed before scoring, so it never takes a result slot |
 | AI Engineer · mandatory Kubernetes | **Incompatible** | "Mandatory: Kubernetes — not found in your profile" |
 
 This exact scenario runs in the test suite (`tests/test_scenarios.py`).
+
+### 📡 Chance to be seen (reach)
+
+Fit answers *"am I right for this job?"*. Reach answers *"will a person actually read my application?"*.
+It is shown next to fit and never mixed into the fit score. Every signal is shown with its reason:
+
+| Signal | Raises the chance | Lowers the chance |
+|:--|:--|:--|
+| Freshness | Posted in the last 1–3 days | Older than 2–4 weeks |
+| Channel | Company's own careers board / ATS; curated boards (Instahyre, Cutshort, Wellfound) | Public LinkedIn / Naukri / Indeed listing |
+| Applicants | Page shows a small count | Page shows 50+ / 200+ applicants |
+| Direct route | The JD gives an email to send your resume to | — |
+| Notice period | — | "Immediate joiners" while your notice is longer |
+| Company | Lesser-known company; known to hire 1–3 yr engineers | Famous brand (very crowded); mass IT-services recruiter |
+
+The default sort, **Best chance**, ranks by fit *and* reach together. You can also sort by **Best fit** or **Least crowded**.
 
 ## 📄 Resume vs CV vs cover letter
 
@@ -410,7 +474,8 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 
 | Source | Trust | How it is used |
 |--------|-------|----------------|
-| **Employer ATS APIs** — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable | First-party, **verified** | Structured postings; re-verified live by job id (a closed job disappears from the board / returns 404) |
+| **Employer ATS APIs** — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, **Workday** (most GCCs), **Keka** (many Indian product companies) | First-party, **verified** | Structured postings; re-verified live by job id (a closed job disappears from the board / returns 404) |
+| **Company watchlist** — 130 researched Hyderabad / Bengaluru / remote-India employers | Researched, sources linked | Their boards are read on every search and every 4 hours in the background; the research card is shown on each of their jobs |
 | **schema.org JobPosting** on a page | Verified when the hiring organisation's site is the page's site; otherwise inferred | Title, company, location, dates, `validThrough`, remote eligibility, salary |
 | **Other pages** (job boards, aggregators) | Unverified | Text only; if the page links to a supported ATS posting, that posting is used instead |
 | **Web search** — TinyFish → Tavily → Exa → Brave → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
@@ -607,10 +672,11 @@ python -m jobhunterx.api.main
 ```
 jobhunterx/jobhunterx/
 ├── domain/          # 📦 Data contracts: profile, snapshot, job posting, match, document
-├── intelligence/    # 🧠 Understanding + judgement (candidate, job, matching, policy)
-├── discovery/       # 🔎 Search, ATS adapters, page parsing, dedupe, validation, SSRF-safe fetch
+├── intelligence/    # 🧠 Understanding + judgement (candidate, job, matching, reach, policy)
+├── discovery/       # 🔎 Search, ATS adapters (incl. Workday, Keka), watchlist, page parsing, dedupe, validation, SSRF-safe fetch
+├── watchlist/       # 🏢 companies.json — the researched company watchlist (Hyderabad, Bengaluru, remote India)
 ├── generation/      # 📝 Resume / CV / cover letter + fact-checking + one-page PDF rendering
-├── services/        # 🧩 Orchestration: search runs, jobs, documents, profiles, auto-apply kit
+├── services/        # 🧩 Orchestration: search runs, watchlist watcher, jobs, documents, profiles, auto-apply kit
 ├── agents/
 │   ├── browser_agent.py   # 🤖 Auto-apply session: steps, stop / take over / continue / close
 │   ├── browser_worker.py  # 🧵 One long-lived thread that owns the browser
@@ -622,8 +688,10 @@ jobhunterx/jobhunterx/
 └── web/             # 🎨 Preact + htm UI with bundled fonts — no build step
 ```
 
-* 🔁 **One search at a time**; every event carries its run id, so old results never leak into a new search.
-* 💸 **Low AI cost:** profile understanding and job reading are cached, role-fit is batched, out-of-area jobs skip AI.
+* 🚀 **One command to run it:** `start.ps1` / `start.bat` (Windows) and `start.sh` (macOS / Linux) set up uv, the venv and packages, check that everything loads, start the app, and open the browser only once it answers.
+* 🔁 **One search at a time**; every event carries its run id, so old results never leak into a new search. Background watchlist checks never interrupt a search you started.
+* 📶 **Real progress only:** progress is streamed as real counts (`search.progress` events), never estimated from time.
+* 💸 **Low AI cost:** profile understanding and job reading are cached, role-fit is batched, out-of-country jobs are dropped before any AI call, watchlist checks read only new postings (20 per check), and a provider whose key is rejected is skipped instead of retried.
 * 🔒 **Secure by default:** same-origin CORS, CSRF guard, WebSocket origin checks, SSRF-safe fetching, upload limits, autoescaped templates.
 
 <br/>
@@ -637,11 +705,14 @@ The full contract (REST + WebSocket) is in [`jobhunterx/docs/API.md`](jobhunterx
 | Group | Endpoints |
 |-------|-----------|
 | 👤 Profile | `GET/PUT /api/profile`, `POST /api/profile/upload`, people: `GET/POST /api/people`, `POST /api/people/{id}/activate` |
+| 🔑 Setup | `GET /api/setup` (which keys are set), `POST /api/setup/test-key` (one free call to check a key) |
 | 🔎 Searches | `POST /api/searches`, `GET /api/searches/current`, `GET /api/searches/{id}`, `POST /api/searches/{id}/cancel` |
-| 💼 Jobs | `GET /api/jobs`, `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore` |
+| 🏢 Watchlist | `GET /api/watchlist?scope=mine` or `scope=all`, `POST /api/watchlist/check` |
+| 💼 Jobs | `GET /api/jobs` (views incl. `fresh`; sorts `chance` · `score` · `reach` · `recent`), `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore` |
 | 📝 Documents | `POST /api/jobs/{id}/documents`, `POST /api/documents/cv`, `GET /api/documents`, `GET /api/documents/{id}/pdf` |
 | 🤖 Auto-apply | `POST /api/jobs/{id}/apply`, `GET /api/apply/current`, `POST /api/apply/{job_id}/stop · take-over · release · continue · close · done`, `WS /ws/browser` |
 | ⚙️ System | settings, providers, models, usage, database health / repair / backup, interventions, reset |
+| 📡 Live events (`WS /ws`) | `search.run`, `search.progress` (real done / total per stage), `search.activity`, `search.job`, `watch.status`, `watch.done`, `job.updated`, `document.status`, `profile.upload`, `apply.session` |
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -650,9 +721,12 @@ The full contract (REST + WebSocket) is in [`jobhunterx/docs/API.md`](jobhunterx
 ## 🧪 Testing
 
 ```bash
+# with the venv on (see Quickstart)
 cd jobhunterx
-pip install pytest pytest-asyncio playwright
-python -m pytest -q
+python -m pytest -q --ignore=tests/frontend      # fast: API, pipeline scenarios, parsers
+
+uv pip install playwright                        # only needed for the browser UI tests
+python -m pytest -q tests/frontend
 ```
 
 * `tests/test_scenarios.py` — the full pipeline on a realistic candidate (fake network + fake AI, including made-up claims that must be rejected)

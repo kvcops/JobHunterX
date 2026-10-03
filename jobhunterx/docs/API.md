@@ -113,11 +113,56 @@ type SearchRun = {
   plan: { role_families: string[]; titles: string[]; locations: string[]; queries: string[] } | null;
   error: string|null;
   profile_hash: string;
+  mode: "search"|"watch";        // "watch" = background watchlist check (see Watchlist)
+  progress: RunProgress|null;    // real counts of the running stage
+};
+
+type RunProgress = {
+  stage: string;                 // stage key the counts belong to (analysis reports as "match")
+  done: number; total: number;   // real units: searches run, boards checked, pages read, AI reads + scores
+  label: string;                 // e.g. "Company job boards: 21 of 33 checked"
 };
 ```
 
 Stage keys, in order: `understand`, `plan`, `discover`, `normalize`, `dedupe`,
 `validate`, `extract`, `match`, `rank`.
+
+`SearchRequest` also accepts `mode: "watch"` (used by the watcher): no web search, only the watchlist
+companies' boards, only postings not stored before, at most 20 analysed per check.
+
+---
+
+## Setup (first run)
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/setup` | – | `{ llm_ready: boolean, llm_count: number, keys: { google, groq, mistral, tavily, exa, tinyfish, brave: boolean } }` |
+| POST | `/api/setup/test-key` | `{ provider, key }` | `{ ok: boolean, message: string }` — AI keys are checked with one free "list models" call; search keys only by format |
+
+Keys are saved with `POST /api/settings` (written to `jobhunterx/.env`). Placeholder values such as
+`your_gemini_api_key` count as "no key". `POST /api/profile/upload` answers `400` while no AI key is set.
+`GET /api/meta` also returns `setup`.
+
+---
+
+## Watchlist
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/watchlist?scope=mine\|all` | – | `{ cities, covered_cities, total, companies: WatchCompany[], status: WatchStatus }` — `mine` = companies in the active profile's cities (plus remote-India when remote is accepted) |
+| POST | `/api/watchlist/check` | – | `202 { status: WatchStatus }` — runs a check now (skipped while a user search is running) |
+
+```ts
+type WatchStatus = { interval_hours: number; enabled: boolean; checking: boolean;
+                     last: { status, at, run_id?, new_fits?, new_jobs?, companies? } | null };
+type WatchCompany = { name; aliases; website; cities; category; what_they_do; ai_work; size; stage; careers_url;
+  ats: { kind; token; verified; open_jobs; india_jobs }; hires_early_career: "yes"|"some"|"rare"|"unknown";
+  early_career_evidence; role_titles_seen; reviews: { ambitionbox; ambitionbox_reviews; glassdoor; glassdoor_reviews; summary };
+  red_flags: string[]; pay_signal; dsa_heavy_interviews; competition: "very_high"|"high"|"medium"|"low";
+  verdict: "strong"|"good"|"caution"|"avoid"; why; sources: string[]; researched_on; board_supported: boolean };
+```
+
+The watcher runs every `WATCH_INTERVAL_HOURS` (default 4, `0` = off) while the app is open.
 
 ---
 
@@ -137,11 +182,13 @@ Stage keys, in order: `understand`, `plan`, `discover`, `normalize`, `dedupe`,
 | POST | `/api/jobs/{id}/apply` | – | `{ status: "started", session: ApplySession }` — checks the kit (resume, cover letter, CV), writes what is missing, then starts the browser agent; all in the background (409 if already running) |
 
 `view`: `recommended` (default; verdict strong/good/stretch, not closed),
+`fresh` (recommended and first seen in the last 48 hours — new watchlist roles land here),
 `all`, `rejected` (verdict incompatible or closed/invalid), `saved`, `applied`
-(tracking_status in applied/interviewing/offer). `sort`: `score` (default) | `recent`.
+(tracking_status in applied/interviewing/offer).
+`sort`: `chance` (default; 60 % fit + 40 % reach) | `score` (fit) | `reach` (least crowded first) | `recent`.
 
 ```ts
-type ViewCounts = { recommended: number; all: number; rejected: number; saved: number; applied: number };
+type ViewCounts = { recommended: number; fresh: number; all: number; rejected: number; saved: number; applied: number };
 
 type TrackingStatus = "new"|"saved"|"preparing"|"applied"|"interviewing"|"offer"|"rejected"|"archived";
 
@@ -158,6 +205,8 @@ type JobSummary = {
   salary: { min: number|null; max: number|null; currency: string; period: string; raw: string } | null;
   validation: { status: "active"|"likely_active"|"unverified"|"stale"|"closed"|"invalid"; confidence: number; checked_at: string|null };
   match: MatchSummary | null;
+  reach: { score: number; level: "high"|"medium"|"low"; headline: string;
+           application_email: string; company_verdict: string } | null;   // chance a person reads the application
   match_stale: boolean;            // profile changed since scoring
   saved: boolean;
   tracking_status: TrackingStatus;
@@ -276,8 +325,8 @@ Server → client JSON messages:
 
 ```ts
 type WsMessage = {
-  type: "search.run" | "search.job" | "search.activity" | "job.updated" | "job.deleted" | "document.status"
-      | "profile.updated" | "log" | "browser" ;
+  type: "search.run" | "search.progress" | "search.job" | "search.activity" | "job.updated" | "job.deleted"
+      | "document.status" | "profile.updated" | "profile.upload" | "watch.status" | "watch.done" | "log" | "browser" ;
   run_id?: string; job_id?: string;
   message?: string;
   data?: any;
@@ -286,6 +335,9 @@ type WsMessage = {
 ```
 
 * `search.run` — `data: { run: SearchRun }` whenever stage/status/counts change (also final status).
+  `run.mode === "watch"` marks a background watchlist check — clients show it separately, not as the user's search.
+* `search.progress` — `data: { progress: RunProgress, counts, mode }` each time a real unit of work finishes
+  (a web search, a company board, a job page, an AI read, a score). Progress is never estimated from time.
 * `search.job` — `data: { job: JobSummary }` a job was added/updated by the run.
 * `search.activity` — `data: { item: { id, ts, stage, agent, kind, message, job? } }` one plain-language line
   describing what the pipeline just did (e.g. "AI Engineer at Acme is live and accepting applications").
@@ -297,6 +349,9 @@ type WsMessage = {
 * `profile.updated` — `data: ProfileEnvelope`.
 * `log` — `data: { level: "info"|"warn"|"error", source: string }`, `message` — activity feed line.
 * `apply.session` — `data: { session: ApplySession }` every time an auto-apply session changes (status, kit, a step).
+* `profile.upload` — `data: { upload: { id, status, stage: "received"|"extracting"|"understanding"|"done"|"failed", error } }`.
+* `watch.status` — `data: WatchStatus` when a watchlist check starts.
+* `watch.done` — `data: { status, at, run_id, new_fits, new_jobs, companies, status_info: WatchStatus }` when it ends.
 * `browser` — `data` is a browser-agent event `{ agent, event_type, job_id, message }`; only `hitl_request` is sent now.
 
 `/ws/browser`: the live view of the agent's browser. Server → client: `{type:"frame", data:<base64 jpeg>, w, h}` and
