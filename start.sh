@@ -15,8 +15,8 @@ ROOT="$(pwd)"
 say()  { printf '\033[36m==> %s\033[0m\n' "$1"; }
 ok()   { printf '\033[32m    OK  %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[31mERROR: %s\033[0m\n' "$1"; exit 1; }
-open_url() { (command -v open >/dev/null && open "$1") || (command -v xdg-open >/dev/null && xdg-open "$1") \
-             || (command -v cmd.exe >/dev/null && cmd.exe /c start "" "$1") || true; }
+open_url() { { (command -v open >/dev/null && open "$1") || (command -v xdg-open >/dev/null && xdg-open "$1") \
+             || (command -v cmd.exe >/dev/null && cmd.exe /c start "" "$1"); } >/dev/null 2>&1 || true; }
 
 # ---------------------------------------------------------------- 1. uv
 if ! command -v uv >/dev/null 2>&1; then
