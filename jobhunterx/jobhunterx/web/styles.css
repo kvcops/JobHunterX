@@ -126,7 +126,7 @@ html.vt .view { animation: none; }
 
 /* -------------------------------------------------------------------------- shell */
 .shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 16px; height: 100dvh; padding: 16px; overflow: hidden; }
-.sidebar { min-height: 0; }
+.sidebar { min-height: 0; position: relative; z-index: 5; }   /* above the main panel, so its popovers are never covered */
 .sidebar-card { height: 100%; display: flex; flex-direction: column; gap: 4px; padding: 20px 12px 12px;
   background: var(--card); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
   border: 1px solid var(--edge); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -1063,7 +1063,13 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 .switcher { flex: 1; min-width: 0; }
 .switcher .me { width: 100%; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; text-align: left; }
 .me-chev { margin-left: auto; color: var(--text-3); flex: none; }
-.switcher .popover { top: auto; bottom: calc(100% + 10px); left: 0; min-width: 260px; padding: 10px; transform-origin: bottom left; }
+/* the popover spans the whole sidebar footer so it never spills past the sidebar under the main panel */
+.sidebar-foot { position: relative; }
+.switcher.pop-anchor { position: static; }
+.switcher .popover { top: auto; bottom: calc(100% + 10px); left: 0; right: 0; min-width: 0; padding: 10px; transform-origin: bottom left; }
+.switch-item { min-width: 0; }
+.switch-item .grow { flex: 1; }
+.switch-item .grow .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .switch-list { display: flex; flex-direction: column; gap: 2px; }
 .switch-list .sec-title { padding: 4px 8px 6px; margin: 0; }
 .switch-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; border: 0; background: transparent; font: inherit; color: var(--text); cursor: pointer; text-align: left;
