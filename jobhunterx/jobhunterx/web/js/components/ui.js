@@ -257,7 +257,7 @@ export function Tabs({ tabs, value, onChange, label, size }) {
   const sig = tabs.map((t) => `${t.key}:${t.count ?? ''}`).join('|');
   const measure = () => {
     const el = ref.current && ref.current.querySelector('[aria-selected="true"]');
-    if (el) setInd({ x: el.offsetLeft, w: el.offsetWidth });
+    if (el) setInd({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight });   // y/h: small tab bars may wrap
   };
   useLayoutEffect(measure, [value, sig]);
   useEffect(() => {
@@ -274,7 +274,7 @@ export function Tabs({ tabs, value, onChange, label, size }) {
     requestAnimationFrame(() => { const el = ref.current && ref.current.querySelector('[aria-selected="true"]'); el && el.focus(); });
   };
   return html`<div class=${`tabs ${size === 'sm' ? 'tabs-sm' : ''}`} role="tablist" aria-label=${label} ref=${ref} onKeyDown=${onKey}>
-    ${ind ? html`<span class="tab-ind" aria-hidden="true" style=${{ transform: `translateX(${ind.x}px)`, width: `${ind.w}px` }}></span>` : null}
+    ${ind ? html`<span class="tab-ind" aria-hidden="true" style=${{ transform: `translate(${ind.x}px, ${ind.y - 4}px)`, width: `${ind.w}px`, height: `${ind.h}px`, bottom: 'auto' }}></span>` : null}
     ${tabs.map((t) => html`<button type="button" role="tab" key=${t.key} aria-selected=${value === t.key ? 'true' : 'false'} tabindex=${value === t.key ? '0' : '-1'}
       class=${`tab ${value === t.key ? 'active' : ''}`} onClick=${() => onChange(t.key)}>
       ${t.label}${typeof t.count === 'number' ? html`<span class="tab-count">${t.count}</span>` : null}</button>`)}</div>`;
