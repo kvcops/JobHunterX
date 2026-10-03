@@ -11,7 +11,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PLACEHOLDER_PREFIXES = ("your_", "your-", "<", "xxx", "changeme", "change_me", "replace", "paste", "todo", "none", "null")
+
+
+def is_real_key(value: Optional[str]) -> bool:
+    """False for empty values and template placeholders like `your_gemini_api_key` copied from .env.example."""
+    v = (value or "").strip().strip('"').strip("'")
+    return len(v) >= 12 and not v.lower().startswith(_PLACEHOLDER_PREFIXES)
+
 
 # Project root (jobhunterx/): settings.py lives at jobhunterx/jobhunterx/config/settings.py
 _BASE_DIR = Path(__file__).resolve().parents[2]
@@ -30,6 +40,13 @@ class Settings(BaseSettings):
     google_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
+
+    @field_validator("google_api_key", "groq_api_key", "mistral_api_key", "tinyfish_api_key", "tavily_api_key",
+                     "exa_api_key", "brave_api_key", mode="before")
+    @classmethod
+    def _drop_placeholder_keys(cls, v):
+        # A placeholder must count as "no key": otherwise every AI call fails and retries, and the UI waits forever.
+        return v.strip().strip('"').strip("'") if isinstance(v, str) and is_real_key(v) else None
 
     # --- Free-tier limits (defaults live in config/models.py; JSON overrides per model) ---
     gemma_daily_requests: int = 1500
@@ -69,6 +86,7 @@ class Settings(BaseSettings):
     match_policy_json: str = ""
     max_jobs_per_search: int = 60
     max_llm_jd_extractions_per_search: int = 40
+    watch_interval_hours: float = 4.0            # how often watchlist boards are checked while the app runs; 0 = off
     fetch_timeout_s: float = 12.0
     allow_private_network_fetch: bool = False   # SSRF guard; keep False
 

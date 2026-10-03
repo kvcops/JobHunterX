@@ -25,6 +25,8 @@ from jobhunterx.domain.common import Seniority, WorkMode
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import ConstraintResult, ExperienceFit, MatchAssessment, ScoreComponent
 from jobhunterx.intelligence.policy import Policy, get_policy
+from jobhunterx.discovery.watchlist import is_mass_recruiter
+from jobhunterx.intelligence.reach import assess_reach
 from jobhunterx.intelligence.text import term_in_text, tokens
 
 ENGINE_VERSION = "match-v2"
@@ -399,6 +401,10 @@ def assess(
     if job.company and any(norm_term(job.company) == norm_term(x) for x in snapshot.excluded_companies):
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is on your excluded list."))
+    elif is_mass_recruiter(job.company):
+        constraints.append(ConstraintResult(key="company", label="Company", status="fail",
+                                            detail=f"{job.company} is a mass-recruitment IT services firm — "
+                                                   "bulk hiring, little real product AI work."))
 
     if job.employment_type and snapshot.employment_types and job.employment_type not in snapshot.employment_types:
         constraints.append(ConstraintResult(key="employment_type", label="Employment type", status="warn", hard=False,
@@ -452,6 +458,7 @@ def assess(
         rejected_reasons=[f.detail for f in fails],
         role_fit=round(closeness, 3),
         role_track=track,
+        reach=assess_reach(job, snapshot, now),
         method="llm" if (req.method == "llm" and fit_method == "llm") else "fallback",
         profile_hash=snapshot.profile_hash,
         engine_version=ENGINE_VERSION,

@@ -14,6 +14,10 @@ export function inView(job, view) {
     case 'rejected': return verdict === 'incompatible' || DEAD_VALIDATION.has(vstatus);
     case 'saved': return !!job.saved;
     case 'applied': return APPLIED_STATUSES.has(job.tracking_status);
+    case 'fresh': {
+      const seen = Date.parse(job.discovered_at || '');
+      return RECOMMENDED_VERDICTS.has(verdict) && !DEAD_VALIDATION.has(vstatus) && !Number.isNaN(seen) && Date.now() - seen < 48 * 3600e3;
+    }
     default: return true;
   }
 }
@@ -35,8 +39,14 @@ function ts(job) {
   return Number.isNaN(d) ? 0 : d;
 }
 
+const fit = (j) => (j.match ? j.match.score : -1);
+const reach = (j) => (j.reach ? j.reach.score : 50);
+
 export function compareJobs(sort) {
   if (sort === 'recent') return (a, b) => ts(b) - ts(a);
+  if (sort === 'reach') return (a, b) => reach(b) - reach(a) || fit(b) - fit(a);
+  // "chance": fit says you should apply, reach says someone will read it — mirrors the server's blend
+  if (sort === 'chance') return (a, b) => (Math.max(fit(b), 0) * 0.6 + reach(b) * 0.4) - (Math.max(fit(a), 0) * 0.6 + reach(a) * 0.4) || ts(b) - ts(a);
   return (a, b) => {
     const sa = a.match ? a.match.score : -1;
     const sb = b.match ? b.match.score : -1;
@@ -60,11 +70,16 @@ export function summaryFromDetail(d) {
     missing_required: (m.missing_required || []).slice(0, 5),
     experience: m.experience, rejected_reasons: m.rejected_reasons || [],
   } : null;
+  const r = m && m.reach;
+  const reachSummary = r ? {
+    score: r.score, level: r.level, headline: r.headline, application_email: r.application_email, company_verdict: r.company_verdict,
+  } : null;
   const v = d.validation || {};
   const { description, requirements, sources, document_list: _dl, ...rest } = d;
   return {
     ...rest,
     match,
+    reach: reachSummary,
     validation: { status: v.status, confidence: v.confidence, checked_at: v.checked_at },
   };
 }

@@ -489,6 +489,7 @@ function TuningSection({ d }) {
     <div class="form-grid">
       ${num('max_jobs_per_search', 'Jobs analysed per search', '5–200. More jobs = longer searches and more AI calls.')}
       ${num('max_llm_jd_extractions_per_search', 'Deep AI reads per search', 'How many postings get a full AI read.')}
+      ${num('watch_interval_hours', 'Watchlist check (hours)', 'How often your watchlist companies are checked for new roles while the app is open. 0 = off.', 0.5)}
       ${num('fetch_timeout_s', 'Page fetch timeout (s)', 'How long to wait for a job page.', 0.5)}
       ${num('exa_search_num_results', 'Exa results per query', '1–50')}
       <${Field} label="Tavily depth">${(id) => html`<${Select} id=${id} block label="Tavily depth" value=${t.tavily_search_depth}

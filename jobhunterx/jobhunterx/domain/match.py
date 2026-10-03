@@ -46,6 +46,24 @@ class ExperienceFit(BaseModel):
     gap_years: float = 0.0
 
 
+class ReachSignal(BaseModel):
+    key: str
+    points: int
+    detail: str
+
+
+class Reach(BaseModel):
+    """How likely a person actually reads the application (see intelligence/reach.py)."""
+
+    score: int = 50                    # 0–100
+    level: Literal["high", "medium", "low"] = "medium"
+    headline: str = ""
+    signals: list[ReachSignal] = Field(default_factory=list)
+    application_email: str = ""        # only an address the posting itself gives
+    watchlist_company: str = ""
+    company_verdict: str = ""
+
+
 class MatchAssessment(BaseModel):
     score: int = 0                     # 0–100
     verdict: Verdict = "weak"
@@ -63,6 +81,7 @@ class MatchAssessment(BaseModel):
     rejected_reasons: list[str] = Field(default_factory=list)
     role_fit: float = 0.0
     role_track: str = ""
+    reach: Optional[Reach] = None      # chance of being seen — separate from fit, never mixed into `score`
     method: str = ""                   # llm | fallback — how the JD/role fit were understood
     profile_hash: str = ""
     engine_version: str = ""

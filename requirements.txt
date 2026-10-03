@@ -1,53 +1,62 @@
 # =============================================================================
-# JobHunterX — Python Requirements
-# Optimized & Conflict-Free Installation
+# JobHunterX — Python Requirements (exact versions that are known to work together)
 # =============================================================================
+#
+# FAST INSTALL (recommended, ~30 seconds):
+#     pip install uv
+#     uv pip install -r requirements.txt
+#
+# Plain pip also works, but upgrade it first (old pip resolves very slowly):
+#     python -m pip install --upgrade pip
+#     pip install -r requirements.txt
+#
+# Why everything is pinned: browser-use requires exactly openai==2.16.0, while
+# newer litellm releases need openai>=2.20. With open-ended ">=" versions pip
+# walks back through hundreds of litellm releases trying to satisfy both —
+# that is what made installs take hours. These pins resolve instantly.
+# Upgrade a package only together with a fresh resolve (uv pip compile).
 
-# Prefer prebuilt wheels over source tarballs. Some packages (e.g. litellm)
-# ship sdists that require a Rust toolchain to build; this flag makes pip pick
-# the latest version with a ready-made wheel instead.
 --prefer-binary
 
 # --- Core Web Framework & Server ---
-fastapi>=0.140.0
-uvicorn[standard]>=0.34.0
-python-multipart>=0.0.20
-httpx>=0.27.0
+uvicorn[standard]==0.41.0
+fastapi==0.140.7
+python-multipart==0.0.32
+httpx==0.28.1
 
 # --- Data Schemas & Configuration ---
-pydantic>=2.11.0
-pydantic-settings>=2.8.0
-python-dotenv>=1.1.0
+pydantic==2.12.5
+pydantic-settings==2.14.1
+python-dotenv==1.2.2
 
 # --- LLM Providers & Router ---
-# litellm is pinned to 1.80.0: browser-use pins openai==2.16.0, but litellm
-# >=1.85.0 requires openai>=2.20. This version ships prebuilt wheels for all
-# platforms (no Rust toolchain needed) and resolves with browser-use.
+# litellm 1.80.0 is the newest release compatible with browser-use's openai pin.
 litellm==1.80.0
-google-genai>=1.65.0
+openai==2.16.0
+google-genai==1.65.0
 
 # --- Search & Web Scraping ---
-ddgs>=9.0.0
-trafilatura>=2.0.0
-beautifulsoup4>=4.13.0
-lxml>=5.4.0
+ddgs==9.14.4
+trafilatura==2.1.0
+beautifulsoup4==4.14.3
+lxml==6.1.1
 
 # --- Document Processing & PDF Tailoring ---
-xhtml2pdf>=0.2.0
-jinja2>=3.1.0
-pymupdf>=1.25.0
+xhtml2pdf==0.2.17
+jinja2==3.1.6
+pymupdf==1.28.0
 
 # --- Persistence & Caching ---
-aiosqlite>=0.22.0
-diskcache>=5.6.0
+aiosqlite==0.22.1
+diskcache==5.6.3
 
 # --- System & Observability ---
-structlog>=26.1.0
-psutil>=7.0.0
+structlog==26.1.0
+psutil==7.2.2
 
 # --- Browser Automation ---
-browser-use>=0.13.0
+browser-use==0.13.6
 
 # --- Testing & Development ---
-pytest>=8.0.0
-pytest-asyncio>=0.25.0
+pytest==9.1.1
+pytest-asyncio==1.4.0

@@ -28,6 +28,11 @@ async def _slow(chain, messages, **kw):
 
 mp.setattr(llm_structured, "call_llm_with_fallback", _slow)
 
+# The fake LLM needs no keys: skip the first-run API key screen.
+from jobhunterx.api import routes  # noqa: E402
+_real_setup = routes._setup_status
+mp.setattr(routes, "_setup_status", lambda: {**_real_setup(), "llm_ready": True})
+
 import uvicorn  # noqa: E402
 from jobhunterx.api.main import app  # noqa: E402
 

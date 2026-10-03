@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from jobhunterx.domain.common import Seniority, WorkMode
 
@@ -52,6 +52,12 @@ class Salary(BaseModel):
     currency: str = ""
     period: str = "year"           # year | month | hour
     raw: str = ""
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _currency(cls, v):
+        s = str(v or "").strip()
+        return "INR" if s.lower().rstrip(".") in ("₹", "rs", "inr", "rupees", "rupee") else s
 
     def annual_min(self) -> Optional[float]:
         if self.min is None:

@@ -12,7 +12,7 @@ import {
 import { JobDetail } from './jobdetail.js';
 import {
   VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, WORK_MODES, WORK_MODE_LABEL, relTime, fmtSalary,
-  experienceText, EXPERIENCE_TONE, plural, humanize,
+  experienceText, EXPERIENCE_TONE, plural, humanize, REACH_SHORT, REACH_TONE, COMPANY_VERDICT_TONE,
 } from '../lib/format.js';
 import { defaultSearchRequest } from '../state/domain.js';
 
@@ -258,6 +258,7 @@ function MissionControl() {
 export function JobCard({ job, onOpen, selected, index = 0, fresh }) {
   const pendingSave = useStore((s) => !!s.pending.save[job.id]);
   const m = job.match;
+  const r = job.reach;
   const exp = m && m.experience;
   return html`<article class=${`job-card ${m && m.verdict === 'incompatible' ? 'is-rejected' : ''} ${selected ? 'is-selected' : ''} ${fresh ? 'is-fresh' : ''}`}
       style=${{ '--i': Math.min(index, 14) }}>
@@ -281,6 +282,12 @@ export function JobCard({ job, onOpen, selected, index = 0, fresh }) {
         ${m && m.required_total ? html`<span class="fact">${m.required_matched}/${m.required_total} skills</span>` : null}
         ${exp && exp.fit !== 'unknown' ? html`<span class=${`fact tone-text-${EXPERIENCE_TONE[exp.fit]}`}>${experienceText(exp)}</span>` : null}
       </div>
+      ${r ? html`<div class="job-reach" title=${r.headline}>
+        <${Badge} tone=${REACH_TONE[r.level]}>${REACH_SHORT[r.level]}</${Badge}>
+        ${r.application_email ? html`<${Badge} tone="success">Email route</${Badge}>` : null}
+        ${r.company_verdict ? html`<${Badge} tone=${COMPANY_VERDICT_TONE[r.company_verdict]}>Watchlist</${Badge}>` : null}
+        <span class="job-reach-why">${r.headline}</span>
+      </div>` : null}
     </button>
     <button type="button" class=${`icon-btn save-btn ${job.saved ? 'on' : ''}`} aria-pressed=${job.saved ? 'true' : 'false'}
       aria-label=${job.saved ? 'Unsave job' : 'Save job'} disabled=${pendingSave} onClick=${() => toggleSaved(job.id)}>
@@ -299,7 +306,7 @@ function Filters() {
     const t = setTimeout(() => setList({ q }), 300);
     return () => clearTimeout(t);
   }, [q]);
-  const active = (list.work_mode ? 1 : 0) + (list.min_score ? 1 : 0) + (list.sort !== 'score' ? 1 : 0) + (list.scope === 'run' ? 1 : 0);
+  const active = (list.work_mode ? 1 : 0) + (list.min_score ? 1 : 0) + (list.sort !== 'chance' ? 1 : 0) + (list.scope === 'run' ? 1 : 0);
   return html`<div class="filter-row">
     <label class="search-field"><${Icon} name="search" size=${15} />
       <input type="search" placeholder="Filter by title, company, place" aria-label="Filter jobs" value=${q} onInput=${(e) => setQ(e.currentTarget.value)} /></label>
@@ -315,7 +322,8 @@ function Filters() {
           <${Field} label="Minimum score">${(id) => html`<${Select} id=${id} block label="Minimum score" value=${String(list.min_score || 0)} onChange=${(v) => setList({ min_score: Number(v) })}
             options=${[['0', 'Any score'], ['45', '45 and above', 'Includes stretch roles'], ['60', '60 and above', 'Good matches'], ['75', '75 and above', 'Strong matches only']]} />`}</${Field}>
           <${Field} label="Sort">${(id) => html`<${Select} id=${id} block label="Sort" value=${list.sort} onChange=${(v) => setList({ sort: v })}
-            options=${[['score', 'Best match'], ['recent', 'Most recent']]} />`}</${Field}>
+            options=${[['chance', 'Best chance', 'Fit and how likely you are to be seen'], ['score', 'Best fit'],
+              ['reach', 'Least crowded', 'Fresh posts, employer boards, email routes first'], ['recent', 'Most recent']]} />`}</${Field}>
         </div>
       </${Popover}>
     </div>
@@ -331,6 +339,7 @@ function JobList() {
   const counts = list.counts || {};
   const tabs = [
     { key: 'recommended', label: 'For you', count: counts.recommended },
+    { key: 'fresh', label: 'New', count: counts.fresh },
     { key: 'all', label: 'All', count: counts.all },
     { key: 'saved', label: 'Saved', count: counts.saved },
     { key: 'applied', label: 'Applied', count: counts.applied },

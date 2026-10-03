@@ -32,6 +32,14 @@ export const CHECK_STATUS_TONE = {
   verified: 'success', inferred: 'info', unverified: 'neutral', unknown: 'unknown', failed: 'danger',
 };
 
+// Reach: chance a person actually reads the application (separate from fit).
+export const REACH_LABEL = { high: 'Good chance to be seen', medium: 'Some chance to be seen', low: 'Crowded — low chance' };
+export const REACH_SHORT = { high: 'Seen: high', medium: 'Seen: medium', low: 'Seen: low' };
+export const REACH_TONE = { high: 'success', medium: 'info', low: 'danger' };
+export const COMPANY_VERDICT_LABEL = { strong: 'Strong company to watch', good: 'Good company', caution: 'Caution', avoid: 'Avoid' };
+export const COMPANY_VERDICT_TONE = { strong: 'success', good: 'info', caution: 'warning', avoid: 'danger' };
+export const COMPETITION_LABEL = { low: 'Low competition', medium: 'Medium competition', high: 'High competition', very_high: 'Very high competition' };
+export const EARLY_CAREER_LABEL = { yes: 'Hires 1–3 yr engineers', some: 'Sometimes hires 1–3 yr', rare: 'Rarely hires under 3 yrs', unknown: 'Early-career hiring unknown' };
 export const CONSTRAINT_TONE = { pass: 'success', warn: 'warning', fail: 'danger', unknown: 'unknown' };
 export const CONSTRAINT_LABEL = { pass: 'Pass', warn: 'Warning', fail: 'Fail', unknown: 'Unknown' };
 

@@ -19,7 +19,7 @@ import hashlib
 import json
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from jobhunterx.domain.common import Seniority, WorkMode
 
@@ -221,6 +221,13 @@ class CandidatePreferences(_Lenient):
         if v in ("", None):
             return None
         return v
+
+    @model_validator(mode="after")
+    def _lpa(self) -> "CandidatePreferences":
+        # "14" in an INR salary box means 14 LPA (₹14,00,000) — nobody asks for ₹14 a year.
+        if self.min_annual_salary and self.salary_currency.upper() == "INR" and 0 < self.min_annual_salary < 1000:
+            self.min_annual_salary = self.min_annual_salary * 100_000
+        return self
 
 
 class CandidateProfile(_Lenient):

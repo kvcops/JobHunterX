@@ -13,6 +13,7 @@ Search run orchestration — the full discovery → ranking pipeline.
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
@@ -20,12 +21,13 @@ from typing import Awaitable, Callable, Optional
 from jobhunterx import storage
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
-from jobhunterx.discovery import ats, dedupe, page, search, validate
+from jobhunterx.discovery import ats, dedupe, page, search, validate, watchlist
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
-from jobhunterx.domain.job import JobPosting
+from jobhunterx.domain.job import AtsRef, JobPosting
 from jobhunterx.intelligence import job as job_ai
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
+from jobhunterx.intelligence.policy import get_policy
 from jobhunterx.intelligence.text import term_in_text, tokens
 from jobhunterx.services import profile as profile_svc
 from jobhunterx.services.jobs import summary
@@ -60,6 +62,9 @@ VERDICT_WORDS = {"strong": "Strong match", "good": "Good match", "stretch": "Str
 CHUNK = 6
 FETCH_CONCURRENCY = 6
 BOARD_JOBS_PER_BOARD = 15
+BOARD_CONCURRENCY = 8
+WATCH_BOARDS_MAX = 80
+WATCH_NEW_PER_CHECK = 20
 
 
 def _now() -> str:
@@ -144,14 +149,23 @@ def _location_prefilter(job: JobPosting, snap: CandidateSnapshot, include_remote
     text = "; ".join([job.location_raw, *job.locations, *job.countries])
     if not text.strip(" ;"):
         return True
-    if include_remote and (job.work_mode == WorkMode.REMOTE or term_in_text(WorkMode.REMOTE.value, text)):
+    if snap.open_to_international:
         return True
     forms = {f for p in snap.locations for f in [p.city, p.country, *p.aliases] if f}
     if snap.willing_to_relocate and snap.home_country:
         forms.add(snap.home_country)
-    if snap.open_to_international:
+    if any(term_in_text(f, text) for f in forms):
         return True
-    return any(term_in_text(f, text) for f in forms)
+    if include_remote and (job.work_mode == WorkMode.REMOTE or term_in_text(WorkMode.REMOTE.value, text)):
+        # "Remote" alone may include the candidate; "Remote - US" / "Remote, Germany" does not.
+        if snap.home_country and term_in_text(snap.home_country, text):
+            return True
+        return not _REMOTE_LEFTOVER.sub(" ", text).strip(" ;,/-|()")
+    return False
+
+
+_REMOTE_LEFTOVER = re.compile(r"(?i)\b(remote|anywhere|worldwide|global|work from home|wfh|fully|first|"
+                              r"apac|asia|asia pacific)\b|[;,/|()\-–]")
 
 
 def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
@@ -164,34 +178,59 @@ def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
     return best
 
 
-async def _expand_boards(refs: list, snap: CandidateSnapshot, include_remote: bool,
-                         skip_llm: set[str]) -> list[JobPosting]:
-    """For each discovered ATS board, pull its open jobs and keep the relevant ones.
+async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompany]]], snap: CandidateSnapshot,
+                         include_remote: bool, titles: list[str]) -> list[JobPosting]:
+    """For each ATS board (watchlist or discovered), pull its open jobs and keep the relevant ones.
 
-    Jobs outside the candidate's locations are kept (so the user can see why
-    they were excluded) but marked to skip LLM analysis — their location
-    already makes them incompatible, so spending a model call would be waste.
+    Jobs outside the candidate's locations are dropped here. A foreign
+    company's board can list dozens of US/Europe roles; keeping them would
+    fill the result slots with jobs the candidate can never take and push
+    out the local roles found by web search.
     """
     out: list[JobPosting] = []
+    sem = asyncio.Semaphore(BOARD_CONCURRENCY)
 
-    async def one(ref):
-        jobs = await ats.ADAPTERS[ref.kind].list_jobs(ref.token)
+    async def one(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
+        async with sem:
+            jobs = await ats.ADAPTERS[ref.kind].search_jobs(ref.token, titles[:4] or None)
         if not jobs:
             return []
+        jobs = [j for j in jobs if _location_prefilter(j, snap, include_remote)]
         for j in jobs:
             j.id = j.id or str(uuid.uuid4())
-            if not _location_prefilter(j, snap, include_remote):
-                skip_llm.add(j.id)
+            if company:
+                j.company = company.name          # ATS boards often carry a token or legal-entity name
         keep = [(j, _title_relevance(j, snap)) for j in jobs]
         keep = [jr for jr in keep if jr[1] > 0]
-        keep.sort(key=lambda jr: -jr[1])
-        return [j for j, _ in keep[:BOARD_JOBS_PER_BOARD]]
+        keep.sort(key=lambda jr: (-jr[1], _age_days(jr[0])))
+        picked = [j for j, _ in keep[:BOARD_JOBS_PER_BOARD]]
+        # Some board APIs (e.g. SmartRecruiters) list jobs without their text — fetch it for the ones we keep.
+        adapter = ats.ADAPTERS[ref.kind]
 
-    results = await asyncio.gather(*(one(r) for r in refs), return_exceptions=True)
+        async def hydrate(j: JobPosting) -> JobPosting:
+            if j.description or not (j.ats and j.ats.job_id):
+                return j
+            async with sem:
+                state, full = await adapter.check(j.ats)
+            if state == "live" and full and full.description:
+                j.description = full.description
+            return j
+
+        return list(await asyncio.gather(*(hydrate(j) for j in picked)))
+
+    results = await asyncio.gather(*(one(r, c) for r, c in refs), return_exceptions=True)
     for r in results:
         if isinstance(r, list):
             out += r
+        elif isinstance(r, Exception):
+            log.debug("board_expand_failed", error=str(r)[:120])
     return out
+
+
+def _age_days(p: JobPosting) -> float:
+    if not p.posted_at:
+        return 999.0
+    return max(0.0, (datetime.now(timezone.utc) - p.posted_at).total_seconds() / 86400)
 
 
 async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
@@ -213,26 +252,39 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     await run.say("understand", f"You read as a {snap.seniority.value} profile with about {snap.professional_years:g} years "
                   f"of experience, strongest in {tracks}", "good")
 
-    # 2. Plan -----------------------------------------------------------------
-    await run.stage("plan")
-    await run.say("plan", "Deciding which titles and places to search", "work")
+    watch_mode = request.get("mode") == "watch"
     scope = search.scope_from_snapshot(snap, locations=request.get("locations") or None,
                                        role_focus=request.get("role_focus") or None,
                                        work_modes=request.get("work_modes") or None)
-    max_queries = max(4, min(16, max_jobs // 4))
-    queries, plan_method = await search.plan_queries(snap, scope, max_queries)
+    watch_cos = watchlist.for_candidate(snap)
+    watch_refs = watchlist.board_refs(watch_cos)[:WATCH_BOARDS_MAX]
+
+    # 2. Plan -----------------------------------------------------------------
+    await run.stage("plan")
+    if watch_mode:
+        queries, plan_method = [], "watchlist"
+        await run.say("plan", f"Checking {len(watch_refs)} watchlist companies' own job boards for new roles", "work")
+    else:
+        await run.say("plan", "Deciding which titles and places to search", "work")
+        max_queries = max(4, min(16, max_jobs // 4))
+        queries, plan_method = await search.plan_queries(snap, scope, max_queries)
     c["queries"] = len(queries)
     run.data["plan"] = {"role_families": [f.label for f in snap.role_families], "titles": scope.titles,
-                        "locations": scope.locations, "queries": queries, "method": plan_method}
-    await run.stage("plan", "done", f"{len(queries)} queries across {len(scope.titles)} titles")
-    where = ", ".join(scope.locations[:3]) or "your preferred locations"
-    titles = ", ".join(scope.titles[:3]) + (f" and {len(scope.titles) - 3} more" if len(scope.titles) > 3 else "")
-    await run.say("plan", f"Looking for {titles} in {where} — {len(queries)} searches planned", "info")
+                        "locations": scope.locations, "queries": queries, "method": plan_method,
+                        "watchlist": len(watch_refs)}
+    await run.stage("plan", "done", f"{len(queries)} queries · {len(watch_refs)} watchlist boards")
+    if not watch_mode:
+        where = ", ".join(scope.locations[:3]) or "your preferred locations"
+        titles = ", ".join(scope.titles[:3]) + (f" and {len(scope.titles) - 3} more" if len(scope.titles) > 3 else "")
+        await run.say("plan", f"Looking for {titles} in {where} — {len(queries)} searches planned"
+                      + (f", plus {len(watch_refs)} researched companies checked directly" if watch_refs else ""), "info")
 
     # 3. Discover -------------------------------------------------------------
     await run.stage("discover")
-    await run.say("discover", f"Searching job sites and company career pages ({len(queries)} searches)", "work")
-    leads = await search.run_queries(queries)
+    leads = []
+    if queries:
+        await run.say("discover", f"Searching job sites and company career pages ({len(queries)} searches)", "work")
+        leads = await search.run_queries(queries)
     c["search_results"] = len(leads)
     posting_leads, boards = [], {}
     for lead in leads:
@@ -243,16 +295,30 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             posting_leads.append(lead)
             if ref:
                 boards.setdefault((ref.kind, ref.token.lower()), ref.model_copy(update={"job_id": ""}))
-    await run.say("discover", f"Found {len(leads)} search results"
-                  + (f", including {len(boards)} company career boards" if boards else ""), "info")
-    skip_llm: set[str] = set()
-    board_refs = list(boards.values())[:12]
-    for ref in board_refs[:6]:
+    if queries:
+        await run.say("discover", f"Found {len(leads)} search results"
+                      + (f", including {len(boards)} company career boards" if boards else ""), "info")
+    known = {(r.kind, r.token.lower()) for r, _ in watch_refs}
+    found_refs = [(r, watchlist.find_board(r)) for k, r in boards.items() if k not in known][:12]
+    board_refs = watch_refs + found_refs
+    if watch_refs:
+        await run.say("discover", f"Opening {len(watch_refs)} researched companies' own job boards — "
+                      "new roles there are usually seen before the crowd arrives", "work")
+    for ref, _ in found_refs[:6]:
         await run.say("discover", f"Opening {_pretty_board(ref.token)}'s careers board on {ref.kind.title()}", "work")
-    board_jobs = await _expand_boards(board_refs, snap, scope.include_remote, skip_llm)
+    board_jobs = await _expand_boards(board_refs, snap, scope.include_remote, scope.titles)
     if board_refs:
         await run.say("discover", f"Pulled {len(board_jobs)} relevant openings straight from employer boards", "good")
-    await run.stage("discover", "done", f"{len(leads)} search results · {len(boards)} employer job boards")
+    if watch_mode:
+        before = len(board_jobs)
+        stale_after = get_policy().stale_after_days
+        board_jobs = [j for j in board_jobs if _age_days(j) <= stale_after or not j.posted_at]
+        board_jobs = [j for j in board_jobs if not await storage.job_exists(j)]
+        # Free AI tiers allow ~1 deep read a minute; take the best new ones now, the rest next check.
+        max_jobs = min(max_jobs, WATCH_NEW_PER_CHECK)
+        await run.say("discover", f"{len(board_jobs)} of them are new since the last check"
+                      if before else "No matching openings on watchlist boards right now", "info")
+    await run.stage("discover", "done", f"{len(leads)} search results · {len(board_refs)} employer job boards")
 
     # 4. Normalize ------------------------------------------------------------
     await run.stage("normalize")
@@ -292,7 +358,8 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     c["duplicates"] = dups
     for p in unique:
         p.id = p.id or str(uuid.uuid4())
-    unique.sort(key=lambda p: (-(p.primary_source.first_party if p.primary_source else 0), -_title_relevance(p, snap)))
+    unique.sort(key=lambda p: (-(p.primary_source.first_party if p.primary_source else 0),
+                               -round(_title_relevance(p, snap), 1), _age_days(p)))
     unique = unique[:max_jobs]
     run.data["total"] = len(unique)
     await run.stage("dedupe", "done", f"{dups} duplicates merged · {len(unique)} unique")
@@ -330,7 +397,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             else:
                 await run.say("validate", f"Couldn't confirm {name} is still open — marked unverified", "warn", ref)
         for p in chunk:
-            use_llm = llm_budget > 0 and p.validation.status not in ("invalid",) and p.id not in skip_llm
+            use_llm = llm_budget > 0 and p.validation.status not in ("invalid",)
             ref = _job_ref(p)
             if use_llm:
                 await run.say("extract", f"Reading the requirements for {ref['title']} at {ref['company']}", "work", ref)
@@ -340,8 +407,6 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 n_req = len(p.requirements.required_skills)
                 await run.say("extract", f"{ref['title']} asks for {_years(p)}"
                               + (f" and {n_req} required skills" if n_req else ""), "info", ref)
-            elif p.id in skip_llm:
-                await run.say("extract", f"Skipped a deep read of {ref['title']} — it's outside your locations", "info", ref)
             validate.finalize(p)   # extraction may reveal closed / not-a-posting
         fits = await job_ai.assess_role_fit(snap, chunk)
         for p in chunk:
@@ -391,6 +456,14 @@ class SearchManager:
     @property
     def current(self) -> Optional[dict]:
         return self._run.data if self._run else None
+
+    async def wait(self) -> None:
+        """Wait for the active run to end (completed, failed or cancelled)."""
+        if self._task and not self._task.done():
+            try:
+                await asyncio.shield(self._task)
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def cancel(self, run_id: Optional[str] = None) -> Optional[dict]:
         if self._run and (run_id is None or self._run.id == run_id) and self._task and not self._task.done():

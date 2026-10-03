@@ -458,9 +458,16 @@ source .venv/bin/activate       # Linux / macOS
 ### ② Install
 
 ```bash
-pip install -r requirements.txt --prefer-binary
+pip install uv                  # fast installer — the whole install takes ~30 seconds
+uv pip install -r requirements.txt
 playwright install chromium     # the browser the agent uses
 ```
+
+> Plain `pip install -r requirements.txt` works too — run `python -m pip install --upgrade pip` first.
+> Versions are pinned on purpose: with open-ended versions pip can spend hours resolving
+> (browser-use needs exactly `openai==2.16.0`, newer litellm needs a newer openai).
+>
+> No keys yet? Just start the app — the first screen asks for them, with a link to get each one free.
 
 ### ③ Add your keys
 

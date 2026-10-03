@@ -70,7 +70,7 @@ def test_full_flow_search_save_track_generate(client):
     data = client.get("/api/jobs", params={"view": "recommended", "run_id": run["id"]}).json()
     titles = [j["title"] for j in data["jobs"]]
     assert "AI Engineer" in titles and "Senior AI Engineer" not in titles and "Frontend Engineer" not in titles
-    assert data["counts"]["rejected"] >= 4
+    assert data["counts"]["rejected"] >= 3          # the Berlin job is dropped before scoring
     job = next(j for j in data["jobs"] if j["title"] == "AI Engineer")
     assert job["match"]["verdict"] in ("strong", "good") and job["source"]["first_party"]
 

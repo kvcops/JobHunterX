@@ -24,6 +24,7 @@ from jobhunterx.agents import extractor
 from jobhunterx.api.ws import manager as ws_manager
 from jobhunterx.config import database as db
 from jobhunterx.config.logging import get_logger
+from jobhunterx.config.settings import is_real_key
 from jobhunterx.domain.candidate import CandidateProfile
 from jobhunterx.generation.cover_letter import GenerationUnavailable
 from jobhunterx.services import apply as apply_svc
@@ -62,7 +63,63 @@ async def _current_hash() -> Optional[str]:
 
 @router.get("/meta")
 async def meta():
-    return {"tracking_statuses": storage.TRACKING_STATUSES}
+    return {"tracking_statuses": storage.TRACKING_STATUSES, "setup": _setup_status()}
+
+
+# ---------------------------------------------------------------------------
+# First-run setup: API keys
+# ---------------------------------------------------------------------------
+
+_LLM_KEYS = ("google", "groq", "mistral")
+_SEARCH_KEYS = ("tavily", "exa", "tinyfish", "brave")
+
+
+def _setup_status() -> dict:
+    from jobhunterx.config.settings import get_settings
+    s = get_settings()
+    have = {name: bool(getattr(s, f"{name}_api_key")) for name in (*_LLM_KEYS, *_SEARCH_KEYS)}
+    return {"llm_ready": any(have[n] for n in _LLM_KEYS), "keys": have,
+            "llm_count": sum(have[n] for n in _LLM_KEYS)}
+
+
+@router.get("/setup")
+async def setup_status():
+    return _setup_status()
+
+
+class KeyTest(BaseModel):
+    provider: Literal["google", "groq", "mistral", "tavily", "exa", "tinyfish", "brave"]
+    key: str = Field(..., max_length=256)
+
+
+@router.post("/setup/test-key")
+async def test_key(body: KeyTest):
+    """Check a key with one free call (listing the provider's models). Search keys are only format-checked —
+    testing them would spend a search credit."""
+    import httpx
+    key = body.key.strip()
+    if not is_real_key(key) or not re.fullmatch(r"[A-Za-z0-9_\-.:]{12,256}", key):
+        return {"ok": False, "message": "That doesn't look like an API key — copy the whole key again."}
+    checks = {
+        "google": ("https://generativelanguage.googleapis.com/v1beta/models", {"x-goog-api-key": key}),
+        "groq": ("https://api.groq.com/openai/v1/models", {"Authorization": f"Bearer {key}"}),
+        "mistral": ("https://api.mistral.ai/v1/models", {"Authorization": f"Bearer {key}"}),
+    }
+    if body.provider not in checks:
+        return {"ok": True, "message": "Saved format looks right — it is checked on the first search."}
+    url, headers = checks[body.provider]
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(url, headers=headers)
+    except httpx.HTTPError:
+        return {"ok": False, "message": "Could not reach the provider — check your internet connection and try again."}
+    if r.status_code == 200:
+        return {"ok": True, "message": "Key works."}
+    if r.status_code in (400, 401, 403):
+        return {"ok": False, "message": "The provider rejected this key. Create a new key and paste it again."}
+    if r.status_code == 429:
+        return {"ok": True, "message": "Key accepted (the provider is rate-limiting right now, that's fine)."}
+    return {"ok": False, "message": f"The provider answered with an error ({r.status_code}). Try again in a minute."}
 
 
 @router.get("/profile")
@@ -123,6 +180,9 @@ async def upload_resume(file: UploadFile = File(...), background: bool = Query(F
         raise HTTPException(413, "The file is larger than 10 MB.")
     if not data.startswith(b"%PDF"):
         raise HTTPException(422, "Please upload a PDF resume.")
+    if not _setup_status()["llm_ready"]:
+        raise HTTPException(400, "Add at least one AI key first (Google AI Studio, Groq or Mistral — all free). "
+                                 "Without one, the resume cannot be read.")
     up = {"id": str(uuid.uuid4()), "status": "running", "stage": "received", "file_name": (file.filename or "resume.pdf")[:120],
           "started_at": datetime.now(timezone.utc).isoformat(), "error": None}
     _uploads[up["id"]] = up
@@ -246,12 +306,40 @@ async def cancel_search(run_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Watchlist — researched companies whose own job boards are checked directly
+# ---------------------------------------------------------------------------
+
+@router.get("/watchlist")
+async def get_watchlist(scope: Literal["mine", "all"] = "mine"):
+    from jobhunterx.discovery import watchlist
+    from jobhunterx.services.watcher import watcher
+    cities: list[str] = []
+    companies = list(watchlist.load())
+    if scope == "mine":
+        profile = await profile_svc.get_profile()
+        if profile and not profile.is_empty():
+            snap = await profile_svc.get_snapshot(profile)
+            cities = watchlist.cities_for(snap)
+            companies = watchlist.for_candidate(snap)
+    return {"cities": cities, "covered_cities": list(watchlist.CITY_FORMS), "total": len(watchlist.load()),
+            "companies": [watchlist.public_view(c) for c in companies], "status": watcher.status()}
+
+
+@router.post("/watchlist/check", status_code=202)
+async def check_watchlist():
+    from jobhunterx.services.watcher import watcher
+    await _profile_or_400()
+    asyncio.create_task(watcher.check_now(emit))
+    return {"status": watcher.status()}
+
+
+# ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
 
 @router.get("/jobs")
 async def list_jobs(view: str = "recommended", run_id: str = "", q: str = "", work_mode: str = "",
-                    min_score: int = 0, sort: Literal["score", "recent"] = "score", limit: int = 200):
+                    min_score: int = 0, sort: Literal["chance", "score", "reach", "recent"] = "chance", limit: int = 200):
     if view not in jobs_svc.VIEWS:
         raise HTTPException(400, f"Unknown view '{view}'")
     items, counts = await jobs_svc.list_jobs(view, await _current_hash(), run_id=run_id, q=q.strip()[:100],
@@ -576,6 +664,7 @@ def _source(env_names: list[str], file_keys: dict[str, str]) -> str:
 # Non-secret settings that can be edited from the UI (and are written back to .env).
 _TUNABLES = {
     "max_jobs_per_search": ("MAX_JOBS_PER_SEARCH", int, 5, 200),
+    "watch_interval_hours": ("WATCH_INTERVAL_HOURS", float, 0, 24),
     "max_llm_jd_extractions_per_search": ("MAX_LLM_JD_EXTRACTIONS_PER_SEARCH", int, 0, 200),
     "fetch_timeout_s": ("FETCH_TIMEOUT_S", float, 3, 60),
     "tavily_search_depth": ("TAVILY_SEARCH_DEPTH", str, None, None),
@@ -641,7 +730,7 @@ async def update_settings(payload: dict):
             key = str(payload[field] or "").strip()
             if not re.fullmatch(r"[A-Za-z0-9_\-.:]{0,256}", key):
                 raise HTTPException(422, f"{field} contains invalid characters")
-            setattr(s, attr, key or None)
+            setattr(s, attr, key if is_real_key(key) else None)
             keys_changed = True
             for n in env_names:
                 if key:

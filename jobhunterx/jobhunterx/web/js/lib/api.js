@@ -158,6 +158,14 @@ export const api = {
   clearJobs: (scope, o) => request('/jobs', { method: 'DELETE', query: { scope }, ...o }),
   applyJob: (id, o) => request(`/jobs/${enc(id)}/apply`, { method: 'POST', ...o }),
 
+  // first-run setup (API keys)
+  setup: (o) => request('/setup', o),
+  testKey: (provider, key, o) => request('/setup/test-key', { method: 'POST', body: { provider, key }, timeout: 30_000, ...o }),
+
+  // watchlist (researched companies whose own job boards are checked directly)
+  watchlist: (scope, o) => request('/watchlist', { query: { scope }, timeout: 45_000, ...o }),
+  checkWatchlist: (o) => request('/watchlist/check', { method: 'POST', ...o }),
+
   // documents
   generateDocument: (jobId, kind, o) => request(`/jobs/${enc(jobId)}/documents`, { method: 'POST', body: { kind }, timeout: 120_000, ...o }),
   generateCv: (focus, o) => request('/documents/cv', { method: 'POST', body: focus ? { focus } : {}, timeout: 120_000, ...o }),

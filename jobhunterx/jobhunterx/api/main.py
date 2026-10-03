@@ -84,6 +84,10 @@ async def lifespan(app: FastAPI):
     live_view.bind_main_loop(asyncio.get_running_loop())
     # learn which models each configured provider offers (non-blocking)
     asyncio.create_task(model_catalog.refresh_available())
+    # check watchlist companies' own job boards every few hours while the app runs
+    from jobhunterx.api.routes import emit as api_emit
+    from jobhunterx.services.watcher import watcher
+    watcher.start(api_emit)
 
     # Ensure directories
     settings.cache_full_path

@@ -537,6 +537,43 @@ export async function loadTracker() {
 }
 
 // ---------------------------------------------------------------------------
+// Watchlist (researched companies; their own job boards are checked every few hours)
+// ---------------------------------------------------------------------------
+let watchSeq = 0;
+export async function loadWatchlist(scope = 'mine') {
+  const seq = ++watchSeq;
+  setSlice('watch', (w) => ({ ...w, status: w.data ? 'refreshing' : 'loading', error: null }));
+  try {
+    const data = await api.watchlist(scope);
+    if (seq !== watchSeq) return;
+    setSlice('watch', { status: 'ready', data, scope, checking: !!(data.status && data.status.checking) });
+  } catch (err) {
+    if (seq !== watchSeq) return;
+    setSlice('watch', { status: 'error', error: errorText(err) });
+  }
+}
+export async function checkWatchlistNow() {
+  setSlice('watch', { checking: true });
+  try {
+    await api.checkWatchlist();
+    toast('Checking your watchlist companies for new roles…', 'info');
+  } catch (err) {
+    setSlice('watch', { checking: false });
+    toast(errorText(err), 'danger');
+  }
+}
+function onWatchDone(d) {
+  setSlice('watch', (w) => ({ ...w, checking: false, data: w.data ? { ...w.data, status: d.status_info || w.data.status } : w.data }));
+  if (d.status === 'busy' || d.status === 'already_checking') return;
+  if (d.new_fits > 0) {
+    toast(`${d.new_fits} new role${d.new_fits === 1 ? '' : 's'} at watchlist companies fit you — see the "New" tab. Apply early.`, 'success', 12000);
+  } else if (d.status === 'completed') {
+    activity(`Watchlist checked (${d.companies || 0} companies): no new roles that fit right now`, 'info', 'watch');
+  }
+  loadList();
+}
+
+// ---------------------------------------------------------------------------
 // Settings, models, usage, pipeline mode, reset
 // ---------------------------------------------------------------------------
 async function loadInto(slice, call) {
@@ -778,6 +815,12 @@ function onMessage(msg) {
     case 'apply.session':
       onApplySession(msg.data && msg.data.session);
       return;
+    case 'watch.status':
+      setSlice('watch', { checking: !!(msg.data && msg.data.checking) });
+      return;
+    case 'watch.done':
+      onWatchDone(msg.data || {});
+      return;
     default:
   }
 }
@@ -836,7 +879,46 @@ async function loadSessionData() {
   if (getState().route.page === 'tracker') loadTracker();
 }
 
+// ---------------------------------------------------------------------------
+// First-run setup: without an AI key nothing works, so it is asked for before anything else
+// ---------------------------------------------------------------------------
+async function loadSetup() {
+  const data = await api.setup();
+  setSlice('setup', { data, error: null });
+  return data;
+}
+export async function testSetupKey(provider, key) {
+  setSlice('setup', (s) => ({ ...s, tests: { ...s.tests, [provider]: { busy: true } } }));
+  try {
+    const res = await api.testKey(provider, key);
+    setSlice('setup', (s) => ({ ...s, tests: { ...s.tests, [provider]: { busy: false, ok: res.ok, message: res.message } } }));
+  } catch (err) {
+    setSlice('setup', (s) => ({ ...s, tests: { ...s.tests, [provider]: { busy: false, ok: false, message: errorText(err) } } }));
+  }
+}
+export async function saveSetupKeys(keys) {
+  setSlice('setup', { saving: true, error: null });
+  try {
+    if (Object.keys(keys).length) await api.postSettings(keys);
+    const data = await loadSetup();
+    setSlice('setup', { saving: false });
+    if (!data.llm_ready) { setSlice('setup', { error: 'No working AI key yet — paste at least one AI key.' }); return; }
+    toast('Keys saved. Next: your resume.', 'success');
+    setSlice('app', { phase: 'booting' });
+    await startSession();
+  } catch (err) {
+    setSlice('setup', { saving: false, error: errorText(err) });
+  }
+}
+
 async function startSession() {
+  try {
+    const setup = await loadSetup();
+    if (!setup.llm_ready) { setSlice('app', { phase: 'setup', error: null }); return; }
+  } catch (err) {
+    setSlice('app', { phase: 'error', error: errorText(err) });
+    return;
+  }
   let people;
   try {
     ({ people } = await loadPeople());

@@ -5,9 +5,11 @@ import { useStore } from './state/store.js';
 import { boot, navigate, setTheme, retryBoot } from './actions.js';
 import { Icon, ConfirmDialog, Toasts, Button } from './components/ui.js';
 import { DiscoverView } from './views/discover.js';
+import { CompaniesView } from './views/companies.js';
 import { ProfileView } from './views/profile.js';
 import { DocumentsView } from './views/documents.js';
 import { OnboardingView } from './views/onboarding.js';
+import { SetupView } from './views/setup.js';
 import { PeoplePicker, ProfileSwitcher } from './views/people.js';
 import { TrackerView, BrowserView, InterventionsView, SettingsView } from './views/other.js';
 
@@ -16,6 +18,7 @@ const NAV_GROUPS = [
   { label: 'Workflow', items: [
     { page: 'profile', label: 'Profile', icon: 'user', step: 1 },
     { page: 'discover', label: 'Discover', icon: 'search', step: 2 },
+    { page: 'companies', label: 'Companies', icon: 'layers' },
     { page: 'documents', label: 'Documents', icon: 'doc', step: 3 },
     { page: 'tracker', label: 'Tracker', icon: 'board', step: 4 },
   ] },
@@ -26,7 +29,7 @@ const NAV_GROUPS = [
   { label: 'System', items: [{ page: 'settings', label: 'Settings', icon: 'gear' }] },
 ];
 const VIEWS = {
-  discover: DiscoverView, profile: ProfileView, documents: DocumentsView, tracker: TrackerView,
+  discover: DiscoverView, companies: CompaniesView, profile: ProfileView, documents: DocumentsView, tracker: TrackerView,
   browser: BrowserView, interventions: InterventionsView, settings: SettingsView,
 };
 
@@ -120,7 +123,7 @@ function Root() {
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => { document.documentElement.dataset.motion = motion; }, [motion]);
   return html`<${Ambient} />
-    ${phase === 'booting' ? html`<${Splash} />` : phase === 'error' ? html`<${BootError} />` : phase === 'pick' ? html`<${PeoplePicker} />` : phase === 'onboarding' ? html`<${OnboardingView} />` : html`<${AppShell} />`}
+    ${phase === 'booting' ? html`<${Splash} />` : phase === 'error' ? html`<${BootError} />` : phase === 'setup' ? html`<${SetupView} />` : phase === 'pick' ? html`<${PeoplePicker} />` : phase === 'onboarding' ? html`<${OnboardingView} />` : html`<${AppShell} />`}
     <${ConfirmDialog} /><${Toasts} />`;
 }
 

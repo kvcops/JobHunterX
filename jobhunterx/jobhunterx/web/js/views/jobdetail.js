@@ -9,15 +9,61 @@ import {
 import {
   VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, CHECK_LABEL, CHECK_STATUS_LABEL, CHECK_STATUS_TONE,
   CONSTRAINT_TONE, CONSTRAINT_LABEL, TRACKING_LABEL, DEFAULT_TRACKING, WORK_MODE_LABEL, DOC_KIND_LABEL,
-  fmtDate, relTime, fmtSalary, safeUrl, humanize, experienceText,
+  fmtDate, relTime, fmtSalary, safeUrl, humanize, experienceText, REACH_LABEL, REACH_TONE,
+  COMPANY_VERDICT_LABEL, COMPANY_VERDICT_TONE, COMPETITION_LABEL, EARLY_CAREER_LABEL,
 } from '../lib/format.js';
 import { genKey } from '../state/domain.js';
+
+function ReachSection({ reach }) {
+  if (!reach) return null;
+  return html`<section class="reach-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>Chance a person actually reads your application</h3>
+      <${Badge} tone=${REACH_TONE[reach.level]}>${REACH_LABEL[reach.level]} · ${reach.score}/100</${Badge}></div>
+    <p class="muted small">Separate from fit. Public LinkedIn / Naukri posts get hundreds to thousands of applicants —
+      a fresh post on the company's own site, a smaller company or a direct email gives you a real chance.</p>
+    <ul class="reach-signals">${reach.signals.map((s) => html`<li key=${s.key} class=${s.points > 0 ? 'up' : s.points < 0 ? 'down' : ''}>
+      <span class="pts">${s.points > 0 ? `+${s.points}` : s.points}</span><span>${s.detail}</span></li>`)}</ul>
+    ${reach.application_email ? html`<${Notice} tone="success">The posting asks for applications at <strong>${reach.application_email}</strong> (found in the job text).
+      A short, specific email with your proof of work beats a portal application.</${Notice}>` : null}
+  </section>`;
+}
+
+export function CompanySection({ c }) {
+  if (!c) return null;
+  const rv = c.reviews || {};
+  const careers = safeUrl(c.careers_url);
+  return html`<section class="company-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>About ${c.name}</h3>
+      <${Badge} tone=${COMPANY_VERDICT_TONE[c.verdict]}>${COMPANY_VERDICT_LABEL[c.verdict] || c.verdict}</${Badge}>
+      ${c.competition ? html`<${Badge} tone=${c.competition === 'low' ? 'success' : c.competition === 'very_high' ? 'danger' : 'neutral'}>${COMPETITION_LABEL[c.competition]}</${Badge}>` : null}
+      <${Badge} tone=${c.hires_early_career === 'yes' ? 'success' : c.hires_early_career === 'rare' ? 'warning' : 'neutral'}>${EARLY_CAREER_LABEL[c.hires_early_career] || ''}</${Badge}></div>
+    ${c.why ? html`<p>${c.why}</p>` : null}
+    <div class="facts-grid">
+      <div><span class="muted small">What they do</span><div>${c.what_they_do || '—'}</div></div>
+      <div><span class="muted small">Real AI work</span><div>${c.ai_work || '—'}</div></div>
+      <div><span class="muted small">Size · stage</span><div>${[c.size, humanize(c.stage)].filter((x) => x && x !== 'unknown' && x !== 'Unknown').join(' · ') || 'Unknown'}</div></div>
+      <div><span class="muted small">Ratings</span><div>${rv.ambitionbox ? `AmbitionBox ${rv.ambitionbox}${rv.ambitionbox_reviews ? ` (${rv.ambitionbox_reviews} reviews)` : ''}` : ''}
+        ${rv.glassdoor ? ` · Glassdoor ${rv.glassdoor}${rv.glassdoor_reviews ? ` (${rv.glassdoor_reviews})` : ''}` : ''}${!rv.ambitionbox && !rv.glassdoor ? 'Not found' : ''}</div></div>
+      <div><span class="muted small">Heavy DSA interviews</span><div>${humanize(c.dsa_heavy_interviews) || 'Unknown'}</div></div>
+      <div><span class="muted small">Pay signal</span><div>${c.pay_signal || 'Unknown'}</div></div>
+    </div>
+    ${rv.summary ? html`<div><span class="muted small">What employees say</span><p>${rv.summary}</p></div>` : null}
+    ${c.red_flags && c.red_flags.length ? html`<div><span class="muted small">Red flags</span><ul class="bullets bad">${c.red_flags.map((x) => html`<li>${x}</li>`)}</ul></div>` : null}
+    <div class="row gap wrap">
+      ${careers ? html`<a class="btn btn-sm btn-secondary" href=${careers} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${14} /><span>Careers page</span></a>` : null}
+      ${(c.sources || []).slice(0, 4).map((u, i) => { const s = safeUrl(u); return s ? html`<a class="small" href=${s} target="_blank" rel="noopener noreferrer">source ${i + 1}</a>` : null; })}
+      ${c.researched_on ? html`<span class="muted small">researched ${c.researched_on}</span>` : null}
+    </div>
+  </section>`;
+}
 
 function MatchTab({ job }) {
   const m = job.match;
   if (!m) return html`<${Notice}>This job has not been scored yet.</${Notice}>`;
   return html`<div class="stack">
     ${m.headline ? html`<p class="detail-headline">${m.headline}</p>` : null}
+    <${ReachSection} reach=${m.reach} />
+    <${CompanySection} c=${job.company_profile} />
     ${m.method === 'fallback' ? html`<${Notice} tone="warning">Partial analysis — the AI could not read this posting fully, so skill coverage and requirements may be incomplete.</${Notice}>` : null}
     <section>
       <h3 class="sec-title">Hard requirements</h3>

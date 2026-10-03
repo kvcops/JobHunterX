@@ -30,6 +30,7 @@ _JOB_COLUMNS = {
     "posting_json": "TEXT", "match_json": "TEXT", "fingerprint": "TEXT", "canonical_url": "TEXT",
     "ats_key": "TEXT", "run_id": "TEXT", "saved_at": "TEXT", "tracking_status": "TEXT DEFAULT 'new'",
     "verdict": "TEXT", "fit_score": "INTEGER", "profile_hash": "TEXT", "validation_status": "TEXT",
+    "reach_score": "INTEGER",
 }
 
 _SCHEMA = """
@@ -231,6 +232,12 @@ async def find_existing(db, job: JobPosting) -> Optional[str]:
     return None
 
 
+async def job_exists(job: JobPosting) -> bool:
+    """Already stored for the active person (same ATS id, URL or fingerprint)?"""
+    async with _conn() as db:
+        return await find_existing(db, job) is not None
+
+
 async def save_job(job: JobPosting, match: Optional[MatchAssessment], run_id: Optional[str]) -> str:
     """Insert or update a posting (dedup against stored jobs). Returns job id."""
     async with _conn() as db:
@@ -249,6 +256,7 @@ async def save_job(job: JobPosting, match: Optional[MatchAssessment], run_id: Op
             "match_score": (match.score / 100) if match else None, "posting_json": posting_json, "match_json": match_json,
             "fingerprint": job.fingerprint, "canonical_url": job.canonical_url, "ats_key": _ats_key(job) or None,
             "verdict": match.verdict if match else None, "fit_score": match.score if match else None,
+            "reach_score": match.reach.score if match and match.reach else None,
             "profile_hash": match.profile_hash if match else None, "validation_status": job.validation.status,
         }
         if existing:
@@ -280,8 +288,10 @@ async def save_job(job: JobPosting, match: Optional[MatchAssessment], run_id: Op
 async def update_match(job_id: str, match: MatchAssessment) -> None:
     async with _conn() as db:
         await db.execute(
-            "UPDATE jobs SET match_json = ?, verdict = ?, fit_score = ?, match_score = ?, profile_hash = ?, updated_at = ? WHERE id = ?",
-            (match.model_dump_json(), match.verdict, match.score, match.score / 100, match.profile_hash, _now(), job_id))
+            "UPDATE jobs SET match_json = ?, verdict = ?, fit_score = ?, match_score = ?, reach_score = ?, profile_hash = ?, "
+            "updated_at = ? WHERE id = ?",
+            (match.model_dump_json(), match.verdict, match.score, match.score / 100,
+             match.reach.score if match.reach else None, match.profile_hash, _now(), job_id))
         await db.commit()
 
 
@@ -323,7 +333,7 @@ async def get_row(job_id: str) -> Optional[dict]:
 
 async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score DESC", limit: int = 200) -> list[dict]:
     sql = "SELECT id, company, role, location, apply_url, status, posting_json, match_json, run_id, saved_at, " \
-          "tracking_status, verdict, fit_score, profile_hash, validation_status, created_at, updated_at, " \
+          "tracking_status, verdict, fit_score, reach_score, profile_hash, validation_status, created_at, updated_at, " \
           "(tailored_pdf IS NOT NULL) AS has_legacy_pdf FROM jobs"
     where, params = _scope(where, params)
     sql += f" WHERE {where}"

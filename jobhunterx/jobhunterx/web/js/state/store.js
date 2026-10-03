@@ -53,9 +53,11 @@ export function initialState() {
       feed: { runId: null, items: [] },   // plain-language live activity of the active run
     },
     jobs: { byId: {} },
+    watch: { status: 'idle', data: null, error: null, checking: false },
+    setup: { data: null, error: null, saving: false, tests: {} },   // API keys; checked before anything else
     details: {},            // jobId -> { status, job, error }
     list: {
-      scope: 'all', runId: null, view: 'recommended', q: '', work_mode: '', min_score: 0, sort: 'score',
+      scope: 'all', runId: null, view: 'recommended', q: '', work_mode: '', min_score: 0, sort: 'chance',
       ids: [], counts: null, status: 'idle', error: null,
     },
     pending: { save: {}, track: {}, verify: {}, rescore: {}, apply: {}, remove: {} },

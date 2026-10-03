@@ -31,7 +31,7 @@ from jobhunterx.domain.candidate import CandidateSnapshot, norm_term
 from jobhunterx.domain.common import Seniority, WorkMode
 from jobhunterx.domain.job import JobPosting, Requirements, Salary
 from jobhunterx.intelligence.llm_structured import call_structured, fence
-from jobhunterx.intelligence.text import any_term_in_text, number_in_text, tokens
+from jobhunterx.intelligence.text import any_term_in_text, number_in_text, parse_inr_salary, tokens
 
 log = get_logger("job_understanding")
 
@@ -165,11 +165,17 @@ def apply_understanding(job: JobPosting, u: JobUnderstanding, model: str) -> Non
     req.domain_keywords = [d for d in u.domains if d][:8]
     job.requirements = req
 
+    if job.salary is None and u.salary_evidence and _evidence_ok(u.salary_evidence, text):
+        # Indian notation ("12-18 LPA") is read by code, not by the model, so lakhs never become rupees or vice versa.
+        job.salary = inr_salary(u.salary_evidence)
     if u.salary and u.salary.min is not None and job.salary is None and _evidence_ok(u.salary_evidence, text):
         ev = u.salary_evidence.replace(",", "")
         if number_in_text(u.salary.min, ev) or number_in_text(u.salary.min, u.salary_evidence):
             job.salary = Salary(min=u.salary.min, max=u.salary.max, currency=u.salary.currency,
                                 period=u.salary.period, raw=u.salary_evidence.strip()[:120])
+            top = job.salary.annual_max()
+            if job.salary.currency == "INR" and top is not None and top < 50_000:
+                job.salary = None              # "12" from "12 LPA" read as rupees — unusable, not a real figure
 
     if job.seniority == Seniority.UNKNOWN:
         job.seniority = u.seniority
@@ -232,9 +238,25 @@ async def understand_job(job: JobPosting, snapshot: Optional[CandidateSnapshot] 
         )
         if u is not None:
             apply_understanding(job, u, model)
+            _salary_from_text(job)
             return "llm"
     job.requirements = fallback_requirements(job, snapshot)
+    _salary_from_text(job)
     return "fallback"
+
+
+def inr_salary(text: str, require_context: bool = False) -> Optional[Salary]:
+    found = parse_inr_salary(text, require_context=require_context)
+    if not found:
+        return None
+    lo, hi, period, raw = found
+    return Salary(min=lo, max=hi, currency="INR", period=period, raw=raw[:120])
+
+
+def _salary_from_text(job: JobPosting) -> None:
+    """Last resort: stated Indian pay in the JD text, even when the model missed it or was unavailable."""
+    if job.salary is None:
+        job.salary = inr_salary(job.description or "", require_context=True)
 
 
 # ---------------------------------------------------------------------------

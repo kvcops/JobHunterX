@@ -12,6 +12,7 @@ title, company board, location and dates are marked *verified*.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from abc import ABC, abstractmethod
 from typing import Literal, Optional
@@ -71,6 +72,10 @@ class AtsAdapter(ABC):
     @abstractmethod
     async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
         """None = board unreachable/unknown; [] = board has no jobs."""
+
+    async def search_jobs(self, token: str, queries: Optional[list[str]] = None) -> Optional[list[JobPosting]]:
+        """Jobs worth looking at on this board. Small boards return everything; huge ones search by `queries`."""
+        return await self.list_jobs(token)
 
     async def check(self, ref: AtsRef) -> tuple[Liveness, Optional[JobPosting]]:
         jobs = await self.list_jobs(ref.token)
@@ -340,7 +345,135 @@ class Workable(AtsAdapter):
         return out
 
 
-ADAPTERS: dict[str, AtsAdapter] = {a.kind: a for a in [Greenhouse(), Lever(), Ashby(), SmartRecruiters(), Recruitee(), Workable()]}
+class Workday(AtsAdapter):
+    """Workday career sites (most GCCs in India hire through Workday).
+
+    Token: "<tenant>.<wdN>/<site>", e.g. "acme.wd5/AcmeCareers". Boards can hold
+    thousands of jobs, so listing is a keyword search, not a full download.
+    """
+    search_hosts = ("myworkdayjobs.com",)
+    kind = "workday"
+    _URL = re.compile(r"(?P<tenant>[\w\-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com/(?:wday/cxs/[\w\-]+/)?"
+                      r"(?:[a-z]{2}-[A-Z]{2}/)?(?P<site>[\w\-]+)(?:/job/(?P<path>[^?#]+))?", re.I)
+    DEFAULT_QUERIES = ("AI engineer", "machine learning", "generative AI", "LLM")
+    PER_QUERY = 40
+    MAX_DETAILS = 30
+
+    def parse_url(self, url: str) -> Optional[AtsRef]:
+        m = self._URL.search(url or "")
+        if not m or m.group("site").lower() in ("job", "wday", "cxs"):
+            return None
+        return AtsRef(kind=self.kind, token=f"{m.group('tenant')}.{m.group('wd')}/{m.group('site')}",
+                      job_id=(m.group("path") or "").strip("/"))
+
+    @staticmethod
+    def _base(token: str) -> tuple[str, str, str]:
+        host, _, site = token.partition("/")
+        tenant = host.split(".")[0]
+        return f"https://{host}.myworkdayjobs.com", tenant, site
+
+    async def _detail(self, token: str, path: str) -> tuple[Liveness, Optional[JobPosting]]:
+        root, tenant, site = self._base(token)
+        data, res = await net.fetch_json(f"{root}/wday/cxs/{tenant}/{site}/job/{path}")
+        if res.status in (404, 410):
+            return "gone", None
+        info = (data or {}).get("jobPostingInfo") if isinstance(data, dict) else None
+        if not isinstance(info, dict):
+            return "unknown", None
+        if info.get("canApply") is False or info.get("posted") is False:
+            return "gone", None
+        locs = [info.get("location", "")] + list(info.get("additionalLocations") or [])
+        country = (info.get("country") or {}).get("descriptor", "") if isinstance(info.get("country"), dict) else ""
+        remote = str(info.get("remoteType") or "").lower()
+        mode = WorkMode.REMOTE if "remote" in remote else WorkMode.HYBRID if "hybrid" in remote else _mode(remote)
+        url = info.get("externalUrl") or f"{root}/{site}/job/{path}"
+        return "live", self._posting(
+            token=token, job_id=path, title=info.get("title", ""),
+            company=((data.get("hiringOrganization") or {}).get("name") or tenant).strip(),
+            location="; ".join(l for l in locs if l), description=html_to_text(info.get("jobDescription", "")),
+            url=url, apply_url=f"{url.rstrip('/')}/apply" if "/apply" not in url else url, posted=info.get("startDate"),
+            mode=mode, employment_type=_etype(info.get("timeType", "")), countries=[country] if country else [],
+        )
+
+    async def search_jobs(self, token: str, queries: Optional[list[str]] = None) -> Optional[list[JobPosting]]:
+        root, tenant, site = self._base(token)
+        paths: dict[str, None] = {}
+        reached = False
+        for q in (queries or self.DEFAULT_QUERIES)[:4]:
+            data, _ = await net.fetch_json(f"{root}/wday/cxs/{tenant}/{site}/jobs", method="POST",
+                                           json_body={"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": q})
+            if not isinstance(data, dict):
+                continue
+            reached = True
+            for it in (data.get("jobPostings") or [])[: self.PER_QUERY]:
+                path = str(it.get("externalPath") or "").split("/job/", 1)[-1].strip("/")
+                if path:
+                    paths.setdefault(path)
+        if not reached:
+            return None
+        sem = asyncio.Semaphore(5)
+
+        async def one(path: str) -> Optional[JobPosting]:
+            async with sem:
+                state, p = await self._detail(token, path)
+                return p if state == "live" else None
+
+        found = await asyncio.gather(*(one(p) for p in list(paths)[: self.MAX_DETAILS]))
+        return [p for p in found if p]
+
+    async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
+        return await self.search_jobs(token)
+
+    async def check(self, ref: AtsRef) -> tuple[Liveness, Optional[JobPosting]]:
+        if not ref.job_id:
+            return "unknown", None
+        return await self._detail(ref.token, ref.job_id)
+
+
+class Keka(AtsAdapter):
+    """Keka hiring portals (common with Indian product companies, especially in Hyderabad).
+
+    Token: the portal host, e.g. "acme.keka.com". Experience ranges are given
+    per job ("1-3").
+    """
+    search_hosts = ()                      # Keka job pages aren't indexed usefully; polled via the watchlist
+    kind = "keka"
+    _URL = re.compile(r"(?P<host>[\w\-]+\.keka\.com)/careers", re.I)
+
+    def parse_url(self, url: str) -> Optional[AtsRef]:
+        m = self._URL.search(url or "")
+        if not m:
+            return None
+        job = re.search(r"/careers/jobdetails/(\d+)", url)
+        return AtsRef(kind=self.kind, token=m.group("host").lower(), job_id=job.group(1) if job else "")
+
+    async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
+        host = token.split("/")[0]
+        data, _ = await net.fetch_json(f"https://{host}/careers/api/jobs/default/active")
+        if not isinstance(data, list):
+            return None
+        out = []
+        for it in data:
+            if not isinstance(it, dict):
+                continue
+            locs = [l for l in it.get("jobLocations") or [] if isinstance(l, dict)]
+            loc = "; ".join(", ".join(x for x in [l.get("city"), l.get("countryName")] if x) for l in locs)
+            exp = str(it.get("experience") or "").strip()
+            desc = html_to_text(it.get("description", ""))
+            if exp and "experience" not in desc[:300].lower():
+                desc = f"Experience: {exp} years\n{desc}"     # stated on the board, not always in the text
+            url = f"https://{host}/careers/jobdetails/{it.get('id')}"
+            out.append(self._posting(
+                token=token, job_id=str(it.get("id", "")), title=it.get("title", ""), company=host.split(".")[0],
+                location=loc, description=desc, url=url, posted=it.get("publishedOn"),
+                department=it.get("departmentName", ""),
+                countries=list(dict.fromkeys(l.get("countryName") for l in locs if l.get("countryName"))),
+            ))
+        return out
+
+
+ADAPTERS: dict[str, AtsAdapter] = {a.kind: a for a in [Greenhouse(), Lever(), Ashby(), SmartRecruiters(), Recruitee(),
+                                                       Workable(), Workday(), Keka()]}
 
 
 def parse_ats_url(url: str) -> Optional[AtsRef]:

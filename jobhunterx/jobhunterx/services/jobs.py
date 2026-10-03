@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from jobhunterx import storage
-from jobhunterx.discovery import validate
+from jobhunterx.discovery import validate, watchlist
 from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import MatchAssessment
@@ -18,6 +18,17 @@ VIEWS = {
     "rejected": "(verdict = 'incompatible' OR validation_status IN ('closed','invalid'))",
     "saved": "saved_at IS NOT NULL",
     "applied": "tracking_status IN ('applied','interviewing','offer')",
+    # first seen in the last 48 hours and worth a look — new watchlist postings land here
+    "fresh": "created_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-2 days') AND verdict IN ('strong','good','stretch') "
+             "AND COALESCE(validation_status,'') NOT IN ('closed','invalid')",
+}
+
+SORTS = {
+    # fit decides if you should apply; reach decides if anyone will read it — "chance" weighs both
+    "chance": "(COALESCE(fit_score, 0) * 0.6 + COALESCE(reach_score, 50) * 0.4) DESC, updated_at DESC",
+    "score": "COALESCE(fit_score, -1) DESC, updated_at DESC",
+    "reach": "COALESCE(reach_score, -1) DESC, COALESCE(fit_score, -1) DESC",
+    "recent": "updated_at DESC",
 }
 
 
@@ -61,6 +72,10 @@ def _summary(p: JobPosting, m: Optional[MatchAssessment], row: dict, current_has
             "experience": m.experience.model_dump(mode="json"),
             "rejected_reasons": m.rejected_reasons,
         } if m else None,
+        "reach": {
+            "score": m.reach.score, "level": m.reach.level, "headline": m.reach.headline,
+            "application_email": m.reach.application_email, "company_verdict": m.reach.company_verdict,
+        } if m and m.reach else None,
         "match_stale": bool(m and current_hash and m.profile_hash != current_hash),
         "saved": bool(row.get("saved_at")),
         "tracking_status": row.get("tracking_status") or "new",
@@ -70,7 +85,7 @@ def _summary(p: JobPosting, m: Optional[MatchAssessment], row: dict, current_has
 
 
 async def list_jobs(view: str, current_hash: Optional[str], *, run_id: str = "", q: str = "", work_mode: str = "",
-                    min_score: int = 0, sort: str = "score", limit: int = 200) -> tuple[list[dict], dict]:
+                    min_score: int = 0, sort: str = "chance", limit: int = 200) -> tuple[list[dict], dict]:
     clauses, params = [], []
     base = VIEWS.get(view, VIEWS["recommended"])
     if base:
@@ -84,7 +99,7 @@ async def list_jobs(view: str, current_hash: Optional[str], *, run_id: str = "",
     if min_score:
         clauses.append("COALESCE(fit_score, 0) >= ?")
         params.append(int(min_score))
-    order = "updated_at DESC" if sort == "recent" else "COALESCE(fit_score, -1) DESC, updated_at DESC"
+    order = SORTS.get(sort, SORTS["chance"])
     rows = await storage.list_rows(" AND ".join(clauses), tuple(params), order=order, limit=limit)
     docs = await storage.latest_document_ids([r["id"] for r in rows])
     items = [summary(r, current_hash, docs.get(r["id"])) for r in rows]
@@ -110,9 +125,15 @@ async def detail(job_id: str, current_hash: Optional[str]) -> Optional[dict]:
         "validation": p.validation.model_dump(mode="json"),
         "match": m.model_dump(mode="json") if m else None,
         "sources": [s.model_dump(mode="json") for s in p.sources],
+        "company_profile": _company_profile(p),
         "document_list": [document_summary(d, current_hash, p) for d in docs],
     })
     return out
+
+
+def _company_profile(p: JobPosting) -> Optional[dict]:
+    c = watchlist.find(p)
+    return watchlist.public_view(c) if c else None
 
 
 def document_summary(d, current_hash: Optional[str], job: Optional[JobPosting] = None) -> dict:

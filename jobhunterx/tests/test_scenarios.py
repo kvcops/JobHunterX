@@ -5,7 +5,7 @@ Candidate: ~1.5 years professional AI/ML experience in Hyderabad.
   A  AI Engineer, 0–2 yrs, Python/LLM/RAG, Hyderabad      → recommended
   B  Senior AI Engineer, 6+ yrs                          → incompatible (experience/seniority)
   C  Frontend Engineer, React/TypeScript                 → incompatible (career track)
-  D  AI Engineer, 1–3 yrs, Berlin on-site                → incompatible (location)
+  D  AI Engineer, 1–3 yrs, Berlin on-site                → dropped before scoring (outside the country)
   E  AI Engineer, mandatory Kubernetes (absent)          → incompatible (mandatory skill)
   +  duplicate of A on a job board (JSON-LD)             → merged into A
   +  dead link (404)                                     → dropped
@@ -54,7 +54,8 @@ async def _search():
 def test_pipeline_distinguishes_jobs_for_the_right_reasons(world):
     r, events, jobs, _ = run(_search())
     assert r.data["status"] == "completed"
-    a, b, c, d, e = (jobs[k] for k in ("101", "102", "103", "104", "105"))
+    a, b, c, e = (jobs[k] for k in ("101", "102", "103", "105"))
+    assert "104" not in jobs                                       # Berlin board job never takes a result slot
 
     pa, ma = a
     assert ma.verdict in ("strong", "good"), (ma.score, ma.hard_constraints)
@@ -68,9 +69,6 @@ def test_pipeline_distinguishes_jobs_for_the_right_reasons(world):
 
     assert c[1].verdict == "incompatible"
     assert any(x.key == "role" and x.status == "fail" for x in c[1].hard_constraints)
-
-    assert d[1].verdict == "incompatible"
-    assert any(x.key == "location" and x.status == "fail" for x in d[1].hard_constraints)
 
     assert e[1].verdict == "incompatible"
     assert any(x.key == "must_have" and x.status == "fail" and "Kubernetes" in x.detail for x in e[1].hard_constraints)
