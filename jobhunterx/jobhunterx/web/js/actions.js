@@ -1031,6 +1031,12 @@ export async function choosePerson(id) {
   }
 }
 
+/** Back to "Who's searching?" — e.g. from onboarding, to switch, add or delete a profile. */
+export async function openPicker() {
+  try { await loadPeople(); } catch { /* the picker shows what it has */ }
+  withTransition(() => setSlice('app', { phase: 'pick', error: null }));
+}
+
 export async function createPerson(name = '') {
   try {
     const { active, people } = await api.createPerson(name || 'New profile');

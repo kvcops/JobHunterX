@@ -1045,6 +1045,18 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 .person-meta { font-size: .72rem; color: var(--text-3); }
 .person-flag { position: absolute; top: 12px; right: 12px; font-size: .64rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
   background: var(--accent-soft); padding: 3px 8px; border-radius: 99px; }
+.person-slot { position: relative; display: grid; }
+.person-del { position: absolute; top: 10px; left: 10px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px;
+  border: 1px solid var(--edge); background: var(--card-solid); color: var(--text-3); cursor: pointer; opacity: 0; transform: scale(.9);
+  transition: opacity .2s, transform .2s var(--spring), color .2s, border-color .2s; }
+.person-slot:hover .person-del, .person-del:focus-visible { opacity: 1; transform: none; }
+.person-del:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--edge)); }
+@media (hover: none) { .person-del { opacity: .85; transform: none; } }
+.ob-brand-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ob-profiles { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; font: inherit; font-size: .82rem; font-weight: 500;
+  color: var(--text-2); background: var(--card-solid); border: 1px solid var(--edge); cursor: pointer; transition: color .2s, border-color .2s; }
+.ob-profiles:hover { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 40%, var(--edge)); }
+.ob-profiles-n { font-size: .7rem; padding: 0 6px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
 .picker-hint { margin-top: 14px; } kbd { font-family: var(--mono); font-size: .75em; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--card-solid); }
 
 /* sidebar switcher */

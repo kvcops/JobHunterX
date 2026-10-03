@@ -10,14 +10,19 @@ function initials(name) {
 }
 
 function PersonCard({ p, active, busy, onPick, index }) {
-  return html`<button type="button" class=${`person-card ${active ? 'is-last' : ''} ${busy ? 'is-busy' : ''}`} style=${{ '--i': index }}
+  // the delete button sits beside the card button (a button cannot hold another button)
+  return html`<div class="person-slot">
+    <button type="button" class=${`person-card ${active ? 'is-last' : ''} ${busy ? 'is-busy' : ''}`} style=${{ '--i': index }}
       onClick=${() => onPick(p.id)} disabled=${busy} aria-label=${`Open ${p.name}`}>
     <span class="person-ava" style=${{ '--h': (p.name.length * 47) % 360 }}>${busy ? html`<${Spinner} size=${22} />` : initials(p.name)}</span>
     <strong class="person-name">${p.name}</strong>
     <span class="person-sub">${p.headline || (p.has_profile ? 'Profile ready' : 'Setup not finished')}${p.location ? ` · ${p.location}` : ''}</span>
     <span class="person-meta">${plural(p.jobs || 0, 'job')} · ${p.saved || 0} saved · ${relTime(p.last_used_at || p.created_at)}</span>
     ${active ? html`<span class="person-flag">Last used</span>` : null}
-  </button>`;
+  </button>
+    <button type="button" class="person-del" aria-label=${`Delete ${p.name}`} title="Delete this profile" disabled=${busy}
+      onClick=${() => deletePerson(p.id)}><${Icon} name="trash" size=${15} /></button>
+  </div>`;
 }
 
 /** Full-screen "Who's searching?" shown once per browser session to returning users. */
@@ -43,7 +48,7 @@ export function PeoplePicker() {
           <span class="person-sub">Start fresh with another resume</span>
         </button>
       </div>
-      <p class="muted small picker-hint">Tip: press <kbd>Enter</kbd> to open the last used profile.</p>
+      <p class="muted small picker-hint">Tip: press <kbd>Enter</kbd> to open the last used profile. Hover a profile to delete it.</p>
     </div>
   </div>`;
 }

@@ -2,7 +2,7 @@
 // Shown only until the user finishes (or when a profile has no data yet). The step survives reloads.
 import { html, useState, useRef, useEffect } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
-import { uploadResume, saveProfile, setOnboardingStep, finishOnboarding } from '../actions.js';
+import { uploadResume, saveProfile, setOnboardingStep, finishOnboarding, openPicker } from '../actions.js';
 import {
   Button, Icon, ChipsInput, Field, Notice, Meter, Seg, Skeleton, ScanDoc, ErrorBox, AutoTextarea, Spinner, Elapsed, UPLOAD_STAGES,
 } from '../components/ui.js';
@@ -273,10 +273,15 @@ export function OnboardingView() {
   };
   const snap = env && env.snapshot;
   const [title, lead] = COPY[step];
+  const peopleCount = useStore((s) => s.people.items.length);
   return html`<div class="onboarding">
     <aside class="ob-side">
-      <div class="brand"><span class="brand-mark"><img src="/assets/logo.svg" alt="" width="34" height="34" /></span>
-        <span class="brand-name">JobHunter<span class="serif">X</span></span></div>
+      <div class="ob-brand-row">
+        <div class="brand"><span class="brand-mark"><img src="/assets/logo.svg" alt="" width="34" height="34" /></span>
+          <span class="brand-name">JobHunter<span class="serif">X</span></span></div>
+        ${peopleCount ? html`<button type="button" class="ob-profiles" onClick=${openPicker} title="Switch, add or delete profiles">
+          <${Icon} name="user" size=${14} /> Profiles${peopleCount > 1 ? html` <span class="ob-profiles-n">${peopleCount}</span>` : null}</button>` : null}
+      </div>
       <div class="ob-copy" key=${step}><h1>${title}</h1><p class="lead">${lead}</p></div>
       <${Stepper} step=${step} onGo=${profile ? (k) => saveThen(k) : null} />
     </aside>
