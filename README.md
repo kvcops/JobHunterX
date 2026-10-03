@@ -440,52 +440,97 @@ Search providers are tried in priority order (primary first, DuckDuckGo last) wi
 
 ## ⚡ Quickstart
 
+Takes about 5 minutes. Copy each command, paste it in your terminal, press Enter.
+
 ### What you need
 
-- 🐍 **Python 3.11+**
-- 🔑 **One free AI key** — Google AI Studio is the easiest
+- 🐍 **Python 3.11 or newer** — or let `uv` download it for you (step ②)
+- 🌐 **Google Chrome** — used by Auto-apply
+- 🔑 **One free AI key** — Google AI Studio is the easiest ([get it here](https://aistudio.google.com/apikey))
 
 ### ① Get the code
 
 ```bash
 git clone https://github.com/kvcops/jobhunterx.git
 cd jobhunterx
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # Linux / macOS
 ```
 
-### ② Install
+### ② Install `uv` (a fast installer)
+
+`uv` installs everything in about 30 seconds. Plain `pip` can take a very long time here.
+
+**Windows (PowerShell):**
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**macOS / Linux:**
 
 ```bash
-pip install uv                  # fast installer — the whole install takes ~30 seconds
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Close the terminal and open a new one, then check it works: `uv --version`
+
+> Can't run the installer? `pip install uv` works too.
+
+### ③ Make a virtual environment (venv)
+
+A venv is a private folder for this project's packages, so they don't mix with other projects.
+
+```bash
+uv venv --python 3.11
+```
+
+This creates a `.venv` folder. If Python 3.11 is missing, `uv` downloads it.
+
+Now **turn the venv on** (do this every time you open a new terminal):
+
+| System | Command |
+|:--|:--|
+| Windows (PowerShell) | `.venv\Scripts\Activate.ps1` |
+| Windows (Command Prompt) | `.venv\Scripts\activate.bat` |
+| macOS / Linux | `source .venv/bin/activate` |
+
+You will see `(.venv)` at the start of the line when it is on.
+
+> PowerShell says "running scripts is disabled"? Run this once, then try again:
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+
+### ④ Install the packages
+
+```bash
 uv pip install -r requirements.txt
-playwright install chromium     # the browser the agent uses
 ```
 
-> Plain `pip install -r requirements.txt` works too — run `python -m pip install --upgrade pip` first.
-> Versions are pinned on purpose: with open-ended versions pip can spend hours resolving
-> (browser-use needs exactly `openai==2.16.0`, newer litellm needs a newer openai).
->
-> No keys yet? Just start the app — the first screen asks for them, with a link to get each one free.
+All versions are fixed on purpose, so this finishes in seconds instead of hours.
 
-### ③ Add your keys
+### ⑤ Add your AI key
+
+**Easy way:** skip this step. When you start the app, the first screen asks for your keys,
+shows where to get each one for free, tests it, and saves it for you.
+
+**Or do it by hand:** copy the example file and paste your key after the `=` sign.
 
 ```bash
+# Windows
+copy jobhunterx\.env.example jobhunterx\.env
+# macOS / Linux
 cp jobhunterx/.env.example jobhunterx/.env
 ```
 
 ```env
-GOOGLE_API_KEY=your_google_ai_studio_key   # free — recommended
-GROQ_API_KEY=your_groq_key                 # optional
-MISTRAL_API_KEY=your_mistral_key           # optional
+GOOGLE_API_KEY=paste-your-key-here     # free — start with this one
+GROQ_API_KEY=                          # optional — makes it faster
+MISTRAL_API_KEY=                       # optional — backup
 ```
 
 > [!TIP]
-> **Free keys:** [Google AI Studio](https://aistudio.google.com/) · [Groq](https://console.groq.com/) · [Mistral](https://console.mistral.ai/).
-> You can also paste keys later in **Settings** — they are saved to `.env` for you.
+> **Free keys:** [Google AI Studio](https://aistudio.google.com/apikey) · [Groq](https://console.groq.com/keys) · [Mistral](https://console.mistral.ai/api-keys).
+> One key is enough. Two or three make searches much faster, because each free plan allows only a few calls per minute.
 
-### ④ Start 🚀
+### ⑥ Start 🚀
 
 ```bash
 cd jobhunterx
@@ -497,6 +542,22 @@ python -m jobhunterx.api.main
 ### Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting. 🎯
 
 </div>
+
+**Next time**, you only need: open a terminal in the project folder → turn the venv on (step ③) → `cd jobhunterx` → `python -m jobhunterx.api.main`.
+
+> **Stop the app:** press `Ctrl + C` in the terminal.
+
+### 🆘 If something goes wrong
+
+| Problem | Fix |
+|:--|:--|
+| Resume upload keeps loading | No real AI key. Restart the app — the first screen asks for one. Keys like `your_gemini_api_key` don't count. |
+| `pip install` takes forever | Use `uv pip install -r requirements.txt` (step ④). |
+| `uv` not found | Close and reopen the terminal after installing it, or use `pip install uv`. |
+| `No module named jobhunterx` | Run the start command from inside the inner `jobhunterx` folder (`cd jobhunterx`), with the venv on. |
+| Port 8000 is busy | Set `PORT=8001` in `jobhunterx/.env` and open `http://127.0.0.1:8001`. |
+| Auto-apply can't open a browser | Install [Google Chrome](https://www.google.com/chrome/). |
+| Searches are slow | Add a second free AI key (Groq). Free plans allow only a few calls per minute each. |
 
 ### ⚙️ Handy settings (`.env` or Settings page)
 
