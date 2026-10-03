@@ -313,7 +313,8 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         before = len(board_jobs)
         stale_after = get_policy().stale_after_days
         board_jobs = [j for j in board_jobs if _age_days(j) <= stale_after or not j.posted_at]
-        board_jobs = [j for j in board_jobs if not await storage.job_exists(j)]
+        seen = await storage.job_exists_many(board_jobs)
+        board_jobs = [j for i, j in enumerate(board_jobs) if i not in seen]
         # Free AI tiers allow ~1 deep read a minute; take the best new ones now, the rest next check.
         max_jobs = min(max_jobs, WATCH_NEW_PER_CHECK)
         await run.say("discover", f"{len(board_jobs)} of them are new since the last check"

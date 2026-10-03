@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from jobhunterx.config.logging import get_logger
-from jobhunterx.config.settings import get_settings
+from jobhunterx.config.settings import get_settings, is_real_key
 
 log = get_logger("models")
 
@@ -94,13 +94,11 @@ def limits(model: str) -> dict[str, Optional[int]]:
 
 def provider_key(provider: str) -> Optional[str]:
     s = get_settings()
-    if provider == "google":
-        return s.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    if provider == "groq":
-        return s.groq_api_key or os.getenv("GROQ_API_KEY")
-    if provider == "mistral":
-        return s.mistral_api_key or os.getenv("MISTRAL_API_KEY")
-    return None
+    env = {"google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "groq": ("GROQ_API_KEY",), "mistral": ("MISTRAL_API_KEY",)}.get(provider)
+    if env is None:
+        return None
+    candidates = [getattr(s, f"{provider}_api_key")] + [os.getenv(n) for n in env]
+    return next((k for k in candidates if is_real_key(k)), None)
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +254,29 @@ def budgets_status() -> dict[str, dict[str, Any]]:
 _SERVER_ERR = ("500", "502", "503", "504", "internal", "unavailable", "deadline", "overloaded", "timed out", "timeout",
                "having trouble")
 _RATE_ERR = ("429", "resource_exhausted", "rate limit", "rate_limit", "quota")
+_AUTH_ERR = ("401", "403", "api key not valid", "api_key_invalid", "invalid api key", "invalid_api_key", "incorrect api key",
+             "unauthorized", "authentication", "permission_denied", "permission denied")
 _health: dict[str, dict[str, Any]] = {}
+# provider -> (fingerprint of the rejected key, until). A rejected key is skipped for every model of that
+# provider instead of being retried on each call; pasting a new key clears it at once.
+_bad_keys: dict[str, tuple[str, float]] = {}
+BAD_KEY_REST_S = 1800.0
+
+
+def _fingerprint(key: Optional[str]) -> str:
+    import hashlib
+    return hashlib.sha256((key or "").encode()).hexdigest()[:16]
+
+
+def key_rejected(provider: str) -> bool:
+    hit = _bad_keys.get(provider)
+    if not hit:
+        return False
+    fp, until = hit
+    if fp != _fingerprint(provider_key(provider)) or time.monotonic() >= until:
+        _bad_keys.pop(provider, None)        # key changed or the rest is over: try again
+        return False
+    return True
 
 
 def mark_success(model: str) -> None:
@@ -266,6 +286,11 @@ def mark_success(model: str) -> None:
 def mark_failure(model: str, error: str) -> Optional[float]:
     """Record a failed call. Returns the rest period in seconds (None if the error is not the model's fault)."""
     e = (error or "").lower()
+    if any(k in e for k in _AUTH_ERR) and not any(k in e for k in _RATE_ERR):
+        provider = provider_of(model)
+        _bad_keys[provider] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
+        log.warning("api_key_rejected", provider=provider, rest_s=int(BAD_KEY_REST_S))
+        return BAD_KEY_REST_S
     if any(k in e for k in _RATE_ERR):
         rest = 60.0
     elif any(k in e for k in _SERVER_ERR):

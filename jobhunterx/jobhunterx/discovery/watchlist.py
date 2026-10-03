@@ -15,6 +15,7 @@ firms are excluded on purpose (see `MASS_RECRUITERS`).
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -25,7 +26,7 @@ from jobhunterx.discovery import ats
 from jobhunterx.domain.candidate import CandidateSnapshot, norm_term
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
-from jobhunterx.intelligence.text import term_in_text
+from jobhunterx.intelligence.text import term_in_text, term_pattern
 
 DATA_FILE = Path(__file__).resolve().parent.parent / "watchlist" / "companies.json"
 
@@ -118,9 +119,13 @@ def load() -> tuple[WatchCompany, ...]:
     return tuple(out)
 
 
+_MASS_RE = re.compile("|".join(term_pattern(m).pattern for m in MASS_RECRUITERS), re.I)
+
+
+@lru_cache(maxsize=4096)
 def is_mass_recruiter(company: str) -> bool:
     n = norm_term(company)
-    return bool(n) and any(n == m or term_in_text(m, n) for m in MASS_RECRUITERS)
+    return bool(n) and bool(_MASS_RE.search(n))
 
 
 def cities_for(snap: CandidateSnapshot) -> list[str]:
@@ -144,29 +149,32 @@ def for_candidate(snap: CandidateSnapshot) -> list[WatchCompany]:
     return sorted(picked, key=lambda c: (rank.get(c.verdict, 5), c.competition == "very_high", c.name.lower()))
 
 
-def find_board(ref: AtsRef) -> Optional[WatchCompany]:
-    key = (ref.kind, ref.token.lower())
+@lru_cache(maxsize=1)
+def _index() -> tuple[dict[tuple[str, str], WatchCompany], dict[str, WatchCompany]]:
+    """Lookup tables built once: (ats kind, token) -> company, and every known name -> company."""
+    by_board: dict[tuple[str, str], WatchCompany] = {}
+    by_name: dict[str, WatchCompany] = {}
     for c in load():
         b = c.board
-        if b and (b.kind, b.token.lower()) == key:
-            return c
-    return None
+        if b:
+            by_board.setdefault((b.kind, b.token.lower()), c)
+        for n in c.names():
+            by_name.setdefault(n, c)
+    return by_board, by_name
+
+
+def find_board(ref: AtsRef) -> Optional[WatchCompany]:
+    return _index()[0].get((ref.kind, ref.token.lower()))
 
 
 def find(job: JobPosting) -> Optional[WatchCompany]:
     """The watchlist entry for a posting's employer (by ATS board, then by name)."""
-    companies = load()
     if job.ats and job.ats.token:
         hit = find_board(job.ats)
         if hit:
             return hit
     name = norm_term(job.company)
-    if not name:
-        return None
-    for c in companies:
-        if name in c.names():
-            return c
-    return None
+    return _index()[1].get(name) if name else None
 
 
 def board_refs(companies: list[WatchCompany]) -> list[tuple[AtsRef, WatchCompany]]:

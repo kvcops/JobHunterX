@@ -105,7 +105,7 @@ async def list_jobs(view: str, current_hash: Optional[str], *, run_id: str = "",
     items = [summary(r, current_hash, docs.get(r["id"])) for r in rows]
     if work_mode:
         items = [i for i in items if i["work_mode"] == work_mode]
-    counts = {name: await storage.count(where) for name, where in VIEWS.items()}
+    counts = await storage.count_many(VIEWS)
     return items, counts
 
 

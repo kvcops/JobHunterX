@@ -399,9 +399,11 @@ class Workday(AtsAdapter):
         root, tenant, site = self._base(token)
         paths: dict[str, None] = {}
         reached = False
-        for q in (queries or self.DEFAULT_QUERIES)[:4]:
-            data, _ = await net.fetch_json(f"{root}/wday/cxs/{tenant}/{site}/jobs", method="POST",
-                                           json_body={"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": q})
+        pages = await asyncio.gather(*(
+            net.fetch_json(f"{root}/wday/cxs/{tenant}/{site}/jobs", method="POST",
+                           json_body={"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": q})
+            for q in (queries or self.DEFAULT_QUERIES)[:4]))
+        for data, _ in pages:
             if not isinstance(data, dict):
                 continue
             reached = True

@@ -98,6 +98,8 @@ def _skip_reason(model: str) -> str | None:
     provider = M.provider_of(model)
     if not M.provider_key(provider):
         return "no API key"
+    if M.key_rejected(provider):
+        return "API key rejected — replace it in Settings"
     if not app_state.llm_provider_enabled(provider):
         return "provider turned off"
     if M.is_listed(model) is False:

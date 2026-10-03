@@ -232,12 +232,6 @@ async def find_existing(db, job: JobPosting) -> Optional[str]:
     return None
 
 
-async def job_exists(job: JobPosting) -> bool:
-    """Already stored for the active person (same ATS id, URL or fingerprint)?"""
-    async with _conn() as db:
-        return await find_existing(db, job) is not None
-
-
 async def save_job(job: JobPosting, match: Optional[MatchAssessment], run_id: Optional[str]) -> str:
     """Insert or update a posting (dedup against stored jobs). Returns job id."""
     async with _conn() as db:
@@ -342,6 +336,26 @@ async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score
         db.row_factory = aiosqlite.Row
         cur = await db.execute(sql, (*params, limit))
         return [dict(r) for r in await cur.fetchall()]
+
+
+async def count_many(conditions: dict[str, str]) -> dict[str, int]:
+    """Several COUNTs (one per named WHERE condition, no parameters) in a single query."""
+    where, params = _scope()
+    cols = ", ".join(f"COALESCE(SUM(CASE WHEN {cond or '1=1'} THEN 1 ELSE 0 END), 0)" for cond in conditions.values())
+    async with _conn() as db:
+        cur = await db.execute(f"SELECT {cols} FROM jobs WHERE {where}", params)
+        row = await cur.fetchone()
+    return dict(zip(conditions, row))
+
+
+async def job_exists_many(jobs: list[JobPosting]) -> set[int]:
+    """Indexes of the given postings that are already stored — one connection for the whole batch."""
+    out = set()
+    async with _conn() as db:
+        for i, job in enumerate(jobs):
+            if await find_existing(db, job) is not None:
+                out.add(i)
+    return out
 
 
 async def count(where: str = "", params: tuple = ()) -> int:
