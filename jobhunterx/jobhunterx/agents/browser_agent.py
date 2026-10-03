@@ -710,13 +710,14 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
         from jobhunterx import storage
         await db.update_job(job_id, status="applied")
         await storage.set_tracking(job_id, "applied")
+        await db.resolve_job_interventions(job_id, "resolved")
         sess.update(status="applied", message="Application submitted 🎉", result=final[:400], live=_alive(sess))
         return
     hitl = hitl or HITLType.MANUAL_FORM
     await db.update_job(job_id, status="needs_attention")
     try:
-        await db.create_intervention_session(job_id=job_id, hitl_type=hitl.value, url=sess.data.get("url") or sess.job.get("apply_url", ""),
-                                             company=sess.job.get("company", ""), role=sess.job.get("role", ""))
+        await db.open_intervention(job_id=job_id, hitl_type=hitl.value, url=sess.data.get("url") or sess.job.get("apply_url", ""),
+                                   company=sess.job.get("company", ""), role=sess.job.get("role", ""))
     except Exception as exc:
         log.warning("intervention_create_failed", error=str(exc)[:160])
     sess.update(status="needs_you", message="Waiting for you", notice=HELP_TEXT.get(hitl, "The agent needs your help."),
@@ -782,6 +783,12 @@ async def stop(job_id: str) -> Optional[dict]:
         sess.update(status="stopped", control="agent", live=_alive(sess),
                     message="Stopped", notice="Stopped by you. Progress is saved — take over, continue, or close the browser.")
         await db.update_job(job_id, status="needs_attention")
+        try:   # an unfinished application stays in Interventions until it is submitted or dismissed
+            await db.open_intervention(job_id=job_id, hitl_type=HITLType.STOPPED.value,
+                                       url=sess.data.get("url") or sess.job.get("apply_url", ""),
+                                       company=sess.job.get("company", ""), role=sess.job.get("role", ""))
+        except Exception as exc:
+            log.warning("intervention_create_failed", error=str(exc)[:160])
 
     await browser_worker.run(_do())
     return sess.snapshot()

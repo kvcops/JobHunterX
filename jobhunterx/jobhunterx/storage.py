@@ -338,9 +338,9 @@ async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score
         return [dict(r) for r in await cur.fetchall()]
 
 
-async def count_many(conditions: dict[str, str]) -> dict[str, int]:
-    """Several COUNTs (one per named WHERE condition, no parameters) in a single query."""
-    where, params = _scope()
+async def count_many(conditions: dict[str, str], where: str = "", params: tuple = ()) -> dict[str, int]:
+    """Several COUNTs in one query: one per named condition (no parameters), all within `where`."""
+    where, params = _scope(where, params)
     cols = ", ".join(f"COALESCE(SUM(CASE WHEN {cond or '1=1'} THEN 1 ELSE 0 END), 0)" for cond in conditions.values())
     async with _conn() as db:
         cur = await db.execute(f"SELECT {cols} FROM jobs WHERE {where}", params)

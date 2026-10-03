@@ -86,26 +86,27 @@ def _summary(p: JobPosting, m: Optional[MatchAssessment], row: dict, current_has
 
 async def list_jobs(view: str, current_hash: Optional[str], *, run_id: str = "", q: str = "", work_mode: str = "",
                     min_score: int = 0, sort: str = "chance", limit: int = 200) -> tuple[list[dict], dict]:
-    clauses, params = [], []
-    base = VIEWS.get(view, VIEWS["recommended"])
-    if base:
-        clauses.append(f"({base})")
+    # Filters shared by the list and the tab counts, so a tab's number always matches what it shows.
+    filters, params = [], []
     if run_id:
-        clauses.append("run_id = ?")
+        filters.append("run_id = ?")
         params.append(run_id)
     if q:
-        clauses.append("(role LIKE ? OR company LIKE ? OR location LIKE ?)")
+        filters.append("(role LIKE ? OR company LIKE ? OR location LIKE ?)")
         params += [f"%{q}%"] * 3
     if min_score:
-        clauses.append("COALESCE(fit_score, 0) >= ?")
+        filters.append("COALESCE(fit_score, 0) >= ?")
         params.append(int(min_score))
+    if work_mode:
+        filters.append("json_extract(posting_json, '$.work_mode') = ?")
+        params.append(work_mode)
+    base = VIEWS.get(view, VIEWS["recommended"])
+    clauses = ([f"({base})"] if base else []) + filters
     order = SORTS.get(sort, SORTS["chance"])
     rows = await storage.list_rows(" AND ".join(clauses), tuple(params), order=order, limit=limit)
     docs = await storage.latest_document_ids([r["id"] for r in rows])
     items = [summary(r, current_hash, docs.get(r["id"])) for r in rows]
-    if work_mode:
-        items = [i for i in items if i["work_mode"] == work_mode]
-    counts = await storage.count_many(VIEWS)
+    counts = await storage.count_many(VIEWS, " AND ".join(filters), tuple(params))
     return items, counts
 
 

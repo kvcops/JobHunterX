@@ -7,9 +7,10 @@ import {
 } from '../actions.js';
 import {
   Button, Badge, ScoreRing, Skeleton, EmptyState, ErrorBox, ChipsInput, Tabs, Icon, Field, Notice, PageHead, Popover, Seg,
-  Monogram, Orb, CountUp, Select, Spinner, VERDICT_TONE,
+  Monogram, Orb, CountUp, Select, Spinner, Drawer, VERDICT_TONE,
 } from '../components/ui.js';
 import { JobDetail } from './jobdetail.js';
+import { AgentWorld } from './agentworld.js';
 import {
   VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, WORK_MODES, WORK_MODE_LABEL, relTime, fmtSalary,
   experienceText, EXPERIENCE_TONE, plural, humanize, REACH_SHORT, REACH_TONE, COMPANY_VERDICT_TONE,
@@ -184,22 +185,35 @@ function FeedItem({ it, now, live }) {
     : html`<li class=${`feed-item k-${it.kind}`}>${body}</li>`;
 }
 
-function LiveFeed({ active }) {
+const VIEW_KEY = 'jhx-activity-view';
+function readView() { try { return localStorage.getItem(VIEW_KEY) === 'agents' ? 'agents' : 'feed'; } catch { return 'feed'; } }
+
+function LiveFeed({ active, run }) {
   const items = useStore((s) => s.search.feed.items);
   const now = useNow(1000, true);
   const [filter, setFilter] = useState('all');
+  const [view, setViewState] = useState(readView);
+  const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage unavailable */ } };
   const shown = items.filter((x) => filter === 'all' || (filter === 'jobs' ? x.stage === 'match' : x.kind === 'reject' || x.kind === 'warn'));
   const list = shown.slice().reverse();
   return html`<section class="feed" aria-label="Live activity">
     <div class="feed-head">
-      <span class="feed-title">${active ? html`<span class="live-dot"></span>Live activity` : 'Activity'}</span>
-      <${Tabs} size="sm" label="Activity filter" value=${filter} onChange=${setFilter}
-        tabs=${[{ key: 'all', label: 'Everything' }, { key: 'jobs', label: 'Verdicts' }, { key: 'issues', label: 'Issues' }]} />
+      <div class="row gap">
+        <span class="feed-title">${active ? html`<span class="live-dot"></span>Live` : 'Activity'}</span>
+        <div class="view-toggle" role="group" aria-label="How to show the activity">
+          <button type="button" class=${view === 'feed' ? 'on' : ''} aria-pressed=${view === 'feed' ? 'true' : 'false'} onClick=${() => setView('feed')}>
+            <${Icon} name="list" size=${13} /> Activity</button>
+          <button type="button" class=${view === 'agents' ? 'on' : ''} aria-pressed=${view === 'agents' ? 'true' : 'false'} onClick=${() => setView('agents')}>
+            <${Icon} name="user" size=${13} /> Agents at work</button>
+        </div>
+      </div>
+      ${view === 'feed' ? html`<${Tabs} size="sm" label="Activity filter" value=${filter} onChange=${setFilter}
+        tabs=${[{ key: 'all', label: 'Everything' }, { key: 'jobs', label: 'Verdicts' }, { key: 'issues', label: 'Issues' }]} />` : null}
     </div>
-    <ol class="feed-list" aria-live="polite">
+    ${view === 'agents' && run ? html`<${AgentWorld} run=${run} items=${items} />` : html`<ol class="feed-list" aria-live="polite">
       ${list.length ? list.map((it, k) => html`<${FeedItem} key=${it.id} it=${it} now=${now} live=${active && k === 0} />`)
         : html`<li class="feed-empty">${active ? 'Warming up…' : 'Nothing to show for this filter.'}</li>`}
-    </ol>
+    </ol>`}
   </section>`;
 }
 
@@ -251,14 +265,18 @@ function MissionControl() {
       </div>
       ${run.error ? html`<${ErrorBox} message=${run.error} />` : null}
     </div>
-    <${LiveFeed} active=${active} />
+    <${LiveFeed} active=${active} run=${run} />
     ${run.plan ? html`<div class="plan-box">
-      <button type="button" class="link-btn" aria-expanded=${plan ? 'true' : 'false'} onClick=${() => setPlan(!plan)}>${plan ? 'Hide' : 'Show'} the exact search plan</button>
-      ${plan ? html`<div class="plan">
+      <button type="button" class="link-btn" onClick=${() => setPlan(true)}>Show the exact search plan</button>
+      ${plan ? html`<${Drawer} onClose=${() => setPlan(false)} label="Search plan"><div class="plan-drawer">
+        <div class="row space"><h2>The exact search <span class="serif">plan</span></h2>
+          <button type="button" class="icon-btn" aria-label="Close" onClick=${() => setPlan(false)}><${Icon} name="x" /></button></div>
+        <p class="muted small">What this search looks for and every query it sends. Planned ${run.plan.method === 'llm' ? 'by the AI from your profile' : run.plan.method === 'watchlist' ? 'for a watchlist check' : 'from your profile'}.</p>
         <div><div class="sec-title">Titles</div><div class="chip-row">${run.plan.titles.map((t) => html`<span class="chip">${t}</span>`)}</div></div>
         <div><div class="sec-title">Locations</div><div class="chip-row">${run.plan.locations.map((t) => html`<span class="chip">${t}</span>`)}</div></div>
-        <div><div class="sec-title">Queries · ${run.plan.queries.length}</div><ul class="queries">${run.plan.queries.map((q) => html`<li><code>${q}</code></li>`)}</ul></div>
-      </div>` : null}</div>` : null}
+        ${run.plan.watchlist ? html`<div><div class="sec-title">Watchlist</div><p class="small">${run.plan.watchlist} researched companies' own job boards are checked directly.</p></div>` : null}
+        <div><div class="sec-title">Web searches · ${run.plan.queries.length}</div><ul class="queries">${run.plan.queries.map((q) => html`<li><code>${q}</code></li>`)}</ul></div>
+      </div></${Drawer}>` : null}</div>` : null}
   </div>`;
 }
 
@@ -314,8 +332,9 @@ function Filters() {
     const t = setTimeout(() => setList({ q }), 300);
     return () => clearTimeout(t);
   }, [q]);
-  const active = (list.work_mode ? 1 : 0) + (list.min_score ? 1 : 0) + (list.sort !== 'chance' ? 1 : 0) + (list.scope === 'run' ? 1 : 0);
-  return html`<div class="filter-row">
+  // Only filters the user set count here; "latest search only" is shown as its own chip below.
+  const active = (list.work_mode ? 1 : 0) + (list.min_score ? 1 : 0) + (list.sort !== 'chance' ? 1 : 0);
+  return html`<div class="filter-block"><div class="filter-row">
     <label class="search-field"><${Icon} name="search" size=${15} />
       <input type="search" placeholder="Filter by title, company, place" aria-label="Filter jobs" value=${q} onInput=${(e) => setQ(e.currentTarget.value)} /></label>
     <div class="pop-anchor">
@@ -335,6 +354,11 @@ function Filters() {
         </div>
       </${Popover}>
     </div>
+  </div>
+  ${list.scope === 'run' ? html`<div class="scope-note">
+    <span><${Icon} name="search" size=${12} /> Showing jobs from the latest search only</span>
+    <button type="button" class="link-btn small" onClick=${() => setList({ scope: 'all' })}>Show all jobs</button>
+  </div>` : null}
   </div>`;
 }
 

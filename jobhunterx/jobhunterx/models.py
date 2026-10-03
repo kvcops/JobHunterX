@@ -22,6 +22,7 @@ class HITLType(str, Enum):
     MFA = "needs_mfa"
     MANUAL_FORM = "needs_manual_form"
     TOO_COMPLEX = "too_complex"
+    STOPPED = "stopped_by_you"
 
 
 class AgentEvent(BaseModel):

@@ -503,6 +503,7 @@ async def apply_mark_done(job_id: str):
     from jobhunterx.agents import browser_agent as ba
     await storage.set_tracking(job_id, "applied")
     await db.update_job(job_id, status="applied")
+    await db.resolve_job_interventions(job_id, "resolved")
     sess = ba.get_session(job_id)
     if sess:
         sess.update(status="applied", message="You submitted it 🎉", notice="")

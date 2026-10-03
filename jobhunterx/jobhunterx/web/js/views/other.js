@@ -2,7 +2,7 @@
 import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import {
-  loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention,
+  loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention, markInterventionApplied,
   applyControl, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
   loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion,
 } from '../actions.js';
@@ -360,20 +360,36 @@ export function BrowserView() {
     </div></div>`;
 }
 
+const IV_STATE = {
+  needs_you: ['Waiting for you', 'warning'], stopped: ['Stopped — waiting for you', 'warning'], paused: ['You have control', 'info'],
+  running: ['Agent is continuing…', 'info'], launching: ['Agent is starting…', 'info'], closed: ['Browser closed — still unfinished', 'neutral'],
+  failed: ['Agent stopped — still unfinished', 'danger'],
+};
+function ivState(item, session) {
+  if (!session || session.job_id !== item.job_id) return ['Waiting for you', 'warning'];
+  if (session.control === 'you' && session.live) return ['You have control', 'info'];
+  return IV_STATE[session.status] || ['Waiting for you', 'warning'];
+}
+
 export function InterventionsView() {
   const iv = useStore((s) => s.interventions);
+  const session = useStore((s) => s.browser.session);
   return html`<div class="view view-interventions">
-    <${PageHead} title=${html`Needs <span class="serif">you</span>`} sub="When the agent hits a login wall, CAPTCHA or one-time code, it pauses here."
+    <${PageHead} title=${html`Needs <span class="serif">you</span>`} sub="Applications the agent could not finish — a login wall, CAPTCHA, one-time code, or you stopped it. Each stays here until it is submitted or you dismiss it."
       actions=${html`<${Button} icon="refresh" busy=${iv.status === 'refreshing'} onClick=${loadInterventions}>Refresh</${Button}>`} />
     <section class="pane card"><div class="scroll pane-pad">
     ${iv.status === 'error' ? html`<${ErrorBox} message=${iv.error} onRetry=${loadInterventions} />` : null}
     ${iv.status === 'loading' ? html`<${Skeleton} rows=${3} />` : null}
     ${iv.status === 'ready' && !iv.items.length ? html`<div class="pane-center"><${EmptyState} icon="check" title="Nothing needs you">The agent is not waiting on anything.</${EmptyState}></div>` : null}
-    <div class="stack">${iv.items.map((it) => html`<div class="iv-row row space wrap" key=${it.id}>
-      <div><${Badge} tone="warning">${humanize(it.hitl_type)}</${Badge}> <strong>${it.role || 'Application'}</strong> <span class="muted">@ ${it.company || '—'} · ${relTime(it.created_at)}</span></div>
-      <div class="row gap"><${Button} onClick=${() => focusIntervention(it)}>Take over</${Button}>
-        <${Button} variant="primary" onClick=${() => continueIntervention(it)}>Continue</${Button}>
-        <${Button} onClick=${() => skipIntervention(it)}>Skip</${Button}></div></div>`)}</div>
+    <div class="stack">${iv.items.map((it) => { const [state, tone] = ivState(it, session); return html`<div class="iv-row row space wrap" key=${it.id}>
+      <div class="stack" style=${{ gap: '4px' }}>
+        <div><${Badge} tone="warning">${humanize(it.hitl_type)}</${Badge}> <strong>${it.role || 'Application'}</strong> <span class="muted">@ ${it.company || '—'} · ${relTime(it.created_at)}</span></div>
+        <div class="small"><${Badge} tone=${tone}>${state}</${Badge}></div>
+      </div>
+      <div class="row gap wrap"><${Button} onClick=${() => focusIntervention(it)}>Take over</${Button}>
+        <${Button} variant="primary" onClick=${() => continueIntervention(it)}>Let the agent continue</${Button}>
+        <${Button} icon="check" onClick=${() => markInterventionApplied(it)}>Mark as applied</${Button}>
+        <button type="button" class="link-btn small" onClick=${() => skipIntervention(it)}>Dismiss</button></div></div>`; })}</div>
     </div></section>
   </div>`;
 }

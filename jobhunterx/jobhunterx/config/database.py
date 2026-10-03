@@ -721,6 +721,32 @@ async def create_intervention_session(
         return cursor.lastrowid
 
 
+async def open_intervention(job_id: str, hitl_type: str, url: str, company: str = "", role: str = "") -> int:
+    """Keep exactly one pending intervention per job: update the open one, or create it.
+
+    An intervention stays pending until the application is really finished (submitted,
+    marked done, or dismissed) — taking over, continuing or closing the browser keep it.
+    """
+    async with aiosqlite.connect(_db_path) as db:
+        cur = await db.execute("SELECT id FROM intervention_sessions WHERE job_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+                               (job_id,))
+        row = await cur.fetchone()
+        if row:
+            await db.execute("UPDATE intervention_sessions SET hitl_type = ?, url = COALESCE(NULLIF(?, ''), url) WHERE id = ?",
+                             (hitl_type, url, row[0]))
+            await db.commit()
+            return row[0]
+    return await create_intervention_session(job_id=job_id, hitl_type=hitl_type, url=url, company=company, role=role)
+
+
+async def resolve_job_interventions(job_id: str, status: str = "resolved") -> None:
+    """Close every pending intervention of a job (the application is finished)."""
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("UPDATE intervention_sessions SET status = ?, resolved_at = ? WHERE job_id = ? AND status = 'pending'",
+                         (status, _now_iso(), job_id))
+        await db.commit()
+
+
 async def get_pending_interventions() -> list[dict]:
     """Return all pending intervention sessions."""
     async with aiosqlite.connect(_db_path) as db:

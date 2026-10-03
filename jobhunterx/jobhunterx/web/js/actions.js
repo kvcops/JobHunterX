@@ -314,6 +314,22 @@ export function setList(partial) {
   setSlice('list', partial);
   loadList();
 }
+function listQuery(l, extra = {}) {
+  return { view: l.view, q: l.q, work_mode: l.work_mode, min_score: l.min_score || '', sort: l.sort,
+    run_id: l.scope === 'run' ? l.runId : '', ...extra };
+}
+// Tab counts while jobs stream in: one small request at most every ~1.5 s, same filters as the list.
+let countsTimer = null;
+function refreshCountsSoon() {
+  if (countsTimer) return;
+  countsTimer = setTimeout(async () => {
+    countsTimer = null;
+    try {
+      const res = await api.listJobs(listQuery(getState().list, { limit: 1 }));
+      setSlice('list', { counts: res.counts });
+    } catch { /* the next full load corrects it */ }
+  }, 1500);
+}
 export async function loadList() {
   const seq = ++listSeq;
   listCtrl?.abort();
@@ -321,10 +337,7 @@ export async function loadList() {
   const l = getState().list;
   setSlice('list', { status: 'loading', error: null });
   try {
-    const res = await api.listJobs({
-      view: l.view, q: l.q, work_mode: l.work_mode, min_score: l.min_score || '', sort: l.sort,
-      run_id: l.scope === 'run' ? l.runId : '',
-    }, { signal: listCtrl.signal });
+    const res = await api.listJobs(listQuery(l), { signal: listCtrl.signal });
     if (seq !== listSeq) return;
     upsertJobs(res.jobs);
     setSlice('list', { status: 'ready', ids: res.jobs.map((j) => j.id), counts: res.counts });
@@ -689,19 +702,28 @@ export async function loadInterventions() {
     setSlice('interventions', { status: 'error', error: errorText(err) });
   }
 }
+// An intervention stays listed until the application is really finished: submitted (by the agent or
+// marked done by you) or dismissed. Taking over or continuing keeps it here.
 export async function continueIntervention(item) {
   try {
     const { session } = await api.applyAction(item.job_id, 'continue');
     if (session) setSlice('browser', { status: 'ready', session });
-    await api.resolveIntervention(item.id, 'resolved');
     navigate('#/browser');
+  } catch (err) { toast(errorText(err), 'danger'); }
+  loadInterventions();
+}
+export async function markInterventionApplied(item) {
+  try {
+    const { session } = await api.applyAction(item.job_id, 'done');
+    if (session) setSlice('browser', { status: 'ready', session });
+    toast('Marked as applied 🎉', 'success');
   } catch (err) { toast(errorText(err), 'danger'); }
   loadInterventions();
 }
 export async function skipIntervention(item) {
   try {
-    await api.resumeAgent(item.job_id, 'skip');
     await api.resolveIntervention(item.id, 'skipped');
+    toast('Dismissed — it no longer waits for you.', 'info');
   } catch (err) { toast(errorText(err), 'danger'); }
   loadInterventions();
 }
@@ -746,11 +768,9 @@ function onApplySession(session) {
   setSlice('browser', { status: 'ready', session });
   const changed = !prev || prev.job_id !== session.job_id || prev.status !== session.status;
   if (!changed) return;
+  loadInterventions();                         // keep the Interventions list in step with every status change
   if (session.status === 'applied') toast(`Applied to ${session.company || 'the job'} 🎉`, 'success', 7000);
-  if (session.status === 'needs_you') {
-    toast(session.notice || 'The agent needs your help.', 'warning', 8000);
-    loadInterventions();
-  }
+  if (session.status === 'needs_you') toast(session.notice || 'The agent needs your help.', 'warning', 8000);
   if (session.status === 'failed') toast(session.notice || 'The agent could not finish.', 'danger', 8000);
 }
 function handleBrowserEvent(ev) {
@@ -785,11 +805,13 @@ function onMessage(msg) {
       if (job && isWatchEvent(msg)) {                                        // new watchlist role: show it live
         upsertJobs([job]);
         reconcileListMembership(getState().jobs.byId[job.id]);
+        refreshCountsSoon();
         return;
       }
       if (!job || msg.run_id !== s.search.activeRunId) return;               // stale run
       upsertJobs([job]);
       setSlice('search', (sr) => ({ ...sr, streamedIds: sr.streamedIds.includes(job.id) ? sr.streamedIds : [...sr.streamedIds, job.id] }));
+      refreshCountsSoon();
       reconcileListMembership(getState().jobs.byId[job.id]);
       return;
     }
