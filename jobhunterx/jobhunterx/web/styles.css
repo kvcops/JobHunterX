@@ -424,7 +424,6 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 .scan-chip::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--success); margin-right: 6px; vertical-align: 1px; }
 .scan-chip.c1 { left: -18px; top: 46px; } .scan-chip.c2 { right: -22px; top: 104px; animation-delay: -1.2s; } .scan-chip.c3 { left: -6px; bottom: 26px; animation-delay: -2.4s; }
 @keyframes chipFloat { 0%, 100% { transform: translateY(0); opacity: .95; } 50% { transform: translateY(-8px); opacity: 1; } }
-.rotating { display: inline-block; animation: blurIn .5s var(--ease); }
 
 /* -------------------------------------------------------------------------- onboarding */
 .onboarding { min-height: 100dvh; display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 28px; padding: 24px; }
@@ -1266,3 +1265,12 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
   .setup-search-grid { grid-template-columns: 1fr; }
   .setup-foot .btn { width: 100%; justify-content: center; }
 }
+
+/* live watchlist check */
+.live-check { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+.live-pct { font-family: var(--mono); font-size: .85rem; color: var(--text-2); }
+.live-feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: .8rem; color: var(--text-2); }
+.live-feed li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-feed li:first-child { color: var(--ink); }
+.live-feed .k-good { color: var(--success); } .live-feed .k-reject { color: var(--text-3); }
+.company-box .facts-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }

@@ -53,7 +53,7 @@ export function initialState() {
       feed: { runId: null, items: [] },   // plain-language live activity of the active run
     },
     jobs: { byId: {} },
-    watch: { status: 'idle', data: null, error: null, checking: false },
+    watch: { status: 'idle', data: null, error: null, checking: false, run: null, feed: [] },   // run = live background check
     setup: { data: null, error: null, saving: false, tests: {} },   // API keys; checked before anything else
     details: {},            // jobId -> { status, job, error }
     list: {

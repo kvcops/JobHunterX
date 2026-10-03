@@ -4,7 +4,7 @@ import {
   loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, generateDocument, generateCv, loadDocuments, autoApply, deleteJob, navigate,
 } from '../actions.js';
 import {
-  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, Select, VERDICT_TONE,
+  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, Select, VERDICT_TONE, Elapsed,
 } from '../components/ui.js';
 import {
   VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, CHECK_LABEL, CHECK_STATUS_LABEL, CHECK_STATUS_TONE,
@@ -159,7 +159,7 @@ function DocActions({ job }) {
     return html`<div class=${`kit-item ${busy ? 'is-busy' : ''}`} key=${kind}>
       <div class="kit-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>${busy ? html`<span class="scan-beam"></span>` : null}</div>
       <div class="grow"><strong>${DOC_KIND_LABEL[kind]}</strong>
-        <div class="muted small">${busy ? 'Writing and fact-checking — up to a minute…'
+        <div class="muted small">${busy ? html`Writing and fact-checking against your profile · <${Elapsed} since=${g.startedAt} />`
           : latest ? `Generated ${relTime(latest.created_at)}${latest.stale ? ' · profile changed since' : ''}${latest.warnings_count ? ` · ${latest.warnings_count} note(s)` : ''}` : 'Tailored to this job, using only facts from your profile.'}</div>
         ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
       </div>
@@ -177,7 +177,7 @@ function DocActions({ job }) {
   const cvRow = html`<div class=${`kit-item ${cvBusy ? 'is-busy' : ''}`} key="cv">
     <div class="kit-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>${cvBusy ? html`<span class="scan-beam"></span>` : null}</div>
     <div class="grow"><strong>CV</strong>
-      <div class="muted small">${cvBusy ? 'Writing your CV…' : cvDoc ? `Made ${relTime(cvDoc.created_at)} · your full career story, shared by every application` : 'Your full career story (not job-specific). Some forms ask for it.'}</div>
+      <div class="muted small">${cvBusy ? html`Writing your CV · <${Elapsed} since=${cvGen.startedAt} />` : cvDoc ? `Made ${relTime(cvDoc.created_at)} · your full career story, shared by every application` : 'Your full career story (not job-specific). Some forms ask for it.'}</div>
       ${cvGen && cvGen.status === 'failed' ? html`<div class="error-text small" role="alert">${cvGen.error}</div>` : null}</div>
     <div class="row gap">
       ${cvId ? html`<${Button} size="sm" onClick=${() => navigate(`#/documents/${cvId}`)}>Open</${Button}>` : null}

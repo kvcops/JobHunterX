@@ -62,6 +62,7 @@ function Sidebar() {
   const theme = useStore((s) => s.theme);
   const runActive = useStore((s) => !!(s.search.run && ['queued', 'running'].includes(s.search.run.status)));
   const ivCount = useStore((s) => s.interventions.items.length);
+  const watchActive = useStore((s) => !!(s.watch.run && ['queued', 'running'].includes(s.watch.run.status)));
   // One highlight that glides to the active item instead of jumping.
   const groupsRef = useRef();
   const [ind, setInd] = useState(null);
@@ -91,6 +92,7 @@ function Sidebar() {
           <${Icon} name=${n.icon} size=${18} /><span class="lbl">${n.label}</span>
           ${n.step ? html`<span class="nav-step" aria-hidden="true">${n.step}</span>` : null}
           ${n.page === 'discover' && runActive ? html`<span class="dot" aria-label="Search running"></span>` : null}
+          ${n.page === 'companies' && watchActive ? html`<span class="dot" aria-label="Watchlist check running"></span>` : null}
           ${n.page === 'interventions' && ivCount ? html`<span class="nav-count">${ivCount}</span>` : null}</a></li>`)}</ul>
       </div>`)}</div>
       <div class="sidebar-foot">

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from pydantic import BaseModel, Field
 
@@ -161,7 +161,8 @@ def _provider_lists(router: SearchRouter, n_queries: int) -> tuple[list[list[str
     return lists, strategy
 
 
-async def run_queries(queries: list[str], per_query: int = 10) -> list[Lead]:
+async def run_queries(queries: list[str], per_query: int = 10,
+                      on_progress: Optional[Callable[[int, int], Awaitable[None]]] = None) -> list[Lead]:
     """Run planned queries through the enabled search providers.
 
     fallback — the first provider that returns results answers (fewest calls)
@@ -172,7 +173,9 @@ async def run_queries(queries: list[str], per_query: int = 10) -> list[Lead]:
     lists, strategy = _provider_lists(router, len(queries))
     leads: list[Lead] = []
     seen: set[str] = set()
-    for q, providers in zip(queries, lists):
+    for n, (q, providers) in enumerate(zip(queries, lists), 1):
+        if on_progress:
+            await on_progress(n - 1, len(queries))
         if not providers:
             continue
         batches = []
@@ -191,4 +194,6 @@ async def run_queries(queries: list[str], per_query: int = 10) -> list[Lead]:
                     continue
                 seen.add(key)
                 leads.append(Lead(url=it.url, title=it.title, snippet=it.snippet, provider=it.provider, query=q))
+    if on_progress:
+        await on_progress(len(queries), len(queries))
     return leads

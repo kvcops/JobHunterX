@@ -87,15 +87,23 @@ const AGENT_META = [
 ];
 const AGENT_BY_STAGE = Object.fromEntries(AGENT_META.flatMap((a) => [[a.stage, a], ...(a.also || []).map((x) => [x, a])]));
 
-/** Overall progress 0–100: finished stages plus the share of jobs already analysed in the streaming stages. */
-function runProgress(run) {
-  if (!ACTIVE.has(run.status)) return run.status === 'completed' ? 100 : Math.round((run.stages.filter((st) => st.status === 'done').length / run.stages.length) * 100);
-  const early = ['understand', 'plan', 'discover', 'normalize', 'dedupe'];
-  const doneEarly = run.stages.filter((st) => early.includes(st.key) && st.status === 'done').length;
-  const runningEarly = run.stages.some((st) => early.includes(st.key) && st.status === 'running') ? 0.5 : 0;
-  const share = run.total ? Math.min(1, run.counts.scored / run.total) : 0;
-  // first five stages ≈ 45% of the work, the per-job analysis ≈ 55%
-  return Math.min(99, Math.round(((doneEarly + runningEarly) / early.length) * 45 + share * 55));
+// Stage groups and how much of the bar each one fills. Inside a running group the bar only moves by
+// real counts the server reports (searches done, boards checked, pages read, jobs analysed) — never by time.
+const PROGRESS_GROUPS = [
+  { keys: ['understand'], w: 3 }, { keys: ['plan'], w: 3 }, { keys: ['discover'], w: 20 }, { keys: ['normalize'], w: 14 },
+  { keys: ['dedupe'], w: 2 }, { keys: ['validate', 'extract', 'match', 'rank'], w: 58 },
+];
+/** Overall progress 0–100 from finished stages plus the real done/total of the running one. */
+export function runProgress(run) {
+  if (run.status === 'completed') return 100;
+  const status = Object.fromEntries(run.stages.map((st) => [st.key, st.status]));
+  const p = run.progress;
+  let sum = 0;
+  for (const g of PROGRESS_GROUPS) {
+    if (g.keys.every((k) => status[k] === 'done' || status[k] === 'skipped')) { sum += g.w; continue; }
+    if (p && p.total > 0 && g.keys.includes(p.stage)) sum += g.w * Math.min(1, p.done / p.total);
+  }
+  return Math.min(ACTIVE.has(run.status) ? 99 : 100, Math.round(sum));
 }
 
 function useNow(ms = 1000, on = true) {
@@ -224,7 +232,7 @@ function MissionControl() {
         <div class="grow">
           <span class="eyebrow">${active ? html`Live · <${Elapsed} run=${run} />` : html`Finished in <${Elapsed} run=${run} />`}</span>
           <h2>${active ? html`Discovery in <span class="serif">progress</span>` : run.status === 'completed' ? html`Search <span class="serif">complete</span>` : `Search ${run.status}`}</h2>
-          <p class="muted small">${active ? (cur ? `Step ${idx + 1} of ${run.stages.length} · ${cur.label}${run.total && idx >= 5 ? ` · ${c.scored} of ${run.total} jobs analysed` : ''}` : 'Warming up…')
+          <p class="muted small" aria-live="polite">${active ? (cur ? `Step ${idx + 1} of ${run.stages.length} · ${run.progress && run.progress.label ? run.progress.label : cur.label}` : 'Starting…')
             : `${c.recommended} roles fit you out of ${c.scored} analysed · ${c.duplicates} duplicates merged`}</p>
         </div>
         <div class="mc-pct"><span class="n"><${CountUp} value=${pct} /></span><span class="u">%</span></div>

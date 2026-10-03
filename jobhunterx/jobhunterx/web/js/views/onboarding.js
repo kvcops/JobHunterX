@@ -4,7 +4,7 @@ import { html, useState, useRef, useEffect } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { uploadResume, saveProfile, setOnboardingStep, finishOnboarding } from '../actions.js';
 import {
-  Button, Icon, ChipsInput, Field, Notice, Meter, Seg, Skeleton, ScanDoc, Orb, ErrorBox, AutoTextarea, Spinner,
+  Button, Icon, ChipsInput, Field, Notice, Meter, Seg, Skeleton, ScanDoc, Orb, ErrorBox, AutoTextarea, Spinner, Elapsed, UPLOAD_STAGES,
 } from '../components/ui.js';
 import { ExperienceSummary } from '../components/experience.js';
 import { normalizeProfile, setIn, defaultSearchRequest } from '../state/domain.js';
@@ -37,16 +37,6 @@ function Stepper({ step }) {
   </ol>`;
 }
 
-const UPLOAD_STAGES = [
-  ['sending', 'Uploading the PDF'], ['extracting', 'Reading roles, dates, skills and projects'], ['understanding', 'Working out your career tracks'],
-];
-
-function Elapsed({ since }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
-  const sec = Math.max(0, Math.round((now - since) / 1000));
-  return html`<span class="elapsed">${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}</span>`;
-}
 
 function UploadStep() {
   const up = useStore((s) => s.profile.upload);

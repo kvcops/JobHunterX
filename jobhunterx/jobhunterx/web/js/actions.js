@@ -296,6 +296,10 @@ async function loadCurrentRun() {
   try {
     const { run } = await api.currentSearch();
     if (!run) return;
+    if (run.mode === 'watch') {                 // a background watchlist check is not the user's search
+      if (['queued', 'running'].includes(run.status)) onWatchRun(run);
+      return;
+    }
     const active = getState().search.activeRunId;
     if (!active || active === run.id) { setSlice('search', { activeRunId: run.id, run }); mergeFeed(run.id, run.activity); }
   } catch { /* non-fatal */ }
@@ -457,7 +461,7 @@ export async function autoApply(jobId) {
 export async function generateDocument(jobId, kind) {
   const key = genKey(jobId, kind);
   if (getState().gen[key]?.status === 'generating') return;
-  setEntry('gen', key, { status: 'generating', error: null, documentId: null });
+  setEntry('gen', key, { status: 'generating', error: null, documentId: null, startedAt: Date.now() });
   try {
     const { document } = await api.generateDocument(jobId, kind);
     setEntry('gen', key, { status: 'ready', error: null, documentId: document.id });
@@ -472,7 +476,7 @@ export async function generateDocument(jobId, kind) {
 export async function generateCv(focus) {
   const key = genKey(null, 'cv');
   if (getState().gen[key]?.status === 'generating') return;
-  setEntry('gen', key, { status: 'generating', error: null, documentId: null, focus });
+  setEntry('gen', key, { status: 'generating', error: null, documentId: null, focus, startedAt: Date.now() });
   try {
     const { document } = await api.generateCv(focus);
     setEntry('gen', key, { status: 'ready', error: null, documentId: document.id });
@@ -562,8 +566,21 @@ export async function checkWatchlistNow() {
     toast(errorText(err), 'danger');
   }
 }
+// A background watchlist check streams the same events as a search; it gets its own live panel
+// (Companies page + sidebar dot) instead of taking over the Discover screen.
+const WATCH_FEED_KEEP = 6;
+function onWatchRun(run) {
+  setSlice('watch', (w) => ({ ...w, checking: ['queued', 'running'].includes(run.status), run,
+    feed: w.run && w.run.id === run.id ? w.feed : (run.activity || []).slice(-WATCH_FEED_KEEP) }));
+}
+function isWatchEvent(msg) {
+  const w = getState().watch;
+  return !!(msg.run_id && w.run && w.run.id === msg.run_id);
+}
 function onWatchDone(d) {
-  setSlice('watch', (w) => ({ ...w, checking: false, data: w.data ? { ...w.data, status: d.status_info || w.data.status } : w.data }));
+  setSlice('watch', (w) => ({ ...w, checking: false, run: w.run ? { ...w.run, status: d.status || 'completed' } : null,
+    data: w.data ? { ...w.data, status: d.status_info || w.data.status } : w.data }));
+  if (getState().route.page === 'companies') loadWatchlist(getState().watch.scope || 'mine');
   if (d.status === 'busy' || d.status === 'already_checking') return;
   if (d.new_fits > 0) {
     toast(`${d.new_fits} new role${d.new_fits === 1 ? '' : 's'} at watchlist companies fit you — see the "New" tab. Apply early.`, 'success', 12000);
@@ -751,6 +768,7 @@ function onMessage(msg) {
     case 'search.run': {
       const run = msg.data && msg.data.run;
       if (!run) return;
+      if (run.mode === 'watch') { onWatchRun(run); return; }
       if (s.search.activeRunId && run.id !== s.search.activeRunId) return;   // stale run
       if (!s.search.activeRunId && s.search.starting) return;                 // response will carry it
       const wasActive = s.search.run && ['queued', 'running'].includes(s.search.run.status);
@@ -764,14 +782,33 @@ function onMessage(msg) {
     }
     case 'search.job': {
       const job = msg.data && msg.data.job;
+      if (job && isWatchEvent(msg)) {                                        // new watchlist role: show it live
+        upsertJobs([job]);
+        reconcileListMembership(getState().jobs.byId[job.id]);
+        return;
+      }
       if (!job || msg.run_id !== s.search.activeRunId) return;               // stale run
       upsertJobs([job]);
       setSlice('search', (sr) => ({ ...sr, streamedIds: sr.streamedIds.includes(job.id) ? sr.streamedIds : [...sr.streamedIds, job.id] }));
       reconcileListMembership(getState().jobs.byId[job.id]);
       return;
     }
+    case 'search.progress': {
+      const d = msg.data || {};
+      if (isWatchEvent(msg)) {
+        setSlice('watch', (w) => ({ ...w, run: { ...w.run, progress: d.progress, counts: d.counts || w.run.counts } }));
+        return;
+      }
+      if (!msg.run_id || msg.run_id !== s.search.activeRunId || !s.search.run) return;   // stale run
+      setSlice('search', (sr) => ({ ...sr, run: { ...sr.run, progress: d.progress, counts: d.counts || sr.run.counts } }));
+      return;
+    }
     case 'search.activity': {
       const item = msg.data && msg.data.item;
+      if (item && isWatchEvent(msg)) {
+        setSlice('watch', (w) => ({ ...w, feed: [...(w.feed || []), item].slice(-WATCH_FEED_KEEP) }));
+        return;
+      }
       if (!item || !msg.run_id || msg.run_id !== s.search.activeRunId) return;   // stale run
       mergeFeed(msg.run_id, [item]);
       return;

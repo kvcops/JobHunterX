@@ -301,11 +301,21 @@ export function ScanDoc() {
   </div>`;
 }
 
-/** Cycles through honest descriptions of what is happening (no fake progress). */
-export function RotatingText({ items, ms = 2600 }) {
-  const [i, setI] = useState(0);
-  useEffect(() => { const t = setInterval(() => setI((x) => (x + 1) % items.length), ms); return () => clearInterval(t); }, [items.length, ms]);
-  return html`<span class="rotating" key=${i}>${items[i]}</span>`;
+/** Real time since `since` (ms epoch), ticking every second — honest feedback while a single long call runs. */
+export function Elapsed({ since }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const sec = Math.max(0, Math.round((now - (since || now)) / 1000));
+  return html`<span class="elapsed">${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}</span>`;
+}
+
+/** Resume reading stages as the server reports them (`profile.upload` events). */
+export const UPLOAD_STAGES = [
+  ['sending', 'Uploading the PDF'], ['extracting', 'Reading roles, dates, skills and projects'], ['understanding', 'Working out your career tracks'],
+];
+export function uploadStageLabel(stage) {
+  const hit = UPLOAD_STAGES.find(([k]) => k === (stage === 'received' ? 'extracting' : stage));
+  return hit ? hit[1] : 'Reading your resume';
 }
 
 // ---------------------------------------------------------------------------- overlays

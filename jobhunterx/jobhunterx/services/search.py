@@ -80,6 +80,8 @@ def new_run(profile_hash: str) -> dict:
                                   "scored", "recommended", "rejected")},
         "plan": None, "error": None, "profile_hash": profile_hash,
         "total": 0, "activity": [], "person_id": storage.active_person(),
+        "mode": "search",          # search | watch (background watchlist check)
+        "progress": None,          # real counts for the running stage: {stage, done, total, label}
     }
 
 
@@ -139,6 +141,13 @@ class Run:
         del feed[:-FEED_KEEP]
         await self._emit({"type": "search.activity", "run_id": self.id, "data": {"item": item}, "ts": item["ts"]})
 
+    async def progress(self, stage: str, done: int, total: int, label: str) -> None:
+        """Real progress of the running stage (x of y), streamed live — never estimated."""
+        self.data["progress"] = {"stage": stage, "done": done, "total": total, "label": label}
+        await self._emit({"type": "search.progress", "run_id": self.id,
+                          "data": {"progress": self.data["progress"], "counts": self.data["counts"], "mode": self.data.get("mode")},
+                          "ts": _now()})
+
     async def log(self, message: str, level: str = "info") -> None:
         await self._emit({"type": "log", "run_id": self.id, "message": message,
                           "data": {"level": level, "source": "search"}, "ts": _now()})
@@ -179,7 +188,8 @@ def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
 
 
 async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompany]]], snap: CandidateSnapshot,
-                         include_remote: bool, titles: list[str]) -> list[JobPosting]:
+                         include_remote: bool, titles: list[str],
+                         on_board_done: Optional[Callable[[], Awaitable[None]]] = None) -> list[JobPosting]:
     """For each ATS board (watchlist or discovered), pull its open jobs and keep the relevant ones.
 
     Jobs outside the candidate's locations are dropped here. A foreign
@@ -218,7 +228,14 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
 
         return list(await asyncio.gather(*(hydrate(j) for j in picked)))
 
-    results = await asyncio.gather(*(one(r, c) for r, c in refs), return_exceptions=True)
+    async def counted(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
+        try:
+            return await one(ref, company)
+        finally:
+            if on_board_done:
+                await on_board_done()
+
+    results = await asyncio.gather(*(counted(r, c) for r, c in refs), return_exceptions=True)
     for r in results:
         if isinstance(r, list):
             out += r
@@ -284,7 +301,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     leads = []
     if queries:
         await run.say("discover", f"Searching job sites and company career pages ({len(queries)} searches)", "work")
-        leads = await search.run_queries(queries)
+        async def query_progress(done: int, total: int) -> None:
+            await run.progress("discover", done, total, f"Web searches: {done} of {total} done")
+        leads = await search.run_queries(queries, on_progress=query_progress)
     c["search_results"] = len(leads)
     posting_leads, boards = [], {}
     for lead in leads:
@@ -306,7 +325,16 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                       "new roles there are usually seen before the crowd arrives", "work")
     for ref, _ in found_refs[:6]:
         await run.say("discover", f"Opening {_pretty_board(ref.token)}'s careers board on {ref.kind.title()}", "work")
-    board_jobs = await _expand_boards(board_refs, snap, scope.include_remote, scope.titles)
+    boards_done = {"n": 0}
+
+    async def board_progress() -> None:
+        boards_done["n"] += 1
+        await run.progress("discover", boards_done["n"], len(board_refs),
+                           f"Company job boards: {boards_done['n']} of {len(board_refs)} checked")
+
+    if board_refs:
+        await run.progress("discover", 0, len(board_refs), f"Company job boards: 0 of {len(board_refs)} checked")
+    board_jobs = await _expand_boards(board_refs, snap, scope.include_remote, scope.titles, on_board_done=board_progress)
     if board_refs:
         await run.say("discover", f"Pulled {len(board_jobs)} relevant openings straight from employer boards", "good")
     if watch_mode:
@@ -328,6 +356,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     if to_read:
         await run.say("normalize", f"Opening {len(to_read)} job pages to read the full descriptions", "work")
     narrated = {"n": 0}
+    pages_done = {"n": 0}
+    if to_read:
+        await run.progress("normalize", 0, len(to_read), f"Job pages: 0 of {len(to_read)} read")
 
     async def resolve(lead) -> Optional[JobPosting]:
         async with sem:
@@ -335,7 +366,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 p, _ = await page.posting_from_url(lead.url, hint_title=lead.title, hint_snippet=lead.snippet)
             except Exception as exc:
                 log.debug("lead_resolve_failed", url=lead.url[:80], error=str(exc)[:100])
-                return None
+                p = None
+            finally:
+                pages_done["n"] += 1
+                await run.progress("normalize", pages_done["n"], len(to_read), f"Job pages: {pages_done['n']} of {len(to_read)} read")
+        if p is None:
+            return None
         if p:
             p.discovered_by_query = lead.query
             narrated["n"] += 1
@@ -374,6 +410,15 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     for key in ("validate", "extract", "match", "rank"):
         await run.stage(key)
     best: Optional[tuple[int, JobPosting]] = None
+    read = {"n": 0}
+
+    async def analysis_progress(current: str = "") -> None:
+        # Two real steps per job — AI read finished, score saved — so the bar moves while the slow reads run.
+        label = f"Jobs analysed: {c['scored']} of {len(unique)}" + (f" · reading {current}" if current else "")
+        await run.progress("match", read["n"] + c["scored"], 2 * len(unique), label)
+
+    if unique:
+        await analysis_progress()
     for i in range(0, len(unique), CHUNK):
         chunk = unique[i:i + CHUNK]
 
@@ -402,7 +447,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             ref = _job_ref(p)
             if use_llm:
                 await run.say("extract", f"Reading the requirements for {ref['title']} at {ref['company']}", "work", ref)
+                await analysis_progress(f"“{ref['title']}” at {ref['company']}")
             method = await job_ai.understand_job(p, snap, use_llm=use_llm)
+            read["n"] += 1
             if method == "llm":
                 llm_budget -= 1
                 n_req = len(p.requirements.required_skills)
@@ -416,6 +463,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 c["invalid"] += 1
             job_id = await storage.save_job(p, m, run.id)
             c["scored"] += 1
+            await analysis_progress()
             if m.verdict == "incompatible" or p.validation.status in ("closed", "invalid"):
                 c["rejected"] += 1
             elif m.verdict in ("strong", "good", "stretch"):
@@ -478,6 +526,7 @@ class SearchManager:
     async def start(self, profile: CandidateProfile, request: dict, emit: Emit) -> dict:
         await self.cancel()
         run = Run(new_run(profile.content_hash()), emit)
+        run.data["mode"] = "watch" if request.get("mode") == "watch" else "search"
         self._run = run
         await run.publish()
 

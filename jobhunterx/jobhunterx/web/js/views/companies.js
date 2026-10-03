@@ -5,6 +5,7 @@ import { useStore } from '../state/store.js';
 import { loadWatchlist, checkWatchlistNow, navigate, setList } from '../actions.js';
 import { Button, Badge, Skeleton, ErrorBox, EmptyState, PageHead, Tabs, Icon, Monogram, Notice } from '../components/ui.js';
 import { CompanySection } from './jobdetail.js';
+import { runProgress } from './discover.js';
 import {
   COMPANY_VERDICT_LABEL, COMPANY_VERDICT_TONE, COMPETITION_LABEL, EARLY_CAREER_LABEL, relTime, humanize, plural,
 } from '../lib/format.js';
@@ -36,6 +37,27 @@ function CompanyRow({ c, open, onToggle }) {
   </article>`;
 }
 
+/** Live view of a running watchlist check — every line and number comes from the server as it happens. */
+function LiveCheck({ run, feed }) {
+  const pct = runProgress(run);
+  const p = run.progress;
+  const cur = run.stages.find((st) => st.status === 'running');
+  const c = run.counts || {};
+  return html`<div class="card pad live-check" aria-live="polite">
+    <div class="row gap wrap">
+      <span class="live-dot"></span><strong>Checking your watchlist companies now</strong>
+      <span class="muted small">${p && p.label ? p.label : cur ? cur.label : 'Starting…'}</span>
+      <span class="grow"></span><span class="live-pct">${pct}%</span>
+    </div>
+    <div class="mc-bar is-active" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${pct}><div class="mc-fill" style=${{ width: `${pct}%` }}></div></div>
+    <div class="row gap wrap small muted">
+      <span>${c.candidates || 0} openings found</span><span>·</span><span>${c.scored || 0} analysed</span><span>·</span>
+      <span class="tone-text-success">${c.recommended || 0} fit you</span>
+    </div>
+    ${feed && feed.length ? html`<ul class="live-feed">${feed.slice().reverse().map((it) => html`<li key=${it.id} class=${`k-${it.kind}`}>${it.message}</li>`)}</ul>` : null}
+  </div>`;
+}
+
 export function CompaniesView() {
   const w = useStore((s) => s.watch);
   const [filter, setFilter] = useState('all');
@@ -56,6 +78,7 @@ export function CompaniesView() {
     { key: 'caution', label: 'Caution', count: all.filter((c) => c.verdict === 'caution').length },
   ];
   const checking = w.checking || (st && st.checking);
+  const liveRun = w.run && ['queued', 'running'].includes(w.run.status) ? w.run : null;
   return html`<div class="view view-companies">
     <${PageHead} title=${html`Companies to <span class="serif">watch</span>`}
       sub="Researched companies in your cities. Their own job boards are checked every few hours, so you can apply in the first hours — not as applicant #1,500 on LinkedIn."
@@ -72,6 +95,7 @@ export function CompaniesView() {
       ${d && scope === 'mine' && !(d.cities || []).length ? html`<${Notice} tone="warning">None of your preferred locations are covered yet. Researched cities: ${(d.covered_cities || []).join(', ')}.
         Add one of them under Profile → preferences to use the watchlist.</${Notice}>` : null}
     </div>
+    ${liveRun ? html`<${LiveCheck} run=${liveRun} feed=${w.feed} />` : null}
     <${Tabs} label="Filter companies" size="sm" value=${filter} onChange=${setFilter} tabs=${tabs} />
     <div class="company-list">
       ${w.status === 'error' ? html`<${ErrorBox} message=${w.error} onRetry=${() => loadWatchlist(scope)} />` : null}

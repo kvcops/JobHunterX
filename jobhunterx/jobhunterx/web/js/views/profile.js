@@ -2,7 +2,7 @@ import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { uploadResume, saveProfile, loadProfile } from '../actions.js';
 import {
-  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHead, Stat, Seg, Select, AutoTextarea, ScanDoc, RotatingText, EmptyState,
+  Button, Badge, Skeleton, ErrorBox, ChipsInput, Field, Icon, Notice, Meter, Tabs, PageHead, Stat, Seg, Select, AutoTextarea, ScanDoc, EmptyState, Elapsed, uploadStageLabel,
 } from '../components/ui.js';
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
 import { ExperienceSummary } from '../components/experience.js';
@@ -23,7 +23,7 @@ function Reading() {
   if (up.status !== 'uploading') return null;
   return html`<div class="reading-overlay" aria-live="polite"><${ScanDoc} />
     <strong>Reading ${up.fileName}</strong>
-    <p class="muted small"><${RotatingText} items=${['Extracting roles and dates…', 'Checking skills against where you used them…', 'Re-mapping your career tracks…']} /></p></div>`;
+    <p class="muted small">${uploadStageLabel(up.stage)}… · <${Elapsed} since=${up.startedAt} /></p></div>`;
 }
 
 function Understanding({ snap }) {
