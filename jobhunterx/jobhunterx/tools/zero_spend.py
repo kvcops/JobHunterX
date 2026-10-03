@@ -20,6 +20,7 @@ KNOWN_FREE_ALLOWANCES_NATIVE = {
     "exa": (10.00, "USD"),
     "brave": (5.00, "USD"),
     "tinyfish": (None, "credits"),  # Uncapped 0-credit utility (no Tier B soft cap)
+    "deep": (None, "NOT_APPLICABLE"),
     "ddgs": (None, "NOT_APPLICABLE"),
 }
 

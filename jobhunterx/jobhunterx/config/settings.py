@@ -40,8 +40,10 @@ class Settings(BaseSettings):
     google_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
+    nvidia_api_key: Optional[str] = None          # NVIDIA NIM (build.nvidia.com), free key, 40 requests/minute
+    kilo_api_key: Optional[str] = None            # optional: Kilo's free pool works without any key
 
-    @field_validator("google_api_key", "groq_api_key", "mistral_api_key", "tinyfish_api_key", "tavily_api_key",
+    @field_validator("google_api_key", "groq_api_key", "mistral_api_key", "nvidia_api_key", "kilo_api_key", "tinyfish_api_key", "tavily_api_key",
                      "exa_api_key", "brave_api_key", mode="before")
     @classmethod
     def _drop_placeholder_keys(cls, v):
@@ -107,6 +109,9 @@ class Settings(BaseSettings):
         providers = []
         if self.google_api_key:
             providers.append("google")
+        providers.append("kilo")               # Kilo's free pool needs no key
+        if self.nvidia_api_key:
+            providers.append("nvidia")
         if self.groq_api_key:
             providers.append("groq")
         if self.mistral_api_key:

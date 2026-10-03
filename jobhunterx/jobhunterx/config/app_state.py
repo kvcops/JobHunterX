@@ -18,12 +18,12 @@ from jobhunterx.config.logging import get_logger
 
 log = get_logger("app_state")
 
-SEARCH_PROVIDERS = ["tinyfish", "tavily", "exa", "brave", "ddgs"]
-LLM_PROVIDERS = ["google", "groq", "mistral"]
+SEARCH_PROVIDERS = ["tinyfish", "tavily", "exa", "brave", "deep", "ddgs"]   # deep + ddgs need no key
+LLM_PROVIDERS = ["google", "kilo", "nvidia", "groq", "mistral"]   # kilo needs no key (free pool)
 
 # Seeded on first start; later releases only ever add keys.
 DEFAULTS: dict[str, Any] = {
-    "llm.providers": {"google": True, "groq": True, "mistral": True},
+    "llm.providers": {"google": True, "kilo": True, "nvidia": True, "groq": True, "mistral": True},
     "llm.overrides": {},                       # chain -> preferred first model id
     "search.providers": {p: True for p in SEARCH_PROVIDERS},
     "search.order": list(SEARCH_PROVIDERS),
@@ -32,6 +32,7 @@ DEFAULTS: dict[str, Any] = {
     # combine:  ask two providers per query and merge (widest coverage, uses more quota)
     "search.strategy": "fallback",
     "people.active": None,
+    "setup.free_ok": False,                    # the user chose to start on Kilo's free models without any key
 }
 
 _cache: dict[str, Any] = copy.deepcopy(DEFAULTS)
@@ -62,6 +63,8 @@ async def load(db_path: str) -> None:
             _cache[key] = val
         await db.commit()
     order = [p for p in _cache["search.order"] if p in SEARCH_PROVIDERS]
+    if "deep" not in order:                      # added later: it belongs right before plain DuckDuckGo
+        order.insert(order.index("ddgs") if "ddgs" in order else len(order), "deep")
     _cache["search.order"] = order + [p for p in SEARCH_PROVIDERS if p not in order]
 
 

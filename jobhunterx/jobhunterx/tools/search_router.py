@@ -16,6 +16,7 @@ from jobhunterx.tools.search_providers import (
     BaseSearchProvider,
     BraveProvider,
     DDGSProvider,
+    DeepSearchProvider,
     ExaProvider,
     ProviderSearchResponse,
     SearchResultItem,
@@ -39,6 +40,7 @@ class SearchRouter:
             "tavily": TavilyProvider(),
             "exa": ExaProvider(),
             "brave": BraveProvider(),
+            "deep": DeepSearchProvider(),
             "ddgs": DDGSProvider(),
         }
         self.session_disabled: Dict[str, bool] = {}
@@ -51,7 +53,7 @@ class SearchRouter:
         if primary in order:
             order.remove(primary)
             order.insert(0, primary)
-        return order + ["ddgs"]
+        return order + ["deep", "ddgs"]
 
     async def execute_query(
         self, query: str, max_results: int = 10,

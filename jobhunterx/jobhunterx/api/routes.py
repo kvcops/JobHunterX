@@ -70,16 +70,19 @@ async def meta():
 # First-run setup: API keys
 # ---------------------------------------------------------------------------
 
-_LLM_KEYS = ("google", "groq", "mistral")
+_LLM_KEYS = ("google", "nvidia", "groq", "mistral")
 _SEARCH_KEYS = ("tavily", "exa", "tinyfish", "brave")
 
 
 def _setup_status() -> dict:
+    from jobhunterx.config import app_state
     from jobhunterx.config.settings import get_settings
     s = get_settings()
-    have = {name: bool(getattr(s, f"{name}_api_key")) for name in (*_LLM_KEYS, *_SEARCH_KEYS)}
-    return {"llm_ready": any(have[n] for n in _LLM_KEYS), "keys": have,
-            "llm_count": sum(have[n] for n in _LLM_KEYS)}
+    have = {name: bool(getattr(s, f"{name}_api_key")) for name in (*_LLM_KEYS, *_SEARCH_KEYS, "kilo")}
+    kilo_on = app_state.llm_provider_enabled("kilo")
+    free_ok = bool(app_state.get("setup.free_ok"))
+    return {"llm_ready": any(have[n] for n in _LLM_KEYS) or (kilo_on and free_ok), "keys": have,
+            "llm_count": sum(have[n] for n in _LLM_KEYS) + int(kilo_on), "kilo_on": kilo_on, "free_ok": free_ok}
 
 
 @router.get("/setup")
@@ -87,8 +90,19 @@ async def setup_status():
     return _setup_status()
 
 
+@router.post("/setup/free")
+async def setup_free():
+    """Start without any key: Kilo's free models do the AI work (they may use prompts for training — the UI says so)."""
+    from jobhunterx.config import app_state
+    cur = app_state.get("llm.providers")
+    cur["kilo"] = True
+    await app_state.set("llm.providers", cur)
+    await app_state.set("setup.free_ok", True)
+    return _setup_status()
+
+
 class KeyTest(BaseModel):
-    provider: Literal["google", "groq", "mistral", "tavily", "exa", "tinyfish", "brave"]
+    provider: Literal["google", "nvidia", "groq", "mistral", "tavily", "exa", "tinyfish", "brave"]
     key: str = Field(..., max_length=256)
 
 
@@ -105,6 +119,22 @@ async def test_key(body: KeyTest):
         "groq": ("https://api.groq.com/openai/v1/models", {"Authorization": f"Bearer {key}"}),
         "mistral": ("https://api.mistral.ai/v1/models", {"Authorization": f"Bearer {key}"}),
     }
+    if body.provider == "nvidia":           # NIM lists models without a key, so check with a one-token answer
+        from jobhunterx.config import openai_compat as oc
+        try:
+            await oc.chat(oc.NIM_BASE, "nvidia/nemotron-nano-3-30b-a3b", [{"role": "user", "content": "hi"}], key=key,
+                          max_tokens=16, timeout=20)
+        except oc.EmptyAnswer:
+            pass
+        except oc.ChatError as exc:
+            if exc.status in (401, 403):
+                return {"ok": False, "message": "NVIDIA rejected this key. Create a new key and paste it again."}
+            if exc.status == 429:
+                return {"ok": True, "message": "Key accepted (NVIDIA is rate-limiting right now, that's fine)."}
+            return {"ok": False, "message": f"NVIDIA answered with an error ({exc.status}). Try again in a minute."}
+        except Exception:
+            return {"ok": False, "message": "Could not reach NVIDIA — check your internet connection and try again."}
+        return {"ok": True, "message": "Key works."}
     if body.provider not in checks:
         return {"ok": True, "message": "Saved format looks right — it is checked on the first search."}
     url, headers = checks[body.provider]
@@ -181,8 +211,8 @@ async def upload_resume(file: UploadFile = File(...), background: bool = Query(F
     if not data.startswith(b"%PDF"):
         raise HTTPException(422, "Please upload a PDF resume.")
     if not _setup_status()["llm_ready"]:
-        raise HTTPException(400, "Add at least one AI key first (Google AI Studio, Groq or Mistral — all free). "
-                                 "Without one, the resume cannot be read.")
+        raise HTTPException(400, "Add at least one AI key first (Google AI Studio, NVIDIA, Groq or Mistral — all free), "
+                                 "or choose “Start free with Kilo”. Without AI, the resume cannot be read.")
     up = {"id": str(uuid.uuid4()), "status": "running", "stage": "received", "file_name": (file.filename or "resume.pdf")[:120],
           "started_at": datetime.now(timezone.utc).isoformat(), "error": None}
     _uploads[up["id"]] = up
@@ -636,10 +666,12 @@ _KEY_FIELDS = {  # payload key → (settings attr, env var names)
     "gemini_api_key": ("google_api_key", ["GOOGLE_API_KEY", "GEMINI_API_KEY"]),
     "groq_api_key": ("groq_api_key", ["GROQ_API_KEY"]),
     "mistral_api_key": ("mistral_api_key", ["MISTRAL_API_KEY"]),
+    "nvidia_api_key": ("nvidia_api_key", ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"]),
+    "kilo_api_key": ("kilo_api_key", ["KILO_API_KEY"]),
 }
 _BOOL_FIELDS = {"enable_web_search_apis": "ENABLE_WEB_SEARCH_APIS", "brave_enabled": "BRAVE_ENABLED",
                 "strict_zero_spend_protection": "STRICT_ZERO_SPEND_PROTECTION"}
-_SEARCH_PROVIDERS = ("tinyfish", "tavily", "exa", "brave", "ddgs")
+_SEARCH_PROVIDERS = ("tinyfish", "tavily", "exa", "brave", "deep", "ddgs")
 
 
 def _env_file_keys() -> dict[str, str]:
@@ -688,13 +720,15 @@ async def get_settings_masked():
     out["primary_search_provider"] = s.primary_search_provider
     out["search_providers"] = list(_SEARCH_PROVIDERS)
     names = {"google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"], "groq": ["GROQ_API_KEY"], "mistral": ["MISTRAL_API_KEY"],
-             "tinyfish": ["TINYFISH_API_KEY"], "tavily": ["TAVILY_API_KEY"], "exa": ["EXA_API_KEY"], "brave": ["BRAVE_API_KEY"]}
+             "nvidia": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"], "kilo": ["KILO_API_KEY"], "tinyfish": ["TINYFISH_API_KEY"], "tavily": ["TAVILY_API_KEY"], "exa": ["EXA_API_KEY"], "brave": ["BRAVE_API_KEY"]}
     for name, env_names in names.items():
         val = getattr(s, f"{name}_api_key")
         out[f"{name}_configured"] = bool(val)
         out[f"{name}_key_masked"] = _mask(val)
         out[f"{name}_source"] = _source(env_names, file_keys) if val else ""
     out["tunables"] = {k: getattr(s, k) for k in _TUNABLES}
+    from jobhunterx.tools import deep_search
+    out["deep_engines"] = deep_search.engine_status()
     out["providers"] = {"llm": app_state.get("llm.providers"), "search": app_state.get("search.providers"),
                         "search_order": app_state.get("search.order"), "search_strategy": app_state.get("search.strategy")}
     from jobhunterx.config.settings import _BASE_DIR

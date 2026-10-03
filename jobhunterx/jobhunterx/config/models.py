@@ -27,8 +27,32 @@ from jobhunterx.config.settings import get_settings, is_real_key
 
 log = get_logger("models")
 
-# rpm / rpd = requests per minute / day; tpm / tpd = tokens per minute / day. None = not limited (or unknown).
+# rpm / rph / rpd = requests per minute / hour / day; tpm / tpd = tokens per minute / day. None = not limited (or unknown).
 CATALOG: list[dict[str, Any]] = [
+    # Kilo Gateway free pool — no API key, no card. 200 requests/hour per model. Measured Oct 2026 (JSON answers):
+    # kilo-auto/free ~1-2 s, Nemotron 3 Super ~1.2-3 s, Laguna S ~2.7 s, Ling 3.1 Flash ~3.6 s, Nemotron 3 Nano Omni ~3.4 s.
+    # Avoided: thinking models that spend the whole budget reasoning (Step 3.7 Flash, Dots, Apodex, LFM, openrouter/free)
+    # and slow ones (Qwen3.8 27B ~23 s, Nemotron 3.5 Lightning ~20 s). NOTE: every free model here may use prompts for training.
+    {"id": "kilo/kilo-auto/free", "name": "Kilo Auto (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Kilo routes each request to a fast free model. ~1-2 s. No key."},
+    {"id": "kilo/nvidia/nemotron-3-super-120b-a12b:free", "name": "Nemotron 3 Super 120B (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Strong MoE (12B active), clean JSON, ~1-3 s. No key."},
+    {"id": "kilo/poolside/laguna-s-2.1:free", "name": "Laguna S 2.1 (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Fast, reliable JSON, ~2.7 s. No key."},
+    {"id": "kilo/inclusionai/ling-3.1-flash", "name": "Ling 3.1 Flash (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Flash model, ~3.6 s. No key."},
+    {"id": "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "name": "Nemotron 3 Nano Omni (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Small MoE (3B active), ~3.4 s. No key."},
+    # NVIDIA NIM (build.nvidia.com) — free key, 40 requests/minute per ACCOUNT across all models (no official increase on
+    # the free tier). Chosen for speed: small MoE / "flash" models; big dense models are slow on the shared free endpoint.
+    {"id": "nim/nvidia/nemotron-nano-3-30b-a3b", "name": "Nemotron Nano 3 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "3B active parameters — the fastest capable NIM model."},
+    {"id": "nim/openai/gpt-oss-20b", "name": "GPT-OSS 20B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Fast and light."},
+    {"id": "nim/z-ai/glm-5.3-flash", "name": "GLM 5.3 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Flash model, good structured output."},
+    {"id": "nim/deepseek-ai/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Flash model, strong reasoning and writing."},
     # Google AI Studio — Gemma runs on the Gemini API (no system role: instructions are sent inline).
     {"id": "gemini/gemma-4-31b-it", "name": "Gemma 4 31B", "provider": "google", "rpm": 15, "rpd": 1500, "tpm": None, "tpd": None,
      "note": "Dense 31B, 256K context. Strong, but slow and often overloaded on the free tier — used as a fallback."},
@@ -62,15 +86,24 @@ BY_ID = {m["id"]: m for m in CATALOG}
 # Live tests (Oct 2026): Gemini 3.5 Flash Lite answers in ~1 s; free Gemma 4 31B takes 12-36 s and often
 # fails with 500/503 under load. So Flash Lite leads, Gemma 4 31B is the first fallback (bigger daily budget),
 # then Groq and Mistral.
+# Order: Gemini Flash Lite (fastest, if you have a key) -> Kilo free pool (no key) -> NVIDIA NIM -> Gemma -> Groq -> Mistral.
+# Kilo models are spread across chains so their 200 req/hour per-model budgets add up.
+_KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/poolside/laguna-s-2.1:free"]
+_KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "kilo/inclusionai/ling-3.1-flash",
+               "kilo/poolside/laguna-s-2.1:free", "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
 CHAINS: dict[str, list[str]] = {
-    "fast": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b",
-             "groq/qwen/qwen3-32b", "mistral/mistral-small-latest"],
-    "reasoning": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b",
-                  "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest"],
-    "tailoring": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/moonshotai/kimi-k2-instruct-0905",
-                  "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b", "mistral/mistral-medium-latest"],
-    "extraction": ["gemini/gemini-3.5-flash-lite", "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/qwen/qwen3.6-27b",
-                   "groq/qwen/qwen3-32b", "mistral/mistral-medium-latest"],
+    "fast": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST, "nim/nvidia/nemotron-nano-3-30b-a3b", "nim/openai/gpt-oss-20b",
+             "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b", "mistral/mistral-small-latest"],
+    "reasoning": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash",
+                  "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
+                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest"],
+    "tailoring": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free",
+                  "nim/deepseek-ai/deepseek-v4.1-flash", "nim/z-ai/glm-5.3-flash", "gemini/gemma-4-31b-it",
+                  "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b",
+                  "mistral/mistral-medium-latest"],
+    "extraction": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash",
+                   "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b",
+                   "mistral/mistral-medium-latest"],
     "browser": ["gemini/gemini-3.5-flash-lite", "groq/openai/gpt-oss-120b", "mistral/mistral-small-latest"],
 }
 CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tailoring": "Resume & letter writing",
@@ -78,11 +111,17 @@ CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tail
 
 
 def provider_of(model: str) -> str:
-    return {"gemini": "google", "groq": "groq", "mistral": "mistral"}.get(model.split("/", 1)[0], "other")
+    return {"gemini": "google", "groq": "groq", "mistral": "mistral", "kilo": "kilo", "nim": "nvidia"}.get(model.split("/", 1)[0], "other")
+
+
+KILO_FREE = "free"                # Kilo's free pool needs no key; a Kilo account key (optional) is used when set
+NIM_ACCOUNT = "nim/__account__"   # one shared limiter: NIM's 40 requests/minute counts across all models
 
 
 def limits(model: str) -> dict[str, Optional[int]]:
-    base = {k: BY_ID.get(model, {}).get(k) for k in ("rpm", "rpd", "tpm", "tpd")}
+    if model == NIM_ACCOUNT:
+        return {"rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None}
+    base = {k: BY_ID.get(model, {}).get(k) for k in ("rpm", "rph", "rpd", "tpm", "tpd")}
     raw = os.getenv("MODEL_LIMITS_JSON") or getattr(get_settings(), "model_limits_json", "") or ""
     if raw:
         try:
@@ -94,11 +133,15 @@ def limits(model: str) -> dict[str, Optional[int]]:
 
 def provider_key(provider: str) -> Optional[str]:
     s = get_settings()
-    env = {"google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "groq": ("GROQ_API_KEY",), "mistral": ("MISTRAL_API_KEY",)}.get(provider)
+    env = {"google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "groq": ("GROQ_API_KEY",), "mistral": ("MISTRAL_API_KEY",),
+           "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"), "kilo": ("KILO_API_KEY",)}.get(provider)
     if env is None:
         return None
-    candidates = [getattr(s, f"{provider}_api_key")] + [os.getenv(n) for n in env]
-    return next((k for k in candidates if is_real_key(k)), None)
+    candidates = [getattr(s, f"{provider}_api_key", None)] + [os.getenv(n) for n in env]
+    real = next((k for k in candidates if is_real_key(k)), None)
+    if provider == "kilo":
+        return real or KILO_FREE       # works without a key
+    return real
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +161,11 @@ async def _list_provider(provider: str, key: str) -> list[str]:
             client = genai.Client(api_key=key)
             return [m.name.split("/", 1)[-1] for m in client.models.list()]
         return [f"gemini/{n}" for n in await asyncio.to_thread(_sync)]
+    if provider in ("kilo", "nvidia"):
+        from jobhunterx.config import openai_compat as oc
+        base, prefix = (oc.KILO_BASE, "kilo") if provider == "kilo" else (oc.NIM_BASE, "nim")
+        data = await oc.list_models(base, None if key == KILO_FREE else key)
+        return [f"{prefix}/{m['id']}" for m in data if isinstance(m, dict) and m.get("id")]
     import httpx
     url = {"groq": "https://api.groq.com/openai/v1/models", "mistral": "https://api.mistral.ai/v1/models"}[provider]
     async with httpx.AsyncClient(timeout=15) as client:
@@ -141,7 +189,7 @@ async def refresh_available(force: bool = False) -> dict[str, dict[str, Any]]:
         _refresh_lock = asyncio.Lock()
     async with _refresh_lock:
         now = time.monotonic()
-        for provider in ("google", "groq", "mistral"):
+        for provider in ("google", "groq", "mistral", "kilo", "nvidia"):
             key = provider_key(provider)
             if not key:
                 _available.pop(provider, None)
@@ -182,6 +230,7 @@ class _ModelBudget:
         self.lock = asyncio.Lock()
         self.last = 0.0
         self.window: deque[tuple[float, int]] = deque()
+        self.hour: deque[float] = deque()      # request times in the last hour (per-hour limits like Kilo's)
         self.day = ""
         self.req_today = 0
         self.tok_today = 0
@@ -196,6 +245,12 @@ class _ModelBudget:
         lim = limits(self.model)
         if lim["rpd"] and self.req_today >= lim["rpd"]:
             return "daily request limit reached"
+        if lim.get("rph"):
+            now = time.monotonic()
+            while self.hour and now - self.hour[0] > 3600:
+                self.hour.popleft()
+            if len(self.hour) >= lim["rph"]:
+                return "hourly request limit reached"
         if lim["tpd"] and self.tok_today >= lim["tpd"]:
             return "daily token limit reached"
         return None
@@ -219,6 +274,7 @@ class _ModelBudget:
                     await asyncio.sleep(max(0.5, 60 - (now - self.window[0][0])))
             self.last = time.monotonic()
             self.window.append((self.last, est_tokens))
+            self.hour.append(self.last)
             self._roll_day()
             self.req_today += 1
 
@@ -253,7 +309,7 @@ def budgets_status() -> dict[str, dict[str, Any]]:
 
 _SERVER_ERR = ("500", "502", "503", "504", "internal", "unavailable", "deadline", "overloaded", "timed out", "timeout",
                "having trouble")
-_RATE_ERR = ("429", "resource_exhausted", "rate limit", "rate_limit", "quota")
+_RATE_ERR = ("429", "resource_exhausted", "rate limit", "rate_limit", "quota", "too many requests")
 _AUTH_ERR = ("401", "403", "api key not valid", "api_key_invalid", "invalid api key", "invalid_api_key", "incorrect api key",
              "unauthorized", "authentication", "permission_denied", "permission denied")
 _health: dict[str, dict[str, Any]] = {}

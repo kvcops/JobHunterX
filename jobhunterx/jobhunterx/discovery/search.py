@@ -13,6 +13,7 @@ posting later (ATS API → JSON-LD → page text).
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
@@ -31,6 +32,7 @@ from jobhunterx.tools.search_router import SearchRouter
 log = get_logger("search")
 
 PLAN_VERSION = "plan-v1"
+QUERY_CONCURRENCY = 3                   # searches in flight at once (Deep Search fans each out to several engines)
 
 
 @dataclass
@@ -141,15 +143,18 @@ class Lead:
     query: str
 
 
+FREE_PROVIDERS = ("deep", "ddgs")       # keyless: Deep Search (multi-engine + crawl + AI rerank), plain DuckDuckGo
+
+
 def _provider_lists(router: SearchRouter, n_queries: int) -> tuple[list[list[str]], str]:
     """Per-query provider order from the user's settings (order, on/off, strategy)."""
     from jobhunterx.config import app_state
     order, strategy = app_state.search_plan()
     if not get_settings().enable_web_search_apis:
-        order = [p for p in order if p == "ddgs"]
+        order = [p for p in order if p in FREE_PROVIDERS]
     usable = [p for p in order if p in router.providers
               and router.providers[p].is_available(router.config, session_disabled=router.session_disabled.get(p, False))]
-    paid, free = [p for p in usable if p != "ddgs"], [p for p in usable if p == "ddgs"]
+    paid, free = [p for p in usable if p not in FREE_PROVIDERS], [p for p in usable if p in FREE_PROVIDERS]
     lists = []
     for i in range(n_queries):
         if strategy in ("spread", "combine") and paid:
@@ -171,29 +176,36 @@ async def run_queries(queries: list[str], per_query: int = 10,
     """
     router = SearchRouter(config=router_config())
     lists, strategy = _provider_lists(router, len(queries))
+    sem = asyncio.Semaphore(QUERY_CONCURRENCY)
+    done = {"n": 0}
+
+    async def one(q: str, providers: list[str]) -> list:
+        batches = []
+        if providers:
+            async with sem:
+                try:
+                    batches.append(await router.execute_query(q, max_results=per_query, providers=providers))
+                    if strategy == "combine" and len(providers) > 1:
+                        answered = batches[0][0].provider if batches[0] else None
+                        rest = [p for p in providers if p != answered]
+                        batches.append(await router.execute_query(q, max_results=per_query, providers=rest))
+                except Exception as exc:
+                    log.warning("search_query_failed", query=q[:60], error=str(exc)[:120])
+        done["n"] += 1
+        if on_progress:
+            await on_progress(done["n"], len(queries))
+        return [(q, it) for items in batches for it in items]
+
+    if on_progress:
+        await on_progress(0, len(queries))
+    results = await asyncio.gather(*(one(q, p) for q, p in zip(queries, lists)))
     leads: list[Lead] = []
     seen: set[str] = set()
-    for n, (q, providers) in enumerate(zip(queries, lists), 1):
-        if on_progress:
-            await on_progress(n - 1, len(queries))
-        if not providers:
-            continue
-        batches = []
-        try:
-            batches.append(await router.execute_query(q, max_results=per_query, providers=providers))
-            if strategy == "combine" and len(providers) > 1:
-                answered = batches[0][0].provider if batches[0] else None
-                rest = [p for p in providers if p != answered]
-                batches.append(await router.execute_query(q, max_results=per_query, providers=rest))
-        except Exception as exc:
-            log.warning("search_query_failed", query=q[:60], error=str(exc)[:120])
-        for items in batches:
-            for it in items:
-                key = re.sub(r"[#?].*$", "", (it.url or "").strip().lower()).rstrip("/")
-                if not key or key in seen:
-                    continue
-                seen.add(key)
-                leads.append(Lead(url=it.url, title=it.title, snippet=it.snippet, provider=it.provider, query=q))
-    if on_progress:
-        await on_progress(len(queries), len(queries))
+    for group in results:                      # keep query order, so the planner's best queries lead
+        for q, it in group:
+            key = re.sub(r"[#?].*$", "", (it.url or "").strip().lower()).rstrip("/")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            leads.append(Lead(url=it.url, title=it.title, snippet=it.snippet, provider=it.provider, query=q))
     return leads

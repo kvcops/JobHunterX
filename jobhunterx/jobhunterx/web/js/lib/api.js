@@ -160,6 +160,7 @@ export const api = {
 
   // first-run setup (API keys)
   setup: (o) => request('/setup', o),
+  setupFree: (o) => request('/setup/free', { method: 'POST', ...o }),
   testKey: (provider, key, o) => request('/setup/test-key', { method: 'POST', body: { provider, key }, timeout: 30_000, ...o }),
 
   // watchlist (researched companies whose own job boards are checked directly)

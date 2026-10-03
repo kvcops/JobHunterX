@@ -557,6 +557,33 @@ class BraveProvider(BaseSearchProvider):
             )
 
 
+class DeepSearchProvider(BaseSearchProvider):
+    """JobHunterX Deep Search: several free engines + crawling + AI rerank, no API key (tools/deep_search.py)."""
+
+    @property
+    def name(self) -> str:
+        return "deep"
+
+    def is_available(self, config: Dict[str, Any], session_disabled: bool = False) -> bool:
+        return not session_disabled
+
+    def calculate_worst_case_cost(self, request_params: Dict[str, Any]) -> CostEstimate:
+        return CostEstimate(status=CostStatus.NOT_APPLICABLE, units=0.0, unit_type="NOT_APPLICABLE", estimated_amount_native=0.0,
+                            explanation="Free: public search engines plus page reading; no API key")
+
+    async def search(self, query: str, max_results: int = 10, config: Optional[Dict[str, Any]] = None) -> ProviderSearchResponse:
+        from jobhunterx.tools import deep_search
+        cost = self.calculate_worst_case_cost({"query": query})
+        try:
+            hits = await deep_search.search(query, max_results=max_results)
+        except Exception as exc:
+            log.warning("deep_search_failed", error=str(exc)[:120])
+            return ProviderSearchResponse(provider_name=self.name, verdict=TransportVerdict.TEMPORARY_PROVIDER_ERROR,
+                                          results=[], cost_estimate=cost, error_message=str(exc)[:120])
+        items = [SearchResultItem(url=h.url, title=h.title, snippet=h.snippet[:500], provider=self.name) for h in hits]
+        return ProviderSearchResponse(provider_name=self.name, verdict=TransportVerdict.SUCCESS, results=items, cost_estimate=cost)
+
+
 class DDGSProvider(BaseSearchProvider):
     """DuckDuckGo Third-Party Scraper Adapter (UNOFFICIAL / SCRAPER-BASED)."""
 

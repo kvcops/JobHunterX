@@ -23,12 +23,14 @@
   <a href="https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api"><img src="https://img.shields.io/badge/Gemma_4_31B-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
   <a href="https://groq.com"><img src="https://img.shields.io/badge/GPT--OSS_·_Kimi_K2_·_Qwen-Groq-F55036?style=for-the-badge" /></a>
   <a href="https://mistral.ai"><img src="https://img.shields.io/badge/Mistral_Large-Mistral-FF7000?style=for-the-badge&logo=mistral&logoColor=white" /></a>
+  <a href="https://kilo.ai"><img src="https://img.shields.io/badge/Free_models,_no_key-Kilo_Gateway-8B5CF6?style=for-the-badge" /></a>
+  <a href="https://build.nvidia.com"><img src="https://img.shields.io/badge/Nemotron_·_GLM_·_DeepSeek-NVIDIA_NIM-76B900?style=for-the-badge&logo=nvidia&logoColor=white" /></a>
   
 </p>
 
 <p align="center">
   
-  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Groq_·_Mistral-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
+  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Kilo_·_NVIDIA_·_Groq_·_Mistral-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
   <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_SmartRecruiters-10B981?style=flat-square&labelColor=1e1b2e" />
   
 </p>
@@ -143,7 +145,7 @@ flowchart LR
 
 | Step | What you do | What JobHunterX does |
 |:--:|:--|:--|
-| 0️⃣ | Paste one free AI key | The first screen links to Google AI Studio / Groq / Mistral, tests the key and saves it |
+| 0️⃣ | Paste one free AI key — or press **Start free** | The first screen links to Google AI Studio / NVIDIA / Groq / Mistral, tests the key and saves it. **Start free** uses Kilo's free models with no key |
 | 1️⃣ | Upload your resume PDF | Reads it in the background (with live progress) and builds your profile |
 | 2️⃣ | Check "how we see you" | Shows total experience, **with and without internships**, every role, contact and location |
 | 3️⃣ | Add goals | Many job titles, many cities, remote / hybrid / relocation, current & expected CTC, notice period |
@@ -164,7 +166,7 @@ flowchart LR
 
 #### 0 · First run: one free AI key 🔑
 <img src="assets/ui_setup_keys.png" alt="Free AI key setup" width="90%"/>
-<br/><sub><i>No key yet? The first screen shows where to get each one free, tests it with one call and saves it to <code>.env</code>. Placeholder values never count as a key.</i></sub>
+<br/><sub><i>No key yet? Press <b>Start free</b> to use Kilo's free models right away, or get a free key: the screen shows where, tests it with one call and saves it to <code>.env</code>. Placeholder values never count as a key.</i></sub>
 <br/><br/>
 
 #### 1 · Who's searching? 👥
@@ -414,11 +416,25 @@ graph LR
         M1["mistral-medium-latest"]
         M2["mistral-small-latest"]
     end
-    G2 -->|fallback| G1 -->|fallback| GR1 -->|fallback| M1
+    subgraph Kilo["🆓 Kilo Gateway (no key)"]
+        K1["kilo-auto/free"]
+        K2["nemotron-3-super-120b:free"]
+        K3["laguna-s-2.1:free"]
+    end
+    subgraph NIM["🟩 NVIDIA NIM"]
+        N1["nemotron-nano-3-30b-a3b"]
+        N2["glm-5.3-flash"]
+        N3["deepseek-v4.1-flash"]
+    end
+    G2 -->|fallback| K1 -->|fallback| N1 -->|fallback| G1 -->|fallback| GR1 -->|fallback| M1
 
     classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px;
     classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px;
     classDef mistral fill:#FF7000,stroke:#cc5a00,color:#fff,stroke-width:2px;
+    classDef kilo fill:#8B5CF6,stroke:#6d28d9,color:#fff,stroke-width:2px;
+    classDef nim fill:#76B900,stroke:#5a8f00,color:#fff,stroke-width:2px;
+    class K1,K2,K3 kilo;
+    class N1,N2,N3 nim;
     class G1,G2 google;
     class GR1,GR2,GR3,GR4 groq;
     class M1,M2 mistral;
@@ -428,11 +444,22 @@ graph LR
 
 | Task (Settings label) | Chain | Model order |
 |:--|:--|:--|
-| Quick tasks | `fast` | Gemini 3.5 Flash Lite → Gemma 4 31B → GPT-OSS 20B → Qwen3.6 27B / Qwen3 32B → Mistral Small |
-| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → Gemma 4 31B → GPT-OSS 120B → Kimi K2 → Mistral Medium |
-| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → Gemma 4 31B → Kimi K2 → GPT-OSS 120B → Mistral Medium |
-| Resume reading | `extraction` | Gemini 3.5 Flash Lite → Gemma 4 31B → GPT-OSS 120B → Qwen3.6 27B / Qwen3 32B → Mistral Medium |
+| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **Kilo** (Auto, Nemotron 3 Super, Laguna S) → **NIM** (Nemotron Nano 3, GPT-OSS 20B) → Gemma 4 31B → Groq GPT-OSS 20B / Qwen → Mistral Small |
+| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **Kilo** (Nemotron 3 Super, Auto, Ling Flash, Laguna S, Nemotron Nano Omni) → **NIM** (GLM 5.3 Flash, DeepSeek V4.1 Flash) → Gemma 4 31B → GPT-OSS 120B → Kimi K2 → Mistral Medium |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **Kilo** (Nemotron 3 Super, Auto) → **NIM** (DeepSeek V4.1 Flash, GLM 5.3 Flash) → Gemma 4 31B → Kimi K2 → GPT-OSS 120B → Mistral Medium |
+| Resume reading | `extraction` | same as Matching, then Qwen3.6 27B / Qwen3 32B → Mistral Medium |
 | Browser agent | `browser` | Gemini 3.5 Flash Lite → GPT-OSS 120B → Mistral Small (→ Gemma 4 31B) |
+
+**Kilo comes before NVIDIA NIM** on purpose: it needs no key and each Kilo model has its own 200 requests/hour, while NIM's
+40 requests/minute is shared by every NIM model on your account. Kilo's free models are "thinking" models; the app turns
+their thinking off (`reasoning: {enabled: false}`) — in tests that made them answer in about 1–3 s instead of running out
+of room before the answer. If a model still returns an empty answer, it gets one retry with more room and is never
+"rested" for it.
+
+> [!WARNING]
+> **Privacy:** Kilo's free models are marked *may train on your prompts*. Your resume text and job posts are sent in those
+> prompts. If that matters to you, add any free key (Google, NVIDIA, Groq or Mistral) and turn Kilo off in
+> **Settings → AI providers**.
 
 Llama models are deliberately not used. In **Settings → AI providers** you can turn any provider off, add or replace its key,
 pick the first model for each task, and press **Check available models** — the app asks each provider's `/models`
@@ -456,6 +483,8 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 | Mistral | `mistral-medium-latest` | 50 | — | 25K | Free plan limits are per account (Admin console → Limits) |
 | Mistral | `mistral-small-latest` | 50 | — | 50K | |
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
+| Kilo Gateway | `kilo-auto/free` · `nvidia/nemotron-3-super-120b-a12b:free` · `poolside/laguna-s-2.1:free` · `inclusionai/ling-3.1-flash` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | — | **200 req / hour per model** | — | No key. Measured 1–4 s per answer. May train on prompts |
+| NVIDIA NIM | `nvidia/nemotron-nano-3-30b-a3b` · `openai/gpt-oss-20b` · `z-ai/glm-5.3-flash` · `deepseek-ai/deepseek-v4.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget |
 
 > [!NOTE]
 > **Why you may see `500 INTERNAL` or `503 high demand` from Gemma:** those come from Google's servers. In live tests
@@ -478,7 +507,24 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 | **Company watchlist** — 130 researched Hyderabad / Bengaluru / remote-India employers | Researched, sources linked | Their boards are read on every search and every 4 hours in the background; the research card is shown on each of their jobs |
 | **schema.org JobPosting** on a page | Verified when the hiring organisation's site is the page's site; otherwise inferred | Title, company, location, dates, `validThrough`, remote eligibility, salary |
 | **Other pages** (job boards, aggregators) | Unverified | Text only; if the page links to a supported ATS posting, that posting is used instead |
-| **Web search** — TinyFish → Tavily → Exa → Brave → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
+| **Web search** — TinyFish → Tavily → Exa → Brave → **Deep Search** (free) → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
+
+### 🔎 Deep Search — good results without any search key
+
+Paid search APIs like Tavily and Exa do three things one free scraper does not: they ask several indexes, they read the
+pages, and they rank by meaning. **Deep Search** (`tools/deep_search.py`) does the same with free parts:
+
+1. **Ask many engines at once** — Bing, Yandex, Google and Brave (through Mullvad's proxies), Yahoo and DuckDuckGo.
+   An engine that keeps failing is rested for 10 minutes instead of slowing every query.
+2. **Merge** — results are combined with reciprocal-rank fusion (a page several engines agree on rises). Employer job
+   pages get a boost (a single ATS posting 1.6×, a company job board 1.4×, a careers page 1.25×); aggregators are
+   lowered and people-lookup sites (RocketReach, ZoomInfo…) are pushed out.
+3. **Open the pages** — the best careers / listing pages are opened and mined for links to the employer's own job board
+   and individual postings (Greenhouse, Lever, Ashby, Workday, Keka…). One careers page can become many real postings.
+4. **Rank by meaning** — the AI scores the top 20 for "is this a real, open posting that matches the search?" (it uses
+   Kilo's free models when you have no key).
+
+Search queries now run 3 at a time, so a full search finishes much faster than one by one.
 
 Search providers are tried in priority order (primary first, DuckDuckGo last) with zero-spend protection
 (`tools/zero_spend.py`) and a usage ledger. All fetching of untrusted URLs goes through an SSRF-safe client
@@ -599,7 +645,8 @@ All versions are fixed on purpose, so this finishes in seconds instead of hours.
 #### ⑤ Add your AI key
 
 **Easy way:** skip this step. When you start the app, the first screen asks for your keys,
-shows where to get each one for free, tests it, and saves it for you.
+shows where to get each one for free, tests it, and saves it for you. Or press **Start free** to use
+Kilo's free models with no key at all (they may use your prompts for training — see the privacy note above).
 
 **Or do it by hand:** copy the example file and paste your key after the `=` sign.
 
@@ -612,12 +659,13 @@ cp jobhunterx/.env.example jobhunterx/.env
 
 ```env
 GOOGLE_API_KEY=paste-your-key-here     # free — start with this one
+NVIDIA_API_KEY=                        # optional — 40 requests/min, fast small models
 GROQ_API_KEY=                          # optional — makes it faster
 MISTRAL_API_KEY=                       # optional — backup
 ```
 
 > [!TIP]
-> **Free keys:** [Google AI Studio](https://aistudio.google.com/apikey) · [Groq](https://console.groq.com/keys) · [Mistral](https://console.mistral.ai/api-keys).
+> **Free keys:** [Google AI Studio](https://aistudio.google.com/apikey) · [NVIDIA NIM](https://build.nvidia.com/settings/api-keys) · [Groq](https://console.groq.com/keys) · [Mistral](https://console.mistral.ai/api-keys). No key at all? Kilo's free models work out of the box.
 > One key is enough. Two or three make searches much faster, because each free plan allows only a few calls per minute.
 
 #### ⑥ Start

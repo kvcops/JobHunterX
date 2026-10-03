@@ -970,6 +970,21 @@ export async function saveSetupKeys(keys) {
   }
 }
 
+export async function startFree(keys = {}) {
+  setSlice('setup', { saving: true, error: null });
+  try {
+    if (Object.keys(keys).length) await api.postSettings(keys);
+    await api.setupFree();
+    await loadSetup();
+    setSlice('setup', { saving: false });
+    toast('Using free Kilo models. Next: your resume.', 'success');
+    setSlice('app', { phase: 'booting' });
+    await startSession();
+  } catch (err) {
+    setSlice('setup', { saving: false, error: errorText(err) });
+  }
+}
+
 async function startSession() {
   try {
     const setup = await loadSetup();

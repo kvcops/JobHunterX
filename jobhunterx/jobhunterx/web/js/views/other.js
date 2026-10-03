@@ -397,6 +397,9 @@ export function InterventionsView() {
 // ---------------------------------------------------------------------------- settings
 const LLM_META = {
   google: { name: 'Google AI Studio', field: 'google_api_key', hint: 'Gemma 4 31B and Gemini 3.5 Flash Lite', url: 'aistudio.google.com' },
+  kilo: { name: 'Kilo Gateway', field: 'kilo_api_key', hint: 'Free models with no key — Nemotron 3 Super, Laguna S, Ling Flash · 200 requests/hour per model', url: 'kilo.ai (key optional)',
+    free: true, note: 'Free models may use your prompts (resume text, job posts) to train. Turn off if that matters to you.' },
+  nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Nemotron Nano 3, GPT-OSS 20B, GLM Flash, DeepSeek Flash · 40 requests/min', url: 'build.nvidia.com' },
   groq: { name: 'Groq', field: 'groq_api_key', hint: 'GPT-OSS, Kimi K2, Qwen3 — very fast', url: 'console.groq.com' },
   mistral: { name: 'Mistral', field: 'mistral_api_key', hint: 'Mistral Medium / Small / Large (latest)', url: 'console.mistral.ai' },
 };
@@ -405,6 +408,7 @@ const SEARCH_META = {
   tavily: { name: 'Tavily', field: 'tavily_api_key', hint: 'Monthly free credits; good snippets' },
   exa: { name: 'Exa', field: 'exa_api_key', hint: 'Neural search; free monthly credits' },
   brave: { name: 'Brave Search', field: 'brave_api_key', hint: 'Independent index; free monthly queries' },
+  deep: { name: 'Deep Search', field: null, hint: 'No key — asks 6 free engines at once, opens careers pages for real postings, AI ranks the results' },
   ddgs: { name: 'DuckDuckGo', field: null, hint: 'No key needed — always-available fallback' },
 };
 const STRATEGIES = [
@@ -412,7 +416,7 @@ const STRATEGIES = [
   ['spread', 'Spread', 'Rotate queries across providers so free quotas are shared.'],
   ['combine', 'Combine', 'Two providers answer every query and results merge. Widest coverage, uses more quota.'],
 ];
-const fmtLimit = (l) => [l.rpm && `${l.rpm} RPM`, l.rpd && `${fmtNum(l.rpd)}/day`, l.tpm && `${fmtNum(l.tpm)} TPM`, l.tpd && `${fmtNum(l.tpd)} TPD`].filter(Boolean).join(' · ') || 'account limits';
+const fmtLimit = (l) => [l.rpm && `${l.rpm} RPM`, l.rph && `${l.rph}/hour`, l.rpd && `${fmtNum(l.rpd)}/day`, l.tpm && `${fmtNum(l.tpm)} TPM`, l.tpd && `${fmtNum(l.tpd)} TPD`].filter(Boolean).join(' · ') || 'account limits';
 
 function KeyField({ field, configured, masked, source, label }) {
   const [editing, setEditing] = useState(false);
@@ -453,7 +457,8 @@ function AiSection({ d, models }) {
           ${st && st.configured ? html`<span class=${`status-dot ${st.reachable === false ? 'bad' : st.reachable ? 'good' : ''}`}
             title=${st.error || ''}>${st.reachable === false ? 'Key rejected / unreachable' : st.reachable ? `${st.models_listed} models available` : 'Not checked yet'}</span>` : null}
           <${Toggle} on=${on} label=${`Use ${m.name}`} onChange=${(v) => setProviders({ llm: { [k]: v } })} /></div>
-        <${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />
+        ${m.free ? html`<div class="row gap small"><${Badge} tone="success">Works without a key</${Badge}><span class="muted">${m.note}</span></div>`
+          : html`<${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />`}
       </div>`;
     })}</div>
     <h3 class="sub-title">Model for each task</h3>
@@ -475,7 +480,7 @@ function SearchSection({ d }) {
     setProviders({ search_order: next });
   };
   return html`<section class="set-section"><h2>Web search</h2>
-    <p class="muted small">Providers are asked in this order. Turn any off; DuckDuckGo needs no key and is the safety net.</p>
+    <p class="muted small">Providers are asked in this order. Turn any off; Deep Search and DuckDuckGo need no key and are the safety net.</p>
     <div class="field" style=${{ margin: '12px 0 16px' }}><span class="field-label">Strategy</span>
       <${Seg} label="Search strategy" options=${STRATEGIES.map(([k, l]) => [k, l])} value=${d.providers.search_strategy} onChange=${(v) => setProviders({ search_strategy: v })} />
       <span class="field-hint">${(STRATEGIES.find((x) => x[0] === d.providers.search_strategy) || STRATEGIES[0])[2]}</span></div>
@@ -490,7 +495,7 @@ function SearchSection({ d }) {
         ${m.field ? html`<${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />` : null}
       </div>`; })}</div>
     <div class="stack" style=${{ gap: '4px', marginTop: '16px' }}>
-      <label class="switch"><input type="checkbox" checked=${d.enable_web_search_apis} onChange=${(e) => saveSettings({ enable_web_search_apis: e.currentTarget.checked })} /><span class="switch-ui"></span> Use keyed search APIs (off = DuckDuckGo only)</label>
+      <label class="switch"><input type="checkbox" checked=${d.enable_web_search_apis} onChange=${(e) => saveSettings({ enable_web_search_apis: e.currentTarget.checked })} /><span class="switch-ui"></span> Use keyed search APIs (off = free Deep Search + DuckDuckGo only)</label>
       <label class="switch"><input type="checkbox" checked=${d.strict_zero_spend_protection} onChange=${(e) => saveSettings({ strict_zero_spend_protection: e.currentTarget.checked })} /><span class="switch-ui"></span> Zero-spend protection (never exceed a provider's free allowance)</label>
     </div>
   </section>`;
@@ -547,11 +552,11 @@ function AgentSection({ d, mode }) {
 
 function SettingsOverview({ d }) {
   if (!d) return null;
-  const llm = ['google', 'groq', 'mistral'];
+  const llm = ['google', 'kilo', 'nvidia', 'groq', 'mistral'];
   const search = d.search_providers || [];
   const on = (kind, p) => !d.providers || !d.providers[kind] || d.providers[kind][p] !== false;
-  const llmReady = llm.filter((p) => d[`${p}_configured`] && on('llm', p)).length;
-  const searchReady = search.filter((p) => (p === 'ddgs' || d[`${p}_configured`]) && on('search', p)).length;
+  const llmReady = llm.filter((p) => (p === 'kilo' || d[`${p}_configured`]) && on('llm', p)).length;
+  const searchReady = search.filter((p) => (p === 'ddgs' || p === 'deep' || d[`${p}_configured`]) && on('search', p)).length;
   const item = (ok, label, value) => html`<div class=${`ov-item ${ok ? 'ok' : 'warn'}`}><span class="ov-dot"></span><span class="grow">${label}</span><strong>${value}</strong></div>`;
   return html`<div class="set-overview">
     ${item(llmReady > 0, 'AI providers', `${llmReady}/${llm.length}`)}
