@@ -1274,3 +1274,24 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .live-feed li:first-child { color: var(--ink); }
 .live-feed .k-good { color: var(--success); } .live-feed .k-reject { color: var(--text-3); }
 .company-box .facts-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+
+/* onboarding: the card grows with its content — never an inner scrollbar. On short screens the whole page
+   scrolls, the action bar stays pinned at the bottom and the step list stays in view. */
+.ob-card { width: min(920px, 100%); max-height: none; overflow: visible; }
+.ob-body { overflow: visible; }
+.ob-foot { position: sticky; bottom: 12px; z-index: 3; border-bottom-left-radius: inherit; border-bottom-right-radius: inherit;
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur); }
+.ob-side { position: sticky; top: 24px; align-self: start; min-height: calc(100dvh - 48px); }
+.ob-main { align-self: start; min-height: calc(100dvh - 48px); }
+.ob-review, .ob-prefs { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+.ob-prefs .option-cards { grid-template-columns: 1fr; gap: 6px; }
+.ob-prefs .opt-card { padding: 9px 12px; }
+.ob-prefs .form-grid.tight { margin: 0; }
+.ob-review .form-grid.tight { margin: 0; }
+@media (max-width: 1100px) {
+  .ob-review, .ob-prefs { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .ob-side { position: static; min-height: 0; }
+  .ob-main { min-height: 0; }
+}

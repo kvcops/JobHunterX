@@ -88,26 +88,30 @@ function ReviewStep({ draft, set }) {
   const extraction = useStore((s) => s.profile.upload.extraction);
   const snap = env && env.snapshot;
   const locSugg = uniq([draft.location, ...draft.experience.map((e) => e.location)]);
+  const links = foundLinks(draft);
   return html`<div class="stack">
     ${extraction && extraction.warnings && extraction.warnings.length ? html`<${Notice} tone="warning">${extraction.warnings.join(' ')}</${Notice}>` : null}
-    ${snap ? html`<div class="ob-level"><span class="chip">${humanize(snap.seniority)} level</span>
-        <span class="chip">${snap.skills.length} verified skills</span>${snap.role_families.slice(0, 2).map((f) => html`<span class="chip soft">${f.label}</span>`)}</div>
-      <${ExperienceSummary} snap=${snap} />` : html`<${Skeleton} lines=${4} />`}
-    <div class="form-grid tight">
-      <${Field} label="Full name">${(id) => html`<input id=${id} class="input" autocomplete="name" value=${draft.name} onInput=${(e) => set(['name'], e.currentTarget.value)} />`}</${Field}>
-      <${Field} label="Email">${(id) => html`<input id=${id} class="input" type="email" autocomplete="email" value=${draft.email} onInput=${(e) => set(['email'], e.currentTarget.value)} />`}</${Field}>
-      <${Field} label="Phone">${(id) => html`<input id=${id} class="input" type="tel" autocomplete="tel" value=${draft.phone} onInput=${(e) => set(['phone'], e.currentTarget.value)} />`}</${Field}>
-      <${Field} label="Current location" hint="City, state, country">${(id) => html`<input id=${id} class="input" list="ob-loc" autocomplete="address-level2" value=${draft.location}
-        placeholder="e.g. Hyderabad, Telangana, India" onInput=${(e) => set(['location'], e.currentTarget.value)} />
-        <datalist id="ob-loc">${locSugg.map((l) => html`<option value=${l} />`)}</datalist>`}</${Field}>
+    <div class="ob-review">
+      <div class="stack">
+        ${snap ? html`<div class="ob-level"><span class="chip">${humanize(snap.seniority)} level</span>
+            <span class="chip">${snap.skills.length} verified skills</span>${snap.role_families.slice(0, 2).map((f) => html`<span class="chip soft">${f.label}</span>`)}</div>
+          <${ExperienceSummary} snap=${snap} />` : html`<${Skeleton} lines=${4} />`}
+      </div>
+      <div class="stack">
+        <div class="form-grid tight">
+          <${Field} label="Full name">${(id) => html`<input id=${id} class="input" autocomplete="name" value=${draft.name} onInput=${(e) => set(['name'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="Email">${(id) => html`<input id=${id} class="input" type="email" autocomplete="email" value=${draft.email} onInput=${(e) => set(['email'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="Phone">${(id) => html`<input id=${id} class="input" type="tel" autocomplete="tel" value=${draft.phone} onInput=${(e) => set(['phone'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="Current location" hint="City, state, country">${(id) => html`<input id=${id} class="input" list="ob-loc" autocomplete="address-level2" value=${draft.location}
+            placeholder="e.g. Hyderabad, Telangana, India" onInput=${(e) => set(['location'], e.currentTarget.value)} />
+            <datalist id="ob-loc">${locSugg.map((l) => html`<option value=${l} />`)}</datalist>`}</${Field}>
+        </div>
+        ${links.length ? html`<div class="ob-links"><span class="field-label"><${Icon} name="external" size=${13} /> Links we found · ${links.length}</span>
+          <div class="chip-row">${links.map((l, i) => { const u = safeUrl(l.url); return u ? html`<a key=${i} class="chip link-chip" href=${u} target="_blank" rel="noopener noreferrer" title=${l.url}>
+            ${l.where ? html`<span class="muted">${l.where.length > 26 ? `${l.where.slice(0, 25)}…` : l.where} ·</span>` : null}${l.label}</a>` : null; })}</div>
+          <span class="field-hint">They go into your resume and CV next to the project or entry they belong to. Edit them any time in Profile.</span></div>` : null}
+      </div>
     </div>
-    ${(() => {
-      const links = foundLinks(draft);
-      return links.length ? html`<div class="ob-links"><span class="field-label"><${Icon} name="external" size=${13} /> Links we found · ${links.length}</span>
-        <div class="chip-row">${links.map((l, i) => { const u = safeUrl(l.url); return u ? html`<a key=${i} class="chip link-chip" href=${u} target="_blank" rel="noopener noreferrer" title=${l.url}>
-          ${l.where ? html`<span class="muted">${l.where.length > 26 ? `${l.where.slice(0, 25)}…` : l.where} ·</span>` : null}${l.label}</a>` : null; })}</div>
-        <span class="field-hint">They go into your resume and CV next to the project or entry they belong to. Edit them any time in Profile.</span></div>` : null;
-    })()}
   </div>`;
 }
 
@@ -120,31 +124,35 @@ function PrefsStep({ draft, set }) {
     ...draft.experience.map((e) => e.role)]);
   const locSugg = uniq([city(draft.location), ...draft.experience.map((e) => city(e.location)), ...(snap ? snap.locations.map((l) => l.city) : [])]);
   const country = p.home_country || (snap && snap.home_country) || '';
-  return html`<div class="form-grid tight">
-    <${Field} label="Job titles you want" hint="Add as many as you like — each one is searched." wide>
-      <${ChipsInput} label="Target roles" value=${p.target_roles} onChange=${(v) => set(['preferences', 'target_roles'], v)}
-        placeholder="Type a title and press Enter" suggestions=${titleSugg} /></${Field}>
-    <${Field} label="Cities you can work in" hint="Add every city you'd move to or commute to." wide>
-      <${ChipsInput} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)}
-        placeholder="Type a city and press Enter" suggestions=${locSugg} /></${Field}>
-    <div class="field field-wide"><span class="field-label">Work modes you accept</span>
-      <${Seg} multi label="Work modes" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${p.work_modes} onChange=${(v) => set(['preferences', 'work_modes'], v)} /></div>
-    <div class="field field-wide toggles option-cards">
-      <label class=${`opt-card ${remote ? 'on' : ''}`}><input type="checkbox" checked=${remote}
-          onChange=${(e) => set(['preferences', 'work_modes'], e.currentTarget.checked ? uniq([...p.work_modes, 'remote']) : p.work_modes.filter((m) => m !== 'remote'))} />
-        <span class="switch-ui"></span><span><strong>Remote roles${country ? ` anywhere in ${country}` : ''}</strong><small>Not tied to the cities above</small></span></label>
-      <label class=${`opt-card ${p.willing_to_relocate ? 'on' : ''}`}><input type="checkbox" checked=${p.willing_to_relocate} onChange=${(e) => set(['preferences', 'willing_to_relocate'], e.currentTarget.checked)} />
-        <span class="switch-ui"></span><span><strong>Willing to relocate</strong><small>Other cities in ${country || 'my country'}</small></span></label>
-      <label class=${`opt-card ${p.open_to_international ? 'on' : ''}`}><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} />
-        <span class="switch-ui"></span><span><strong>Roles abroad</strong><small>Remote for foreign companies or relocation</small></span></label>
+  return html`<div class="ob-prefs">
+    <div class="stack">
+      <${Field} label="Job titles you want" hint="Add as many as you like — each one is searched.">
+        <${ChipsInput} label="Target roles" value=${p.target_roles} onChange=${(v) => set(['preferences', 'target_roles'], v)}
+          placeholder="Type a title and press Enter" suggestions=${titleSugg} /></${Field}>
+      <${Field} label="Career direction" hint="Where you want to grow — shapes which tracks are searched.">${(id) => html`<${AutoTextarea} id=${id}
+        value=${p.career_direction || ''} placeholder="e.g. Move from data science into applied LLM engineering" onInput=${(e) => set(['preferences', 'career_direction'], e.currentTarget.value)} />`}</${Field}>
+      <${Field} label="Employment types">
+        <${ChipsInput} label="Employment types" value=${p.employment_types} onChange=${(v) => set(['preferences', 'employment_types'], v)} placeholder="full_time"
+          suggestions=${['full_time', 'contract', 'internship', 'part_time']} /></${Field}>
     </div>
-    <${Field} label="Home country">${(id) => html`<input id=${id} class="input" autocomplete="country-name" value=${p.home_country || ''} placeholder=${(snap && snap.home_country) || 'e.g. India'}
-      onInput=${(e) => set(['preferences', 'home_country'], e.currentTarget.value)} />`}</${Field}>
-    <${Field} label="Employment types" hint="e.g. full_time, contract, internship">
-      <${ChipsInput} label="Employment types" value=${p.employment_types} onChange=${(v) => set(['preferences', 'employment_types'], v)} placeholder="full_time"
-        suggestions=${['full_time', 'contract', 'internship', 'part_time']} /></${Field}>
-    <${Field} label="Career direction" hint="Where you want to grow — shapes which tracks are searched." wide>${(id) => html`<${AutoTextarea} id=${id}
-      value=${p.career_direction || ''} placeholder="e.g. Move from data science into applied LLM engineering" onInput=${(e) => set(['preferences', 'career_direction'], e.currentTarget.value)} />`}</${Field}>
+    <div class="stack">
+      <${Field} label="Cities you can work in" hint="Add every city you'd move to or commute to.">
+        <${ChipsInput} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)}
+          placeholder="Type a city and press Enter" suggestions=${locSugg} /></${Field}>
+      <div class="field"><span class="field-label">Work modes you accept</span>
+        <${Seg} multi label="Work modes" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${p.work_modes} onChange=${(v) => set(['preferences', 'work_modes'], v)} /></div>
+      <div class="field toggles option-cards">
+        <label class=${`opt-card ${remote ? 'on' : ''}`}><input type="checkbox" checked=${remote}
+            onChange=${(e) => set(['preferences', 'work_modes'], e.currentTarget.checked ? uniq([...p.work_modes, 'remote']) : p.work_modes.filter((m) => m !== 'remote'))} />
+          <span class="switch-ui"></span><span><strong>Remote roles${country ? ` anywhere in ${country}` : ''}</strong><small>Not tied to the cities above</small></span></label>
+        <label class=${`opt-card ${p.willing_to_relocate ? 'on' : ''}`}><input type="checkbox" checked=${p.willing_to_relocate} onChange=${(e) => set(['preferences', 'willing_to_relocate'], e.currentTarget.checked)} />
+          <span class="switch-ui"></span><span><strong>Willing to relocate</strong><small>Other cities in ${country || 'my country'}</small></span></label>
+        <label class=${`opt-card ${p.open_to_international ? 'on' : ''}`}><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} />
+          <span class="switch-ui"></span><span><strong>Roles abroad</strong><small>Remote for foreign companies or relocation</small></span></label>
+      </div>
+      <${Field} label="Home country">${(id) => html`<input id=${id} class="input" autocomplete="country-name" value=${p.home_country || ''} placeholder=${(snap && snap.home_country) || 'e.g. India'}
+        onInput=${(e) => set(['preferences', 'home_country'], e.currentTarget.value)} />`}</${Field}>
+    </div>
   </div>`;
 }
 
