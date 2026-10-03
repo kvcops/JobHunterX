@@ -234,6 +234,20 @@ async def browser_websocket(websocket: WebSocket):
         live_view.remove_client(websocket)
 
 
+# JobHunterX has no service worker. A browser that once ran another web app on this address keeps asking for that
+# app's /sw.js (a 404 every page load); this one removes itself, so the browser drops the leftover worker for good.
+_SW_UNREGISTER = """self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(self.registration.unregister()));
+"""
+
+
+@app.get("/sw.js", include_in_schema=False)
+@app.get("/service-worker.js", include_in_schema=False)
+async def leftover_service_worker():
+    from fastapi.responses import Response
+    return Response(_SW_UNREGISTER, media_type="application/javascript", headers={"Cache-Control": "no-store"})
+
+
 # Static files (frontend) — mounted last so API routes take priority
 _web_dir = Path(__file__).resolve().parent.parent / "web"
 if _web_dir.exists():
