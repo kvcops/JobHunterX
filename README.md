@@ -440,22 +440,47 @@ Search providers are tried in priority order (primary first, DuckDuckGo last) wi
 
 ## ⚡ Quickstart
 
-Takes about 5 minutes. Copy each command, paste it in your terminal, press Enter.
+### 🚀 One command (recommended)
 
-### What you need
-
-- 🐍 **Python 3.11 or newer** — or let `uv` download it for you (step ②)
-- 🌐 **Google Chrome** — used by Auto-apply
-- 🔑 **One free AI key** — Google AI Studio is the easiest ([get it here](https://aistudio.google.com/apikey))
-
-### ① Get the code
+Get the code, then run **one** command. It does everything for you:
+installs `uv`, makes the virtual environment, installs all packages (~30 seconds),
+creates the settings file, starts the app and opens it in your browser.
 
 ```bash
 git clone https://github.com/kvcops/jobhunterx.git
 cd jobhunterx
 ```
 
-### ② Install `uv` (a fast installer)
+| Your computer | Run this |
+|:--|:--|
+| **Windows** | `powershell -ExecutionPolicy Bypass -File start.ps1` &nbsp;— or just **double-click `start.bat`** |
+| **macOS / Linux** | `bash start.sh` |
+
+The first screen asks for a **free AI key** and shows where to get it. That's it. 🎉
+
+**Next time:** run the same command (or double-click `start.bat` again). It skips the setup and just starts the app.
+**Stop the app:** press `Ctrl + C` in that window.
+
+### What you need
+
+- 🌐 **Internet** for the first setup
+- 🌐 **Google Chrome**, used by Auto-apply
+- 🔑 **One free AI key** — Google AI Studio is the easiest ([get it here](https://aistudio.google.com/apikey))
+
+You don't need to install Python yourself — `uv` downloads Python 3.11 if it's missing.
+
+<details>
+<summary><b>Prefer doing it by hand? Step-by-step commands</b></summary>
+<br/>
+
+#### ① Get the code
+
+```bash
+git clone https://github.com/kvcops/jobhunterx.git
+cd jobhunterx
+```
+
+#### ② Install `uv` (a fast installer)
 
 `uv` installs everything in about 30 seconds. Plain `pip` can take a very long time here.
 
@@ -475,7 +500,7 @@ Close the terminal and open a new one, then check it works: `uv --version`
 
 > Can't run the installer? `pip install uv` works too.
 
-### ③ Make a virtual environment (venv)
+#### ③ Make a virtual environment (venv)
 
 A venv is a private folder for this project's packages, so they don't mix with other projects.
 
@@ -498,7 +523,7 @@ You will see `(.venv)` at the start of the line when it is on.
 > PowerShell says "running scripts is disabled"? Run this once, then try again:
 > `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
-### ④ Install the packages
+#### ④ Install the packages
 
 ```bash
 uv pip install -r requirements.txt
@@ -506,7 +531,7 @@ uv pip install -r requirements.txt
 
 All versions are fixed on purpose, so this finishes in seconds instead of hours.
 
-### ⑤ Add your AI key
+#### ⑤ Add your AI key
 
 **Easy way:** skip this step. When you start the app, the first screen asks for your keys,
 shows where to get each one for free, tests it, and saves it for you.
@@ -530,7 +555,7 @@ MISTRAL_API_KEY=                       # optional — backup
 > **Free keys:** [Google AI Studio](https://aistudio.google.com/apikey) · [Groq](https://console.groq.com/keys) · [Mistral](https://console.mistral.ai/api-keys).
 > One key is enough. Two or three make searches much faster, because each free plan allows only a few calls per minute.
 
-### ⑥ Start 🚀
+#### ⑥ Start
 
 ```bash
 cd jobhunterx
@@ -546,6 +571,8 @@ python -m jobhunterx.api.main
 **Next time**, you only need: open a terminal in the project folder → turn the venv on (step ③) → `cd jobhunterx` → `python -m jobhunterx.api.main`.
 
 > **Stop the app:** press `Ctrl + C` in the terminal.
+
+</details>
 
 ### 🆘 If something goes wrong
 
