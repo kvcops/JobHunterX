@@ -1437,3 +1437,56 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
   .aw-prop { width: 18px; height: 18px; top: -16px; }
 }
 @media (max-width: 900px) { .aw-office { container-type: inline-size; height: auto; overflow: visible; } }
+
+/* ------------------------------------------------------------------ agents at work — 3D world */
+.aw3d { position: relative; flex: 1; min-height: 220px; display: flex; }
+.aw3d-frame { position: relative; flex: 1; min-height: 0; border-radius: 18px; overflow: hidden; border: 1px solid var(--line);
+  background: radial-gradient(120% 90% at 50% 0%, #fdf6ee 0%, #f3ece4 55%, #ebe2d8 100%); }
+:root[data-theme="dark"] .aw3d-frame { background: radial-gradient(120% 90% at 50% 0%, #22222a 0%, #19191f 60%, #131317 100%); }
+.aw3d-canvas { position: absolute; inset: 0; }
+.aw3d-canvas canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.aw3d-canvas canvas.grabbing { cursor: grabbing; }
+.aw3d-tags { position: absolute; inset: 0; pointer-events: none; }
+.aw3d-tag { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; transition: opacity .3s; will-change: transform; }
+.aw3d-name { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 99px; font-size: .7rem; font-weight: 500; white-space: nowrap;
+  background: color-mix(in srgb, var(--card-solid) 88%, transparent); border: 1px solid var(--line); color: var(--ink);
+  box-shadow: 0 4px 12px -6px rgba(0, 0, 0, .3); backdrop-filter: blur(6px); }
+.aw3d-name .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong); }
+.aw3d-tag.is-running .aw3d-name { border-color: hsl(var(--h) 70% 60%); }
+.aw3d-tag.is-running .aw3d-name .dot { background: hsl(var(--h) 75% 55%); box-shadow: 0 0 0 3px hsl(var(--h) 80% 60% / .25); animation: pulse 1.4s infinite; }
+.aw3d-tag.is-done .aw3d-name .dot { background: var(--success); }
+.aw3d-tag.is-pending .aw3d-name { opacity: .7; }
+.aw3d-say { max-width: 210px; padding: 6px 10px; border-radius: 12px; font-size: .7rem; line-height: 1.35; text-align: center;
+  background: var(--card-solid); border: 1px solid var(--line); color: var(--text-2); box-shadow: 0 8px 22px -12px rgba(0, 0, 0, .45);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; position: relative; }
+.aw3d-say::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 9px; height: 9px; background: inherit; border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+.aw3d-tag.is-running .aw3d-say { color: var(--ink); border-color: hsl(var(--h) 70% 62%); max-width: 240px; font-weight: 500; }
+.aw3d-tag.is-done .aw3d-say { font-family: var(--mono); font-size: .64rem; padding: 4px 8px; }
+.aw3d-zzz { font-size: .8rem; font-weight: 700; color: var(--text-3); }
+.aw3d-zzz span { display: inline-block; animation: awZ 2.4s ease-in-out infinite; }
+.aw3d-zzz span + span { animation-delay: .5s; }
+.aw3d-loading { position: absolute; inset: 0; display: grid; place-items: center; font-size: .85rem; color: var(--text-2); }
+.aw3d-bar { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 10px; pointer-events: none; }
+.aw3d-hint { font-size: .72rem; color: var(--text-2); padding: 5px 10px; border-radius: 99px; background: color-mix(in srgb, var(--card-solid) 80%, transparent);
+  backdrop-filter: blur(6px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.aw3d-hint strong { color: var(--ink); font-weight: 500; }
+.aw3d-btn { all: unset; pointer-events: auto; cursor: pointer; font-size: .74rem; padding: 6px 12px; border-radius: 99px; color: var(--ink);
+  background: color-mix(in srgb, var(--card-solid) 90%, transparent); border: 1px solid var(--line); backdrop-filter: blur(6px); white-space: nowrap; }
+.aw3d-btn:hover { border-color: var(--line-strong); }
+.aw3d-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* expanded: the same world, big and centred */
+.aw3d-backdrop { position: fixed; inset: 0; z-index: 900; background: rgba(10, 10, 14, .42); backdrop-filter: blur(3px); animation: fade .25s; }
+.aw3d.is-big .aw3d-frame { position: fixed; z-index: 901; inset: 4vh 4vw; box-shadow: 0 40px 90px -30px rgba(0, 0, 0, .55); animation: pop .35s var(--spring); }
+.aw3d.is-big .aw3d-say { max-width: 280px; font-size: .78rem; }
+.aw3d.is-big .aw3d-name { font-size: .78rem; }
+:root[data-motion="reduced"] .aw3d * { animation: none !important; }
+@media (max-width: 900px) { .aw3d { min-height: 340px; } }
+/* while the 3D world is expanded, its ancestors must not trap position:fixed (blur/transform/filter create containing blocks) */
+*:has(> * .aw3d.is-big), *:has(.aw3d.is-big) { transform: none !important; filter: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; contain: none !important; animation: none !important; }
+/* small panel: only the agents working right now speak; results show when expanded */
+.aw3d-frame { container: aw3dframe / size; }
+@container aw3dframe (max-height: 520px) {
+  .aw3d-tag.is-done .aw3d-say, .aw3d-tag.is-pending .aw3d-zzz { display: none; }
+  .aw3d-tag.is-pending .aw3d-name { opacity: .55; }
+}
