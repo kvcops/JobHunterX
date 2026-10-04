@@ -51,6 +51,10 @@ AGGREGATORS = ("linkedin.com", "naukri.com", "indeed.", "glassdoor.", "foundit.i
 # People-lookup / contact-scraping sites: never job postings, often rank high for role names.
 NOISE = ("rocketreach.co", "zoominfo.com", "signalhire.com", "contactout.com", "apollo.io", "lusha.com", "theorg.com",
          "crunchbase.com", "youtube.com", "medium.com", "quora.com", "reddit.com", "wikipedia.org")
+# A site whose own name is about jobs ("linuxcareers", "sherjobs", "jobsora", "hirist") lists many employers' roles:
+# treat it as an aggregator, never as one employer's careers page.
+_JOB_SITE_NAME = re.compile(r"(?i)(jobs?|careers?|hiring|vacanc|recruitment|naukri)")
+MAX_PER_SITE = 3              # results kept from one site (an ATS counts per employer board, not per host)
 _CAREERS_PATH = re.compile(r"/(careers?|jobs?|join-us|join|work-with-us|openings|vacancies|positions)(/|$|\?)", re.I)
 _JOB_ANCHOR = re.compile(r"\b(engineer|developer|scientist|analyst|manager|architect|intern|lead|specialist|consultant|designer)\b", re.I)
 
@@ -95,6 +99,9 @@ def classify(url: str) -> str:
     if any(h == n or h.endswith("." + n) for n in NOISE):
         return "noise"
     if any(a in h for a in AGGREGATORS):
+        return "aggregator"
+    site_name = h.split(".")[-2] if h.count(".") >= 1 else h
+    if _JOB_SITE_NAME.search(site_name):
         return "aggregator"
     if _CAREERS_PATH.search(urlparse(url).path or "") or h.startswith(("careers.", "jobs.")):
         return "careers"
@@ -160,11 +167,12 @@ async def _crawl_page(hit: Hit, sem: asyncio.Semaphore) -> list[Hit]:
     base = res.url or hit.url
     found: dict[str, Hit] = {}
     # links and embedded job-board frames (Greenhouse/Lever/Ashby/Workday embeds sit in iframes or scripts)
-    for m in re.finditer(r"""(?:href|src|data-url)=["']([^"'#\s]+)["'][^>]*>([^<]{0,120})""", html, re.I):
+    for m in re.finditer(r"""<(?:a|iframe)\b[^>]*?(?:href|src|data-url)=["']([^"'#\s]+)["'][^>]*>(.{0,600}?)(?:</a>|</iframe>|<a\b)""",
+                         html, re.I | re.S):
         url = urljoin(base, m.group(1))
         if not url.startswith("http"):
             continue
-        anchor = re.sub(r"\s+", " ", m.group(2) or "").strip()
+        anchor = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2) or "")).strip()[:140]
         ref = ats.parse_ats_url(url)
         kind = ("posting" if ref.job_id else "board") if ref else None
         if (not kind and hit.kind == "careers" and _host(url) == _host(base) and _JOB_ANCHOR.search(anchor)
@@ -174,6 +182,8 @@ async def _crawl_page(hit: Hit, sem: asyncio.Semaphore) -> list[Hit]:
             continue
         key = _norm(url)
         if key in found or key == _norm(hit.url):
+            continue
+        if kind == "posting" and not ref and not anchor:
             continue
         found[key] = Hit(url=url, title=anchor or hit.title, snippet=f"Found on {_host(base)}", kind=kind,
                          score=hit.score * (0.9 if kind == "posting" else 0.8), via=f"crawl:{_host(base)}")
@@ -253,9 +263,33 @@ async def search(query: str, max_results: int = 10, use_ai: bool = True) -> list
     ranked = sorted(hits.values(), key=lambda h: -h.score)
     if use_ai:
         ranked = await rerank(query, ranked)
+    ranked = diversify(ranked)
     log.info("deep_search", query=query[:60], engines=sum(1 for e in _engines.values() if e.rest_until <= time.monotonic()),
              candidates=len(hits), crawled=len(extra), ms=int((time.monotonic() - t0) * 1000))
     return ranked[:max_results]
+
+
+def site_key(url: str) -> str:
+    """One employer board per key on shared ATS hosts (greenhouse.io/acme ≠ greenhouse.io/other); else the host."""
+    from jobhunterx.discovery import ats
+    ref = ats.parse_ats_url(url)
+    return f"{ref.kind}:{ref.token.lower()}" if ref else _host(url)
+
+
+def diversify(hits: list, per_site: int = MAX_PER_SITE) -> list:
+    """Keep order, but at most `per_site` results from one site and one copy of a title per site."""
+    seen_site: dict[str, int] = {}
+    seen_title: set[tuple[str, str]] = set()
+    out = []
+    for h in hits:
+        k = site_key(h.url)
+        t = (k, re.sub(r"\W+", " ", (h.title or "").lower()).strip())
+        if seen_site.get(k, 0) >= per_site or (t[1] and t in seen_title):
+            continue
+        seen_site[k] = seen_site.get(k, 0) + 1
+        seen_title.add(t)
+        out.append(h)
+    return out
 
 
 def engine_status() -> dict:

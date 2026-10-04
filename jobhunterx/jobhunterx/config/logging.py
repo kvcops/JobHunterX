@@ -141,6 +141,10 @@ def setup_logging(log_level: str = "INFO", json_output: bool = False) -> None:
     )
     for logger_name in noisy_loggers:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
+    # These warn on normal events: trafilatura for every short page it skips ("discarding data: None"),
+    # the Google SDK whenever GOOGLE_API_KEY and GEMINI_API_KEY are both set (we always pass the key ourselves).
+    for logger_name in ("trafilatura", "htmldate", "courlan", "justext", "google_genai", "google_genai._api_client"):
+        logging.getLogger(logger_name).setLevel(logging.ERROR)
 
     if HAS_STRUCTLOG:
         shared_processors: list[structlog.types.Processor] = [

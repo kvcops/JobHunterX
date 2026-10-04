@@ -412,6 +412,7 @@ const SEARCH_META = {
   ddgs: { name: 'DuckDuckGo', field: null, hint: 'No key needed — always-available fallback' },
 };
 const STRATEGIES = [
+  ['smart', 'Smart', 'Free Deep Search and one keyed provider answer every query together; results are merged and ranked by AI. Best results.'],
   ['fallback', 'Fallback', 'Ask providers in order; the first with results answers. Fewest calls.'],
   ['spread', 'Spread', 'Rotate queries across providers so free quotas are shared.'],
   ['combine', 'Combine', 'Two providers answer every query and results merge. Widest coverage, uses more quota.'],

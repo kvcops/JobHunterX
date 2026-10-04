@@ -129,7 +129,7 @@ export function normalizeProfile(p) {
     if (!Array.isArray(out.preferences[k])) out.preferences[k] = [];
   }
   out.experience = out.experience.map((e) => ({ role: '', company: '', location: '', start: '', end: '', employment_type: '', bullets: [], ...e, bullets: Array.isArray(e.bullets) ? e.bullets : [] }));
-  out.education = out.education.map((e) => ({ degree: '', institution: '', start: '', end: '', grade: '', details: '', ...e }));
+  out.education = out.education.map((e) => ({ degree: '', institution: '', university: '', start: '', end: '', grade: '', details: '', ...e }));
   const links = (v) => (Array.isArray(v) ? v.filter((l) => l && typeof l === 'object').map((l) => ({ label: l.label || '', url: l.url || '' })) : []);
   out.links = links(p.links);
   out.item_links = Array.isArray(p.item_links) ? p.item_links.filter((l) => l && typeof l === 'object').map((l) => ({ section: '', item: '', label: '', url: '', ...l })) : [];

@@ -18,6 +18,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
+from pydantic import BaseModel, Field
+
 from jobhunterx import storage
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
@@ -26,6 +28,7 @@ from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
 from jobhunterx.intelligence import job as job_ai
+from jobhunterx.intelligence.llm_structured import call_structured
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 from jobhunterx.intelligence.policy import get_policy
 from jobhunterx.intelligence.text import term_in_text, tokens
@@ -177,6 +180,73 @@ _REMOTE_LEFTOVER = re.compile(r"(?i)\b(remote|anywhere|worldwide|global|work fro
                               r"apac|asia|asia pacific)\b|[;,/|()\-–]")
 
 
+# Search results that are lists of jobs, not one job: "84 Linux Admin jobs in Hyderabad", "6000+ … jobs", "(426 Open Roles)".
+_LISTING_TITLE = re.compile(r"(?i)(^\s*\d[\d,]*\+?\s+.*\bjobs?\b|\bjobs?\s+(in|at|for)\b.*|\(\d[\d,]*\+?\s+(open\s+)?(roles|jobs|openings)\)|"
+                            r"\b\d[\d,]*\+?\s+(open\s+)?(roles|jobs|openings|vacancies)\b|\bjob\s+vacancies\b)")
+# Places that, named alone in a result, mean the job is not in India (checked only when no candidate place is named).
+_FOREIGN = re.compile(r"(?i)\b(united states|u\.s\.a?|usa|canada|united kingdom|england|london|ireland|germany|berlin|"
+                      r"netherlands|amsterdam|france|paris|spain|poland|europe|emea|latam|brazil|mexico|argentina|"
+                      r"philippines|pakistan|bangladesh|sri lanka|vietnam|indonesia|malaysia|australia|new zealand|"
+                      r"japan|china|korea|israel|egypt|nigeria|kenya|south africa|new york|san francisco|seattle|"
+                      r"austin|boston|chicago|toronto|vancouver|remote[\s,\-–]+(us|usa|uk|eu|canada|europe))\b")
+
+
+def _lead_worth_reading(lead, snap: CandidateSnapshot) -> bool:
+    """Cheap checks on a search result before spending a page fetch on it."""
+    title = lead.title or ""
+    if _LISTING_TITLE.search(title):
+        return False
+    text = f"{title} {lead.snippet or ''}"
+    if snap.open_to_international or not _FOREIGN.search(text):
+        return True
+    forms = {f for p in snap.locations for f in [p.city, p.country, *p.aliases] if f}
+    if snap.home_country:
+        forms.add(snap.home_country)
+    return any(term_in_text(f, text) for f in forms)
+
+
+class _TriageItem(BaseModel):
+    i: int
+    score: int = Field(ge=0, le=3)
+
+
+class _Triage(BaseModel):
+    jobs: list[_TriageItem] = Field(default_factory=list)
+
+
+_TRIAGE_SYS = """You shortlist job postings for one candidate before a detailed review. For each numbered posting give a score:
+3 = squarely the candidate's field and a level they can realistically get;
+2 = a related role they could credibly apply for (adjacent field, or one level above/below);
+1 = weak link (shares a word but different work);
+0 = a different field, or clearly far above/below their level.
+Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager". Score every index."""
+TRIAGE_MAX = 140
+
+
+async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[dict[str, int]]:
+    """One AI call: job id → 0..3 fit-of-field score. None when no AI answered (callers fall back to word overlap)."""
+    if not jobs:
+        return {}
+    who = (f"Level: {snap.seniority.value}, about {snap.professional_years:g} years\n"
+           f"Target titles: {', '.join(snap.target_titles[:6])}\n"
+           f"Adjacent titles: {', '.join(snap.adjacent_titles[:6])}\n"
+           f"Fields: {', '.join(f.label for f in snap.role_families[:5])}\n"
+           f"Strongest skills: {', '.join(s.name for s in snap.skills[:10])}")
+    lines = "\n".join(f"[{i}] {p.title[:90]} | {p.company[:40]} | {(p.location_raw or '')[:40]}" for i, p in enumerate(jobs))
+    try:
+        res, _ = await call_structured(task="search_triage", version="v1", model=_Triage, system=_TRIAGE_SYS,
+                                       user=f"CANDIDATE\n{who}\n\nPOSTINGS\n{lines}", chain="fast", max_tokens=3000,
+                                       cache_parts=(snap.profile_hash, lines))
+    except Exception as exc:
+        log.info("triage_unavailable", error=str(exc)[:100])
+        return None
+    if not res or not res.jobs:
+        return None
+    out = {jobs[t.i].id: t.score for t in res.jobs if 0 <= t.i < len(jobs)}
+    log.info("triage", postings=len(jobs), scored=len(out), different_field=sum(1 for v in out.values() if v == 0))
+    return out
+
+
 def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
     jt = set(tokens(job.title))
     best = 0.0
@@ -202,7 +272,11 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
 
     async def one(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
         async with sem:
-            jobs = await ats.ADAPTERS[ref.kind].search_jobs(ref.token, titles[:4] or None)
+            queries = titles[:3] or None
+            city = next((p.city for p in snap.locations if p.city), "")
+            if ref.kind == "workday" and queries and city:
+                queries = [f"{queries[0]} {city}", *queries]     # huge global boards: ask for local roles first
+            jobs = await ats.ADAPTERS[ref.kind].search_jobs(ref.token, queries)
         if not jobs:
             return []
         jobs = [j for j in jobs if _location_prefilter(j, snap, include_remote)]
@@ -352,7 +426,11 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     # 4. Normalize ------------------------------------------------------------
     await run.stage("normalize")
     sem = asyncio.Semaphore(FETCH_CONCURRENCY)
-    to_read = posting_leads[: max_jobs * 2]
+    worth = [l for l in posting_leads if _lead_worth_reading(l, snap)]
+    skipped = len(posting_leads) - len(worth)
+    if skipped:
+        await run.say("normalize", f"Skipped {skipped} search results that are job lists or clearly outside your locations", "info")
+    to_read = worth[: max_jobs * 2]
     if to_read:
         await run.say("normalize", f"Opening {len(to_read)} job pages to read the full descriptions", "work")
     narrated = {"n": 0}
@@ -380,7 +458,11 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         return p
 
     resolved = await asyncio.gather(*(resolve(l) for l in to_read))
-    candidates = [p for p in resolved if p] + board_jobs
+    found = [p for p in resolved if p]
+    local = [p for p in found if _location_prefilter(p, snap, scope.include_remote)]
+    if len(local) < len(found):
+        await run.say("normalize", f"Dropped {len(found) - len(local)} postings outside your locations", "info")
+    candidates = local + board_jobs
     c["fetched"] = len([p for p in resolved if p])
     c["candidates"] = len(candidates)
     await run.stage("normalize", "done", f"{len(candidates)} postings read ({len(board_jobs)} from employer boards)")
@@ -395,7 +477,19 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     c["duplicates"] = dups
     for p in unique:
         p.id = p.id or str(uuid.uuid4())
-    unique.sort(key=lambda p: (-(p.primary_source.first_party if p.primary_source else 0),
+    # Shortlist: which postings are the candidate's field? One AI call scores them all; the cap then keeps the best.
+    pool = sorted(unique, key=lambda p: -_title_relevance(p, snap))[:TRIAGE_MAX]
+    rest = unique[len(pool):] if len(unique) > TRIAGE_MAX else []
+    fit = await _triage(snap, pool) if len(pool) > max_jobs // 2 else None
+    if fit:
+        before = len(pool)
+        pool = [p for p in pool if fit.get(p.id, 1) > 0] or pool
+        unique = pool
+        await run.say("dedupe", f"Shortlisted {len(pool)} of {before} postings that match your field"
+                      + (f" ({before - len(pool)} are a different line of work)" if before > len(pool) else ""), "info")
+    else:
+        unique = pool + rest
+    unique.sort(key=lambda p: (-(fit or {}).get(p.id, 0), -(p.primary_source.first_party if p.primary_source else 0),
                                -round(_title_relevance(p, snap), 1), _age_days(p)))
     unique = unique[:max_jobs]
     run.data["total"] = len(unique)

@@ -16,6 +16,7 @@ reported as incompatible — for the right, stated reason.
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Optional
@@ -38,8 +39,43 @@ _EDU_ORDER = ["none", "diploma", "bachelor", "master", "phd"]
 # Skill coverage
 # ---------------------------------------------------------------------------
 
+# Everyday tools an umbrella skill implies. Someone with years of "Linux" has used SSH, sudo and systemd even if the
+# resume never lists them; a job that names them must not read that person as missing them. Credit is "related", not full.
+_IMPLIED_BY: dict[str, tuple[str, ...]] = {
+    "linux": ("ubuntu", "debian", "centos", "rhel", "red hat", "red hat enterprise linux", "fedora", "suse", "systemd",
+              "ssh", "sudo", "bash", "shell", "shell scripting", "rpm", "apt", "yum", "rpm/apt", "cron", "linux administration",
+              "linux system administration", "unix"),
+    "unix": ("ssh", "bash", "shell", "shell scripting", "cron"),
+    "rhel": ("linux", "rpm", "yum", "systemd", "ssh", "sudo"),
+    "red hat": ("linux", "rpm", "yum", "systemd", "ssh", "sudo"),
+    "jenkins": ("ci/cd", "ci", "continuous integration"),
+    "github actions": ("ci/cd", "ci", "continuous integration", "git", "github"),
+    "gitlab ci": ("ci/cd", "ci", "continuous integration", "git", "gitlab"),
+    "git": ("github", "gitlab", "version control"),
+    "kubernetes": ("k8s", "kubectl", "container orchestration", "docker", "containers"),
+    "docker": ("containers", "containerization"),
+    "aws": ("ec2", "s3", "iam", "cloudwatch", "vpc", "cloud"),
+    "azure": ("azure vms", "azure monitor", "cloud"),
+    "gcp": ("google cloud", "gce", "cloud"),
+    "google cloud": ("gcp", "cloud"),
+    "terraform": ("infrastructure as code", "iac"),
+    "ansible": ("configuration management", "infrastructure as code"),
+    "prometheus": ("monitoring", "observability"),
+    "grafana": ("monitoring", "observability", "dashboards"),
+    "python": ("scripting",),
+    "pytorch": ("deep learning", "machine learning"),
+    "tensorflow": ("deep learning", "machine learning"),
+    "llm": ("generative ai", "genai", "large language models"),
+    "large language models": ("llm", "generative ai", "genai"),
+    "rag": ("retrieval augmented generation", "llm", "generative ai"),
+    "sql": ("relational databases", "databases"),
+    "postgresql": ("sql", "relational databases", "databases"),
+    "mysql": ("sql", "relational databases", "databases"),
+}
+
+
 def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, pol: Policy,
-                  index: dict[str, SkillEvidence]) -> tuple[float, Optional[SkillEvidence], bool]:
+                  index: dict[str, SkillEvidence], candidate_text: str = "") -> tuple[float, Optional[SkillEvidence], bool]:
     """Return (credit 0–1, candidate skill matched, via_adjacent)."""
     forms = {norm_term(x) for x in [name, *aliases] if x}
     for f in forms:
@@ -48,14 +84,22 @@ def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, po
     for s in snapshot.skills:
         if forms & {norm_term(a) for a in s.adjacent}:
             return pol.credit_adjacent * max(s.strength, pol.credit_listed_only), s, True
+    # named in the candidate's own experience / project text, just not in the skills list
+    if candidate_text and any(len(f) > 1 and term_in_text(f, candidate_text) for f in forms):
+        return pol.credit_listed_only, None, False
+    for s in snapshot.skills:
+        implied = {norm_term(x) for f in s.forms() for x in _IMPLIED_BY.get(f, ())}
+        if forms & implied:
+            return pol.credit_adjacent * max(s.strength, pol.credit_listed_only), s, True
     return 0.0, None, False
 
 
-def _coverage(skills: list[str], aliases: dict[str, list[str]], snapshot: CandidateSnapshot, pol: Policy):
+def _coverage(skills: list[str], aliases: dict[str, list[str]], snapshot: CandidateSnapshot, pol: Policy,
+              candidate_text: str = ""):
     index = snapshot.skill_index()
     matched, partial, missing, credits = [], [], [], []
     for name in skills:
-        c, ev, adj = _skill_credit(name, aliases.get(name, []), snapshot, pol, index)
+        c, ev, adj = _skill_credit(name, aliases.get(name, []), snapshot, pol, index, candidate_text)
         credits.append(c)
         if c and not adj:
             matched.append(name)
@@ -120,6 +164,9 @@ def _place_forms(snapshot: CandidateSnapshot) -> tuple[set[str], set[str]]:
     return cities, countries
 
 
+_WORLDWIDE = re.compile(r"(?i)\b(anywhere|worldwide|global(ly)?|international|any location|all locations)\b")
+
+
 def _location_check(snapshot: CandidateSnapshot, job: JobPosting) -> tuple[ConstraintResult, float]:
     cities, countries = _place_forms(snapshot)
     home = norm_term(snapshot.home_country)
@@ -136,10 +183,14 @@ def _location_check(snapshot: CandidateSnapshot, job: JobPosting) -> tuple[Const
 
     if job.work_mode == WorkMode.REMOTE:
         restricted = {norm_term(c) for c in job.remote_countries}
+        named = list(job.remote_countries)
+        # "Remote · Belgium" with no "worldwide/anywhere" means remote within Belgium, not open to the world.
+        if not restricted and job_countries and not _WORLDWIDE.search(loc_text):
+            restricted, named = job_countries, list(job.countries)
         if restricted and home and home not in restricted:
             if snapshot.open_to_international:
-                return res("warn", f"Remote, but limited to {', '.join(job.remote_countries)}.", 0.4)
-            return res("fail", f"Remote only for {', '.join(job.remote_countries)} — not open to candidates in {snapshot.home_country}.", 0.0)
+                return res("warn", f"Remote, but limited to {', '.join(named)}.", 0.4)
+            return res("fail", f"Remote only for {', '.join(named)} — not open to candidates in {snapshot.home_country}.", 0.0)
         if WorkMode.REMOTE not in modes:
             return res("warn", "Remote role, but you prefer on-site/hybrid work.", 0.6)
         return res("pass", "Remote" + (" (eligible from your country)" if restricted else "") + ".", 1.0)
@@ -287,8 +338,8 @@ def assess(
 
     # --- 5. Skills ---------------------------------------------------------
     partial_method = req.method != "llm"
-    req_score, matched_r, partial_r, missing_r = _coverage(req.required_skills, req.skill_aliases, snapshot, pol)
-    pref_score, matched_p, partial_p, missing_p = _coverage(req.preferred_skills, req.skill_aliases, snapshot, pol)
+    req_score, matched_r, partial_r, missing_r = _coverage(req.required_skills, req.skill_aliases, snapshot, pol, candidate_text or "")
+    pref_score, matched_p, partial_p, missing_p = _coverage(req.preferred_skills, req.skill_aliases, snapshot, pol, candidate_text or "")
     if partial_method:
         unknowns.append("Job requirements could not be fully analysed (AI unavailable) — skill coverage is partial")
         comps.append(ScoreComponent(key="skills_required", label="Required skills", weight=pol.weights.skills_required,
@@ -317,7 +368,15 @@ def assess(
     if must and not partial_method:
         must_missing = [m for m in must if m in missing_r]
         must_partial = [m for m in must if any(m == n for n, _ in partial_r)]
-        if must_missing:
+        # A short must-have list is what the employer really insists on: any gap rules the job out. A long one is usually
+        # the whole tool list marked "mandatory" by the job reader — a missing item there is a gap to show (it already
+        # lowers the score), and only most of the list missing rules the job out.
+        hard = bool(must_missing) and (len(must) <= 3 or (len(must_missing) >= 2 and len(must_missing) / len(must) >= 0.5))
+        if must_missing and not hard:
+            constraints.append(ConstraintResult(key="must_have", label="Mandatory skills", status="warn",
+                                                detail=f"Mandatory: {', '.join(must_missing)} — not found in your profile; "
+                                                       f"you have {len(must) - len(must_missing)} of {len(must)}."))
+        elif must_missing:
             constraints.append(ConstraintResult(key="must_have", label="Mandatory skills", status="fail",
                                                 detail=f"Mandatory: {', '.join(must_missing)} — not found in your profile."))
         elif must_partial:

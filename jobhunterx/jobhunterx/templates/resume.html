@@ -26,7 +26,7 @@
 {% endfor %}</div>{% endif %}
 {% if c.education %}<div class="section"><div class="section-title">Education</div>
 {% for e in c.education[:max_education] %}
-<table><tr><td><span class="row-title">{{ e.degree }}</span>{% if e.institution %} — {{ e.institution }}{% endif %}{% if e.grade %} <span class="row-sub">({{ e.grade }})</span>{% endif %}</td>
+<table><tr><td><span class="row-title">{{ e.degree }}</span>{% if e.institution %} — {{ e.institution }}{% endif %}{% if e.university %} <span class="row-sub">({{ e.university }})</span>{% endif %}{% if e.grade %} <span class="row-sub">({{ e.grade }})</span>{% endif %}</td>
 <td class="right">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}</td></tr></table>
 {% endfor %}</div>{% endif %}
 {% set il = c.item_links or {} %}

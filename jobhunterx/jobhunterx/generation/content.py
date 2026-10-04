@@ -60,6 +60,7 @@ class ProjectItem(BaseModel):
 class EducationItem(BaseModel):
     degree: str = ""
     institution: str = ""
+    university: str = ""
     start: str = ""
     end: str = ""
     grade: str = ""

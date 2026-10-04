@@ -474,8 +474,127 @@ class Keka(AtsAdapter):
         return out
 
 
+class OracleRecruiting(AtsAdapter):
+    """Oracle Recruiting Cloud career sites (JPMorgan, Oracle and many large employers / GCCs in India).
+
+    Token: "<host>/<site>", e.g. "jpmc.fa.oraclecloud.com/CX_1001". The career site's own page reads these public
+    REST endpoints; boards hold thousands of jobs, so listing is a keyword search, then a detail read per job.
+    """
+    kind = "oracle"
+    search_hosts = ("oraclecloud.com/hcmUI/CandidateExperience",)
+    _URL = re.compile(r"(?P<host>[\w\-]+(?:\.[\w\-]+)*\.oraclecloud\.com)/hcmUI/CandidateExperience/[\w\-]+/sites/"
+                      r"(?P<site>[\w\-]+)(?:/(?:job|requisitions/preview)/(?P<job>\d+))?", re.I)
+    DEFAULT_QUERIES = ("engineer", "developer", "analyst")
+    PER_QUERY = 25
+    MAX_DETAILS = 30
+
+    def parse_url(self, url: str) -> Optional[AtsRef]:
+        m = self._URL.search(url or "")
+        if not m:
+            return None
+        return AtsRef(kind=self.kind, token=f"{m.group('host').lower()}/{m.group('site')}", job_id=m.group("job") or "")
+
+    @staticmethod
+    def _split(token: str) -> tuple[str, str]:
+        host, _, site = token.partition("/")
+        return host, site
+
+    async def _detail(self, token: str, job_id: str, hint: Optional[dict] = None) -> tuple[Liveness, Optional[JobPosting]]:
+        host, site = self._split(token)
+        url = (f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true"
+               f"&finder=ById;Id=%22{job_id}%22,siteNumber={site}")
+        data, res = await net.fetch_json(url)
+        if res.status in (404, 410):
+            return "gone", None
+        if not isinstance(data, dict):
+            return "unknown", None
+        items = data.get("items") or []
+        if not items:
+            return "gone", None
+        it = items[0]
+        hint = hint or {}
+        locs = [it.get("PrimaryLocation") or hint.get("PrimaryLocation") or ""]
+        locs += [l.get("Name", "") for l in (it.get("secondaryLocations") or hint.get("secondaryLocations") or []) if isinstance(l, dict)]
+        workplace = str(it.get("WorkplaceType") or hint.get("WorkplaceType") or "").lower()
+        mode = WorkMode.REMOTE if "remote" in workplace else WorkMode.HYBRID if "hybrid" in workplace else \
+            WorkMode.ONSITE if "site" in workplace or "office" in workplace else WorkMode.UNKNOWN
+        parts = [it.get("ExternalDescriptionStr"), it.get("ExternalResponsibilitiesStr"), it.get("ExternalQualificationsStr"),
+                 it.get("CorporateDescriptionStr")]
+        description = "\n\n".join(html_to_text(x) for x in parts if x)
+        page_url = f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{job_id}"
+        country = it.get("PrimaryLocationCountry") or hint.get("PrimaryLocationCountry") or ""
+        return "live", self._posting(
+            token=token, job_id=str(job_id), title=it.get("Title") or hint.get("Title", ""),
+            company=(it.get("LegalEmployer") or hint.get("LegalEmployer") or host.split(".")[0]).strip(),
+            location="; ".join(l for l in dict.fromkeys(locs) if l), description=description, url=page_url,
+            apply_url=f"{page_url}/apply", posted=it.get("ExternalPostedStartDate") or hint.get("PostedDate"), mode=mode,
+            employment_type=_etype(it.get("JobSchedule") or hint.get("JobSchedule") or ""),
+            department=it.get("JobFunction") or hint.get("JobFunction") or "",
+            countries=[_COUNTRY_CODES.get(country, country)] if country else [],
+        )
+
+    COUNTRY = "India"              # JobHunterX searches India; the board's own location filter keeps results local
+    _country_ids: dict[str, Optional[int]] = {}
+
+    async def _country_id(self, host: str, site: str) -> Optional[int]:
+        """The board's location-facet id for India (keyword search matches titles only, so location must be a filter)."""
+        key = f"{host}/{site}"
+        if key not in self._country_ids:
+            data, _ = await net.fetch_json(
+                f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=locationsFacet"
+                f"&finder=findReqs;siteNumber={site},facetsList=LOCATIONS,limit=1")
+            facets = [f for b in ((data or {}).get("items") or []) if isinstance(b, dict) for f in b.get("locationsFacet") or []]
+            hit = next((f for f in facets if str(f.get("Name", "")).strip().lower() == self.COUNTRY.lower()), None)
+            self._country_ids[key] = int(hit["Id"]) if hit and hit.get("Id") else None
+        return self._country_ids[key]
+
+    async def search_jobs(self, token: str, queries: Optional[list[str]] = None) -> Optional[list[JobPosting]]:
+        from urllib.parse import quote
+        host, site = self._split(token)
+        found: dict[str, dict] = {}
+        reached = False
+        loc_id = await self._country_id(host, site)
+        loc = f"locationId={loc_id}," if loc_id else ""
+        pages = await asyncio.gather(*(
+            net.fetch_json(f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
+                           f"&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber={site},{loc}"
+                           f"limit={self.PER_QUERY},sortBy=POSTING_DATES_DESC,keyword=%22{quote(q)}%22")
+            for q in (queries or self.DEFAULT_QUERIES)[:4]))
+        for data, _ in pages:
+            if not isinstance(data, dict):
+                continue
+            reached = True
+            for block in data.get("items") or []:
+                for r in block.get("requisitionList") or []:
+                    if r.get("Id"):
+                        found.setdefault(str(r["Id"]), r)
+        if not reached:
+            return None
+        sem = asyncio.Semaphore(5)
+
+        async def one(job_id: str, hint: dict) -> Optional[JobPosting]:
+            async with sem:
+                state, p = await self._detail(token, job_id, hint)
+                return p if state == "live" else None
+
+        got = await asyncio.gather(*(one(i, h) for i, h in list(found.items())[: self.MAX_DETAILS]))
+        return [p for p in got if p]
+
+    async def list_jobs(self, token: str) -> Optional[list[JobPosting]]:
+        return await self.search_jobs(token)
+
+    async def check(self, ref: AtsRef) -> tuple[Liveness, Optional[JobPosting]]:
+        if not ref.job_id:
+            return "unknown", None
+        return await self._detail(ref.token, ref.job_id)
+
+
+_COUNTRY_CODES = {"IN": "India", "US": "United States", "GB": "United Kingdom", "SG": "Singapore", "IE": "Ireland",
+                  "DE": "Germany", "CA": "Canada", "AU": "Australia", "PH": "Philippines", "PL": "Poland"}
+
+
 ADAPTERS: dict[str, AtsAdapter] = {a.kind: a for a in [Greenhouse(), Lever(), Ashby(), SmartRecruiters(), Recruitee(),
-                                                       Workable(), Workday(), Keka()]}
+                                                       Workable(), Workday(), Keka(), OracleRecruiting()]}
 
 
 def parse_ats_url(url: str) -> Optional[AtsRef]:

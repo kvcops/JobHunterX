@@ -809,7 +809,7 @@ class ProvidersBody(BaseModel):
     llm: Optional[dict[str, bool]] = None
     search: Optional[dict[str, bool]] = None
     search_order: Optional[list[str]] = None
-    search_strategy: Optional[Literal["fallback", "spread", "combine"]] = None
+    search_strategy: Optional[Literal["smart", "fallback", "spread", "combine"]] = None
 
 
 @router.post("/providers")

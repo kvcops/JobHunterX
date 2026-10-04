@@ -49,9 +49,14 @@ class _Plan(BaseModel):
 
 _PLAN_SYSTEM = """You design web search queries that surface individual, currently open job postings for one candidate.
 Use the candidate's target titles, adjacent titles and locations given to you. Vary the angle: exact titles,
-title synonyms employers use, skill-anchored queries for their strongest skills, location variants, and remote variants
-(only if remote is accepted). Prefer queries that land on employers' own career pages and applicant-tracking-system job pages.
+title synonyms employers use, skill-anchored queries for their strongest skills, and remote variants (only if remote is
+accepted). EVERY query must name one of the candidate's locations (or "remote India" style for remote).
+Prefer queries that land on ONE posting on an employer's own career page or applicant-tracking-system job page (use the
+site: hosts given), not on job-board result lists: never write "jobs in <city>" or "<n> openings" style queries.
 Do not include seniority levels above the candidate's. Keep each query under 120 characters. No duplicates."""
+
+# Career platforms common with Indian employers whose job pages are public and readable one by one.
+INDIA_SITE_HINTS = ("keka.com/careers", "darwinbox.in", "zohorecruit.in", "freshteam.com/jobs")
 
 
 def scope_from_snapshot(snap: CandidateSnapshot, *, locations: Optional[list[str]] = None,
@@ -65,13 +70,22 @@ def scope_from_snapshot(snap: CandidateSnapshot, *, locations: Optional[list[str
                        country=snap.home_country)
 
 
+def _with_place(q: str, scope: SearchScope) -> str:
+    """A query that names no place finds jobs anywhere in the world: add the candidate's first place."""
+    places = [*scope.locations, scope.country, "remote"]
+    if any(p and re.search(rf"(?i)\b{re.escape(p)}\b", q) for p in places):
+        return q
+    where = scope.locations[0] if scope.locations else scope.country
+    return f"{q} {where}".strip()
+
+
 def _norm_query(q: str) -> str:
     return " ".join(sorted(set(tokens(q))))
 
 
 def deterministic_queries(scope: SearchScope, limit: int) -> list[str]:
     """ATS-anchored queries from titles × places; no extra vocabulary."""
-    hosts = ats_site_hints()
+    hosts = [*ats_site_hints(), *INDIA_SITE_HINTS]
     places = list(scope.locations)
     if scope.include_remote:
         places.append(f"remote {scope.country}".strip())
@@ -94,7 +108,7 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
         f"Strongest skills: {', '.join(s.name for s in snap.skills[:8])}\n"
         f"Candidate level: {snap.seniority.value}, ~{snap.professional_years:g} years\n"
         f"Locations: {', '.join(scope.locations) or scope.country}; remote accepted: {scope.include_remote}; country: {scope.country}\n"
-        f"Applicant-tracking-system job hosts you may target with site: {', '.join(ats_site_hints())}"
+        f"Applicant-tracking-system job hosts you may target with site: {', '.join([*ats_site_hints(), *INDIA_SITE_HINTS])}"
     )
     plan, _ = await call_structured(
         task="search_plan", version=PLAN_VERSION, model=_Plan, system=_PLAN_SYSTEM, user=user,
@@ -104,7 +118,7 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
     seen: set[str] = set()
     queries: list[str] = []
     # Interleave ATS-anchored and LLM queries so both kinds survive the cap.
-    llm_q = [q.strip() for q in (plan.queries if plan else []) if 5 < len(q.strip()) <= 160]
+    llm_q = [_with_place(q.strip(), scope) for q in (plan.queries if plan else []) if 5 < len(q.strip()) <= 160]
     for pair in zip(base, llm_q):
         for q in pair:
             k = _norm_query(q)
@@ -146,6 +160,47 @@ class Lead:
 FREE_PROVIDERS = ("deep", "ddgs")       # keyless: Deep Search (multi-engine + crawl + AI rerank), plain DuckDuckGo
 
 
+def _merge_ranked(query: str, groups: list[list]) -> list:
+    """Reciprocal-rank fusion of several providers' result lists (a page more than one finds rises), with the same
+    employer-page boost Deep Search uses. Returns deep_search Hits, best first."""
+    from jobhunterx.tools import deep_search as ds
+    hits: dict[str, "ds.Hit"] = {}
+    for items in groups:
+        for rank, it in enumerate(items):
+            key = re.sub(r"[#?].*$", "", (it.url or "").strip().lower()).rstrip("/")
+            if not key:
+                continue
+            h = hits.get(key)
+            if not h:
+                h = hits[key] = ds.Hit(url=it.url, title=it.title or "", snippet=it.snippet or "", kind=ds.classify(it.url))
+            h.score += ds.KIND_BOOST.get(h.kind, 1.0) / (ds.RRF_K + rank + 1)
+            h.engines.add(it.provider)
+            if len(it.snippet or "") > len(h.snippet):
+                h.snippet = it.snippet
+    return sorted(hits.values(), key=lambda h: -h.score)
+
+
+async def _smart_query(router: SearchRouter, deep_router: Optional[SearchRouter], q: str, paid: list[str],
+                       per_query: int) -> list:
+    """Deep Search and one keyed provider at the same time; merged, then one AI rerank of the combined list."""
+    from jobhunterx.tools import deep_search as ds
+    from jobhunterx.tools.search_providers import SearchResultItem
+    jobs = []
+    if paid:
+        jobs.append(router.execute_query(q, max_results=per_query, providers=paid))   # falls through the keyed ones
+    if deep_router:
+        jobs.append(deep_router.execute_query(q, max_results=per_query + 5, providers=["deep"]))
+    groups = []
+    for r in await asyncio.gather(*jobs, return_exceptions=True):
+        if isinstance(r, Exception):
+            log.warning("smart_search_part_failed", query=q[:60], error=str(r)[:120])
+        elif r:
+            groups.append(r)
+    merged = ds.diversify(await ds.rerank(q, _merge_ranked(q, groups)))
+    return [SearchResultItem(url=h.url, title=h.title, snippet=h.snippet[:500], provider="+".join(sorted(h.engines)))
+            for h in merged[: per_query + 5]]
+
+
 def _provider_lists(router: SearchRouter, n_queries: int) -> tuple[list[list[str]], str]:
     """Per-query provider order from the user's settings (order, on/off, strategy)."""
     from jobhunterx.config import app_state
@@ -157,7 +212,7 @@ def _provider_lists(router: SearchRouter, n_queries: int) -> tuple[list[list[str
     paid, free = [p for p in usable if p not in FREE_PROVIDERS], [p for p in usable if p in FREE_PROVIDERS]
     lists = []
     for i in range(n_queries):
-        if strategy in ("spread", "combine") and paid:
+        if strategy in ("spread", "combine", "smart") and paid:
             k = i % len(paid)
             rot = paid[k:] + paid[:k]          # each query starts at a different provider: quotas are shared
         else:
@@ -176,6 +231,7 @@ async def run_queries(queries: list[str], per_query: int = 10,
     """
     router = SearchRouter(config=router_config())
     lists, strategy = _provider_lists(router, len(queries))
+    deep_router = SearchRouter(config={**router_config(), "DEEP_USE_AI": False}) if strategy == "smart" else None
     sem = asyncio.Semaphore(QUERY_CONCURRENCY)
     done = {"n": 0}
 
@@ -184,7 +240,15 @@ async def run_queries(queries: list[str], per_query: int = 10,
         if providers:
             async with sem:
                 try:
-                    batches.append(await router.execute_query(q, max_results=per_query, providers=providers))
+                    if strategy == "smart":
+                        paid = [p for p in providers if p not in FREE_PROVIDERS]
+                        use_deep = "deep" in providers
+                        if use_deep or paid:
+                            batches.append(await _smart_query(router, deep_router if use_deep else None, q, paid, per_query))
+                        if not batches or not batches[0]:          # nothing at all: plain DuckDuckGo as the last net
+                            batches = [await router.execute_query(q, max_results=per_query, providers=["ddgs"])]
+                    else:
+                        batches.append(await router.execute_query(q, max_results=per_query, providers=providers))
                     if strategy == "combine" and len(providers) > 1:
                         answered = batches[0][0].provider if batches[0] else None
                         rest = [p for p in providers if p != answered]

@@ -28,7 +28,7 @@
 {% if c.education %}<div class="section"><div class="section-title">Education</div>
 {% for e in c.education %}
 <table><tr><td class="row-title">{{ e.degree }}</td><td class="right">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}</td></tr>
-<tr><td class="row-sub">{{ e.institution }}{% if e.grade %} · {{ e.grade }}{% endif %}</td><td></td></tr></table>
+<tr><td class="row-sub">{{ e.institution }}{% if e.university %} ({{ e.university }}){% endif %}{% if e.grade %} · {{ e.grade }}{% endif %}</td><td></td></tr></table>
 {% if e.details %}<div>{{ e.details }}</div>{% endif %}
 {% endfor %}</div>{% endif %}
 {% if c.skills %}<div class="section"><div class="section-title">Technical Skills</div>

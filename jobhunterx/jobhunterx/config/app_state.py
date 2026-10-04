@@ -27,10 +27,12 @@ DEFAULTS: dict[str, Any] = {
     "llm.overrides": {},                       # chain -> preferred first model id
     "search.providers": {p: True for p in SEARCH_PROVIDERS},
     "search.order": list(SEARCH_PROVIDERS),
+    # smart:    free Deep Search + one keyed provider per query (rotating), merged and AI-ranked once (best results)
     # fallback: first provider that returns results wins (cheapest)
     # spread:   rotate queries across enabled providers (shares free quotas)
     # combine:  ask two providers per query and merge (widest coverage, uses more quota)
-    "search.strategy": "fallback",
+    "search.strategy": "smart",
+    "search.strategy_v2": False,               # set once the old "fallback" default has been moved to "smart"
     "people.active": None,
     "setup.free_ok": False,                    # the user chose to start on Kilo's free models without any key
 }
@@ -62,6 +64,17 @@ async def load(db_path: str) -> None:
                 val = {**default, **val} if key != "llm.overrides" else val
             _cache[key] = val
         await db.commit()
+    if not _cache.get("search.strategy_v2"):
+        # "fallback" was the old default: it let one keyed provider answer alone and never used Deep Search,
+        # which measured best for real postings. Move it to "smart" once; a later manual choice is kept.
+        if _cache.get("search.strategy") == "fallback":
+            _cache["search.strategy"] = "smart"
+        _cache["search.strategy_v2"] = True
+        async with aiosqlite.connect(db_path) as db:
+            for k in ("search.strategy", "search.strategy_v2"):
+                await db.execute("INSERT INTO app_state (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE "
+                                 "SET value_json = excluded.value_json", (k, json.dumps(_cache[k])))
+            await db.commit()
     order = [p for p in _cache["search.order"] if p in SEARCH_PROVIDERS]
     if "deep" not in order:                      # added later: it belongs right before plain DuckDuckGo
         order.insert(order.index("ddgs") if "ddgs" in order else len(order), "deep")

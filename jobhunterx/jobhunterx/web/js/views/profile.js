@@ -185,8 +185,8 @@ function Editor({ profile }) {
       fields=${[{ key: 'title', label: 'Title' }, { key: 'description', label: 'Description', kind: 'text' }, { key: 'technologies', label: 'Technologies', kind: 'chips' },
         { key: 'links', label: 'Links', kind: 'links', hint: 'Code, live demo, paper, video… The first one is the main link.' }]} />` : null}
     ${tab === 'edu' ? html`<${ListEditor} draft=${draft} set=${set} path=${['education']} title="Education"
-      empty=${{ degree: '', institution: '', start: '', end: '', grade: '', details: '' }}
-      fields=${[{ key: 'degree', label: 'Degree' }, { key: 'institution', label: 'Institution' }, { key: 'start', label: 'Start' }, { key: 'end', label: 'End' }, { key: 'grade', label: 'Grade' }, { key: 'details', label: 'Details', kind: 'text' }]} />` : null}
+      empty=${{ degree: '', institution: '', university: '', start: '', end: '', grade: '', details: '' }}
+      fields=${[{ key: 'degree', label: 'Degree' }, { key: 'institution', label: 'College / school' }, { key: 'university', label: 'Affiliated university' }, { key: 'start', label: 'Start' }, { key: 'end', label: 'End' }, { key: 'grade', label: 'Grade' }, { key: 'details', label: 'Details', kind: 'text' }]} />` : null}
     ${tab === 'more' ? html`<div class="form-grid">
       ${[['certifications', 'Certifications'], ['achievements', 'Achievements'], ['competitions', 'Competitions & hackathons'], ['languages', 'Spoken languages']].map(([k, l]) =>
         html`<${Field} label=${l} wide><${ChipsInput} label=${l} value=${draft[k]} onChange=${(v) => set([k], v)} /></${Field}>`)}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import signal
 import sys
 from pathlib import Path
@@ -307,6 +308,10 @@ def describe_action(name: str, params: dict, state: Any) -> str:
         return f"Choose “{p.get('text', '')}” in {lbl}"
     if name == "dropdown_options":
         return f"Look at the options in {lbl}"
+    if name == "set_checkbox_by_text":
+        return f"{'Tick' if p.get('checked', True) else 'Untick'} “{str(p.get('text', ''))[:40]}”"
+    if name == "set_checkbox":
+        return f"{'Tick' if p.get('checked', True) else 'Untick'} “{lbl}”"
     if name == "scroll":
         return "Scroll down" if p.get("down", True) else "Scroll up"
     if name == "send_keys":
@@ -380,9 +385,156 @@ def _build_llms() -> tuple[Any, Any]:
     return candidates[0], (candidates[1] if len(candidates) > 1 else None)
 
 
+# Runs on the element the agent picked: finds the real checkbox (native input, its <label>, or an ARIA
+# role=checkbox/switch), reports its state, and — when asked to — tries label/box clicks then React-safe events.
+_CHECKBOX_JS = """function(want, act) {
+  const isBox = (e) => e && e.tagName === 'INPUT' && (e.type === 'checkbox' || e.type === 'radio');
+  const el = this;
+  let box = isBox(el) ? el : (el.querySelector && el.querySelector('input[type=checkbox],input[type=radio]'));
+  if (!box && el.tagName === 'LABEL' && el.control) box = el.control;
+  if (!box && el.closest) { const lab = el.closest('label'); if (lab && isBox(lab.control)) box = lab.control; }
+  if (!box && el.id) { const lab = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (lab && isBox(lab.control)) box = lab.control; }
+  const sel = '[role=checkbox],[role=radio],[role=switch],[aria-checked]';
+  const aria = box ? null : ((el.matches && el.matches(sel)) ? el : (el.closest && el.closest(sel)) || (el.querySelector && el.querySelector(sel)));
+  const state = () => box ? box.checked : aria ? aria.getAttribute('aria-checked') === 'true' : null;
+  if (!act || state() === want || state() === null) return { state: state(), found: !!(box || aria) };
+  const targets = [];
+  if (box) { if (box.labels) targets.push(...box.labels); targets.push(box); }
+  if (aria) targets.push(aria);
+  for (const t of targets) {
+    try { t.scrollIntoView({ block: 'center' }); t.click(); } catch (e) {}
+    if (state() === want) return { state: want, found: true, via: t.tagName.toLowerCase() };
+  }
+  if (box) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked').set;
+    setter.call(box, want);
+    for (const ev of ['input', 'change']) box.dispatchEvent(new Event(ev, { bubbles: true }));
+  }
+  return { state: state(), found: true, via: 'events' };
+}"""
+
+
+async def _checkbox_js(browser_session: Any, node: Any, want: bool, act: bool) -> dict:
+    cdp = await browser_session.cdp_client_for_node(node)
+    res = await cdp.cdp_client.send.DOM.resolveNode(params={"backendNodeId": node.backend_node_id}, session_id=cdp.session_id)
+    obj = (res.get("object") or {}).get("objectId")
+    if not obj:
+        return {"found": False, "state": None}
+    out = await cdp.cdp_client.send.Runtime.callFunctionOn(
+        params={"objectId": obj, "functionDeclaration": _CHECKBOX_JS, "returnByValue": True,
+                "arguments": [{"value": bool(want)}, {"value": bool(act)}]}, session_id=cdp.session_id)
+    return (out.get("result") or {}).get("value") or {"found": False, "state": None}
+
+
+async def _set_checkbox(browser_session: Any, index: int, checked: bool) -> Any:
+    """Real mouse click first (what custom widgets expect), verified; then label / React-safe fallbacks."""
+    from browser_use import ActionResult
+    from browser_use.browser.events import ClickElementEvent
+    try:
+        node = await browser_session.get_element_by_index(index)
+        if node is None:
+            return ActionResult(error=f"Element {index} is not on the page any more — refresh the page state and try again.")
+        before = await _checkbox_js(browser_session, node, checked, act=False)
+        if not before.get("found"):
+            return ActionResult(error=f"Element {index} is not a checkbox, toggle or switch. Pick the box itself or its label.")
+        word = "ticked" if checked else "unticked"
+        if before.get("state") == checked:
+            return ActionResult(extracted_content=f"Checkbox {index} was already {word}.")
+        ev = browser_session.event_bus.dispatch(ClickElementEvent(node=node))
+        await ev
+        try:
+            await ev.event_result(raise_if_any=False, raise_if_none=False)
+        except Exception:
+            pass
+        mid = await _checkbox_js(browser_session, node, checked, act=False)
+        if mid.get("state") != checked:
+            mid = await _checkbox_js(browser_session, node, checked, act=True)
+        if mid.get("state") == checked:
+            return ActionResult(extracted_content=f"Checkbox {index} is now {word}.")
+        return ActionResult(error=f"Could not change checkbox {index} — click the visible text next to it once instead.")
+    except Exception as exc:
+        return ActionResult(error=f"Checkbox {index}: {str(exc)[:160]}")
+
+
+# Finds a checkbox / radio / switch by the words next to it — including the hidden <input> behind a custom-styled box,
+# which never shows up in the agent's element list — in the page and its same-origin iframes, then sets and verifies it.
+_CHECKBOX_BY_TEXT_JS = """(text, want) => {
+  const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const t = norm(text);
+  if (!t) return { found: false };
+  const docs = [document];
+  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
+  const cands = [];
+  for (const d of docs) {
+    for (const box of d.querySelectorAll('input[type=checkbox],input[type=radio]')) {
+      const texts = [...(box.labels || [])].map((l) => norm(l.innerText || l.textContent));
+      texts.push(norm(box.getAttribute('aria-label')), norm(box.value));
+      const wrap = box.closest('label,li,p,div');
+      if (wrap) texts.push(norm(wrap.innerText || wrap.textContent));
+      const hits = texts.filter((x) => x && x.includes(t));
+      if (hits.length) cands.push({ kind: 'box', el: box, exact: texts.includes(t), len: Math.min(...hits.map((x) => x.length)) });
+    }
+    for (const el of d.querySelectorAll('[role=checkbox],[role=radio],[role=switch]')) {
+      const lb = el.getAttribute('aria-labelledby');
+      const s = norm((el.innerText || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (lb && d.getElementById(lb) ? d.getElementById(lb).innerText : ''));
+      if (s.includes(t)) cands.push({ kind: 'aria', el, exact: s === t, len: s.length });
+    }
+  }
+  if (!cands.length) return { found: false };
+  cands.sort((a, b) => (b.exact - a.exact) || (a.len - b.len));
+  const c = cands[0], el = c.el;
+  const state = () => c.kind === 'box' ? el.checked : el.getAttribute('aria-checked') === 'true';
+  const label = (c.kind === 'box' && el.labels && el.labels[0] ? el.labels[0].innerText : el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 80);
+  if (state() === want) return { found: true, state: want, already: true, label, matches: cands.length };
+  const targets = c.kind === 'box' ? [...(el.labels || []), el] : [el];
+  for (const x of targets) {
+    try { x.scrollIntoView({ block: 'center' }); x.click(); } catch (e) {}
+    if (state() === want) return { found: true, state: want, label, matches: cands.length };
+  }
+  if (c.kind === 'box') {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked').set;
+    setter.call(el, want);
+    for (const ev of ['input', 'change']) el.dispatchEvent(new Event(ev, { bubbles: true }));
+  }
+  return { found: true, state: state(), label, matches: cands.length };
+}"""
+
+
+async def _set_checkbox_by_text(browser_session: Any, text: str, checked: bool) -> Any:
+    import json as _json
+    from browser_use import ActionResult
+    try:
+        cdp = await browser_session.get_or_create_cdp_session()
+        out = await cdp.cdp_client.send.Runtime.evaluate(
+            params={"expression": f"({_CHECKBOX_BY_TEXT_JS})({_json.dumps(text)}, {_json.dumps(bool(checked))})",
+                    "returnByValue": True}, session_id=cdp.session_id)
+        r = (out.get("result") or {}).get("value") or {}
+    except Exception as exc:
+        return ActionResult(error=f"Checkbox “{text}”: {str(exc)[:160]}")
+    word = "ticked" if checked else "unticked"
+    if not r.get("found"):
+        return ActionResult(error=f"No checkbox next to the words “{text}” — use a shorter exact phrase from the label. "
+                                  "If the form sits inside an embedded frame, open the form's own page first.")
+    name = r.get("label") or text
+    if r.get("state") == checked:
+        return ActionResult(extracted_content=f"Checkbox “{name}” is {'already ' if r.get('already') else 'now '}{word}.")
+    return ActionResult(error=f"Found “{name}” but could not change it — click its visible text once instead.")
+
+
 def _build_tools() -> Any:
     from browser_use import ActionResult, Controller
     controller = Controller()
+
+    @controller.action("Tick or untick a checkbox / toggle / switch by its index, and verify it changed. "
+                       "Use this instead of click for every checkbox.")
+    async def set_checkbox(index: int, checked: bool, browser_session) -> ActionResult:
+        return await _set_checkbox(browser_session, index, checked)
+
+    @controller.action("Tick or untick a checkbox / radio / toggle by the words written next to it, e.g. "
+                       "text='I agree to the privacy policy'. Use this when the box is not in the element list "
+                       "(custom-styled boxes are often hidden) or set_checkbox could not find it.")
+    async def set_checkbox_by_text(text: str, checked: bool, browser_session) -> ActionResult:
+        return await _set_checkbox_by_text(browser_session, text, checked)
 
     @controller.action("Read verification code from email and return it")
     async def get_email_otp(email_address: str, sender_filter: str = "", timeout_seconds: int = 30) -> ActionResult:
@@ -457,11 +609,45 @@ def _build_tools() -> Any:
     return controller
 
 
+# Calling codes for the countries candidates here usually live in; others fall back to the number as written.
+_CALLING_CODES = {"india": "+91", "united states": "+1", "usa": "+1", "canada": "+1", "united kingdom": "+44", "uk": "+44",
+                  "singapore": "+65", "united arab emirates": "+971", "uae": "+971", "germany": "+49", "australia": "+61"}
+
+
+def prefs_country(profile: dict) -> str:
+    return ((profile.get("preferences") or {}).get("home_country") or "").strip()
+
+
+def split_phone(phone: str, country: str = "") -> tuple[str, str]:
+    """'+91 80747 49058' → ('+91', '8074749058'); '08074749058' with India → ('+91', '8074749058')."""
+    raw = (phone or "").strip()
+    digits = re.sub(r"\D", "", raw)
+    if not digits:
+        return "", ""
+    if raw.startswith("+") or raw.startswith("00"):
+        if raw.startswith("00"):
+            digits = digits[2:]
+        for code in sorted({c.lstrip("+") for c in _CALLING_CODES.values()}, key=len, reverse=True):
+            if digits.startswith(code) and 7 <= len(digits) - len(code) <= 12:
+                return "+" + code, digits[len(code):]
+        m = re.match(r"\+?\s*(\d{1,3})[\s\-()]+(.+)", raw.lstrip("0"))
+        return ("+" + m.group(1), re.sub(r"\D", "", m.group(2))) if m else ("", digits)
+    code = _CALLING_CODES.get(country.lower(), "")
+    if code == "+91":
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        digits = digits.lstrip("0") if len(digits) == 11 else digits
+    return code, digits
+
+
 def _profile_block(profile: dict) -> str:
     edu = "\n".join(
-        f"  • {ed.get('degree', '')} — {ed.get('institution', '')} ({ed.get('start', '')} – {ed.get('end', '')})"
-        + (f", Grade: {ed.get('grade')}" if ed.get("grade") else "")
+        f"  • {ed.get('degree', '')} ({ed.get('start', '')} – {ed.get('end', '')})"
+        + f"\n    - College / school attended: {ed.get('institution') or '(not given)'}"
+        + f"\n    - Affiliated / degree-awarding university: {ed.get('university') or '(not given — same as the college, or not stated)'}"
+        + (f"\n    - Grade: {ed.get('grade')}" if ed.get("grade") else "")
         for ed in profile.get("education", [])) or "  (Not provided)"
+    code, national = split_phone(profile.get("phone", ""), prefs_country(profile))
     exp = "\n".join(
         f"  • {e.get('role', '')} at {e.get('company', '')} ({e.get('start', '')} – {e.get('end') or 'Present'})"
         + "".join(f"\n    - {b}" for b in (e.get("bullets") or [])[:3])
@@ -488,7 +674,9 @@ def _profile_block(profile: dict) -> str:
     return f"""=== CANDIDATE ===
 - Full name: {profile.get('name', '')}
 - Email: {profile.get('email', '')}
-- Phone: {profile.get('phone', '')}
+- Phone (full, international): {(code + ' ' + national).strip() if national else profile.get('phone', '')}
+- Phone country code: {code or '(unknown)'}
+- Phone number WITHOUT country code: {national or profile.get('phone', '')}
 - Current location: {profile.get('location', '')}
 - Home country: {prefs.get('home_country', '')}
 - Languages: {', '.join(langs) if isinstance(langs, list) else langs}
@@ -526,7 +714,7 @@ BASIC RULES:
 2. Use the Q&A answers for dropdown/select/radio/input questions about salary, CTC, notice period, work authorization, etc.
 3. Do NOT fill in Current CTC or Expected CTC unless the application form explicitly asks.
 4. If a generic "salary" is asked, prioritize expected salary / expected CTC.
-5. For education and work experience fields, use the detailed history provided above.
+5. For education and work experience fields, use the detailed history provided above (see EDUCATION and PHONE rules below).
 6. Upload files with the `upload_file` action (give the file input's index and the exact path):
    - Resume / CV / "Resume/CV" upload → the RESUME file below (one page, tailored to this job).
    - Cover letter upload → the COVER LETTER file. If there is a cover letter text box instead, paste a short version of it.
@@ -551,7 +739,35 @@ DATE / CALENDAR FIELD RULES:
 - If a date field has a calendar popup, try clicking the input first, then type the date directly — most modern datepickers accept typed input.
 - Format dates as MM/DD/YYYY unless the field clearly shows a different format.
 
+EDUCATION RULES (college vs university — they are different things):
+- "College", "School", "Institute", "Institution name" → the COLLEGE / SCHOOL ATTENDED above.
+- "University", "Affiliated university", "Board", "Degree awarded by" → the AFFILIATED UNIVERSITY above.
+  If no university is given, use the college name there too.
+- If there is only ONE field ("School / University", "Education institution"), enter the college attended.
+- For a college / university dropdown or autocomplete: FIRST search for the exact college name (type it, or its distinctive
+  part, e.g. "CVR College" — not just "College of Engineering"), wait for suggestions and pick the matching one. Try one
+  short variant or common abbreviation if nothing matches (e.g. "JNTU" for "Jawaharlal Nehru Technological University").
+  Only if it is truly not in the list, choose "Other" / "Not listed" and type the full name in the text box that appears.
+  Never pick a different college or the university in place of the college.
+
+PHONE RULES:
+- Look at the phone field first. If the form has a SEPARATE country-code picker or prefix box (a flag, "+1" dropdown,
+  "Country code" field), set it to the candidate's country code above and type ONLY the number WITHOUT country code.
+- If the field already shows a prefix such as "+91" inside or beside the input, type only the number without the code.
+- If it is a single plain phone field with no country code shown, type the full international number (with the code).
+- Never type the country code twice (no "+91 +91…" or "9191…"), no leading 0 before the number.
+
 RADIO BUTTON / CHECKBOX RULES:
+- To tick or untick a checkbox (or a toggle / switch), use the `set_checkbox` action with the box's index and
+  checked=true/false. It verifies the box really changed. Do not click checkboxes repeatedly: a second click unticks it.
+- Required consent boxes ("I agree to the privacy policy / terms", "I confirm the information is correct") → tick them.
+- Marketing / newsletter / "send me job alerts" boxes → leave unticked unless required.
+- For a group of checkboxes (e.g. skills, locations, "which roles interest you"), tick only the options that match the
+  candidate; for a radio group, pick exactly one.
+- Custom-styled checkboxes are often NOT in the element list at all. If you cannot find the box's index (or
+  `set_checkbox` says it is not a checkbox), use `set_checkbox_by_text` with a short exact phrase from its label,
+  e.g. text="I agree to the privacy policy". The same action works for radio options ("Yes", "Immediate joiner").
+- If both report they could not change the box, click its visible text once, then move on.
 - For "Yes/No" questions about work authorization, visa sponsorship, etc., use the Work Authorization Rule below.
 - For gender/ethnicity questions, these are usually optional — skip unless required.
 - For "How did you hear about us?" dropdowns, select "LinkedIn" or "Job Board" if available.

@@ -296,6 +296,20 @@ flowchart TD
 - 💾 **Saved state.** Status, the kit, every step and the last page are stored in the database — reload the app, restart it, or switch tabs and pick up right where you were.
 - 🐢 **Polite pacing.** A small pause between steps looks human and keeps you inside free AI limits (`BROWSER_STEP_DELAY_S`).
 
+**Forms Indian applications actually have** 🇮🇳
+
+- ☑️ **Checkboxes that really tick.** Many sites hide the real checkbox and draw a styled one, so it never appears in the
+  agent's element list. The agent has two actions for this: `set_checkbox` (by element) and `set_checkbox_by_text`
+  (by the words next to the box — finds hidden boxes, ARIA switches and same-site frames). Both read the box's real
+  state before and after, so a second click never unticks a consent box by accident.
+- 🎓 **College ≠ university.** Your profile keeps the college you attended and its affiliating university separately
+  (e.g. *CVR College of Engineering*, affiliated to *JNTU Hyderabad*). A "College" field gets the college, a
+  "University" field the university. In a dropdown the agent first searches for your exact college name (and one short
+  variant), and only picks "Other" and types it when it is truly not listed.
+- 📞 **Phone numbers without double codes.** The agent gets your number split into country code (+91) and the number.
+  If the form has a separate country-code picker or a "+91" prefix, it types only the 10 digits; a single plain field
+  gets the full international number — never "+91 +91…".
+
 <details>
 <summary><b>🛡️ Stealth & safety details</b></summary>
 <br/>
@@ -503,7 +517,7 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 
 | Source | Trust | How it is used |
 |--------|-------|----------------|
-| **Employer ATS APIs** — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, **Workday** (most GCCs), **Keka** (many Indian product companies) | First-party, **verified** | Structured postings; re-verified live by job id (a closed job disappears from the board / returns 404) |
+| **Employer ATS APIs** — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, **Workday** (most GCCs), **Oracle Recruiting** (JPMorgan and other large employers — filtered to India on the board itself), **Keka** (many Indian product companies) | First-party, **verified** | Structured postings; re-verified live by job id (a closed job disappears from the board / returns 404) |
 | **Company watchlist** — 130 researched Hyderabad / Bengaluru / remote-India employers | Researched, sources linked | Their boards are read on every search and every 4 hours in the background; the research card is shown on each of their jobs |
 | **schema.org JobPosting** on a page | Verified when the hiring organisation's site is the page's site; otherwise inferred | Title, company, location, dates, `validThrough`, remote eligibility, salary |
 | **Other pages** (job boards, aggregators) | Unverified | Text only; if the page links to a supported ATS posting, that posting is used instead |
@@ -525,6 +539,29 @@ pages, and they rank by meaning. **Deep Search** (`tools/deep_search.py`) does t
    Kilo's free models when you have no key).
 
 Search queries now run 3 at a time, so a full search finishes much faster than one by one.
+
+### 🧠 Smart search (the default)
+
+Measured on the same India job queries (Oct 2026), Deep Search returned the most single job postings (16 of 30) and the
+fewest job-board list pages; the keyed APIs mostly returned Naukri / LinkedIn / Indeed result pages (Exa: 19 of 30).
+So **Smart** runs **Deep Search and one keyed provider together for every query** (keyed ones rotate so their free
+credits are shared), merges the two lists, keeps at most 3 results per site, and lets the AI rank the combined list once.
+With no keys it is simply Deep Search. *Fallback*, *Spread* and *Combine* are still in **Settings → Web search**.
+
+After search, the pipeline keeps only what is worth your time:
+
+1. **Skip job lists before reading them** — results titled "84 Linux jobs in Hyderabad" or "(426 open roles)" are lists,
+   not jobs; results that name only a foreign place are skipped too.
+2. **Location check for every posting** — web-search postings get the same "is this in your places (or remote from
+   India)?" check as company-board jobs. "Remote · Belgium" means remote *in Belgium*.
+3. **AI shortlist** — one quick AI call scores every posting 0–3 for *is this the candidate's field and level?* (not
+   shared words like "Engineer"), so the deep analysis is spent on the right 60 jobs.
+4. **Fair skill check** — skills named in your experience text count, everyday tools implied by a broader skill count as
+   related (Linux → SSH, sudo, systemd, Ubuntu…), and a long "mandatory" tool list only rules a job out when most of it
+   is missing. A short, explicit must-have still does.
+
+On a 12-year Linux / HPC infrastructure profile in Hyderabad this took a search from **5 to 22 recommended jobs**, all in
+India (JPMorgan, Notion, Freshworks, HighRadius, S&P Global…), where before most web results were in the US or Europe.
 
 Search providers are tried in priority order (primary first, DuckDuckGo last) with zero-spend protection
 (`tools/zero_spend.py`) and a usage ledger. All fetching of untrusted URLs goes through an SSRF-safe client

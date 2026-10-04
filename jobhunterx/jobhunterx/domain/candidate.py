@@ -71,13 +71,14 @@ class Experience(_Lenient):
 
 class Education(_Lenient):
     degree: str = ""
-    institution: str = ""
+    institution: str = ""          # the college / school actually attended, e.g. "CVR College of Engineering"
+    university: str = ""           # the affiliating / degree-awarding university if different, e.g. "JNTU Hyderabad"
     start: str = ""
     end: str = ""
     grade: str = ""
     details: str = ""
 
-    _s = field_validator("degree", "institution", "start", "end", "grade", "details", mode="before")(_coerce_str)
+    _s = field_validator("degree", "institution", "university", "start", "end", "grade", "details", mode="before")(_coerce_str)
 
 
 class Link(_Lenient):

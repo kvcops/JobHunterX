@@ -575,7 +575,7 @@ class DeepSearchProvider(BaseSearchProvider):
         from jobhunterx.tools import deep_search
         cost = self.calculate_worst_case_cost({"query": query})
         try:
-            hits = await deep_search.search(query, max_results=max_results)
+            hits = await deep_search.search(query, max_results=max_results, use_ai=(config or {}).get("DEEP_USE_AI", True))
         except Exception as exc:
             log.warning("deep_search_failed", error=str(exc)[:120])
             return ProviderSearchResponse(provider_name=self.name, verdict=TransportVerdict.TEMPORARY_PROVIDER_ERROR,
