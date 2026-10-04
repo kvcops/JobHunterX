@@ -10,6 +10,7 @@ from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import MatchAssessment
 from jobhunterx.intelligence import job as job_ai
+from jobhunterx.intelligence import skill_links
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 
 VIEWS = {
@@ -157,6 +158,9 @@ async def rescore(job_id: str, snapshot: CandidateSnapshot, profile_dict: dict, 
         await storage.update_posting(p)
     fits = await job_ai.assess_role_fit(snapshot, [p], use_llm=use_llm)
     text = candidate_work_text(profile_dict)
+    if use_llm:
+        await skill_links.resolve(snapshot, [p], text)
+        await storage.update_posting(p)
     m = assess(snapshot, p, role_fit=fits[p.id], candidate_text=text, idf=build_idf([p.description, text]))
     await storage.update_match(job_id, m)
     return True
@@ -175,6 +179,8 @@ async def verify(job_id: str, snapshot: Optional[CandidateSnapshot], profile_dic
     if snapshot and profile_dict:
         text = candidate_work_text(profile_dict)
         role_fit = (m.role_fit, m.role_track, "", m.method) if m else (await job_ai.assess_role_fit(snapshot, [p]))[p.id]
+        await skill_links.resolve(snapshot, [p], text)
+        await storage.update_posting(p)
         await storage.update_match(job_id, assess(snapshot, p, role_fit=role_fit, candidate_text=text,
                                                   idf=build_idf([p.description, text])))
     return True

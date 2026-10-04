@@ -28,6 +28,7 @@ from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
 from jobhunterx.intelligence import job as job_ai
+from jobhunterx.intelligence import skill_links
 from jobhunterx.intelligence.llm_structured import call_structured
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 from jobhunterx.intelligence.policy import get_policy
@@ -551,6 +552,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                               + (f" and {n_req} required skills" if n_req else ""), "info", ref)
             validate.finalize(p)   # extraction may reveal closed / not-a-posting
         fits = await job_ai.assess_role_fit(snap, chunk)
+        linked = await skill_links.resolve(snap, chunk, text)     # other names / related skills, web lookup if new
+        if linked:
+            await run.say("match", f"Linked {linked} job skills to your experience under other names or related skills", "info")
         for p in chunk:
             m = assess(snap, p, role_fit=fits[p.id], candidate_text=text, idf=idf)
             if p.validation.status == "invalid":

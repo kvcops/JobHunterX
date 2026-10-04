@@ -75,12 +75,19 @@ _IMPLIED_BY: dict[str, tuple[str, ...]] = {
 
 
 def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, pol: Policy,
-                  index: dict[str, SkillEvidence], candidate_text: str = "") -> tuple[float, Optional[SkillEvidence], bool]:
+                  index: dict[str, SkillEvidence], candidate_text: str = "",
+                  link: Optional[dict] = None) -> tuple[float, Optional[SkillEvidence], bool]:
     """Return (credit 0–1, candidate skill matched, via_adjacent)."""
     forms = {norm_term(x) for x in [name, *aliases] if x}
     for f in forms:
         if f in index:
             return index[f].strength or pol.credit_listed_only, index[f], False
+    # the AI-judged link (same skill under another name / related experience), see intelligence/skill_links.py
+    ev = index.get(norm_term((link or {}).get("via", "")))
+    if ev and link.get("relation") == "same":
+        return ev.strength or pol.credit_listed_only, ev, False
+    if ev and link.get("relation") == "related":
+        return pol.credit_adjacent * max(ev.strength, pol.credit_listed_only), ev, True
     for s in snapshot.skills:
         if forms & {norm_term(a) for a in s.adjacent}:
             return pol.credit_adjacent * max(s.strength, pol.credit_listed_only), s, True
@@ -95,11 +102,11 @@ def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, po
 
 
 def _coverage(skills: list[str], aliases: dict[str, list[str]], snapshot: CandidateSnapshot, pol: Policy,
-              candidate_text: str = ""):
+              candidate_text: str = "", links: Optional[dict[str, dict]] = None):
     index = snapshot.skill_index()
     matched, partial, missing, credits = [], [], [], []
     for name in skills:
-        c, ev, adj = _skill_credit(name, aliases.get(name, []), snapshot, pol, index, candidate_text)
+        c, ev, adj = _skill_credit(name, aliases.get(name, []), snapshot, pol, index, candidate_text, (links or {}).get(name))
         credits.append(c)
         if c and not adj:
             matched.append(name)
@@ -338,8 +345,10 @@ def assess(
 
     # --- 5. Skills ---------------------------------------------------------
     partial_method = req.method != "llm"
-    req_score, matched_r, partial_r, missing_r = _coverage(req.required_skills, req.skill_aliases, snapshot, pol, candidate_text or "")
-    pref_score, matched_p, partial_p, missing_p = _coverage(req.preferred_skills, req.skill_aliases, snapshot, pol, candidate_text or "")
+    req_score, matched_r, partial_r, missing_r = _coverage(req.required_skills, req.skill_aliases, snapshot, pol,
+                                                           candidate_text or "", req.skill_links)
+    pref_score, matched_p, partial_p, missing_p = _coverage(req.preferred_skills, req.skill_aliases, snapshot, pol,
+                                                            candidate_text or "", req.skill_links)
     if partial_method:
         unknowns.append("Job requirements could not be fully analysed (AI unavailable) — skill coverage is partial")
         comps.append(ScoreComponent(key="skills_required", label="Required skills", weight=pol.weights.skills_required,

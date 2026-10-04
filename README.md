@@ -559,6 +559,12 @@ After search, the pipeline keeps only what is worth your time:
 4. **Fair skill check** — skills named in your experience text count, everyday tools implied by a broader skill count as
    related (Linux → SSH, sudo, systemd, Ubuntu…), and a long "mandatory" tool list only rules a job out when most of it
    is missing. A short, explicit must-have still does.
+5. **Skills under other names, and new ones** — for every job skill that doesn't match by name, the AI decides whether
+   you already have it under another name (*same*: "Generative AI" for someone doing LLM / RAG work, "Vector databases"
+   for FAISS) or have real related experience (*related*: CrewAI or Google ADK for LangGraph, A2A for MCP), and names
+   the skill of yours behind it. If the model finds no link — often because a tool is newer than the model — the app
+   reads a short description of it on the web and asks again. Every answer is remembered on disk
+   (`intelligence/skill_links.py`), so a relationship is learned once and reused for every job and later search.
 
 On a 12-year Linux / HPC infrastructure profile in Hyderabad this took a search from **5 to 22 recommended jobs**, all in
 India (JPMorgan, Notion, Freshworks, HighRadius, S&P Global…), where before most web results were in the US or Europe.

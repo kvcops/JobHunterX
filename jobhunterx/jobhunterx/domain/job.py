@@ -98,6 +98,8 @@ class Requirements(BaseModel):
     preferred_skills: list[str] = Field(default_factory=list)
     must_have_skills: list[str] = Field(default_factory=list)     # subset of required stated as mandatory
     skill_aliases: dict[str, list[str]] = Field(default_factory=dict)
+    # job skill → {"relation": "same"|"related", "via": candidate skill, "why": …}, set by intelligence/skill_links.py
+    skill_links: dict[str, dict] = Field(default_factory=dict)
     experience_min: Optional[float] = None
     experience_max: Optional[float] = None
     experience_evidence: str = ""
