@@ -383,12 +383,14 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
   display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; transition: color .25s; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--ink); }
-/* small tab bars (e.g. the job list) never scroll sideways: tabs share the width, tighten when narrow, wrap only on tiny screens */
-.tabs-sm { width: 100%; overflow: visible; flex-wrap: wrap; }
-.tabs-sm .tab { padding: 5px 12px; font-size: .8rem; flex: 1 1 auto; justify-content: center; gap: 5px; }
+.tabs-sm .tab { padding: 5px 12px; font-size: .8rem; }
+/* job list tabs: always one row of six equal tabs, label on top and count below, so the bar keeps its size when
+   counts grow (9 -> 145) and never scrolls or wraps; only a very narrow column switches to a 3 x 2 grid */
 .results { container-type: inline-size; }
-@container (max-width: 470px) { .tabs-sm .tab { padding: 5px 7px; font-size: .76rem; gap: 4px; } }
-@container (max-width: 380px) { .tabs-sm { display: grid; grid-template-columns: repeat(3, 1fr); border-radius: 18px; } }   /* phones: a tidy 3 x 2 */
+.results > .tabs-sm { width: 100%; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; overflow: visible; }
+.results > .tabs-sm .tab { flex-direction: column; justify-content: center; gap: 1px; min-width: 0; padding: 5px 2px; font-size: .76rem; line-height: 1.15; }
+.results > .tabs-sm .tab-count { font-size: .66rem; }
+@container (max-width: 330px) { .results > .tabs-sm { grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: 18px; } }
 .tab-count { font-family: var(--mono); font-size: .7rem; color: var(--text-3); }
 .tab.active .tab-count { color: var(--accent); }
 
@@ -984,7 +986,7 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 .mc-stats .hl .n { color: var(--accent); } .mc-stats .l { font-size: .72rem; color: var(--text-2); }
 
 .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-.feed-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; }
+.feed-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex: none; flex-wrap: wrap; }
 .feed-title { display: inline-flex; align-items: center; gap: 8px; font-size: .9rem; font-weight: 600; color: var(--ink); }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); animation: livePulse 1.4s infinite; }
 .feed-list { list-style: none; margin: 0; padding: 2px 4px 8px 0; flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; scrollbar-width: thin;
@@ -1362,7 +1364,7 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 
 /* ------------------------------------------------------------------ activity view toggle */
 .view-toggle { display: inline-flex; padding: 3px; gap: 2px; border-radius: 99px; background: var(--card-hi); border: 1px solid var(--line); }
-.view-toggle button { all: unset; display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 99px; font-size: .78rem; color: var(--text-2); cursor: pointer; transition: background .2s, color .2s; }
+.view-toggle button { all: unset; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding: 5px 11px; border-radius: 99px; font-size: .78rem; color: var(--text-2); cursor: pointer; transition: background .2s, color .2s; }
 .view-toggle button.on { background: var(--card-solid); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.08); font-weight: 500; }
 .view-toggle button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
@@ -1525,3 +1527,56 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .aw3d-tag.talking .aw3d-say { animation: pop .3s var(--spring); }
 .aw3d-tag .aw3d-say { color: var(--ink); border-color: hsl(var(--h) 70% 62%); max-width: 240px; font-weight: 500; }
 .aw3d-btn[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+/* agents office: rooms, office talk, robot card */
+.aw3d-tag .aw3d-say.is-chat { font-weight: 400; font-style: italic; color: var(--text-2); border-style: dashed; border-color: hsl(var(--h) 45% 70%); }
+.aw3d-tag.is-selected .aw3d-name { border-color: hsl(var(--h) 75% 55%); box-shadow: 0 0 0 3px hsl(var(--h) 80% 60% / .28), 0 4px 12px -6px rgba(0, 0, 0, .3); }
+.aw3d-rooms { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.aw3d-chip { all: unset; pointer-events: auto; cursor: pointer; font-size: .72rem; padding: 5px 11px; border-radius: 99px; color: var(--text-2);
+  background: color-mix(in srgb, var(--card-solid) 86%, transparent); border: 1px solid var(--line); backdrop-filter: blur(6px); white-space: nowrap; }
+.aw3d-chip:hover { color: var(--ink); border-color: var(--line-strong); }
+.aw3d-chip[aria-pressed="true"] { color: var(--ink); font-weight: 500; border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.aw3d-chip:focus-visible, .aw3d-x:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.aw3d-x { all: unset; cursor: pointer; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 8px; font-size: 1.05rem; line-height: 1; color: var(--text-2); }
+.aw3d-x:hover { background: var(--card-hi); color: var(--ink); }
+.aw3d-log { position: absolute; top: 46px; right: 10px; bottom: 54px; width: min(300px, 46%); display: flex; flex-direction: column; border-radius: 16px;
+  background: color-mix(in srgb, var(--card-solid) 94%, transparent); border: 1px solid var(--line); backdrop-filter: blur(10px);
+  box-shadow: 0 18px 40px -22px rgba(0, 0, 0, .45); animation: pop .3s var(--spring); z-index: 1100; }
+.aw3d-log-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 10px 10px 8px 14px; border-bottom: 1px solid var(--line); }
+.aw3d-log-head > div { display: flex; flex-direction: column; gap: 1px; }
+.aw3d-log-head strong { font-size: .82rem; font-weight: 600; color: var(--ink); }
+.aw3d-log-list { list-style: none; margin: 0; padding: 8px 10px 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.aw3d-log-list li { display: flex; flex-direction: column; gap: 2px; padding: 7px 9px; border-radius: 10px; border-left: 3px solid hsl(var(--h) 65% 58%);
+  background: color-mix(in srgb, hsl(var(--h) 60% 60%) 7%, transparent); font-size: .74rem; line-height: 1.35; }
+.aw3d-log-list li.is-chat { border-left-style: dashed; }
+.aw3d-log-list li.is-chat .what { font-style: italic; color: var(--text-2); }
+.aw3d-log-list .who { display: flex; align-items: center; gap: 6px; font-weight: 500; color: var(--ink); font-size: .72rem; }
+.aw3d-log-list .who .dot { width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--h) 70% 55%); }
+.aw3d-log-list .when { margin-left: auto; font-weight: 400; font-size: .64rem; color: var(--text-3); font-family: var(--mono); }
+.aw3d-log-list .what { color: var(--text); }
+.aw3d-log-list li.aw3d-log-empty { border: 0; background: none; color: var(--text-3); font-size: .74rem; }
+.aw3d-log-list li.aw3d-log-end { padding: 0; border: 0; background: none; }
+.aw3d-card { position: absolute; left: 10px; bottom: 54px; width: min(320px, calc(100% - 20px)); padding: 12px 12px 12px 14px; border-radius: 16px; z-index: 1100;
+  background: color-mix(in srgb, var(--card-solid) 95%, transparent); border: 1px solid hsl(var(--h) 55% 70%); backdrop-filter: blur(10px);
+  box-shadow: 0 18px 40px -22px rgba(0, 0, 0, .5); animation: pop .3s var(--spring); display: flex; flex-direction: column; gap: 6px; }
+.aw3d-card-head { display: flex; align-items: center; gap: 8px; }
+.aw3d-card-head .dot { width: 10px; height: 10px; border-radius: 50%; background: hsl(var(--h) 70% 55%); box-shadow: 0 0 0 3px hsl(var(--h) 80% 60% / .22); }
+.aw3d-card-head strong { font-size: .9rem; font-weight: 600; color: var(--ink); }
+.aw3d-card-head .aw3d-x { margin-left: auto; }
+.aw3d-state { font-size: .66rem; padding: 2px 8px; border-radius: 99px; background: var(--card-hi); color: var(--text-2); }
+.aw3d-state.is-running { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.aw3d-state.is-done { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.aw3d-card-role { margin: 0; font-size: .76rem; color: var(--text-2); }
+.aw3d-card-metric { font-family: var(--mono); font-size: .74rem; color: var(--ink); }
+.aw3d-card-lines { margin: 2px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 3px; font-size: .72rem; color: var(--text); line-height: 1.35; }
+@container aw3dframe (max-width: 620px) {
+  .aw3d-rooms .aw3d-chip { font-size: .66rem; padding: 4px 8px; }
+  .aw3d-log { width: calc(100% - 20px); top: auto; height: 46%; }
+  .aw3d-hint .muted { display: none; }
+}
+/* the expanded agents office covers everything, including the sidebar (which otherwise sits above the main panel) */
+:root:has(.aw3d.is-big) .sidebar { z-index: 0; }
+/* the agents' office opened with no search running */
+.mission.idle.office { align-items: stretch; justify-content: flex-start; text-align: left; gap: 12px; padding: 18px 20px; }
+.mission.idle.office .aw3d { min-height: 360px; }
+@container aw3dframe (max-height: 340px) { .aw3d-rooms { display: none; } }      /* small panel: rooms live in the expanded view */

@@ -217,11 +217,26 @@ function LiveFeed({ active, run }) {
   </section>`;
 }
 
+const OFFICE_KEY = 'jhx.office';
+const readOffice = () => { try { return localStorage.getItem(OFFICE_KEY) === '1'; } catch { return false; } };
+const IDLE_RUN = { id: 'idle', status: 'idle', counts: {}, total: 0, activity: [],
+  stages: ['understand', 'plan', 'discover', 'normalize', 'dedupe', 'validate', 'extract', 'match', 'rank'].map((key) => ({ key, status: 'pending' })) };
+
 function MissionControl() {
   const run = useStore((s) => s.search.run);
   const counts = useStore((s) => s.list.counts) || {};
   const firstId = useStore((s) => s.list.ids[0]);
   const [plan, setPlan] = useState(false);
+  const [office, setOffice] = useState(readOffice);
+  const toggleOffice = (on) => { setOffice(on); try { localStorage.setItem(OFFICE_KEY, on ? '1' : '0'); } catch { /* storage unavailable */ } };
+  if (!run && office) {
+    // no search yet: the agents' office is open anyway — everyone is on a break (nothing here claims search progress)
+    return html`<div class="mission idle office">
+      <div class="row space"><span class="feed-title">Agents' office · no search running</span>
+        <button type="button" class="link-btn small" onClick=${() => toggleOffice(false)}>Close the office</button></div>
+      <${AgentWorld} run=${IDLE_RUN} items=${[]} />
+    </div>`;
+  }
   if (!run) {
     return html`<div class="mission idle">
       <${Orb} size=${170} active=${false} />
@@ -232,6 +247,7 @@ function MissionControl() {
         <div><span class="n"><${CountUp} value=${counts.saved || 0} /></span><span class="l">saved</span></div>
         <div><span class="n"><${CountUp} value=${counts.applied || 0} /></span><span class="l">applied</span></div>
       </div>
+      <button type="button" class="link-btn" onClick=${() => toggleOffice(true)}>Visit the agents' office</button>
     </div>`;
   }
   const active = ACTIVE.has(run.status);

@@ -85,35 +85,49 @@ const reduced = () => {
   return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 };
 
+const ROOMS = [['all', 'Whole office'], ['work', 'Work floor'], ['meeting', 'Meeting room'], ['pantry', 'Pantry'], ['server', 'Server room']];
+const WHERE = { work: 'on the work floor', pantry: 'in the pantry', server: 'in the server room', meet: 'in the meeting room', hall: 'in the hallway' };
+const LOG_KEEP = 80;
+
 /**
- * The 3D world: Three.js renders the island and characters; name tags and speech bubbles are
- * plain HTML that follows each character's head every frame (positions are written straight to
- * the elements, so following the camera never re-renders the app).
+ * The 3D world: Three.js renders the office and the robots; name tags and speech bubbles are plain HTML that follows
+ * each robot's head every frame (positions are written straight to the elements, so the app never re-renders for it).
+ * Work lines come from the real run; "chat" lines are the robots' break-time talk and are marked as such in the log.
  */
 function World3D({ run, items, states, lastLine }) {
   const host = useRef(null);
   const world = useRef(null);
   const tags = useRef({});
+  const where = useRef({});
+  const logEnd = useRef(null);
   const [mode, setMode] = useState('loading');      // loading | ready | fallback
   const [big, setBig] = useState(false);
   const [follow, setFollow] = useState(true);
-  const [said, setSaid] = useState({});             // agent key -> { text, until }: what each robot is saying right now
+  const [room, setRoom] = useState('all');
+  const [showLog, setShowLog] = useState(false);
+  const [log, setLog] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [said, setSaid] = useState({});             // agent key -> { text, until, kind }: what each robot is saying now
   const [, tick] = useState(0);
   const c = run.counts || {};
 
   useEffect(() => {
     let alive = true;
-    const onSay = (key, text, secs) => {
-      setSaid((cur) => ({ ...cur, [key]: { text, until: Date.now() + secs * 1000 } }));
+    let seq = 0;
+    const onSay = (key, text, secs, kind = 'work') => {
+      setSaid((cur) => ({ ...cur, [key]: { text, until: Date.now() + secs * 1000, kind } }));
+      setLog((cur) => [...cur, { id: ++seq, key, text, kind, at: new Date() }].slice(-LOG_KEEP));
       setTimeout(() => alive && tick((n) => n + 1), secs * 1000 + 50);
     };
+    const onSelect = (key) => alive && setSelected(key);
     import('./world3d.js')
-      .then((m) => m.createWorld(host.current, { dark: isDark(), reducedMotion: reduced(), onSay }))
+      .then((m) => m.createWorld(host.current, { dark: isDark(), reducedMotion: reduced(), onSay, onSelect }))
       .then((w) => {
         if (!alive) { w.dispose(); return; }
         world.current = w;
         w.onFrame((pos) => {
           for (const [key, pt] of Object.entries(pos)) {
+            where.current[key] = pt;
             const el = tags.current[key];
             if (!el) continue;
             el.style.transform = `translate(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px) translate(-50%, -100%)`;
@@ -129,30 +143,44 @@ function World3D({ run, items, states, lastLine }) {
     return () => { alive = false; mo.disconnect(); if (world.current) world.current.dispose(); world.current = null; };
   }, []);
 
-  // live run -> world: stage states every render, new activity lines become scenes
+  // live run -> world: stage states and real numbers every render; new activity lines become scenes
   useEffect(() => {
     const w = world.current;
     if (!w) return;
     w.update(Object.fromEntries(DESKS.map((d, i) => [STAGE_KEY[d.key], states[i]])),
-      { scoredRatio: run.total ? Math.min(1, (c.scored || 0) / run.total) : 0 });
+      { scoredRatio: run.total ? Math.min(1, (c.scored || 0) / run.total) : 0, counts: c, status: run.status, total: run.total || 0 });
     const active = ['queued', 'running'].includes(run.status);
     const justFinished = run.finished_at && Date.now() - Date.parse(run.finished_at) < 30000;
     const young = run.started_at && Date.now() - Date.parse(run.started_at) < 180000;
-    // a search that started in the last few minutes is replayed from the start; older ones from the latest events
     w.feed(items, run.id, !active, young && (active || justFinished) ? 'all' : (active || justFinished));
   });
   useEffect(() => { if (world.current) world.current.setFollow(follow); }, [follow, mode]);
+  useEffect(() => { if (showLog && logEnd.current) logEnd.current.scrollIntoView({ block: 'end' }); }, [log, showLog]);
+  // the selected robot's card shows where it is; refresh that twice a second while a card is open
+  useEffect(() => {
+    if (!selected) return undefined;
+    const t = setInterval(() => tick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, [selected]);
 
   useEffect(() => {
     if (!big) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') setBig(false); };
+    const onKey = (e) => { if (e.key === 'Escape') { if (selected) world.current && world.current.select(null); else setBig(false); } };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [big]);
+  }, [big, selected]);
 
   if (mode === 'fallback') return html`<${AgentDesks} run=${run} items=${items} states=${states} lastLine=${lastLine} />`;
   const now = Date.now();
   const busy = DESKS.filter((_, i) => states[i] === 'running').map((d) => d.name);
+  const goRoom = (r) => { setRoom(r); if (world.current) world.current.view(r); };
+  const selIdx = selected ? DESKS.findIndex((d) => STAGE_KEY[d.key] === selected) : -1;
+  const selDesk = selIdx >= 0 ? DESKS[selIdx] : null;
+  const selLines = selDesk ? items.filter((it) => selDesk.stages.includes(it.stage)).slice(-3).reverse() : [];
+  const selWhere = selected && where.current[selected];
+  const selMetric = selDesk ? selDesk.metric(c, run) : null;
+  const deskOf = (key) => DESKS.find((d) => STAGE_KEY[d.key] === key) || DESKS[0];
+  const stateWord = (st) => (st === 'running' ? 'working now' : st === 'done' ? 'finished' : st === 'failed' ? 'stopped' : 'waiting');
   return html`<div class=${`aw3d ${big ? 'is-big' : ''}`} aria-label="Agents at work, in 3D">
     ${big ? html`<div class="aw3d-backdrop" onClick=${() => setBig(false)}></div>` : null}
     <div class="aw3d-frame">
@@ -161,21 +189,44 @@ function World3D({ run, items, states, lastLine }) {
         ${DESKS.map((d, i) => {
           const st = states[i];
           const key = STAGE_KEY[d.key];
-          const say = said[key] && said[key].until > now ? said[key].text : null;
-          return html`<div key=${d.key} class=${`aw3d-tag is-${st} ${say ? 'talking' : ''}`} style=${{ '--h': d.hue, opacity: 0 }} ref=${(el) => { tags.current[key] = el; }}>
-            ${say ? html`<div class="aw3d-say">${say}</div>` : null}
+          const say = said[key] && said[key].until > now ? said[key] : null;
+          return html`<div key=${d.key} class=${`aw3d-tag is-${st} ${say ? 'talking' : ''} ${selected === key ? 'is-selected' : ''}`} style=${{ '--h': d.hue, opacity: 0 }} ref=${(el) => { tags.current[key] = el; }}>
+            ${say ? html`<div class=${`aw3d-say ${say.kind === 'chat' ? 'is-chat' : ''}`}>${say.text}</div>` : null}
             <div class="aw3d-name"><span class="dot"></span>${d.name}</div>
           </div>`;
         })}
       </div>
       ${mode === 'loading' ? html`<div class="aw3d-loading">Opening the office…</div>` : null}
+      <div class="aw3d-rooms" role="group" aria-label="Go to a room">
+        ${ROOMS.map(([k, label]) => html`<button type="button" key=${k} class="aw3d-chip" aria-pressed=${room === k ? 'true' : 'false'} onClick=${() => goRoom(k)}>${label}</button>`)}
+      </div>
+      ${showLog ? html`<aside class="aw3d-log" aria-label="Office talk">
+        <div class="aw3d-log-head"><div><strong>Office talk</strong><span class="muted small">work updates and break-time chat</span></div>
+          <button type="button" class="aw3d-x" aria-label="Close" onClick=${() => setShowLog(false)}>×</button></div>
+        <ol class="aw3d-log-list">
+          ${log.length ? log.map((l) => { const d = deskOf(l.key); return html`<li key=${l.id} class=${`is-${l.kind}`} style=${{ '--h': d.hue }}>
+            <span class="who"><span class="dot"></span>${d.name}<span class="when">${l.kind === 'chat' ? 'chat' : 'work'} · ${l.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></span>
+            <span class="what">${l.text}</span></li>`; })
+            : html`<li class="aw3d-log-empty">Nothing said yet. The robots report every real step of a search and chat on their breaks.</li>`}
+          <li ref=${logEnd} class="aw3d-log-end" aria-hidden="true"></li>
+        </ol></aside>` : null}
+      ${selDesk ? html`<div class="aw3d-card" style=${{ '--h': selDesk.hue }} role="dialog" aria-label=${selDesk.name}>
+        <div class="aw3d-card-head"><span class="dot"></span><strong>${selDesk.name}</strong>
+          <span class=${`aw3d-state is-${states[selIdx]}`}>${stateWord(states[selIdx])}</span>
+          <button type="button" class="aw3d-x" aria-label="Close" onClick=${() => world.current && world.current.select(null)}>×</button></div>
+        <p class="aw3d-card-role">${selDesk.role}${selWhere ? html`<span class="muted"> · ${selWhere.chatting ? 'chatting ' : selWhere.seated ? 'sitting ' : ''}${WHERE[selWhere.where] || ''}</span>` : null}</p>
+        ${selMetric ? html`<div class="aw3d-card-metric">${selMetric}</div>` : null}
+        ${selLines.length ? html`<ul class="aw3d-card-lines">${selLines.map((it) => html`<li key=${it.id}>${it.message}</li>`)}</ul>`
+          : html`<p class="muted small">No work in this search yet.</p>`}
+      </div>` : null}
       <div class="aw3d-bar">
-        <span class="aw3d-hint">${busy.length ? html`<strong>${busy.join(', ')}</strong> working now` : states.every((x) => x === 'done') ? 'Everyone has finished' : 'Waiting to start'}
-          <span class="muted"> · drag to look around · scroll to zoom</span></span>
+        <span class="aw3d-hint">${busy.length ? html`<strong>${busy.join(', ')}</strong> working now` : states.every((x) => x === 'done') ? 'Everyone has finished — break time' : 'No search running — the team is on a break'}
+          <span class="muted"> · click a robot · drag to look around · scroll to zoom</span></span>
         <div class="row gap">
+          <button type="button" class="aw3d-btn" aria-pressed=${showLog ? 'true' : 'false'} onClick=${() => setShowLog(!showLog)}>Office talk${log.length ? ` · ${log.length}` : ''}</button>
           <button type="button" class="aw3d-btn" aria-pressed=${follow ? 'true' : 'false'} onClick=${() => setFollow(!follow)}
             title="Move the camera to wherever agents are working together">${follow ? '● Following the action' : 'Follow the action'}</button>
-          <button type="button" class="aw3d-btn" onClick=${() => world.current && world.current.resetView()} title="Reset the camera">Reset view</button>
+          <button type="button" class="aw3d-btn" onClick=${() => { setRoom('all'); if (world.current) world.current.resetView(); }} title="Reset the camera">Reset view</button>
           <button type="button" class="aw3d-btn" onClick=${() => setBig(!big)} aria-pressed=${big ? 'true' : 'false'}>${big ? 'Close' : 'Expand'}</button>
         </div>
       </div>
