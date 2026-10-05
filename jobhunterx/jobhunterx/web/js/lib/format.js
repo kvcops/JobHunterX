@@ -1,6 +1,6 @@
 // Pure formatting / domain helpers. No DOM, no state.
 
-export const STAGE_KEYS = ['understand', 'plan', 'discover', 'normalize', 'dedupe', 'validate', 'extract', 'match', 'rank'];
+export const STAGE_KEYS = ['understand', 'plan', 'discover', 'normalize', 'dedupe', 'validate', 'extract', 'match', 'rank', 'connect'];
 export const STAGE_LABELS = {
   understand: 'Understand profile', plan: 'Plan search', discover: 'Discover', normalize: 'Normalize',
   dedupe: 'De-duplicate', validate: 'Validate', extract: 'Extract requirements', match: 'Match', rank: 'Rank',

@@ -1242,6 +1242,28 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .reach-signals li.up .pts { color: var(--success); }
 .reach-signals li.down .pts { color: var(--danger); }
 
+/* Connector: referral kit */
+.connect-box { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border-radius: var(--radius-md);
+  background: linear-gradient(135deg, color-mix(in oklab, hsl(92 60% 50%) 9%, var(--card-solid)), var(--card-solid) 60%); border: 1px solid var(--line); }
+.connect-box p { margin: 0; }
+.connect-by { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; color: var(--text-2); }
+.connect-by .dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(92 55% 48%); box-shadow: 0 0 0 3px hsl(92 55% 48% / .2); }
+.connect-routes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.connect-route { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); text-decoration: none; transition: border-color .15s, transform .15s; }
+.connect-route:hover { border-color: hsl(92 50% 45%); transform: translateY(-1px); }
+.connect-route .icon { flex: none; margin-top: 2px; color: hsl(92 45% 40%); }
+.connect-route span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.connect-route strong { font-size: .86rem; font-weight: 600; overflow-wrap: anywhere; }
+.connect-route small { font-size: .76rem; color: var(--text-3); line-height: 1.35; }
+.connect-route.kind-email { border-color: hsl(92 50% 45% / .6); }
+.connect-drafts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.connect-draft { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+.connect-draft .row { align-items: center; }
+.connect-draft .row .btn { margin-left: auto; }
+.connect-draft p { font-size: .88rem; color: var(--text-2); line-height: 1.5; }
+.connect-draft p.pre { white-space: pre-line; }
+
 /* companies (watchlist) */
 .view-companies { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; }
 .view-companies .card.pad { padding: 16px 18px; }
@@ -1580,3 +1602,52 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .mission.idle.office { align-items: stretch; justify-content: flex-start; text-align: left; gap: 12px; padding: 18px 20px; }
 .mission.idle.office .aw3d { min-height: 360px; }
 @container aw3dframe (max-height: 340px) { .aw3d-rooms { display: none; } }      /* small panel: rooms live in the expanded view */
+
+/* agents' office v2: emotions, kinds of talk, the agent card (mood, memories, friends, ask) */
+.aw3d-name { gap: 6px; padding: 3px 10px 3px 7px; backdrop-filter: blur(6px); }
+.aw3d-emo { font-size: .86rem; line-height: 1; filter: saturate(1.1); }
+.aw3d-name .dot { margin-left: 2px; }
+.aw3d-say { position: relative; box-shadow: 0 10px 24px -14px rgba(0, 0, 0, .45); }
+.aw3d-tag .aw3d-say.is-ai { font-style: normal; font-weight: 450; color: var(--ink); border-style: solid; border-color: hsl(var(--h) 60% 62%);
+  background: linear-gradient(135deg, color-mix(in srgb, hsl(var(--h) 80% 70%) 14%, var(--card-solid)), var(--card-solid)); padding-right: 30px; }
+.aw3d-ai { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font: 700 .54rem/1 var(--mono); letter-spacing: .04em; padding: 3px 4px;
+  border-radius: 5px; color: #fff; background: linear-gradient(135deg, hsl(var(--h) 70% 52%), hsl(calc(var(--h) + 50) 70% 52%)); }
+.aw3d-tag .aw3d-say.is-play { font-style: normal; font-weight: 650; color: var(--ink); border: 1.5px solid hsl(var(--h) 80% 55%); background: color-mix(in srgb, hsl(var(--h) 90% 70%) 18%, var(--card-solid)); animation: awBounce .5s var(--spring); }
+.aw3d-tag .aw3d-say.is-think { font-style: italic; color: var(--text-3); border-style: dotted; border-radius: 16px; }
+.aw3d-tag .aw3d-say.is-ask { font-style: normal; font-weight: 450; color: var(--ink); max-width: 300px; text-align: left; border: 1.5px solid hsl(var(--h) 70% 55%); }
+.aw3d-dots { display: inline-flex; gap: 3px; padding: 2px 2px; }
+.aw3d-dots i { width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--h) 50% 55%); animation: awDot 1.1s infinite ease-in-out; }
+.aw3d-dots i:nth-child(2) { animation-delay: .15s; } .aw3d-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes awDot { 0%, 80%, 100% { transform: translateY(0); opacity: .45; } 40% { transform: translateY(-4px); opacity: 1; } }
+@keyframes awBounce { 0% { transform: scale(.7); } 60% { transform: scale(1.08); } 100% { transform: none; } }
+.aw3d-loading { gap: 10px; display: flex; align-items: center; justify-content: center; }
+.aw3d-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+.aw3d-card { width: min(340px, calc(100% - 20px)); max-height: calc(100% - 110px); overflow-y: auto; gap: 8px; }
+.aw3d-card-emo { font-size: 1.2rem; line-height: 1; }
+.aw3d-meters { display: grid; gap: 4px; }
+.aw3d-meter { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; font-size: .68rem; color: var(--text-2); }
+.aw3d-meter i { height: 6px; border-radius: 99px; background: var(--card-hi); overflow: hidden; }
+.aw3d-meter b { display: block; height: 100%; border-radius: inherit; transition: width .6s var(--ease); }
+.aw3d-meter b.joy { background: linear-gradient(90deg, #f5b942, #f57d42); }
+.aw3d-meter b.energy { background: linear-gradient(90deg, #4cc38a, #2fa3c4); }
+.aw3d-meter b.stress { background: linear-gradient(90deg, #e57373, #c2185b); }
+.aw3d-sub { font-size: .64rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); }
+.aw3d-mem ul { margin: 3px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 2px; font-size: .71rem; color: var(--text); line-height: 1.35; }
+.aw3d-mem em { color: var(--text-3); font-style: normal; font-size: .66rem; }
+.aw3d-friends { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: .7rem; color: var(--text-2); }
+.aw3d-friends strong { color: var(--ink); font-weight: 600; }
+.aw3d-qa { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.aw3d-qa li { display: flex; flex-direction: column; gap: 3px; font-size: .72rem; }
+.aw3d-qa .q { align-self: flex-end; max-width: 85%; padding: 5px 9px; border-radius: 12px 12px 3px 12px; background: var(--ink); color: var(--on-ink); }
+.aw3d-qa .a { align-self: flex-start; max-width: 92%; padding: 6px 9px; border-radius: 12px 12px 12px 3px; background: color-mix(in srgb, hsl(var(--h) 70% 60%) 14%, var(--card-hi)); color: var(--text); line-height: 1.4; }
+.aw3d-ask { display: flex; gap: 6px; }
+.aw3d-ask input { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; font-size: .74rem; }
+.aw3d-ask input:focus { outline: 2px solid hsl(var(--h) 65% 55%); outline-offset: 0; border-color: transparent; }
+.aw3d-ask .aw3d-btn:disabled { opacity: .5; cursor: default; }
+.aw3d-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.aw3d-log-list li.is-ai { border-left-style: solid; background: color-mix(in srgb, hsl(var(--h) 70% 60%) 7%, transparent); }
+.aw3d-log-list li.is-play .what { font-weight: 600; }
+.aw3d-log-list li.is-memory { border-left-style: dotted; }
+.aw3d-log-list li.is-memory .what { color: var(--text-2); font-size: .7rem; }
+.aw3d-tag.is-done .aw3d-say { font-family: inherit; font-size: .7rem; padding: 6px 10px; }
+.aw3d.is-big .aw3d-tag.is-done .aw3d-say { font-size: .78rem; }

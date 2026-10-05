@@ -30,7 +30,7 @@ _JOB_COLUMNS = {
     "posting_json": "TEXT", "match_json": "TEXT", "fingerprint": "TEXT", "canonical_url": "TEXT",
     "ats_key": "TEXT", "run_id": "TEXT", "saved_at": "TEXT", "tracking_status": "TEXT DEFAULT 'new'",
     "verdict": "TEXT", "fit_score": "INTEGER", "profile_hash": "TEXT", "validation_status": "TEXT",
-    "reach_score": "INTEGER",
+    "reach_score": "INTEGER", "connect_json": "TEXT",
 }
 
 _SCHEMA = """
@@ -289,6 +289,20 @@ async def update_match(job_id: str, match: MatchAssessment) -> None:
         await db.commit()
 
 
+async def set_connection(job_id: str, data: dict) -> None:
+    """The Connector's referral kit for a job (routes to a real person + drafts)."""
+    async with _conn() as db:
+        await db.execute("UPDATE jobs SET connect_json = ? WHERE id = ?", (json.dumps(data), job_id))
+        await db.commit()
+
+
+def connection_of(row: dict) -> Optional[dict]:
+    try:
+        return json.loads(row["connect_json"]) if row.get("connect_json") else None
+    except ValueError:
+        return None
+
+
 async def update_posting(job: JobPosting) -> None:
     async with _conn() as db:
         await db.execute("UPDATE jobs SET posting_json = ?, validation_status = ?, updated_at = ? WHERE id = ?",
@@ -328,7 +342,7 @@ async def get_row(job_id: str) -> Optional[dict]:
 async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score DESC", limit: int = 200) -> list[dict]:
     sql = "SELECT id, company, role, location, apply_url, status, posting_json, match_json, run_id, saved_at, " \
           "tracking_status, verdict, fit_score, reach_score, profile_hash, validation_status, created_at, updated_at, " \
-          "(tailored_pdf IS NOT NULL) AS has_legacy_pdf FROM jobs"
+          "(tailored_pdf IS NOT NULL) AS has_legacy_pdf, (connect_json IS NOT NULL) AS has_kit FROM jobs"
     where, params = _scope(where, params)
     sql += f" WHERE {where}"
     sql += f" ORDER BY {order} LIMIT ?"

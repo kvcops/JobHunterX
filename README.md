@@ -332,7 +332,7 @@ JobHunterX does **not** just count shared keywords. It understands you, finds an
 and explains whether it genuinely fits.
 
 <details>
-<summary><b>🔍 The 9 stages of every search (click to open)</b></summary>
+<summary><b>🔍 The 10 stages of every search (click to open)</b></summary>
 <br/>
 
 | # | Stage | What happens | Where |
@@ -346,12 +346,39 @@ and explains whether it genuinely fits.
 | 7 | **Extract** | The AI reads the JD into a schema (required vs nice-to-have vs mandatory skills, experience, education, notice period, salary…). A skill is accepted only if it appears in the JD; experience/salary only with a verbatim quote that contains the number. Cached per JD. | `intelligence/job.py` |
 | 8 | **Match** | Hard constraints first (career track, experience gap, seniority, location/work mode, mandatory skills, education, job open, notice, salary, excluded companies). **A failed hard constraint caps the score** — keyword overlap can never lift an incompatible job. Then weighted components (role, required/preferred skills by evidence strength, experience fit, responsibility overlap, seniority, location). | `intelligence/matching.py`, `intelligence/policy.py` |
 | 9 | **Rank & explain** | Score 0–100, verdict (strong / good / stretch / weak / incompatible), strengths, gaps, unknowns, the exact reason a job was rejected — plus the separate chance-to-be-seen score. | `intelligence/reach.py`, UI: "Why this score" |
+| 10 | **Connect** | For your top 5 matches, the **Connector** finds a way to a real person: an application email the posting itself gives (never guessed), the company's careers page, and people searches for its recruiters, the team that is hiring and **alumni of your own college** there (search links — you choose the person; nothing is scraped). It drafts a LinkedIn connection note (≤ 300 characters) and a short email in your voice from your real matched skills and one real role or project — a draft that mentions a number or a skill not in those facts is replaced by a plain template. Any other job gets a kit on request (job → *Reach a real person*). | `intelligence/connect.py` |
 
 > [!NOTE]
 > **No hardcoded skill or title vocabularies.** Skills, titles and career tracks come from the AI (schema-validated and
 > verified against the source text); the code only compares and checks. The only fixed lists are deliberate, researched data:
 > the company watchlist (`watchlist/companies.json`), the city names it covers, and the mass-recruiter exclusion list.
 > Scoring weights and tolerances live in one tunable place: `intelligence/policy.py` (override with `MATCH_POLICY_JSON`).
+
+</details>
+
+<details>
+<summary><b>🤖 The agents' office (click to open)</b></summary>
+<br/>
+
+Open **Discover → Agents** to watch the nine agents as characters in a 3D office: work floor, pantry, server room,
+meeting room, **game room** and **garden**.
+
+- **Work is real.** Every work scene comes from a real event of the running search — the Scout runs through the web
+  portal or to the server room for company boards, the Verifier stamps or bins postings, the Analyst gets excited about
+  a strong fit, the Connector sends paper planes to real people. Break time never claims search progress.
+- **Life between searches.** Chai, ping-pong and foosball (with scores they remember), tag in the garden, the arcade,
+  the swing, a wish at the fountain, naps — and pranks on whoever is napping. After a finished search: a results review
+  with the real numbers, then a party in the garden.
+- **Feelings and memory.** Each agent has a mood (joy, energy, stress) that work and play change, shown on its face
+  screen. Agents remember what they did and saw, pass it on when they talk (gossip spreads), and keep friendships and
+  rivalries — all stored in your browser.
+- **Live conversations.** With *AI chats on*, break-time conversations are written live by a free model, in character;
+  any number in a line must come from your real search, or the line is dropped.
+- **Talk to them.** Click an agent to see its mood, memories and friends, poke it, send it on a break, or ask it a
+  question ("Why did you reject the Zoetis job?") — the answer uses only your real search data.
+
+Rendering keeps integrated graphics smooth: static furniture is merged into a few dozen draw calls, characters use soft
+contact shadows, and bloom switches itself off on slow machines. Without WebGL you get a simple 2D view of the desks.
 
 </details>
 

@@ -65,7 +65,7 @@ def test_full_flow_search_save_track_generate(client):
     run = client.post("/api/searches", json={}).json()["run"]
     run = _wait_run(client, run["id"])
     assert run["status"] == "completed", run
-    assert [s["status"] for s in run["stages"]] == ["done"] * 9
+    assert [s["status"] for s in run["stages"]] == ["done"] * 10
 
     data = client.get("/api/jobs", params={"view": "recommended", "run_id": run["id"]}).json()
     titles = [j["title"] for j in data["jobs"]]

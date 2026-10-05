@@ -1,7 +1,7 @@
 import { html, useState, useEffect } from '../lib/preact.js';
 import { useStore, getState } from '../state/store.js';
 import {
-  loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, generateDocument, generateCv, loadDocuments, autoApply, deleteJob, navigate,
+  loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, connectJob, copyText, generateDocument, generateCv, loadDocuments, autoApply, deleteJob, navigate,
 } from '../actions.js';
 import {
   Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, Select, VERDICT_TONE, Elapsed,
@@ -25,6 +25,40 @@ function ReachSection({ reach }) {
       <span class="pts">${s.points > 0 ? `+${s.points}` : s.points}</span><span>${s.detail}</span></li>`)}</ul>
     ${reach.application_email ? html`<${Notice} tone="success">The posting asks for applications at <strong>${reach.application_email}</strong> (found in the job text).
       A short, specific email with your proof of work beats a portal application.</${Notice}>` : null}
+  </section>`;
+}
+
+const ROUTE_ICON = { email: 'doc', careers: 'external', recruiters: 'user', team: 'user', alumni: 'star', xray: 'search' };
+
+/** The Connector's referral kit: real routes to a person at the company and two drafts in the candidate's voice. */
+function ConnectSection({ job }) {
+  const busy = useStore((s) => !!s.pending.connect[job.id]);
+  const k = job.connection;
+  const strongish = job.match && ['strong', 'good', 'stretch'].includes(job.match.verdict);
+  if (!k && !strongish) return null;
+  const mail = k && k.routes.find((r) => r.kind === 'email');
+  const mailto = mail ? `${mail.url}?subject=${encodeURIComponent(k.subject || '')}&body=${encodeURIComponent(k.message || '')}` : null;
+  return html`<section class="connect-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>Reach a real person</h3>
+      <span class="connect-by"><span class="dot"></span>Connector</span>
+      ${k ? html`<${Badge} tone=${k.method === 'llm' ? 'success' : 'neutral'}>${k.method === 'llm' ? 'Written for you' : 'Plain template'}</${Badge}>` : null}</div>
+    <p class="muted small">A referral or a short note to the right person gets read; a portal application often does not.
+      These are search links — you choose the person. Apply on the company's site first, then reach out.</p>
+    ${k ? html`
+      <div class="connect-routes">${k.routes.map((r) => { const u = safeUrl(r.url) || (r.url.startsWith('mailto:') ? r.url : null); return u ? html`
+        <a key=${r.kind + r.url} class=${`connect-route kind-${r.kind}`} href=${r.kind === 'email' && mailto ? mailto : u} target="_blank" rel="noopener noreferrer" title=${r.note}>
+          <${Icon} name=${ROUTE_ICON[r.kind] || 'external'} size=${15} /><span><strong>${r.label}</strong><small>${r.note}</small></span></a>` : null; })}</div>
+      <div class="connect-drafts">
+        <div class="connect-draft"><div class="row gap"><strong>LinkedIn connection note</strong><span class="muted small">${k.note.length}/300</span>
+          <${Button} size="sm" onClick=${() => copyText(k.note, 'Note copied')}>Copy</${Button}></div>
+          <p>${k.note}</p></div>
+        <div class="connect-draft"><div class="row gap"><strong>Email / message</strong>${k.subject ? html`<span class="muted small">${k.subject}</span>` : null}
+          <${Button} size="sm" onClick=${() => copyText(k.subject ? `${k.subject}\n\n${k.message}` : k.message, 'Message copied')}>Copy</${Button}></div>
+          <p class="pre">${k.message}</p></div>
+      </div>
+      <div class="row gap wrap"><span class="muted small">Uses only: ${(k.facts || []).join(' · ') || 'your profile'}</span>
+        <${Button} size="sm" icon="refresh" busy=${busy} onClick=${() => connectJob(job.id)}>Write again</${Button}></div>`
+    : html`<div><${Button} size="sm" variant="primary" icon="user" busy=${busy} onClick=${() => connectJob(job.id)}>Find people & draft a referral note</${Button}></div>`}
   </section>`;
 }
 
@@ -63,6 +97,7 @@ function MatchTab({ job }) {
   return html`<div class="stack">
     ${m.headline ? html`<p class="detail-headline">${m.headline}</p>` : null}
     <${ReachSection} reach=${m.reach} />
+    <${ConnectSection} job=${job} />
     <${CompanySection} c=${job.company_profile} />
     ${m.method === 'fallback' ? html`<${Notice} tone="warning">Partial analysis — the AI could not read this posting fully, so skill coverage and requirements may be incomplete.</${Notice}>` : null}
     <section>

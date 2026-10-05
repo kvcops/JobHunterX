@@ -3,6 +3,7 @@
 // the animation only shows *who* is busy; it never invents progress.
 import { html, useEffect, useRef, useState } from '../lib/preact.js';
 import { Icon } from '../components/ui.js';
+import { api } from '../lib/api.js';
 
 const DESKS = [
   { key: 'understand', stages: ['understand'], name: 'Profile analyst', role: 'Reads your profile', icon: 'user', hue: 18, act: 'type',
@@ -21,6 +22,8 @@ const DESKS = [
     metric: (c, run) => (run.total ? `${c.scored} of ${run.total} scored` : null) },
   { key: 'rank', stages: ['rank'], name: 'Ranker', role: 'Ranks & explains', icon: 'chart', hue: 28, act: 'cheer',
     metric: (c) => (c.recommended ? `${c.recommended} fit you` : null) },
+  { key: 'connect', stages: ['connect'], name: 'Connector', role: 'Finds a real person & drafts referral notes', icon: 'user', hue: 92, act: 'type',
+    metric: (c, run) => { const st = (run.stages || []).find((x) => x.key === 'connect'); return st && st.status === 'done' && st.detail ? st.detail : null; } },
 ];
 
 function deskState(desk, status) {
@@ -85,8 +88,12 @@ const reduced = () => {
   return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 };
 
-const ROOMS = [['all', 'Whole office'], ['work', 'Work floor'], ['meeting', 'Meeting room'], ['pantry', 'Pantry'], ['server', 'Server room']];
-const WHERE = { work: 'on the work floor', pantry: 'in the pantry', server: 'in the server room', meet: 'in the meeting room', hall: 'in the hallway' };
+const ROOMS = [['all', 'Whole office'], ['work', 'Work floor'], ['meeting', 'Meeting room'], ['pantry', 'Pantry'], ['server', 'Server room'], ['game', 'Game room'], ['garden', 'Garden']];
+const WHERE = { work: 'on the work floor', pantry: 'in the pantry', server: 'in the server room', meet: 'in the meeting room', hall: 'in the hallway', game: 'in the game room', garden: 'in the garden' };
+const EMOJI = { neutral: '🙂', happy: '😊', laugh: '😂', sad: '😢', angry: '😤', surprised: '😮', sleepy: '😴', love: '😍', focused: '🧐', wink: '😉', proud: '😎', dizzy: '😵', tired: '🥱', scared: '😱' };
+const AI_KEY = 'jhx.office.ai';
+const readAI = () => { try { return localStorage.getItem(AI_KEY) !== '0'; } catch { return true; } };
+const KIND_WORD = { work: 'work', chat: 'chat', ai: 'live AI chat', play: 'play', think: 'thinking', ask: 'answer', memory: 'memory' };
 const LOG_KEEP = 80;
 
 /**
@@ -108,6 +115,10 @@ function World3D({ run, items, states, lastLine }) {
   const [log, setLog] = useState([]);
   const [selected, setSelected] = useState(null);
   const [said, setSaid] = useState({});             // agent key -> { text, until, kind }: what each robot is saying now
+  const [ai, setAI] = useState(readAI);
+  const [ask, setAsk] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [qa, setQA] = useState({});                  // agent key -> [{ q, a }]
   const [, tick] = useState(0);
   const c = run.counts || {};
 
@@ -115,29 +126,33 @@ function World3D({ run, items, states, lastLine }) {
     let alive = true;
     let seq = 0;
     const onSay = (key, text, secs, kind = 'work') => {
-      setSaid((cur) => ({ ...cur, [key]: { text, until: Date.now() + secs * 1000, kind } }));
-      setLog((cur) => [...cur, { id: ++seq, key, text, kind, at: new Date() }].slice(-LOG_KEEP));
+      if (kind !== 'memory') setSaid((cur) => ({ ...cur, [key]: { text, until: Date.now() + secs * 1000, kind } }));
+      if (kind !== 'think') setLog((cur) => [...cur, { id: ++seq, key, text, kind, at: new Date() }].slice(-LOG_KEEP));
       setTimeout(() => alive && tick((n) => n + 1), secs * 1000 + 50);
     };
     const onSelect = (key) => alive && setSelected(key);
+    const talk = (body) => api.officeChat(body).catch(() => null);
     import('./world3d.js')
-      .then((m) => m.createWorld(host.current, { dark: isDark(), reducedMotion: reduced(), onSay, onSelect }))
+      .then((m) => m.createWorld(host.current, { dark: isDark(), reducedMotion: reduced(), onSay, onSelect, talk }))
       .then((w) => {
         if (!alive) { w.dispose(); return; }
         world.current = w;
+        w.setAI(readAI());
         w.onFrame((pos) => {
           for (const [key, pt] of Object.entries(pos)) {
+            const prev = where.current[key];
             where.current[key] = pt;
             const el = tags.current[key];
             if (!el) continue;
             el.style.transform = `translate(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px) translate(-50%, -100%)`;
             el.style.opacity = pt.visible ? '1' : '0';
             el.style.zIndex = String(1000 - Math.round(pt.depth * 900));
+            if (!prev || prev.expr !== pt.expr || !el.dataset.emo) { const em = el.querySelector('.aw3d-emo'); if (em) { em.textContent = EMOJI[pt.expr] || ''; el.dataset.emo = '1'; } }
           }
         });
         setMode('ready');
       })
-      .catch(() => alive && setMode('fallback'));      // no WebGL, or the model could not load
+      .catch((err) => { console.warn('3D office unavailable', err); if (alive) setMode('fallback'); });      // no WebGL, or the model could not load
     const mo = new MutationObserver(() => world.current && world.current.setTheme(isDark()));
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     return () => { alive = false; mo.disconnect(); if (world.current) world.current.dispose(); world.current = null; };
@@ -156,7 +171,7 @@ function World3D({ run, items, states, lastLine }) {
   });
   useEffect(() => { if (world.current) world.current.setFollow(follow); }, [follow, mode]);
   useEffect(() => { if (showLog && logEnd.current) logEnd.current.scrollIntoView({ block: 'end' }); }, [log, showLog]);
-  // the selected robot's card shows where it is; refresh that twice a second while a card is open
+  // the selected robot's card shows where it is and how it feels; refresh that twice a second while a card is open
   useEffect(() => {
     if (!selected) return undefined;
     const t = setInterval(() => tick((n) => n + 1), 500);
@@ -165,7 +180,7 @@ function World3D({ run, items, states, lastLine }) {
 
   useEffect(() => {
     if (!big) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape') { if (selected) world.current && world.current.select(null); else setBig(false); } };
+    const onKey = (e) => { if (e.key === 'Escape' && !(e.target && e.target.closest && e.target.closest('input'))) { if (selected) world.current && world.current.select(null); else setBig(false); } };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [big, selected]);
@@ -179,8 +194,29 @@ function World3D({ run, items, states, lastLine }) {
   const selLines = selDesk ? items.filter((it) => selDesk.stages.includes(it.stage)).slice(-3).reverse() : [];
   const selWhere = selected && where.current[selected];
   const selMetric = selDesk ? selDesk.metric(c, run) : null;
+  const selInfo = selected && world.current ? world.current.info(selected) : null;
   const deskOf = (key) => DESKS.find((d) => STAGE_KEY[d.key] === key) || DESKS[0];
   const stateWord = (st) => (st === 'running' ? 'working now' : st === 'done' ? 'finished' : st === 'failed' ? 'stopped' : 'waiting');
+  const toggleAI = () => { const on = !ai; setAI(on); try { localStorage.setItem(AI_KEY, on ? '1' : '0'); } catch { /* ignore */ } if (world.current) world.current.setAI(on); };
+  async function sendAsk(e) {
+    e.preventDefault();
+    const q = ask.trim();
+    if (!q || !selected || asking) return;
+    const key = selected;
+    setAsking(true); setAsk('');
+    if (world.current) world.current.thinking(key, true);
+    try {
+      const r = await api.officeAsk({ agent: key, question: q });
+      if (world.current) { world.current.thinking(key, false); world.current.speak(key, r.answer, r.emotion, Math.min(14, 4 + r.answer.length / 20)); }
+      setQA((cur) => ({ ...cur, [key]: [...(cur[key] || []), { q, a: r.answer }].slice(-4) }));
+    } catch {
+      if (world.current) { world.current.thinking(key, false); world.current.speak(key, 'I could not reach the server — try again?', 'sad', 4); }
+    } finally {
+      setAsking(false);
+    }
+  }
+  const meter = (label, v, tone) => html`<div class="aw3d-meter"><span>${label}</span><i><b class=${tone} style=${{ width: `${Math.round((v || 0) * 100)}%` }}></b></i></div>`;
+  const sayBody = (say) => (say.kind === 'think' && say.text === '…' ? html`<span class="aw3d-dots"><i></i><i></i><i></i></span>` : say.text);
   return html`<div class=${`aw3d ${big ? 'is-big' : ''}`} aria-label="Agents at work, in 3D">
     ${big ? html`<div class="aw3d-backdrop" onClick=${() => setBig(false)}></div>` : null}
     <div class="aw3d-frame">
@@ -190,39 +226,52 @@ function World3D({ run, items, states, lastLine }) {
           const st = states[i];
           const key = STAGE_KEY[d.key];
           const say = said[key] && said[key].until > now ? said[key] : null;
-          return html`<div key=${d.key} class=${`aw3d-tag is-${st} ${say ? 'talking' : ''} ${selected === key ? 'is-selected' : ''}`} style=${{ '--h': d.hue, opacity: 0 }} ref=${(el) => { tags.current[key] = el; }}>
-            ${say ? html`<div class=${`aw3d-say ${say.kind === 'chat' ? 'is-chat' : ''}`}>${say.text}</div>` : null}
-            <div class="aw3d-name"><span class="dot"></span>${d.name}</div>
+          const cls = ['aw3d-tag', `is-${st}`, say ? 'talking' : '', selected === key ? 'is-selected' : ''].join(' ');
+          return html`<div key=${d.key} class=${cls} style=${{ '--h': d.hue, opacity: 0 }} ref=${(el) => { tags.current[key] = el; }}>
+            ${say ? html`<div class=${`aw3d-say is-${say.kind}`}>${sayBody(say)}${say.kind === 'ai' ? html`<span class="aw3d-ai" title="Live AI conversation">AI</span>` : null}</div>` : null}
+            <div class="aw3d-name"><span class="aw3d-emo"></span>${d.name}<span class="dot"></span></div>
           </div>`;
         })}
       </div>
-      ${mode === 'loading' ? html`<div class="aw3d-loading">Opening the office…</div>` : null}
+      ${mode === 'loading' ? html`<div class="aw3d-loading"><span class="aw3d-spin"></span>Opening the office…</div>` : null}
       <div class="aw3d-rooms" role="group" aria-label="Go to a room">
         ${ROOMS.map(([k, label]) => html`<button type="button" key=${k} class="aw3d-chip" aria-pressed=${room === k ? 'true' : 'false'} onClick=${() => goRoom(k)}>${label}</button>`)}
       </div>
       ${showLog ? html`<aside class="aw3d-log" aria-label="Office talk">
-        <div class="aw3d-log-head"><div><strong>Office talk</strong><span class="muted small">work updates and break-time chat</span></div>
+        <div class="aw3d-log-head"><div><strong>Office talk</strong><span class="muted small">work updates, chats, games and gossip</span></div>
           <button type="button" class="aw3d-x" aria-label="Close" onClick=${() => setShowLog(false)}>×</button></div>
         <ol class="aw3d-log-list">
           ${log.length ? log.map((l) => { const d = deskOf(l.key); return html`<li key=${l.id} class=${`is-${l.kind}`} style=${{ '--h': d.hue }}>
-            <span class="who"><span class="dot"></span>${d.name}<span class="when">${l.kind === 'chat' ? 'chat' : 'work'} · ${l.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></span>
+            <span class="who"><span class="dot"></span>${d.name}<span class="when">${KIND_WORD[l.kind] || l.kind} · ${l.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></span>
             <span class="what">${l.text}</span></li>`; })
-            : html`<li class="aw3d-log-empty">Nothing said yet. The robots report every real step of a search and chat on their breaks.</li>`}
+            : html`<li class="aw3d-log-empty">Nothing said yet. The agents report every real step of a search, and chat, play and gossip on their breaks.</li>`}
           <li ref=${logEnd} class="aw3d-log-end" aria-hidden="true"></li>
         </ol></aside>` : null}
       ${selDesk ? html`<div class="aw3d-card" style=${{ '--h': selDesk.hue }} role="dialog" aria-label=${selDesk.name}>
-        <div class="aw3d-card-head"><span class="dot"></span><strong>${selDesk.name}</strong>
+        <div class="aw3d-card-head"><span class="aw3d-card-emo">${selInfo ? EMOJI[selInfo.expr] || '🙂' : '🙂'}</span><strong>${selDesk.name}</strong>
           <span class=${`aw3d-state is-${states[selIdx]}`}>${stateWord(states[selIdx])}</span>
           <button type="button" class="aw3d-x" aria-label="Close" onClick=${() => world.current && world.current.select(null)}>×</button></div>
-        <p class="aw3d-card-role">${selDesk.role}${selWhere ? html`<span class="muted"> · ${selWhere.chatting ? 'chatting ' : selWhere.seated ? 'sitting ' : ''}${WHERE[selWhere.where] || ''}</span>` : null}</p>
+        <p class="aw3d-card-role">${selDesk.role}${selWhere ? html`<span class="muted"> · ${selInfo && selInfo.doing ? `${selInfo.doing} ` : selWhere.chatting ? 'chatting ' : selWhere.seated ? 'sitting ' : ''}${WHERE[selWhere.where] || ''}</span>` : null}</p>
         ${selMetric ? html`<div class="aw3d-card-metric">${selMetric}</div>` : null}
-        ${selLines.length ? html`<ul class="aw3d-card-lines">${selLines.map((it) => html`<li key=${it.id}>${it.message}</li>`)}</ul>`
-          : html`<p class="muted small">No work in this search yet.</p>`}
+        ${selInfo ? html`<div class="aw3d-meters">${meter('Mood', selInfo.mood.joy, 'joy')}${meter('Energy', selInfo.mood.energy, 'energy')}${meter('Stress', selInfo.mood.stress, 'stress')}</div>` : null}
+        ${selLines.length ? html`<ul class="aw3d-card-lines">${selLines.map((it) => html`<li key=${it.id}>${it.message}</li>`)}</ul>` : null}
+        ${selInfo && selInfo.memories.length ? html`<div class="aw3d-mem"><span class="aw3d-sub">Remembers</span><ul>${selInfo.memories.slice(0, 4).map((m, i) => html`<li key=${i}>${m.text}${m.from ? html`<em> — heard from ${m.from}</em>` : null}</li>`)}</ul></div>` : null}
+        ${selInfo && (selInfo.best || selInfo.rival) ? html`<div class="aw3d-friends">${selInfo.best ? html`<span>💛 Best friend: <strong>${selInfo.best.name}</strong></span>` : null}${selInfo.rival ? html`<span>⚔️ Rival: <strong>${selInfo.rival.name}</strong> (${selInfo.rival.rec})</span>` : null}</div>` : null}
+        ${(qa[selected] || []).length ? html`<ul class="aw3d-qa">${qa[selected].slice(-2).map((x, i) => html`<li key=${i}><span class="q">${x.q}</span><span class="a">${x.a}</span></li>`)}</ul>` : null}
+        <form class="aw3d-ask" onSubmit=${sendAsk}>
+          <input type="text" value=${ask} maxLength="300" placeholder=${`Ask the ${selDesk.name} something…`} onInput=${(e) => setAsk(e.target.value)} disabled=${asking} aria-label=${`Ask the ${selDesk.name}`} />
+          <button type="submit" class="aw3d-btn" disabled=${asking || !ask.trim()}>${asking ? '…' : 'Ask'}</button>
+        </form>
+        <div class="aw3d-card-actions">
+          <button type="button" class="aw3d-btn" onClick=${() => world.current && world.current.poke(selected)}>👉 Poke</button>
+          <button type="button" class="aw3d-btn" onClick=${() => world.current && world.current.rest(selected)}>☕ Send on a break</button>
+        </div>
       </div>` : null}
       <div class="aw3d-bar">
         <span class="aw3d-hint">${busy.length ? html`<strong>${busy.join(', ')}</strong> working now` : states.every((x) => x === 'done') ? 'Everyone has finished — break time' : 'No search running — the team is on a break'}
           <span class="muted"> · click a robot · drag to look around · scroll to zoom</span></span>
         <div class="row gap">
+          <button type="button" class="aw3d-btn" aria-pressed=${ai ? 'true' : 'false'} onClick=${toggleAI} title="Let the agents chat live with a free AI model on their breaks">${ai ? '✨ AI chats on' : 'AI chats off'}</button>
           <button type="button" class="aw3d-btn" aria-pressed=${showLog ? 'true' : 'false'} onClick=${() => setShowLog(!showLog)}>Office talk${log.length ? ` · ${log.length}` : ''}</button>
           <button type="button" class="aw3d-btn" aria-pressed=${follow ? 'true' : 'false'} onClick=${() => setFollow(!follow)}
             title="Move the camera to wherever agents are working together">${follow ? '● Following the action' : 'Follow the action'}</button>
@@ -236,7 +285,7 @@ function World3D({ run, items, states, lastLine }) {
 }
 
 // desk key -> station key in the 3D world (the Analyst desk covers the extract + match stages)
-const STAGE_KEY = { understand: 'understand', plan: 'plan', discover: 'discover', normalize: 'normalize', dedupe: 'dedupe', validate: 'validate', match: 'match', rank: 'rank' };
+const STAGE_KEY = { understand: 'understand', plan: 'plan', discover: 'discover', normalize: 'normalize', dedupe: 'dedupe', validate: 'validate', match: 'match', rank: 'rank', connect: 'connect' };
 
 export function AgentWorld({ run, items }) {
   const status = Object.fromEntries(run.stages.map((st) => [st.key, st.status]));

@@ -5,8 +5,11 @@ preact/hooks     hooks/dist/hooks.module.js -> hooks.module.js (MIT, LICENSE.pre
                  local edit: bare import "preact" rewritten to "./preact.module.js"
 htm 3.1.1        dist/htm.module.js     -> htm.module.js      (Apache-2.0, LICENSE.htm)
 three 0.169.0    build/three.module.min.js -> three.module.min.js (MIT, LICENSE.three) — loaded only by the 3D agents view
-three-addons     examples/jsm GLTFLoader.js, utils/BufferGeometryUtils.js, utils/SkeletonUtils.js (MIT, same as three)
-                 local edit: bare import "three" rewritten to "../three.module.min.js"
+three-addons     examples/jsm GLTFLoader.js, utils/BufferGeometryUtils.js, utils/SkeletonUtils.js,
+                 environments/RoomEnvironment.js, geometries/RoundedBoxGeometry.js, postprocessing/{EffectComposer,Pass,
+                 RenderPass,ShaderPass,MaskPass,UnrealBloomPass,OutputPass}.js, shaders/{CopyShader,LuminosityHighPassShader,
+                 OutputShader}.js (MIT, same as three)
+                 local edit: bare import "three" rewritten to "../three.module.min.js" (or "../../" one folder down)
 assets/models/robot.glb  RobotExpressive by Tomás Laulhé (Quaternius), CC0 1.0 — see assets/models/LICENSE.txt
 
 Source-map comments removed (maps not vendored).

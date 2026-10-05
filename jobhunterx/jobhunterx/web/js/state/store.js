@@ -60,7 +60,7 @@ export function initialState() {
       scope: 'all', runId: null, view: 'recommended', q: '', work_mode: '', min_score: 0, sort: 'chance',
       ids: [], counts: null, status: 'idle', error: null,
     },
-    pending: { save: {}, track: {}, verify: {}, rescore: {}, apply: {}, remove: {} },
+    pending: { save: {}, track: {}, verify: {}, rescore: {}, connect: {}, apply: {}, remove: {} },
     gen: {},                // `${jobId|'cv'}:${kind}` -> { status, error, documentId }
     docs: { status: 'idle', items: [], error: null },
     docDetails: {},         // docId -> { status, doc, error }

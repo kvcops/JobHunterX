@@ -129,6 +129,7 @@ async def detail(job_id: str, current_hash: Optional[str]) -> Optional[dict]:
         "sources": [s.model_dump(mode="json") for s in p.sources],
         "company_profile": _company_profile(p),
         "document_list": [document_summary(d, current_hash, p) for d in docs],
+        "connection": storage.connection_of(row),
     })
     return out
 

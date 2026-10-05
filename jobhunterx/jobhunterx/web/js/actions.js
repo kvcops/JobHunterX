@@ -29,6 +29,14 @@ export function withTransition(apply) {
 // Toasts, confirm, activity
 // ---------------------------------------------------------------------------
 let toastSeq = 0;
+export async function copyText(text, what = 'Copied') {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`${what} — paste it anywhere.`, 'success', 2500);
+  } catch {
+    toast('Could not copy — select the text and copy it yourself.', 'warning');
+  }
+}
 export function toast(message, tone = 'info', ms = 4500) {
   const id = ++toastSeq;
   setState((s) => ({ ...s, toasts: [...s.toasts, { id, message, tone, ms }].slice(-4) }));
@@ -417,6 +425,7 @@ async function detailAction(kind, jobId, call, okMsg) {
   }
 }
 export const verifyJob = (id) => detailAction('verify', id, api.verifyJob, 'Posting re-checked.');
+export const connectJob = (id) => detailAction('connect', id, api.connectJob, 'Referral kit ready.');
 export const rescoreJob = (id) => detailAction('rescore', id, api.rescoreJob, 'Match updated for your current profile.');
 export async function deleteJob(jobId) {
   if (getState().pending.remove[jobId]) return;

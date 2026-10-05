@@ -446,6 +446,49 @@ async def rescore_job(job_id: str):
     return {"job": await _detail_or_404(job_id)}
 
 
+class OfficeChatIn(BaseModel):
+    a: str
+    b: str
+    scene: str = ""
+    a_knows: list[str] = Field(default_factory=list)
+    b_knows: list[str] = Field(default_factory=list)
+    moods: dict[str, str] = Field(default_factory=dict)
+
+
+class OfficeAskIn(BaseModel):
+    agent: str
+    question: str = Field(min_length=1, max_length=400)
+
+
+@router.post("/office/chat")
+async def office_chat(body: OfficeChatIn):
+    """A live break-time conversation between two agents (204 when no model is free — the office uses scripted talk)."""
+    from jobhunterx.services import office
+    out = await office.chat(body.a, body.b, body.scene, body.a_knows, body.b_knows, body.moods)
+    return out or Response(status_code=204)
+
+
+@router.post("/office/ask")
+async def office_ask(body: OfficeAskIn):
+    from jobhunterx.services import office
+    return await office.ask(body.agent, body.question)
+
+
+@router.post("/jobs/{job_id}/connect")
+async def connect_job(job_id: str):
+    """The Connector for one job: routes to a real person there and a referral note (made again on request)."""
+    from jobhunterx.intelligence import connect
+    profile = await _profile_or_400()
+    row = await storage.get_row(job_id)
+    if not row:
+        raise HTTPException(404, "Job not found")
+    p, m = storage.row_to_objects(row)
+    snap = await profile_svc.get_snapshot(profile)
+    kit = await connect.build(p, m, profile, snap)
+    await storage.set_connection(job_id, kit.model_dump(mode="json"))
+    return {"job": await _detail_or_404(job_id)}
+
+
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
     if not await db.delete_job(job_id):

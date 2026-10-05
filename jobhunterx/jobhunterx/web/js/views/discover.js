@@ -85,6 +85,7 @@ const AGENT_META = [
   { stage: 'validate', name: 'Verifier', icon: 'shield', h: 150 },
   { stage: 'extract', name: 'Analyst', icon: 'spark', h: 340, also: ['match'] },
   { stage: 'rank', name: 'Ranker', icon: 'chart', h: 46 },
+  { stage: 'connect', name: 'Connector', icon: 'user', h: 92 },
 ];
 const AGENT_BY_STAGE = Object.fromEntries(AGENT_META.flatMap((a) => [[a.stage, a], ...(a.also || []).map((x) => [x, a])]));
 
@@ -92,7 +93,7 @@ const AGENT_BY_STAGE = Object.fromEntries(AGENT_META.flatMap((a) => [[a.stage, a
 // real counts the server reports (searches done, boards checked, pages read, jobs analysed) — never by time.
 const PROGRESS_GROUPS = [
   { keys: ['understand'], w: 3 }, { keys: ['plan'], w: 3 }, { keys: ['discover'], w: 20 }, { keys: ['normalize'], w: 14 },
-  { keys: ['dedupe'], w: 2 }, { keys: ['validate', 'extract', 'match', 'rank'], w: 58 },
+  { keys: ['dedupe'], w: 2 }, { keys: ['validate', 'extract', 'match', 'rank'], w: 54 }, { keys: ['connect'], w: 4 },
 ];
 /** Overall progress 0–100 from finished stages plus the real done/total of the running one. */
 export function runProgress(run) {
@@ -220,7 +221,7 @@ function LiveFeed({ active, run }) {
 const OFFICE_KEY = 'jhx.office';
 const readOffice = () => { try { return localStorage.getItem(OFFICE_KEY) === '1'; } catch { return false; } };
 const IDLE_RUN = { id: 'idle', status: 'idle', counts: {}, total: 0, activity: [],
-  stages: ['understand', 'plan', 'discover', 'normalize', 'dedupe', 'validate', 'extract', 'match', 'rank'].map((key) => ({ key, status: 'pending' })) };
+  stages: ['understand', 'plan', 'discover', 'normalize', 'dedupe', 'validate', 'extract', 'match', 'rank', 'connect'].map((key) => ({ key, status: 'pending' })) };
 
 function MissionControl() {
   const run = useStore((s) => s.search.run);

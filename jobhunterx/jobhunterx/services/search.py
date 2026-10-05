@@ -27,6 +27,7 @@ from jobhunterx.discovery import ats, dedupe, page, search, validate, watchlist
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
+from jobhunterx.intelligence import connect
 from jobhunterx.intelligence import job as job_ai
 from jobhunterx.intelligence import skill_links
 from jobhunterx.intelligence.llm_structured import call_structured
@@ -50,6 +51,7 @@ STAGES = [
     ("extract", "Extracting requirements"),
     ("match", "Matching against your profile"),
     ("rank", "Ranking & explaining"),
+    ("connect", "Finding a way to a real person"),
 ]
 
 # Plain-language "who is doing what" feed shown live in the UI. Every line is
@@ -57,6 +59,7 @@ STAGES = [
 AGENTS = {
     "understand": "Profile analyst", "plan": "Planner", "discover": "Scout", "normalize": "Reader",
     "dedupe": "Curator", "validate": "Verifier", "extract": "Analyst", "match": "Analyst", "rank": "Ranker",
+    "connect": "Connector",
 }
 FEED_KEEP = 150
 READ_NARRATE_MAX = 12
@@ -505,6 +508,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     for key in ("validate", "extract", "match", "rank"):
         await run.stage(key)
     best: Optional[tuple[int, JobPosting]] = None
+    tops: list[tuple[int, str, JobPosting, object]] = []       # strong / good fits, for the Connector
     read = {"n": 0}
 
     async def analysis_progress(current: str = "") -> None:
@@ -575,6 +579,8 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 kind = "reject"
             elif m.verdict in ("strong", "good", "stretch") and (best is None or m.score > best[0]):
                 best = (m.score, p)
+            if m.verdict in ("strong", "good") and p.validation.status not in ("closed", "invalid"):
+                tops.append((m.score, job_id, p, m))
             word = VERDICT_WORDS.get(m.verdict, m.verdict)
             why = m.headline or ""
             if why.lower().startswith(word.lower()):          # headline may already lead with the verdict
@@ -590,9 +596,42 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     elif c["scored"]:
         summary_line += ". Check “Not a fit” to see exactly why the others were ruled out"
     await run.say("rank", summary_line, "done")
+
+    # 10. Connect: a route to a real person for the best fits ------------------
+    if watch_mode or not tops:
+        await run.stage("connect", "skipped", "no strong fits to reach out for" if not watch_mode else "")
+    else:
+        await connect_top(run, profile, snap, tops)
     run.data["status"] = "completed"
     run.data["finished_at"] = _now()
     await run.publish()
+
+
+async def connect_top(run: Run, profile: CandidateProfile, snap: CandidateSnapshot, tops: list) -> None:
+    """The Connector: for the best fits, real routes to a person at the company and a referral note in your voice."""
+    await run.stage("connect")
+    picked = sorted(tops, key=lambda t: -t[0])[:connect.TOP_JOBS]
+    await run.say("connect", f"Finding a way to a real person for your top {len(picked)} "
+                  + ("match" if len(picked) == 1 else "matches") + " — a referral gets read", "work")
+    made = 0
+    for _, job_id, p, m in picked:
+        ref = {**_job_ref(p), "id": job_id}
+        await run.say("connect", f"Looking for recruiters, the team and your college's alumni at {ref['company']}", "work", ref)
+        try:
+            kit = await connect.build(p, m, profile, snap)
+        except Exception as exc:                           # a failed kit never fails the search
+            log.warning("connect_failed", company=p.company, error=str(exc)[:120])
+            continue
+        await storage.set_connection(job_id, kit.model_dump(mode="json"))
+        made += 1
+        email = next((r for r in kit.routes if r.kind == "email"), None)
+        people = sum(1 for r in kit.routes if r.kind in ("recruiters", "team", "alumni", "xray"))
+        await run.say("connect", (f"{ref['company']}: the posting gives an email ({email.label[6:]}) — " if email else f"{ref['company']}: ")
+                      + f"{people} people searches and a referral note ready", "good", ref)
+    await run.stage("connect", "done", f"{made} referral kits")
+    if made:
+        await run.say("connect", f"Referral kits ready for {made} top " + ("match" if made == 1 else "matches")
+                      + " — open a job and look for “Reach a real person”", "done")
 
 
 class SearchManager:
