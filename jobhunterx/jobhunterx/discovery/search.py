@@ -172,7 +172,7 @@ def _merge_ranked(query: str, groups: list[list]) -> list:
                 continue
             h = hits.get(key)
             if not h:
-                h = hits[key] = ds.Hit(url=it.url, title=it.title or "", snippet=it.snippet or "", kind=ds.classify(it.url))
+                h = hits[key] = ds.Hit(url=it.url, title=it.title or "", snippet=it.snippet or "", kind=ds.classify(it.url, it.title or ""))
             h.score += ds.KIND_BOOST.get(h.kind, 1.0) / (ds.RRF_K + rank + 1)
             h.engines.add(it.provider)
             if len(it.snippet or "") > len(h.snippet):

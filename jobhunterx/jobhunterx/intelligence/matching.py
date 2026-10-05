@@ -375,8 +375,12 @@ def assess(
 
     must = [m for m in req.must_have_skills]
     if must and not partial_method:
-        must_missing = [m for m in must if m in missing_r]
         must_partial = [m for m in must if any(m == n for n, _ in partial_r)]
+        # An AI-judged "related" link (Docker for Kubernetes) softens the score, but it does not meet a skill the
+        # employer insists on; related experience the candidate declared themselves still counts as a warning.
+        guessed = [m for m in must_partial if ((req.skill_links or {}).get(m) or {}).get("relation") == "related"]
+        must_missing = [m for m in must if m in missing_r] + guessed
+        must_partial = [m for m in must_partial if m not in guessed]
         # A short must-have list is what the employer really insists on: any gap rules the job out. A long one is usually
         # the whole tool list marked "mandatory" by the job reader — a missing item there is a gap to show (it already
         # lowers the score), and only most of the list missing rules the job out.

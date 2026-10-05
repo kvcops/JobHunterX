@@ -526,17 +526,30 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 ### 🔎 Deep Search — good results without any search key
 
 Paid search APIs like Tavily and Exa do three things one free scraper does not: they ask several indexes, they read the
-pages, and they rank by meaning. **Deep Search** (`tools/deep_search.py`) does the same with free parts:
+pages, and they rank by meaning. **Deep Search** (`tools/deep_search.py`) does the same with free parts, then does what
+a general search API cannot: it turns what it finds into open postings on the employer's own job board.
 
-1. **Ask many engines at once** — Bing, Yandex, Google and Brave (through Mullvad's proxies), Yahoo and DuckDuckGo.
-   An engine that keeps failing is rested for 10 minutes instead of slowing every query.
-2. **Merge** — results are combined with reciprocal-rank fusion (a page several engines agree on rises). Employer job
-   pages get a boost (a single ATS posting 1.6×, a company job board 1.4×, a careers page 1.25×); aggregators are
-   lowered and people-lookup sites (RocketReach, ZoomInfo…) are pushed out.
-3. **Open the pages** — the best careers / listing pages are opened and mined for links to the employer's own job board
-   and individual postings (Greenhouse, Lever, Ashby, Workday, Keka…). One careers page can become many real postings.
-4. **Rank by meaning** — the AI scores the top 20 for "is this a real, open posting that matches the search?" (it uses
-   Kilo's free models when you have no key).
+1. **Understand the query** — role words, places (Hyderabad, Bengaluru… with their other names) and modifiers like
+   "fresher" or "2 years" are told apart.
+2. **Ask many engines, three ways** — the query goes to Bing, Yandex, Google and Brave (through Mullvad's proxies),
+   Yahoo and DuckDuckGo, plus two rewrites: one aimed at ATS job pages (Greenhouse, Lever, Ashby, Workday, Keka) and one
+   at company careers pages. A failing engine rests for 10 minutes, and a slow one gets 3 seconds once most have answered.
+3. **Merge and sort the junk out** — reciprocal-rank fusion combines the lists. Each result is classified as a single
+   posting, an aggregator's single job, a careers page, a *list* of jobs ("3,000+ jobs in…"), a salary page, someone's
+   portfolio or profile, or a blog / guide. Lists come after everything real; salary pages, profiles and guides are dropped.
+4. **Check it is still open** — each ATS posting is checked against the employer's own API: closed jobs are removed,
+   and the real location and posting date replace the search snippet's guess. Jobs outside the searched place sink.
+5. **Find the company's own board** — company names are read from aggregator posts ("Acme hiring AI Engineer…") and
+   careers sites, matched against the researched watchlist or probed on Greenhouse / Lever / Ashby, and matching roles in
+   your city are pulled straight from that board. What it learns about each company's board is remembered for a week.
+6. **Open the pages** — the best careers pages are mined for job links, and the page's own job data (`JobPosting`:
+   date posted, valid through, location) is read; expired postings sink, fresh ones rise ("2 days ago" beats "3 months").
+7. **Rank by meaning** — the AI scores the top 30 for "one open posting that matches the role and place". It drops
+   clear misfits when enough good results remain, and is skipped after 12 s so a slow model never holds the search up.
+
+On four India queries (AI Engineer Hyderabad, ML Engineer Bengaluru, DevOps Hyderabad, Data Analyst fresher Bengaluru),
+the old version returned 7 single postings, none on an employer's own board, and 31 aggregator pages out of 57 results.
+This version returns 28 single postings, 21 on employer boards, and 4 aggregator pages out of 60.
 
 Search queries now run 3 at a time, so a full search finishes much faster than one by one.
 
