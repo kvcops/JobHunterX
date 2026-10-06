@@ -40,6 +40,8 @@ ddgs==9.14.4
 trafilatura==2.1.0
 beautifulsoup4==4.14.3
 lxml==6.1.1
+selectolax==1.0.0          # fast HTML parsing (BeautifulSoup stays as the fallback)
+curl_cffi==0.15.0          # retries pages that block plain Python requests, with Chrome's network fingerprint
 
 # --- Document Processing & PDF Tailoring ---
 xhtml2pdf==0.2.17
