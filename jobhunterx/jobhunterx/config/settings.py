@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     # --- Matching / discovery tuning (JSON overrides, see intelligence/policy.py) ---
     match_policy_json: str = ""
     max_jobs_per_search: int = 60
+    enable_ats_index: bool = True           # daily India copy of ~28k employers' own boards (job-board-aggregator data)
     enable_linkedin_source: bool = True     # LinkedIn's public (logged-out) job feed: newest posts, resolved to employer boards
     linkedin_max_applicants: int = 150      # skip LinkedIn posts that already show this many applicants
     max_llm_jd_extractions_per_search: int = 40

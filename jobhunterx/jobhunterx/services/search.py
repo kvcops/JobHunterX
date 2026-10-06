@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from jobhunterx import storage
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
-from jobhunterx.discovery import ats, dedupe, linkedin, page, registry, search, validate, watchlist
+from jobhunterx.discovery import ats, ats_index, dedupe, linkedin, page, registry, search, validate, watchlist
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
@@ -417,6 +417,24 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         return posts
 
     linkedin_task = asyncio.create_task(from_linkedin())
+    index_leads = []
+    if not watch_mode and settings.enable_ats_index:
+        refresh = ats_index.ensure_background()
+        if refresh and not ats_index.status()["rows"]:      # first run ever: wait for the copy (once)
+            await run.say("discover", "Downloading today's list of open jobs on Indian employers' own boards (first time only)", "work")
+            try:
+                await asyncio.wait_for(asyncio.shield(refresh), 90)
+            except asyncio.TimeoutError:
+                pass
+        hits = ats_index.search([*scope.titles, *snap.adjacent_titles[:4]], scope.locations or [scope.country],
+                                level=snap.seniority.value, include_remote=scope.include_remote, limit=max_jobs)
+        hits = [(r, sc) for r, sc in hits if not watchlist.is_mass_recruiter(r.company)]
+        index_leads = [search.Lead(url=r.url, title=r.title, snippet=f"{r.company} · {r.location} · first seen {r.first_seen[:10]}",
+                                   provider="ats_index", query="employer boards index") for r, _ in hits]
+        st = ats_index.status()
+        if index_leads:
+            await run.say("discover", f"{len(index_leads)} matching openings found instantly among {st['rows']:,} postings on "
+                          f"{st['boards']:,} Indian employers' own job boards (refreshed daily)", "good")
     leads = []
     if queries:
         await run.say("discover", f"Searching job sites and company career pages ({len(queries)} searches)"
@@ -424,6 +442,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         async def query_progress(done: int, total: int) -> None:
             await run.progress("discover", done, total, f"Web searches: {done} of {total} done")
         leads = await search.run_queries(queries, on_progress=query_progress)
+    leads = index_leads + leads              # employers' own postings first
     c["search_results"] = len(leads)
     posting_leads, boards = [], {}
     for lead in leads:

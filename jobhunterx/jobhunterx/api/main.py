@@ -73,6 +73,8 @@ async def lifespan(app: FastAPI):
     await init_db()                                                # create / migrate schema (idempotent)
     await app_state.load(str(settings.db_full_path))               # seed defaults, load preferences
     await storage.heal_active_person()
+    from jobhunterx.discovery import ats_index
+    ats_index.ensure_background()        # today's India postings from employers' own boards, refreshed in the background
     try:
         health = await db_health.check(str(settings.db_full_path), repair=True)
         log.info("database_health", status=health["status"], schema=health["schema_version"], **health["counts"])

@@ -272,4 +272,16 @@ def install(monkeypatch) -> dict:
     monkeypatch.setattr(llm_structured, "call_llm_with_fallback", _llm)
     monkeypatch.setattr(net, "fetch", _fetch)
     monkeypatch.setattr(search_router.SearchRouter, "execute_query", _search)
+    # live sources with their own HTTP clients and on-disk memory stay out of the fake world
+    from jobhunterx.discovery import ats_index, linkedin, registry
+
+    async def _no_linkedin(*a, **kw):
+        return [], {}
+
+    monkeypatch.setattr(linkedin, "discover", _no_linkedin)
+    monkeypatch.setattr(ats_index, "ensure_background", lambda: None)
+    monkeypatch.setattr(ats_index, "search", lambda *a, **kw: [])
+    monkeypatch.setattr(registry, "pick", lambda *a, **kw: [])
+    monkeypatch.setattr(registry, "remember", lambda *a, **kw: 0)
+    monkeypatch.setattr(registry, "polled", lambda *a, **kw: None)
     return calls
