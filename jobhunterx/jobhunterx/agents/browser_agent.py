@@ -81,8 +81,6 @@ def _user_agent(major: Optional[str]) -> Optional[str]:
     return f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
 
 
-def _has_display() -> bool:
-    return sys.platform in ("win32", "darwin") or bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +136,9 @@ async def _build_stealth_profile(settings: Settings) -> Any:
     What actually gets agents flagged, and what is done about each:
       * A browser that is not real Chrome (Playwright's test Chromium) → the installed Google Chrome / Edge is used.
       * A User-Agent that claims another version than the browser's client hints → the real version is used.
-      * Headless mode → on a desktop the window is real but parked off-screen (the live view still streams it);
-        headless only where there is no display at all (a server).
+      * Headless Chrome announcing itself → the new headless mode of the real Chrome with the "Headless" word removed
+        from the User-Agent at the true version (passes Cloudflare's test page). No window ever opens: the browser is
+        only seen through the live view in the app. BROWSER_WINDOW_MODE=window shows it for debugging.
       * A fresh, cookie-less profile every time → one persistent profile keeps "challenge passed" cookies and logins.
       * A data-centre IP → the one thing no browser setting fixes. Point BROWSER_CDP_URL at your own Chrome (your home
         connection, your logins) or a hosted stealth browser when running on a server.
@@ -182,7 +181,7 @@ async def _build_stealth_profile(settings: Settings) -> Any:
     if show:
         mode = "window"
     elif mode == "auto":
-        mode = "offscreen" if _has_display() else "headless"
+        mode = "headless"           # a parked window still shows in the taskbar (and on some monitor setups, on screen)
     w, h = live_view.viewport_size()
     exe = _real_chrome()
     if exe:

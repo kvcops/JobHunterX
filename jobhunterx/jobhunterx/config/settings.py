@@ -69,8 +69,8 @@ class Settings(BaseSettings):
     apply_with_cover_letter: bool = True  # prepare a cover letter before applying
     apply_with_cv: bool = True            # prepare a full CV too (uploaded only where a form asks for a separate CV)
     browser_use_cloud: bool = False     # set True + BROWSER_USE_API_KEY in .env to use stealth cloud browsers
-    # auto: real Chrome window parked off-screen on a desktop (looks human to bot checks), headless on a server
-    browser_window_mode: str = "auto"   # auto | offscreen | headless | window
+    # auto = headless: no Chrome window ever opens; the browser is seen only in the app's live view
+    browser_window_mode: str = "auto"   # auto | headless | offscreen | window (window = visible, for debugging)
     # drive a Chrome you started yourself (chrome --remote-debugging-port=9222 --user-data-dir=…) or a hosted
     # stealth browser (Browserbase, Steel, Browser Use cloud…): its IP, cookies and logins are used
     browser_cdp_url: str = ""
