@@ -38,6 +38,19 @@ class EmptyAnswer(ChatError):
 KILO_EXTRA = {"reasoning": {"enabled": False}}
 
 
+_pool: Optional[tuple[Any, httpx.AsyncClient]] = None
+
+
+def _client() -> httpx.AsyncClient:
+    """Reused per event loop: AI calls to the same provider skip a fresh TLS handshake every time."""
+    import asyncio
+    global _pool
+    loop = asyncio.get_running_loop()
+    if _pool is None or _pool[0] is not loop or _pool[1].is_closed:
+        _pool = (loop, httpx.AsyncClient(limits=httpx.Limits(max_connections=20, keepalive_expiry=60)))
+    return _pool[1]
+
+
 async def chat(base: str, model: str, messages: list[dict], *, key: Optional[str] = None, max_tokens: int = 1024,
                temperature: Optional[float] = None, json_mode: bool = False, timeout: float = 60.0,
                extra: Optional[dict] = None) -> dict[str, Any]:
@@ -50,11 +63,11 @@ async def chat(base: str, model: str, messages: list[dict], *, key: Optional[str
     if key:
         headers["Authorization"] = f"Bearer {key}"
     t0 = time.monotonic()
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.post(f"{base}/chat/completions", json=body, headers=headers)
-        if r.status_code == 400 and json_mode:      # a model without JSON mode: retry plainly (prompts ask for JSON anyway)
-            body.pop("response_format", None)
-            r = await client.post(f"{base}/chat/completions", json=body, headers=headers)
+    client = _client()
+    r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
+    if r.status_code == 400 and json_mode:          # a model without JSON mode: retry plainly (prompts ask for JSON anyway)
+        body.pop("response_format", None)
+        r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
     if r.status_code >= 400:
         raise ChatError(r.status_code, r.text[:300])
     data = r.json()

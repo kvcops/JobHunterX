@@ -8,6 +8,8 @@ presents clean step-by-step agent telemetry in the terminal.
 
 from __future__ import annotations
 
+import os
+
 import logging
 import sys
 try:
@@ -109,12 +111,7 @@ if HAS_STRUCTLOG:
 
 def setup_logging(log_level: str = "INFO", json_output: bool = False) -> None:
     """Configure structlog and stdlib logging with clean console output."""
-    try:
-        import litellm
-        litellm.suppress_debug_info = True
-        litellm.set_verbose = False
-    except ImportError:
-        pass
+    os.environ.setdefault("LITELLM_LOG", "ERROR")     # litellm itself is imported lazily (config/llm_router.py)
 
     # Suppress LiteLLM Gemini deprecation warnings about temperature/top_p/top_k
     # These are cosmetic — the params still work but LiteLLM logs noisy warnings

@@ -20,7 +20,14 @@ import time
 from typing import Any, Dict, List
 
 os.environ.setdefault("LITELLM_LOCAL_RESOURCES", "true")
-import litellm
+
+def _litellm():
+    """litellm costs ~200 MB and ~6 s to import: load it on the first AI call that needs it, not at server start."""
+    import litellm
+    litellm.drop_params = True
+    litellm.suppress_debug_info = True
+    litellm.set_verbose = False
+    return litellm
 
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
@@ -269,9 +276,6 @@ def _cache_key(model: str, messages: list[dict], kwargs: dict) -> str:
 def _ensure_api_keys() -> None:
     """Push API keys from settings into env so LiteLLM picks them up."""
     settings = get_settings()
-    litellm.drop_params = True
-    litellm.suppress_debug_info = True
-    litellm.set_verbose = False
     if settings.google_api_key:
         os.environ.setdefault("GEMINI_API_KEY", settings.google_api_key)
         os.environ.setdefault("GOOGLE_API_KEY", settings.google_api_key)
@@ -322,7 +326,7 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
         await _enforce_rate_limit(model, est)
 
         try:
-            result = await litellm.acompletion(**params)
+            result = await _litellm().acompletion(**params)
             _record_provider_success(model)
             return result
         except Exception as exc:
@@ -331,7 +335,7 @@ async def _raw_completion(params: Dict[str, Any]) -> Any:
                 "rate limit" in err_str
                 or "429" in err_str
                 or "too many requests" in err_str
-                or isinstance(exc, litellm.RateLimitError)
+                or type(exc).__name__ == "RateLimitError"
             )
             if is_rate_limit:
                 _record_rate_limit(model)

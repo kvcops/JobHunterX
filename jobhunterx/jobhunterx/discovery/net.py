@@ -69,14 +69,29 @@ async def assert_safe_url(url: str) -> None:
         raise UnsafeURLError(f"Refusing to fetch non-public address for {host}")
 
 
+_shared: Optional[tuple[asyncio.AbstractEventLoop, httpx.AsyncClient]] = None
+
+
+def _client() -> httpx.AsyncClient:
+    """One pooled client per event loop: hundreds of board / page requests per search reuse warm connections
+    instead of paying a new TCP + TLS handshake each time."""
+    global _shared
+    loop = asyncio.get_running_loop()
+    if _shared is None or _shared[0] is not loop or _shared[1].is_closed:
+        _shared = (loop, httpx.AsyncClient(follow_redirects=False,
+                                           limits=httpx.Limits(max_connections=48, max_keepalive_connections=24,
+                                                               keepalive_expiry=30)))
+    return _shared[1]
+
+
 async def fetch(url: str, *, method: str = "GET", json_body: Any = None, timeout: Optional[float] = None,
                 accept: str = "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
                 client: Optional[httpx.AsyncClient] = None) -> FetchResult:
     """Fetch with SSRF checks on every hop. Never raises for HTTP/network errors."""
     timeout = timeout or get_settings().fetch_timeout_s
     headers = {"User-Agent": _UA, "Accept": accept}
-    own = client is None
-    client = client or httpx.AsyncClient(timeout=timeout, follow_redirects=False)
+    own = False
+    client = client or _client()
     current = url
     try:
         for _ in range(MAX_REDIRECTS + 1):
@@ -85,7 +100,7 @@ async def fetch(url: str, *, method: str = "GET", json_body: Any = None, timeout
             except UnsafeURLError as exc:
                 return FetchResult(url=current, error=str(exc))
             try:
-                async with client.stream(method, current, headers=headers, json=json_body) as resp:
+                async with client.stream(method, current, headers=headers, json=json_body, timeout=timeout) as resp:
                     if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("location"):
                         current = urljoin(current, resp.headers["location"])
                         if resp.status_code == 303:
