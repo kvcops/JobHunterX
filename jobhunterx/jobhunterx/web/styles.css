@@ -88,12 +88,13 @@ code { font-family: var(--mono); font-size: .82em; color: var(--text-2); }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .scroll::-webkit-scrollbar { width: 8px; } .scroll::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
 
-/* soft pastel wash, slowly drifting */
-.ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; background: var(--bg); }
-.ambient i { position: absolute; border-radius: 50%; filter: blur(110px); animation: drift 28s ease-in-out infinite alternate; }
-.ambient i:nth-child(1) { width: 60vw; height: 46vh; left: -8vw; bottom: -18vh; background: var(--wash-1); opacity: .55; }
-.ambient i:nth-child(2) { width: 58vw; height: 50vh; right: -10vw; bottom: -20vh; background: var(--wash-2); opacity: .6; animation-delay: -9s; animation-duration: 34s; }
-.ambient i:nth-child(3) { width: 40vw; height: 30vh; right: 6vw; top: -16vh; background: var(--wash-3); opacity: .35; animation-delay: -4s; }
+/* soft pastel wash. Drawn as soft gradients, still: a blurred, endlessly drifting layer under the frosted panels made
+   the GPU redo every panel's blur on every frame, even with nothing happening on screen. */
+.ambient { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; background: var(--bg); contain: strict; }
+.ambient i { position: absolute; border-radius: 50%; }
+.ambient i:nth-child(1) { width: 96vw; height: 92vh; left: -26vw; bottom: -42vh; background: radial-gradient(closest-side, var(--wash-1), transparent); opacity: .55; }
+.ambient i:nth-child(2) { width: 94vw; height: 96vh; right: -28vw; bottom: -44vh; background: radial-gradient(closest-side, var(--wash-2), transparent); opacity: .6; }
+.ambient i:nth-child(3) { width: 76vw; height: 76vh; right: -12vw; top: -40vh; background: radial-gradient(closest-side, var(--wash-3), transparent); opacity: .35; }
 :root[data-theme="dark"] .ambient i { opacity: .26; }
 @keyframes drift { to { transform: translate(4vw, -3vh) scale(1.08); } }
 
@@ -525,6 +526,15 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 .filter-count { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; border-radius: 99px; background: var(--accent); color: #fff; font-size: .62rem; font-weight: 600; display: grid; place-items: center; padding: 0 4px; animation: pop .3s var(--spring); }
 .job-list { margin: 0 -14px; padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
 .list-foot { display: flex; justify-content: space-between; padding: 6px 4px 0; font-size: .76rem; color: var(--text-3); }
+/* windowed list: only rows near the viewport exist; each is placed by its measured offset */
+.vscroll { contain: strict; }               /* a new row lays out the list, never the whole page */
+.vbody { position: relative; flex: none; }
+.vrow { position: absolute; top: 0; left: 0; right: 0; contain: layout style; }
+.vrow .job-card { animation: none; }
+.vrow .job-card.is-fresh { animation: freshGlow 2.6s ease-out; }
+.list-foot .spinner { vertical-align: -2px; margin-right: 4px; }
+/* long lists that are not windowed: the browser skips layout and paint for items off screen */
+.feed-list > li, .company-list > *, .doc-row, .job-card.track-row { content-visibility: auto; contain-intrinsic-size: auto 72px; }
 
 .job-card { position: relative; display: flex; flex-direction: column; background: var(--card-solid); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow-sm); flex: none;
   transition: transform .35s var(--spring), box-shadow .3s, border-color .3s; animation: rise .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms); }

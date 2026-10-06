@@ -338,6 +338,8 @@ function refreshCountsSoon() {
     } catch { /* the next full load corrects it */ }
   }, 1500);
 }
+// The list arrives in pages: the first one at once, the next when you scroll near the end (see loadMoreList).
+const PAGE = 100;
 export async function loadList() {
   const seq = ++listSeq;
   listCtrl?.abort();
@@ -345,13 +347,29 @@ export async function loadList() {
   const l = getState().list;
   setSlice('list', { status: 'loading', error: null });
   try {
-    const res = await api.listJobs(listQuery(l), { signal: listCtrl.signal });
+    const res = await api.listJobs(listQuery(l, { limit: PAGE }), { signal: listCtrl.signal });
     if (seq !== listSeq) return;
     upsertJobs(res.jobs);
-    setSlice('list', { status: 'ready', ids: res.jobs.map((j) => j.id), counts: res.counts });
+    setSlice('list', { status: 'ready', ids: res.jobs.map((j) => j.id), counts: res.counts, hasMore: !!res.has_more, more: false });
   } catch (err) {
     if (isAbortError(err) || seq !== listSeq) return;
     setSlice('list', { status: 'error', error: errorText(err) });
+  }
+}
+export async function loadMoreList() {
+  const l = getState().list;
+  if (!l.hasMore || l.more || l.status !== 'ready') return;
+  const seq = listSeq;
+  setSlice('list', { more: true });
+  try {
+    const res = await api.listJobs(listQuery(l, { limit: PAGE, offset: l.ids.length }), { signal: listCtrl?.signal });
+    if (seq !== listSeq) return;                                  // filters changed meanwhile: that load wins
+    upsertJobs(res.jobs);
+    const have = new Set(getState().list.ids);
+    setSlice('list', { ids: [...getState().list.ids, ...res.jobs.map((j) => j.id).filter((id) => !have.has(id))],
+      counts: res.counts, hasMore: !!res.has_more, more: false });
+  } catch (err) {
+    if (seq === listSeq) setSlice('list', { more: false, hasMore: !isAbortError(err) && l.hasMore });
   }
 }
 

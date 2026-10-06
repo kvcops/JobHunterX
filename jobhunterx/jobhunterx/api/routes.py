@@ -369,13 +369,16 @@ async def check_watchlist():
 
 @router.get("/jobs")
 async def list_jobs(view: str = "recommended", run_id: str = "", q: str = "", work_mode: str = "",
-                    min_score: int = 0, sort: Literal["chance", "score", "reach", "recent"] = "chance", limit: int = 200):
+                    min_score: int = 0, sort: Literal["chance", "score", "reach", "recent"] = "chance", limit: int = 200,
+                    offset: int = 0):
+    """One page of jobs (page through with offset; has_more says whether another page exists) plus the tab counts."""
     if view not in jobs_svc.VIEWS:
         raise HTTPException(400, f"Unknown view '{view}'")
     items, counts = await jobs_svc.list_jobs(view, await _current_hash(), run_id=run_id, q=q.strip()[:100],
                                              work_mode=work_mode, min_score=min_score, sort=sort,
-                                             limit=max(1, min(limit, 500)))
-    return {"jobs": items, "counts": counts}
+                                             limit=max(1, min(limit, 500)) + 1, offset=max(0, offset))
+    lim = max(1, min(limit, 500))
+    return {"jobs": items[:lim], "counts": counts, "has_more": len(items) > lim, "offset": max(0, offset)}
 
 
 async def _detail_or_404(job_id: str) -> dict:

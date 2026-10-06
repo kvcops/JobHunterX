@@ -51,7 +51,7 @@ function TrackRow({ job, statuses, selected, index, onOpen }) {
         <div class="tr-sub"><span class=${`tc-doc ${docs.resume ? 'on' : ''}`}><${Icon} name="doc" size=${12} />${docs.resume ? 'Resume ready' : 'No resume yet'}</span>
           <span>${job.location || 'Location not stated'}</span></div>
       </div>
-      <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${42} />
+      <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${42} animate=${false} />
     </button>
     <div class="tr-actions">
       <${Select} size="sm" label=${`Status for ${job.title}`} tone=${`s-${job.tracking_status}`} value=${job.tracking_status}

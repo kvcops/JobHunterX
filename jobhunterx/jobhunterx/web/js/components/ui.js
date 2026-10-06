@@ -61,12 +61,13 @@ export const reduced = () => {
 };
 
 /** Animate a number towards `value` (ease-out cubic). Starts from the previous value, so live counters glide. */
-export function useCountUp(value, ms = 900) {
+export function useCountUp(value, ms = 900, enabled = true) {
   const target = Number(value) || 0;
-  const [v, setV] = useState(reduced() ? target : 0);
-  const cur = useRef(reduced() ? target : 0);
+  const still = !enabled || reduced();
+  const [v, setV] = useState(still ? target : 0);
+  const cur = useRef(still ? target : 0);
   useEffect(() => {
-    if (reduced()) { cur.current = target; setV(target); return undefined; }
+    if (still) { cur.current = target; setV(target); return undefined; }
     const from = cur.current;
     const start = performance.now();
     let raf;
@@ -79,7 +80,7 @@ export function useCountUp(value, ms = 900) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [target]);
+  }, [target, still]);
   // Keep the precision of the target (1.6 yrs must not read as 2).
   const dp = Number.isInteger(target) ? 0 : Math.min(2, (String(target).split('.')[1] || '').length);
   return dp ? Number(v.toFixed(dp)) : Math.round(v);
@@ -90,9 +91,9 @@ export function CountUp({ value, ms }) {
 }
 
 /** true one frame after mount: lets CSS transitions run from their initial state. */
-export function useMounted() {
-  const [on, setOn] = useState(false);
-  useEffect(() => { const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
+export function useMounted(enabled = true) {
+  const [on, setOn] = useState(!enabled);
+  useEffect(() => { if (!enabled) return undefined; const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
   return on;
 }
 
@@ -116,11 +117,12 @@ export function Badge({ tone = 'neutral', children, title }) {
 export const VERDICT_TONE = { strong: 'success', good: 'info', stretch: 'warning', weak: 'danger', incompatible: 'danger' };
 
 /** Thin ring that draws itself in on mount and glides between values; the number counts up with it. */
-export function ScoreRing({ score, verdict, size = 52 }) {
+/** animate: count up and sweep the ring when it appears. Off in long lists, where rings appear constantly as you scroll. */
+export function ScoreRing({ score, verdict, size = 52, animate = true }) {
   const has = typeof score === 'number';
   const tone = VERDICT_TONE[verdict] || 'unknown';
-  const mounted = useMounted();
-  const shown = useCountUp(has ? score : 0, 1100);
+  const mounted = useMounted(animate);
+  const shown = useCountUp(has ? score : 0, 1100, animate);
   const r = 21;
   const c = 2 * Math.PI * r;
   const pct = has && mounted ? Math.max(0, Math.min(100, score)) : 0;

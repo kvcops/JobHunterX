@@ -1,10 +1,11 @@
 // Discover: a split workspace. Left = search + results list. Right = the selected job,
 // or "mission control" (live pipeline / last run summary) when nothing is selected.
-import { html, useState, useEffect } from '../lib/preact.js';
+import { html, useState, useEffect, memo } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import {
-  startSearch, cancelSearch, setList, loadList, toggleSaved, navigate, clearJobs,
+  startSearch, cancelSearch, setList, loadList, loadMoreList, toggleSaved, navigate, clearJobs,
 } from '../actions.js';
+import { VirtualList } from '../components/virtual.js';
 import {
   Button, Badge, ScoreRing, Skeleton, EmptyState, ErrorBox, ChipsInput, Tabs, Icon, Field, Notice, PageHead, Popover, Seg,
   Monogram, Orb, CountUp, Select, Spinner, Drawer, VERDICT_TONE,
@@ -171,7 +172,7 @@ function AgentRail({ run }) {
   })}</div>`;
 }
 
-function FeedItem({ it, now, live }) {
+function FeedItemView({ it, now, live }) {
   const a = AGENT_BY_STAGE[it.stage] || { name: it.agent, icon: 'spark', h: 20 };
   const job = it.job;
   const clickable = job && job.id && it.stage === 'match';
@@ -180,11 +181,13 @@ function FeedItem({ it, now, live }) {
       <div class="feed-meta"><strong>${it.agent}</strong><span class="feed-time">${ago(it.ts, now)}</span></div>
       <div class="feed-msg">${it.kind === 'work' && live ? html`<${Spinner} size=${12} />` : html`<span class=${`k-dot k-${it.kind}`}></span>`}<span>${it.message}</span></div>
     </div>
-    ${job && typeof job.score === 'number' ? html`<${ScoreRing} score=${job.score} verdict=${job.verdict} size=${34} />` : null}`;
+    ${job && typeof job.score === 'number' ? html`<${ScoreRing} score=${job.score} verdict=${job.verdict} size=${34} animate=${!!live} />` : null}`;
   return clickable
     ? html`<li class=${`feed-item k-${it.kind} is-link`}><button type="button" onClick=${() => navigate(`#/discover/job/${encodeURIComponent(job.id)}`)}>${body}</button></li>`
     : html`<li class=${`feed-item k-${it.kind}`}>${body}</li>`;
 }
+/** Old lines never re-render for a new event; their "2m ago" refreshes every 15 s instead of every second. */
+const FeedItem = memo(FeedItemView);
 
 const VIEW_KEY = 'jhx-activity-view';
 function readView() { try { return localStorage.getItem(VIEW_KEY) === 'agents' ? 'agents' : 'feed'; } catch { return 'feed'; } }
@@ -212,7 +215,7 @@ function LiveFeed({ active, run }) {
         tabs=${[{ key: 'all', label: 'Everything' }, { key: 'jobs', label: 'Verdicts' }, { key: 'issues', label: 'Issues' }]} />` : null}
     </div>
     ${view === 'agents' && run ? html`<${AgentWorld} run=${run} items=${items} />` : html`<ol class="feed-list" aria-live="polite">
-      ${list.length ? list.map((it, k) => html`<${FeedItem} key=${it.id} it=${it} now=${now} live=${active && k === 0} />`)
+      ${list.length ? list.map((it, k) => html`<${FeedItem} key=${it.id} it=${it} now=${k === 0 ? now : now - (now % 15000)} live=${active && k === 0} />`)
         : html`<li class="feed-empty">${active ? 'Warming up…' : 'Nothing to show for this filter.'}</li>`}
     </ol>`}
   </section>`;
@@ -298,7 +301,9 @@ function MissionControl() {
 }
 
 // ---------------------------------------------------------------------------- job list
-export function JobCard({ job, onOpen, selected, index = 0, fresh }) {
+const openJob = (id) => navigate(`#/discover/job/${encodeURIComponent(id)}`);
+
+function JobCardView({ job, onOpen = openJob, selected, index = 0, fresh }) {
   const pendingSave = useStore((s) => !!s.pending.save[job.id]);
   const m = job.match;
   const r = job.reach;
@@ -315,7 +320,7 @@ export function JobCard({ job, onOpen, selected, index = 0, fresh }) {
             ${job.work_mode !== 'unknown' ? html`<span>${WORK_MODE_LABEL[job.work_mode]}</span>` : null}
             ${job.salary ? html`<span>${fmtSalary(job.salary)}</span>` : null}</div>
         </div>
-        <${ScoreRing} score=${m ? m.score : null} verdict=${m && m.verdict} size=${48} />
+        <${ScoreRing} score=${m ? m.score : null} verdict=${m && m.verdict} size=${48} animate=${!!fresh} />
       </div>
       ${m && m.headline ? html`<p class="job-headline">${m.headline}</p>` : null}
       <div class="job-facts">
@@ -338,6 +343,8 @@ export function JobCard({ job, onOpen, selected, index = 0, fresh }) {
     </button>
   </article>`;
 }
+/** Re-renders only when its own job (or selection / freshness) changes, not on every live update of the search. */
+export const JobCard = memo(JobCardView);
 
 function Filters() {
   const list = useStore((s) => s.list);
@@ -396,23 +403,25 @@ function JobList() {
   ];
   const jobs = list.ids.map((id) => byId[id]).filter(Boolean);
   const runActive = run && ACTIVE.has(run.status);
-  const open = (id) => navigate(`#/discover/job/${encodeURIComponent(id)}`);
   const recent = new Set(streamed.slice(-3));
+  const total = counts[list.view];
   return html`<div class="results" aria-label="Jobs">
     <${Tabs} label="Job views" tabs=${tabs} value=${list.view} onChange=${(v) => setList({ view: v })} size="sm" />
     <${Filters} />
-    <div class="scroll job-list" aria-busy=${list.status === 'loading' ? 'true' : 'false'}>
-      ${list.status === 'error' ? html`<${ErrorBox} message=${list.error} onRetry=${loadList} />` : null}
-      ${list.status === 'loading' && !jobs.length ? html`<${Skeleton} rows=${5} />` : null}
-      ${list.status !== 'loading' && list.status !== 'error' && !jobs.length ? (runActive
-        ? html`<${EmptyState} icon="search" title="Looking for roles…">Matches appear here the moment each job is verified and analysed.</${EmptyState}>`
-        : list.view === 'recommended'
-          ? html`<${EmptyState} icon="spark" title="No recommendations yet">${run ? 'This search found no roles that fit well. Check “Not a fit” to see why, or tune locations and role focus.' : 'Run a search to discover roles that fit your profile.'}</${EmptyState}>`
-          : html`<${EmptyState} icon="info" title="Nothing here">No jobs match these filters.</${EmptyState}>`) : null}
-      ${jobs.map((j, i) => html`<${JobCard} key=${j.id} job=${j} index=${i} onOpen=${open} selected=${route.jobId === j.id} fresh=${runActive && recent.has(j.id)} />`)}
-      ${jobs.length ? html`<div class="list-foot"><span>${plural(jobs.length, 'job')}</span>
-        <button type="button" class="link-btn" onClick=${() => clearJobs('unsaved')}>Clear unsaved</button></div>` : null}
-    </div>
+    <${VirtualList} className="job-list" aria-busy=${list.status === 'loading' ? 'true' : 'false'}
+      items=${jobs} itemKey=${(j) => j.id} estimate=${190} gap=${10} onNearEnd=${loadMoreList}
+      renderItem=${(j) => html`<${JobCard} job=${j} selected=${route.jobId === j.id} fresh=${!!(runActive && recent.has(j.id))} />`}
+      before=${html`
+        ${list.status === 'error' ? html`<${ErrorBox} message=${list.error} onRetry=${loadList} />` : null}
+        ${list.status === 'loading' && !jobs.length ? html`<${Skeleton} rows=${5} />` : null}
+        ${list.status !== 'loading' && list.status !== 'error' && !jobs.length ? (runActive
+          ? html`<${EmptyState} icon="search" title="Looking for roles…">Matches appear here the moment each job is verified and analysed.</${EmptyState}>`
+          : list.view === 'recommended'
+            ? html`<${EmptyState} icon="spark" title="No recommendations yet">${run ? 'This search found no roles that fit well. Check “Not a fit” to see why, or tune locations and role focus.' : 'Run a search to discover roles that fit your profile.'}</${EmptyState}>`
+            : html`<${EmptyState} icon="info" title="Nothing here">No jobs match these filters.</${EmptyState}>`) : null}`}
+      after=${jobs.length ? html`<div class="list-foot">
+        <span>${list.more ? html`<${Spinner} size=${12} /> Loading more…` : list.hasMore && total ? `${jobs.length} of ${plural(total, 'job')} · scroll for more` : plural(jobs.length, 'job')}</span>
+        <button type="button" class="link-btn" onClick=${() => clearJobs('unsaved')}>Clear unsaved</button></div>` : null} />
   </div>`;
 }
 

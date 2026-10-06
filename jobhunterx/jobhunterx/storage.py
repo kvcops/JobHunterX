@@ -339,16 +339,17 @@ async def get_row(job_id: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
-async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score DESC", limit: int = 200) -> list[dict]:
+async def list_rows(where: str = "", params: tuple = (), order: str = "fit_score DESC", limit: int = 200,
+                    offset: int = 0) -> list[dict]:
     sql = "SELECT id, company, role, location, apply_url, status, posting_json, match_json, run_id, saved_at, " \
           "tracking_status, verdict, fit_score, reach_score, profile_hash, validation_status, created_at, updated_at, " \
           "(tailored_pdf IS NOT NULL) AS has_legacy_pdf, (connect_json IS NOT NULL) AS has_kit FROM jobs"
     where, params = _scope(where, params)
     sql += f" WHERE {where}"
-    sql += f" ORDER BY {order} LIMIT ?"
+    sql += f" ORDER BY {order}, id LIMIT ? OFFSET ?"          # id: a stable order, so pages never overlap or skip
     async with _conn() as db:
         db.row_factory = aiosqlite.Row
-        cur = await db.execute(sql, (*params, limit))
+        cur = await db.execute(sql, (*params, limit, max(0, offset)))
         return [dict(r) for r in await cur.fetchall()]
 
 
