@@ -31,7 +31,7 @@ from jobhunterx.intelligence.llm_structured import call_structured
 
 log = get_logger("skill_links")
 
-VERSION = "skill-links-v5"
+VERSION = "skill-links-v6"
 BATCH = 15                    # job skills judged per AI call (small batches give steadier answers)
 LOOKUPS_PER_ROUND = 6         # skills looked up on the web per resolve() call (cached afterwards)
 CANDIDATE_SKILLS = 60         # candidate skills shown to the model
@@ -72,6 +72,10 @@ who keeps up with new tools. For each JOB SKILL decide whether one of the CANDID
   "LangChain" → "LlamaIndex"; "FastAPI" → "Flask"; "AWS" → "GCP"; "MCP" → "A2A").
 - "none": no real link. Sharing a broad area is NOT enough ("Python" does not make someone a "React" developer;
   "SQL" is not "Spark").
+- A job skill that lists ALTERNATIVES ("Classical ML, GenAI/RAG/agents or MLOps", "AWS or GCP") is met when ANY one
+  alternative is met — judge it by the best one.
+- A SOFT SKILL ("Communication", "Analytical skills", "Problem solving", "Teamwork") cannot be disproved by a skills
+  list: mark it "same" with via = the candidate skill closest to the work it describes.
 Set "via" to the ONE candidate skill (copied exactly) that best supports "same" or "related"; empty for "none".
 Set "known" to false only if you genuinely do not know what the job skill is (a new or niche product).
 Return one entry for every job skill, using the job skill text exactly as given."""

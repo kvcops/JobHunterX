@@ -302,6 +302,8 @@ async def assess_role_fit(snapshot: CandidateSnapshot, jobs: list[JobPosting], u
     """Return {job_id: (closeness, matched_track, reason, method)}."""
     out: dict[str, tuple[float, str, str, str]] = {}
     tracks = "\n".join(f"- {f.label} (weight {f.closeness:.2f})" for f in snapshot.role_families) or "- (none)"
+    if snapshot.target_titles:   # roles the candidate asked for are their track by definition
+        tracks += "\n- Target roles the candidate chose (weight 1.00): " + ", ".join(snapshot.target_titles[:10])
     pending = list(jobs)
     if use_llm and snapshot.role_families:
         for i in range(0, len(pending), batch_size):
@@ -311,7 +313,7 @@ async def assess_role_fit(snapshot: CandidateSnapshot, jobs: list[JobPosting], u
                 resp = "; ".join(j.requirements.responsibilities[:4]) or (j.description or "")[:300]
                 lines.append(f"[{j.id}] title: {j.title} | track per posting: {j.role_family or '?'} | work: {resp}")
             user = f"Candidate tracks:\n{tracks}\n\nJobs:\n{fence(chr(10).join(lines), 9000)}"
-            key = content_hash(snapshot.profile_hash, *[f"{j.id}:{j.title}:{j.role_family}" for j in batch])
+            key = content_hash(snapshot.profile_hash, tracks, *[f"{j.id}:{j.title}:{j.role_family}" for j in batch])
             res, model = await call_structured(
                 task="role_fit", version=ROLE_FIT_VERSION, model=RoleFitBatch, system=_FIT_SYSTEM, user=user,
                 chain="fast", max_tokens=1600, cache_parts=(key,),
