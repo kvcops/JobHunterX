@@ -40,11 +40,18 @@ def registrable(host: str) -> str:
     return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
 
+def _jsonld_blocks(html: str) -> list[str]:
+    try:                                   # selectolax: same blocks, many times faster than BeautifulSoup
+        from selectolax.lexbor import LexborHTMLParser
+        return [n.text() for n in LexborHTMLParser(html).css('script[type*="ld+json" i]')]
+    except Exception:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+        return [t.string or t.get_text() or "" for t in soup.find_all("script", type=re.compile("ld\\+json", re.I))]
+
+
 def _iter_jsonld(html: str):
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all("script", type=re.compile("ld\\+json", re.I)):
-        raw = tag.string or tag.get_text() or ""
+    for raw in _jsonld_blocks(html):
         try:
             data = json.loads(raw.strip())
         except ValueError:

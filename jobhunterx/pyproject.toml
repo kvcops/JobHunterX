@@ -27,6 +27,8 @@ dependencies = [
     "ddgs>=9.0.0",
     "trafilatura>=2.0.0",
     "beautifulsoup4>=4.13.0",
+    "selectolax>=1.0.0",
+    "curl_cffi>=0.15.0",
     "lxml>=5.4.0",
 
     # --- PDF & Extraction ---
