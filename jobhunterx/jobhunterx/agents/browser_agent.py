@@ -427,6 +427,8 @@ def describe_action(name: str, params: dict, state: Any) -> str:
         return f"Upload {Path(str(p.get('path', 'file'))).name}"
     if name == "select_dropdown":
         return f"Choose “{p.get('text', '')}” in {lbl}"
+    if name == "choose_option":
+        return f"Choose “{p.get('value', '')}” in {lbl}"
     if name == "dropdown_options":
         return f"Look at the options in {lbl}"
     if name == "set_checkbox_by_text":
@@ -456,7 +458,7 @@ def describe_action(name: str, params: dict, state: Any) -> str:
     if name == "wait_for_human_check":
         return "Wait for the security check to clear"
     if name == "prefill_basic_fields":
-        return "Fill name, email and profile links"
+        return "Fill name, email, phone and profile links"
     if name == "get_email_otp":
         return "Read the verification code from email"
     return name.replace("_", " ").capitalize()
@@ -717,65 +719,500 @@ async def _wait_for_human_check(browser_session: Any, max_seconds: int = 25) -> 
                               "Stop and report CAPTCHA_DETECTED.")
 
 
-# Fills the plain identity fields (name, email, profile links) by their HTML meaning — autocomplete / name / label —
-# so the model spends its steps on the real questions. Only empty, visible, editable fields are touched.
+# Fills the plain identity fields (name, email, profile links) by their HTML meaning. Each field is judged by ONE source
+# at a time — autocomplete, then its visible label, aria-label, placeholder, and last its name/id — so a stray attribute
+# ("name" on a Last-name box) cannot flip it. Only empty, visible, editable fields are touched; a link goes only into the
+# box made for that site (no GitHub in a LinkedIn or Twitter box).
 _PREFILL_JS = """(p) => {
   const docs = [document];
   for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
-  const rules = [
-    ['first', (a, t) => a === 'given-name' || /(^|[^a-z])(first|given|f)[\\s_-]*name|fname|first$/.test(t)],
-    ['last', (a, t) => a === 'family-name' || /(last|family|sur)[\\s_-]*name|lname|surname|last$/.test(t)],
-    ['email', (a, t, el) => a === 'email' || el.type === 'email' || /e-?mail/.test(t)],
-    ['linkedin', (a, t) => /linked\\s*in/.test(t)],
-    ['github', (a, t) => /git\\s*hub/.test(t)],
-    ['website', (a, t) => a === 'url' || /portfolio|personal (web)?site|^website|website$|personal url/.test(t)],
-    ['name', (a, t) => a === 'name' || /^(full[\\s_-]*)?name\\*?$|^your name|legal name|full[\\s_-]*name/.test(t)],
+  const norm = (s) => (s || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\\-\\[\\].:*]+/g, ' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const SKIP = /company|employer|organi[sz]ation|school|college|university|reference|referr|manager|emergency|hiring|recruiter|city|country|\\bstate\\b|(home|street|postal|current|permanent|mailing|residential) address|^address|nominee|father|mother|spouse|guardian|parent|middle|nick|maiden|alternate|secondary|confirm|search|keyword/;
+  const kinds = [
+    ['full', (t) => /first\\s*(name)?\\s*(and|&|\\/)\\s*last|full\\s*name|^name$|^your name|legal name|candidate name|applicant name|name as per/.test(t)],
+    ['last', (t) => /last\\s*name|family\\s*name|sur\\s*name|^last$|^l\\s?name$|\\blname\\b/.test(t)],
+    ['first', (t) => /first\\s*name|given\\s*name|fore\\s*name|^first$|^f\\s?name$|\\bfname\\b|preferred\\s*first/.test(t)],
+    ['email', (t) => /e\\s?mail/.test(t)],
+    ['linkedin', (t) => /linked\\s*in/.test(t)],
+    ['github', (t) => /git\\s*hub/.test(t)],
+    ['gitlab', (t) => /git\\s*lab/.test(t)],
+    ['twitter', (t) => /twitter|\\bx\\.com|^x( handle| profile| url)?$/.test(t)],
+    ['kaggle', (t) => /kaggle/.test(t)], ['leetcode', (t) => /leet\\s*code/.test(t)], ['medium', (t) => /\\bmedium\\b/.test(t)],
+    ['behance', (t) => /behance/.test(t)], ['dribbble', (t) => /dribbble/.test(t)], ['stackoverflow', (t) => /stack\\s*overflow/.test(t)],
+    ['scholar', (t) => /scholar/.test(t)], ['other_social', (t) => /facebook|instagram|youtube|tiktok|threads|social/.test(t)],
+    ['portfolio', (t) => /portfolio|personal\\s*(web)?\\s*site|^web\\s*site|website|personal url|home\\s*page|^url$|^link$|blog/.test(t)],
   ];
+  const labelOf = (el, d) => {
+    let s = [...(el.labels || [])].map((l) => l.innerText).join(' ');
+    const lb = el.getAttribute('aria-labelledby');
+    if (!s && lb) s = lb.split(/\\s+/).map((i) => (d.getElementById(i) || {}).innerText || '').join(' ');
+    let c = el.parentElement;
+    for (let i = 0; !s && c && i < 4; i++, c = c.parentElement) {
+      if (c.querySelectorAll('input,textarea,select').length > 1) break;
+      const l = c.querySelector('label,legend,[class*=label i]');
+      if (l && !l.contains(el)) s = l.innerText;
+    }
+    return s || '';
+  };
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-  const filled = [];
+  const filled = [], seen = new Set();
   for (const d of docs) {
     for (const el of d.querySelectorAll('input')) {
       if (!['text', 'email', 'url', ''].includes(el.type) || el.disabled || el.readOnly || el.value) continue;
+      if (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete')) continue;
       const r = el.getBoundingClientRect(); if (r.width < 5 || r.height < 5) continue;
-      const lab = [...(el.labels || [])].map((l) => l.innerText).join(' ');
-      const t = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, lab].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
-      if (!t || /company|employer|school|college|university|reference|referr|manager|emergency|hiring|recruiter|city|country/.test(t)) continue;
       const a = (el.getAttribute('autocomplete') || '').toLowerCase();
-      const hit = rules.find(([k, f]) => p[k] && f(a, t, el));
-      if (!hit) continue;
-      el.focus(); setter.call(el, p[hit[0]]);
+      const lab = norm(labelOf(el, d));
+      const sources = [lab, norm(el.getAttribute('aria-label')), norm(el.placeholder), norm(el.name + ' ' + el.id)].filter(Boolean);
+      if (!sources.length || sources.slice(0, 2).some((t) => SKIP.test(t))) continue;
+      let kind = ({ 'given-name': 'first', 'family-name': 'last', name: 'full', email: 'email' })[a] || (el.type === 'email' ? 'email' : '');
+      for (const t of sources) {
+        if (kind) break;
+        const hit = kinds.find(([, f]) => f(t));
+        if (hit) kind = hit[0];
+      }
+      if (!kind && a === 'url') kind = 'portfolio';
+      if (!kind || !p[kind] || (seen.has(kind) && !['first', 'last', 'full', 'email'].includes(kind))) continue;
+      seen.add(kind);
+      el.focus(); setter.call(el, p[kind]);
       for (const ev of ['input', 'change']) el.dispatchEvent(new Event(ev, { bubbles: true }));
       el.blur();
-      filled.push((lab || el.placeholder || el.name || hit[0]).trim().slice(0, 40));
+      filled.push((labelOf(el, d) || el.placeholder || el.name || kind).replace(/\\s+/g, ' ').replace(/\\*/g, '').trim().slice(0, 40) + ' = ' + p[kind]);
     }
   }
   return filled;
 }"""
 
 
+# Puts the phone number in the way the phone box expects: sets the country flag / code picker of the common phone widgets
+# (intl-tel-input, react-phone-input-2, react-phone-number-input, a <select> of codes next to the box) to the candidate's
+# country, then types only the national number; a plain box gets the full international number unless it is clearly a
+# 10-digit-only box. Anything it cannot handle safely is reported back for the agent to do with choose_option.
+_PHONE_JS = """(p) => {
+  const docs = [document];
+  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  const selSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+  const put = (el, v) => { el.focus(); setter.call(el, v); for (const ev of ['input', 'change']) el.dispatchEvent(new Event(ev, { bubbles: true })); el.blur(); };
+  const tap = (el) => { for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: el.ownerDocument.defaultView })); };
+  const codeRe = new RegExp('\\\\+\\\\s?' + p.code + '(?!\\\\d)');
+  const digits = (s) => (s || '').replace(/\\D/g, '');
+  const out = [];
+  for (const d of docs) {
+    const w = d.defaultView;
+    for (const el of d.querySelectorAll('input')) {
+      const r = el.getBoundingClientRect(); if (r.width < 5 || r.height < 5 || el.disabled || el.readOnly) continue;
+      const lab = [...(el.labels || [])].map((l) => l.innerText).join(' ');
+      const t = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, lab, el.getAttribute('autocomplete')].join(' ').toLowerCase();
+      const isTel = el.type === 'tel' || /phone|mobile|contact\\s*(no|number)|whats\\s*app|\\btel\\b/.test(t);
+      if (!isTel || /country\\s*code|dial|extension|\\bext\\b|emergency|reference|alternate|fax/.test(t) || el.type === 'search') continue;
+      const v = (el.value || '').trim();
+      if (digits(v).length > p.code.length + 2) continue;                    // already holds a number
+      const iti = (w.intlTelInputGlobals && w.intlTelInputGlobals.getInstance && w.intlTelInputGlobals.getInstance(el))
+               || (w.intlTelInput && w.intlTelInput.getInstance && w.intlTelInput.getInstance(el));
+      if (iti && p.iso) {
+        try { iti.setCountry(p.iso); } catch (e) {}
+        put(el, p.national);
+        out.push('phone (flag picker set to ' + p.code_plus + ') = ' + p.national);
+        continue;
+      }
+      const rtel = el.closest('.react-tel-input');
+      if (rtel) {
+        const flag = rtel.querySelector('.selected-flag');
+        if (!codeRe.test(v) && flag) {
+          tap(flag);
+          const li = rtel.querySelector('li.country[data-country-code="' + p.iso + '"]') || [...rtel.querySelectorAll('li.country')].find((x) => x.getAttribute('data-dial-code') === p.code);
+          if (li) tap(li);
+        }
+        put(el, p.code_plus + ' ' + p.national);
+        out.push('phone (with ' + p.code_plus + ' built in) = ' + p.code_plus + ' ' + p.national);
+        continue;
+      }
+      let box = el.parentElement, sel = null, prefix = null;
+      for (let i = 0; box && i < 4 && !sel && !prefix; i++, box = box.parentElement) {
+        if (box.querySelectorAll('input[type=tel],input[type=text],input:not([type])').length > 2) break;
+        sel = [...box.querySelectorAll('select')].find((s) => [...s.options].some((o) => codeRe.test(o.text) || (p.iso && o.value.toUpperCase() === p.iso.toUpperCase()) || (digits(o.value) === p.code && o.value.length <= 5))) || null;
+        if (!sel) {
+          prefix = [...box.querySelectorAll('button,span,div,[role=combobox]')].find((x) => x !== el && !x.contains(el) && /^\\s*(\\S{0,4}\\s*)?\\+\\d{1,4}\\s*$/.test(x.innerText || '')) || null;
+        }
+      }
+      if (sel) {
+        const o = [...sel.options].find((o) => codeRe.test(o.text)) || [...sel.options].find((o) => p.iso && o.value.toUpperCase() === p.iso.toUpperCase()) || [...sel.options].find((o) => digits(o.value) === p.code);
+        selSetter.call(sel, o.value);
+        for (const ev of ['input', 'change']) sel.dispatchEvent(new Event(ev, { bubbles: true }));
+        put(el, p.national);
+        out.push('phone code picker = ' + o.text.trim().slice(0, 30) + '; phone = ' + p.national);
+        continue;
+      }
+      if (prefix) {
+        if (codeRe.test(prefix.innerText)) { put(el, p.national); out.push('phone (box already shows ' + p.code_plus + ') = ' + p.national); }
+        else out.push('NOT DONE: the phone box has a country-code picker showing "' + prefix.innerText.trim() + '" — set it to ' + p.code_plus + ' with choose_option, then type ' + p.national);
+        continue;
+      }
+      if (codeRe.test(v)) { put(el, v.replace(/\\s+$/, '') + ' ' + p.national); out.push('phone = ' + p.code_plus + ' ' + p.national); continue; }
+      const ml = parseInt(el.getAttribute('maxlength') || '0', 10);
+      const ph = (el.placeholder || '').trim();
+      const nationalOnly = (ml > 0 && ml <= p.national.length + 1) || (/^[\\d\\s-]{8,14}$/.test(ph) && !ph.startsWith('+')) || /10\\s*digit/.test(t);
+      const val = nationalOnly ? p.national : p.code_plus + ' ' + p.national;
+      put(el, val);
+      out.push('phone = ' + val);
+    }
+  }
+  return out;
+}"""
+
+
+async def _eval(browser_session: Any, expression: str) -> Any:
+    cdp = await browser_session.get_or_create_cdp_session()
+    out = await cdp.cdp_client.send.Runtime.evaluate(params={"expression": expression, "returnByValue": True},
+                                                     session_id=cdp.session_id)
+    return (out.get("result") or {}).get("value")
+
+
 async def _prefill(browser_session: Any, profile: dict) -> Any:
     import json as _json
     from browser_use import ActionResult
-    name = (profile.get("name") or "").strip()
-    parts = name.split()
-    vals = {"name": name, "first": parts[0] if parts else "", "last": " ".join(parts[1:]) if len(parts) > 1 else "",
-            "email": profile.get("email") or "", "linkedin": profile.get("linkedin") or "", "github": profile.get("github") or "",
-            "website": profile.get("portfolio") or ""}
+    first, last, full = name_parts(profile)
+    vals = {"full": full, "first": first, "last": last, "email": profile.get("email") or "", **profile_links(profile)}
+    code, national = split_phone(profile.get("phone", ""), home_country(profile))
+    phone = {"code": code.lstrip("+"), "code_plus": code, "iso": _ISO.get(code, ""), "national": national}
     try:
-        cdp = await browser_session.get_or_create_cdp_session()
-        filled = []
+        filled: list = []
         for _ in range(8):                               # single-page forms render a moment after load
-            out = await cdp.cdp_client.send.Runtime.evaluate(
-                params={"expression": f"({_PREFILL_JS})({_json.dumps(vals)})", "returnByValue": True}, session_id=cdp.session_id)
-            filled = (out.get("result") or {}).get("value") or []
+            filled = await _eval(browser_session, f"({_PREFILL_JS})({_json.dumps(vals)})") or []
             if filled:
                 break
             await asyncio.sleep(0.75)
+        if code and national:
+            filled += await _eval(browser_session, f"({_PHONE_JS})({_json.dumps(phone)})") or []
     except Exception as exc:
         return ActionResult(extracted_content=f"Pre-fill skipped ({str(exc)[:80]}). Fill the form normally.")
     if not filled:
         return ActionResult(extracted_content="No basic fields to pre-fill here (maybe an Apply button must be clicked first).")
-    return ActionResult(extracted_content="Pre-filled: " + ", ".join(filled) + ". Check them once; do not retype them.")
+    return ActionResult(extracted_content="Pre-filled: " + "; ".join(filled) + ". Check them once; do not retype them.")
+
+
+# Runs on the dropdown the agent picked (`this`). One function, several steps (`op`), so Python can wait between them:
+# read a native <select>, find the search box of a custom dropdown, list the options that are showing right now (and say
+# whether the list is still loading), scroll a long list, and give the screen point of an option for a real mouse click.
+_OPTION_JS = """function(op, arg) {
+  const el = this, doc = el.ownerDocument, win = doc.defaultView;
+  const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+  const vis = (e) => { const r = e.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return false;
+    const s = win.getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0'; };
+  const isText = (e) => e && ((e.tagName === 'INPUT' && /^(text|search|email|tel|url|)$/.test(e.type)) || e.isContentEditable);
+  const nativeSelect = () => {
+    if (el.tagName === 'SELECT') return el;
+    if (el.tagName === 'LABEL' && el.control && el.control.tagName === 'SELECT') return el.control;
+    const inner = el.querySelectorAll ? el.querySelectorAll('select') : [];
+    return inner.length === 1 ? inner[0] : null;
+  };
+  const shown = () => {
+    let c = el;
+    for (let i = 0; i < 3 && c.parentElement && norm(c.parentElement.innerText).length < 160; i++) c = c.parentElement;
+    const s = nativeSelect();
+    return norm([s && s.selectedOptions[0] ? s.selectedOptions[0].text : '', el.value || '', c.innerText || ''].join(' ')).slice(0, 200);
+  };
+  const PLACEHOLDER = /^(loading|searching|fetching|please wait|no (options|results|matches|data)|nothing found|not found|type to search|start typing|type (at least|more)|please enter|enter \\d+ or more|select\\.*$|select (an? )?(option|one)|choose\\.*$|--)/i;
+  if (op === 'inspect') {
+    const s = nativeSelect();
+    if (s) return { kind: 'select', options: [...s.options].map((o) => ({ t: norm(o.text), v: o.value, off: o.disabled })) };
+    return { kind: 'combo', typable: isText(el), workday: !!el.closest('[data-automation-id]'), expanded: el.getAttribute('aria-expanded') === 'true', shown: shown() };
+  }
+  if (op === 'set_select') {
+    const s = nativeSelect(), o = s.options[arg];
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, o.value);
+    for (const ev of ['input', 'change']) s.dispatchEvent(new Event(ev, { bubbles: true }));
+    return { shown: s.selectedOptions[0] ? norm(s.selectedOptions[0].text) : '' };
+  }
+  if (op === 'shown') return { shown: shown(), expanded: el.getAttribute('aria-expanded') === 'true' };
+  const scopeOf = () => {
+    for (const e of [doc.activeElement, el, el.querySelector && el.querySelector('[aria-controls],[aria-owns]')]) {
+      const id = e && (e.getAttribute('aria-controls') || e.getAttribute('aria-owns'));
+      const sc = id && doc.getElementById(id);
+      if (sc && vis(sc)) return sc;
+    }
+    return doc;
+  };
+  if (op === 'focus_input') {
+    const a = doc.activeElement;
+    let inp = isText(a) ? a : isText(el) ? el : null;
+    if (!inp) {
+      const sc = scopeOf();
+      inp = [...(sc === doc ? doc : sc).querySelectorAll('input[type=search],.iti__search-input,.select2-search__field,input[placeholder*=search i],[role=listbox] input,[role=dialog] input[type=text]')].find(vis) || null;
+    }
+    if (!inp) return { ok: false };
+    inp.focus();
+    try { inp.select(); } catch (e) {}
+    return { ok: true, value: inp.value || '' };
+  }
+  if (op === 'options') {
+    const sc = scopeOf();
+    const SEL = ['[role=option]', '[role=listbox] li', '[role=menuitem]', '[role=menuitemradio]', '[role=treeitem]',
+      '[class*=menu] [class*="-option"]', '[id*="-option-"]', '.select__option', 'li.iti__country', '.country-list li.country',
+      '[data-automation-id=promptOption]', '.MuiAutocomplete-option', '.ant-select-item-option', '.vs__dropdown-option',
+      '.select2-results__option', '.chosen-results li', '.pac-item', 'ul.ui-autocomplete li', '.autocomplete-suggestion',
+      '.dropdown-menu.show li', '[class*=suggestion] li', '[class*=dropdown] [class*=item]'];
+    const found = new Set();
+    for (const q of SEL) { try { for (const e of sc.querySelectorAll(q)) if (!e.contains(el) && !el.contains(e)) found.add(e); } catch (e) {} }
+    let cands = [...found].filter(vis);
+    cands = cands.filter((c) => !cands.some((o) => o !== c && c.contains(o)));
+    const opts = [], els = [];
+    let placeholder = '';
+    for (const c of cands) {
+      const t = norm(c.innerText || c.textContent || c.getAttribute('aria-label'));
+      if (!t || t.length > 200) continue;
+      if (PLACEHOLDER.test(t) && !c.getAttribute('data-dial-code')) { placeholder = placeholder || t; continue; }
+      if (c.getAttribute('aria-disabled') === 'true') continue;
+      els.push(c);
+      opts.push({ t, dial: c.getAttribute('data-dial-code') || (c.querySelector('[data-dial-code]') || { getAttribute: () => '' }).getAttribute('data-dial-code') || '' });
+      if (opts.length >= 400) break;
+    }
+    const busy = [...(sc === doc ? doc : sc).querySelectorAll('[class*=loading i],[class*=spinner i],[aria-busy=true]')].some((e) => vis(e) && !e.contains(el));
+    const list = els.length ? (els[0].closest('[role=listbox],ul,[class*=menu-list],[class*=menu],[class*=list]') || els[0].parentElement) : null;
+    win.__jhxOpts = els; win.__jhxList = list;
+    return { opts, loading: busy || /^(loading|searching|fetching|please wait)/i.test(placeholder), empty: placeholder,
+             scrollable: !!(list && list.scrollHeight > list.clientHeight + 4) };
+  }
+  if (op === 'scroll_list') {
+    const l = win.__jhxList; if (!l) return { moved: false };
+    const before = l.scrollTop; l.scrollTop += Math.max(60, l.clientHeight * 0.85);
+    return { moved: l.scrollTop !== before };
+  }
+  if (op === 'point') {
+    const o = (win.__jhxOpts || [])[arg]; if (!o) return null;
+    o.scrollIntoView({ block: 'nearest' });
+    const r = o.getBoundingClientRect();
+    const lx = r.left + Math.min(r.width / 2, 40), ly = r.top + r.height / 2;
+    const hit = doc.elementFromPoint(lx, ly);
+    let x = lx, y = ly, w = win;
+    try { while (w !== w.top && w.frameElement) { const f = w.frameElement.getBoundingClientRect(); x += f.left + w.frameElement.clientLeft; y += f.top + w.frameElement.clientTop; w = w.parent; } } catch (e) {}
+    return { x, y, top: w === w.top, hit: !!hit && (o === hit || o.contains(hit) || hit.contains(o)) };
+  }
+  if (op === 'synthetic') {
+    const o = (win.__jhxOpts || [])[arg]; if (!o) return false;
+    o.scrollIntoView({ block: 'nearest' });
+    for (const t of ['pointerover', 'mouseover', 'pointermove', 'mousemove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'])
+      o.dispatchEvent(new (t.startsWith('pointer') ? PointerEvent : MouseEvent)(t, { bubbles: true, cancelable: true, view: win, button: 0 }));
+    return true;
+  }
+  return null;
+}"""
+
+
+def _norm_opt(s: str) -> str:
+    s = re.sub(r"[\U0001F1E6-\U0001F1FF]", " ", s or "")                     # flag emoji
+    return re.sub(r"\s+", " ", re.sub(r"[^\w+]+", " ", s.lower())).strip()
+
+
+def _want(value: str) -> tuple[str, str, list[str]]:
+    """What the agent asked for → (normalised value, calling code digits if it is a country / code, aliases)."""
+    v = _norm_opt(value)
+    code, aliases = "", []
+    m = re.fullmatch(r"\+?\s?(\d{1,4})", v)
+    if m:
+        code = m.group(1)
+    else:
+        for name, c in _CALLING_CODES.items():
+            if v == name or re.fullmatch(rf"{re.escape(name)} ?\+?{c.lstrip('+')}", v):
+                code = c.lstrip("+")
+    if code:
+        aliases = [n for n, c in _CALLING_CODES.items() if c == "+" + code] + ["+" + code]
+        aliases += _COUNTRY_ALIASES.get(_CODE_COUNTRY.get("+" + code, "").lower(), [])
+    return v, code, aliases
+
+
+def _option_score(text: str, dial: str, want: str, code: str, aliases: list[str]) -> float:
+    t = _norm_opt(text)
+    if not t:
+        return 0
+    score = 0.0
+    if t == want:
+        score = 100
+    elif code and ((dial and dial.lstrip("+") == code) or re.search(rf"\+\s?{code}(?!\d)", text) or t == code):
+        # "+91" asked: an option carrying that dial code; prefer the one that also names the country ("India +91")
+        score = 94 + (3 if any(re.search(rf"(^| ){re.escape(a)}( |$)", t) for a in aliases if len(a) > 2) else 0)
+    elif t in aliases:
+        score = 92
+    elif want and re.search(rf"(^| ){re.escape(want)}( |$)", t):
+        score = 82
+    elif any(len(a) > 2 and re.search(rf"(^| ){re.escape(a)}( |$)", t) for a in aliases):
+        score = 78
+    elif want and t.startswith(want):
+        score = 72
+    elif want and all(w in t.split() for w in want.split()):
+        score = 66
+    elif want and len(want) > 3 and want in t:
+        score = 55
+    return score - len(t) / 1000 if score else 0
+
+
+def _best(options: list[dict], value: str) -> tuple[int, float]:
+    want, code, aliases = _want(value)
+    best, best_score = -1, 0.0
+    for i, o in enumerate(options):
+        s = _option_score(o.get("t", ""), o.get("dial", ""), want, code, aliases)
+        if s > best_score:
+            best, best_score = i, s
+    return best, best_score
+
+
+_GOOD = 60     # below this an option is only loosely related to what was asked: list them and let the agent decide
+
+
+async def _choose_option(browser_session: Any, index: int, value: str, search: str = "", wait_seconds: float = 8) -> Any:
+    """Open a dropdown (native, React-Select, Material, Workday, country-code flag pickers, autocompletes…), type a search
+    if it has a search box, WAIT until the list has loaded and stopped changing, click the best-matching option with a
+    real mouse click, and check that the field now shows it."""
+    from browser_use import ActionResult
+    from browser_use.browser.events import ClickElementEvent
+    node = await browser_session.get_element_by_index(index)
+    if node is None:
+        return ActionResult(error=f"Element {index} is not on the page any more — refresh the page state and try again.")
+    cdp = await browser_session.cdp_client_for_node(node)
+    send, sid = cdp.cdp_client.send, cdp.session_id
+    res = await send.DOM.resolveNode(params={"backendNodeId": node.backend_node_id}, session_id=sid)
+    obj = (res.get("object") or {}).get("objectId")
+    if not obj:
+        return ActionResult(error=f"Element {index} cannot be read — refresh the page state and try again.")
+
+    async def js(op: str, arg: Any = None) -> Any:
+        out = await send.Runtime.callFunctionOn(params={"objectId": obj, "functionDeclaration": _OPTION_JS, "returnByValue": True,
+                                                        "arguments": [{"value": op}, {"value": arg}]}, session_id=sid)
+        return (out.get("result") or {}).get("value")
+
+    async def key(k: str, code: int, text: str = "") -> None:
+        for typ in ("keyDown", "keyUp"):
+            p = {"type": typ, "key": k, "code": k, "windowsVirtualKeyCode": code}
+            if text and typ == "keyDown":
+                p["text"] = text
+            await send.Input.dispatchKeyEvent(params=p, session_id=sid)
+
+    async def type_text(text: str) -> None:
+        await key("Backspace", 8)                                     # the focused search box has its text selected
+        for ch in text:
+            await send.Input.dispatchKeyEvent(params={"type": "keyDown", "key": ch, "text": ch, "unmodifiedText": ch}, session_id=sid)
+            await send.Input.dispatchKeyEvent(params={"type": "keyUp", "key": ch}, session_id=sid)
+            await asyncio.sleep(0.06)
+
+    async def settled(limit: float) -> dict:
+        """Poll the options until the list stops loading and stays the same for a moment (or a good match shows)."""
+        deadline = time.monotonic() + limit
+        last, since, r = None, time.monotonic(), {"opts": []}
+        while True:
+            r = await js("options") or {"opts": []}
+            sig = tuple(o["t"] for o in r["opts"])
+            now = time.monotonic()
+            if sig != last:
+                last, since = sig, now
+            if r["opts"] and not r.get("loading") and now - since >= 0.6:
+                if _best(r["opts"], value)[1] >= _GOOD or now - since >= 1.5:
+                    return r
+            if r.get("empty") and not r.get("loading") and now - since >= 1.2:
+                return r                                              # "No options" has stayed: this search found nothing
+            if now >= deadline:
+                return r
+            await asyncio.sleep(0.3)
+
+    async def click_option(i: int) -> None:
+        pt = await js("point", i)
+        if pt and pt.get("top") and pt.get("hit"):
+            for typ, extra in (("mouseMoved", {}), ("mousePressed", {"button": "left", "clickCount": 1}),
+                               ("mouseReleased", {"button": "left", "clickCount": 1})):
+                await send.Input.dispatchMouseEvent(params={"type": typ, "x": pt["x"], "y": pt["y"], **extra}, session_id=sid)
+                await asyncio.sleep(0.05)
+        else:
+            await js("synthetic", i)
+
+    def confirmed(chosen: str, shown: str) -> bool:
+        words = [w for w in _norm_opt(chosen).split() if len(w) > 1]
+        have = _norm_opt(shown)
+        return bool(words) and sum(w in have for w in words) >= max(1, (len(words) + 1) // 2)
+
+    wait_seconds = max(3.0, min(float(wait_seconds or 8), 20.0))
+    try:
+        info = await js("inspect") or {}
+        if info.get("kind") == "select":
+            opts = [o for o in info["options"] if not o.get("off")]
+            i, score = _best(opts, value)
+            if score < _GOOD:
+                names = ", ".join(f"“{o['t']}”" for o in opts[:40] if o["t"])
+                return ActionResult(error=f"No option close to “{value}” in this list. The options are: {names}. "
+                                          "Call choose_option again with the exact option text.")
+            out = await js("set_select", info["options"].index(opts[i])) or {}
+            return ActionResult(extracted_content=f"Chose “{opts[i]['t']}”. The field now shows “{out.get('shown', '')}”.")
+
+        if not info.get("expanded"):
+            ev = browser_session.event_bus.dispatch(ClickElementEvent(node=node))
+            await ev
+            try:
+                await ev.event_result(raise_if_any=False, raise_if_none=False)
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
+
+        want_v, code, _aliases = _want(value)
+        terms = [search] if search else []
+        if code and _CODE_COUNTRY.get("+" + code):
+            terms += [_CODE_COUNTRY["+" + code], "+" + code]
+        terms.append(value)
+        terms = list(dict.fromkeys(t.strip() for t in terms if t and t.strip()))[:3]
+
+        r = await settled(1.2 if info.get("typable") else min(2.5, wait_seconds))                       # some lists show everything on open
+        i, score = _best(r["opts"], value)
+        typed = ""
+        if score < _GOOD:
+            for term in terms:
+                focus = await js("focus_input") or {}
+                if not focus.get("ok"):
+                    break
+                await type_text(term)
+                typed = term
+                await asyncio.sleep(0.5)
+                r = await settled(wait_seconds)
+                if not r["opts"] and not r.get("empty") and info.get("workday"):
+                    await key("Enter", 13, "\r")                      # Workday-style boxes search on Enter
+                    r = await settled(wait_seconds)
+                i, score = _best(r["opts"], value)
+                if score >= _GOOD:
+                    break
+        if score < _GOOD and r.get("scrollable"):                       # long list with no search box: scroll through it
+            for _ in range(40):
+                if not (await js("scroll_list") or {}).get("moved"):
+                    break
+                await asyncio.sleep(0.25)
+                r = await js("options") or {"opts": []}
+                i, score = _best(r["opts"], value)
+                if score >= _GOOD:
+                    break
+        if score < _GOOD:
+            await key("Escape", 27)
+            if not r["opts"]:
+                why = f"“{r['empty']}”" if r.get("empty") else "no option list appeared"
+                return ActionResult(error=f"Searched “{typed or value}” but {why}. Try a shorter or different search word "
+                                          "(search=...), or click the dropdown to see it, then call choose_option again.")
+            names = ", ".join(f"“{o['t']}”" for o in r["opts"][:25])
+            return ActionResult(error=f"No option close to “{value}”. Showing now: {names}. Call choose_option again with "
+                                      "the exact text of the right option, or a different search word.")
+
+        chosen = r["opts"][i]["t"]
+        await click_option(i)
+        await asyncio.sleep(0.6)
+        st = await js("shown") or {}
+        if not confirmed(chosen, st.get("shown", "")):
+            again = await js("options") or {"opts": []}
+            j = next((k for k, o in enumerate(again["opts"]) if o["t"] == chosen), -1)
+            if j >= 0:
+                await js("synthetic", j)                                # the list is still open: the click missed
+                await asyncio.sleep(0.6)
+                st = await js("shown") or {}
+        shown = st.get("shown", "")
+        if confirmed(chosen, shown):
+            return ActionResult(extracted_content=f"Chose “{chosen}”. The field now shows “{shown[:90]}”.")
+        return ActionResult(extracted_content=f"Clicked “{chosen}”, but the field shows “{shown[:90]}”. Look at the field once: "
+                                              "if it is not set, open it and click the option yourself.")
+    except Exception as exc:
+        return ActionResult(error=f"Dropdown {index}: {str(exc)[:160]}")
 
 
 def _build_tools(profile: Optional[dict] = None) -> Any:
@@ -787,10 +1224,19 @@ def _build_tools(profile: Optional[dict] = None) -> Any:
     async def wait_for_human_check(browser_session, max_seconds: int = 25) -> ActionResult:
         return await _wait_for_human_check(browser_session, max_seconds)
 
-    @controller.action("Fill the basic identity fields of the application form (name, email, LinkedIn, GitHub, website) "
-                       "in one go. Use it once when a form first appears, then fill the remaining fields.")
+    @controller.action("Fill the basic identity fields of the application form (first / last / full name, email, phone with "
+                       "its country code, LinkedIn, GitHub, portfolio) in one go. Use it once when a form first appears, "
+                       "then fill the remaining fields.")
     async def prefill_basic_fields(browser_session) -> ActionResult:
         return await _prefill(browser_session, profile or {})
+
+    @controller.action("Pick an option in ANY dropdown, select, combobox or autocomplete (country, phone country code / flag "
+                       "picker, location, college, degree, notice period, 'how did you hear'…). Give the dropdown's index "
+                       "and the value you want (e.g. value='India', value='+91', value='Bachelor of Technology'); optional "
+                       "search = a shorter word to type into its search box (e.g. 'CVR' for a college). It opens the list, "
+                       "types, WAITS for the options to load, clicks the best match and checks the field shows it.")
+    async def choose_option(index: int, value: str, browser_session, search: str = "", wait_seconds: float = 8) -> ActionResult:
+        return await _choose_option(browser_session, index, value, search, wait_seconds)
 
     @controller.action("Tick or untick a checkbox / toggle / switch by its index, and verify it changed. "
                        "Use this instead of click for every checkbox.")
@@ -879,14 +1325,32 @@ def _build_tools(profile: Optional[dict] = None) -> Any:
 # Calling codes for the countries candidates here usually live in; others fall back to the number as written.
 _CALLING_CODES = {"india": "+91", "united states": "+1", "usa": "+1", "canada": "+1", "united kingdom": "+44", "uk": "+44",
                   "singapore": "+65", "united arab emirates": "+971", "uae": "+971", "germany": "+49", "australia": "+61"}
+_CODE_COUNTRY = {"+91": "India", "+1": "United States", "+44": "United Kingdom", "+65": "Singapore",
+                 "+971": "United Arab Emirates", "+49": "Germany", "+61": "Australia"}
+_ISO = {"+91": "in", "+1": "us", "+44": "gb", "+65": "sg", "+971": "ae", "+49": "de", "+61": "au"}
+_COUNTRY_ALIASES = {"india": ["india", "bharat", "ind", "in"], "united states": ["united states of america", "usa", "us"],
+                    "united kingdom": ["uk", "great britain", "gb"], "united arab emirates": ["uae", "ae"]}
 
 
 def prefs_country(profile: dict) -> str:
     return ((profile.get("preferences") or {}).get("home_country") or "").strip()
 
 
-def split_phone(phone: str, country: str = "") -> tuple[str, str]:
-    """'+91 80747 49058' → ('+91', '8074749058'); '08074749058' with India → ('+91', '8074749058')."""
+def home_country(profile: dict) -> str:
+    """The country set in preferences; else the one the phone's '+code' names; else India (who this app is for)."""
+    country = prefs_country(profile)
+    if country:
+        return country
+    m = re.match(r"\s*(?:\+|00)\s*(\d{1,3})", profile.get("phone") or "")
+    if m:
+        for code in (m.group(1)[:n] for n in (3, 2, 1)):
+            if "+" + code in _CODE_COUNTRY:
+                return _CODE_COUNTRY["+" + code]
+    return "India"
+
+
+def split_phone(phone: str, country: str = "India") -> tuple[str, str]:
+    """'+91 80747 49058' → ('+91', '8074749058'); '08074749058' / '918074749058' with India → ('+91', '8074749058')."""
     raw = (phone or "").strip()
     digits = re.sub(r"\D", "", raw)
     if not digits:
@@ -899,12 +1363,65 @@ def split_phone(phone: str, country: str = "") -> tuple[str, str]:
                 return "+" + code, digits[len(code):]
         m = re.match(r"\+?\s*(\d{1,3})[\s\-()]+(.+)", raw.lstrip("0"))
         return ("+" + m.group(1), re.sub(r"\D", "", m.group(2))) if m else ("", digits)
-    code = _CALLING_CODES.get(country.lower(), "")
-    if code == "+91":
+    code = _CALLING_CODES.get((country or "India").lower(), "")
+    if code == "+91":                       # Indian mobiles: 10 digits starting 6-9, never a leading 0 or a doubled 91
         if len(digits) == 12 and digits.startswith("91"):
             digits = digits[2:]
         digits = digits.lstrip("0") if len(digits) == 11 else digits
     return code, digits
+
+
+def name_parts(profile: dict) -> tuple[str, str, str]:
+    """(first name, last name, full name). An answer saved for "First name" / "Last name" wins. Otherwise the LAST word is
+    the last name and everything before it the first name ("Vamsi Krishna Kakarla" → "Vamsi Krishna" + "Kakarla"); leading
+    initials as in "K. Vamsi Krishna" are the family initial, so they become the last name only when one word is left."""
+    full = re.sub(r"\s+", " ", (profile.get("name") or "")).strip()
+    saved = {re.sub(r"[^a-z]", "", k.lower()): str(v).strip()
+             for k, v in (((profile.get("qa_memory") or {}).get("custom_answers")) or {}).items() if v}
+    first, last = saved.get("firstname", ""), saved.get("lastname", "") or saved.get("surname", "")
+    words = full.split()
+    initials = []
+    while len(words) > 1 and re.fullmatch(r"[A-Za-z]\.?", words[0]):
+        initials.append(words.pop(0))
+    if len(words) == 1:
+        auto_first, auto_last = words[0], " ".join(initials)
+    else:
+        auto_first, auto_last = " ".join(words[:-1]), (words[-1] if words else "")
+    return first or auto_first, last or auto_last, full
+
+
+# Which site a link belongs to, by its address — never by the box it was typed into on the profile.
+_LINK_SITES = [("linkedin", "linkedin.com"), ("github", "github.com"), ("gitlab", "gitlab.com"), ("twitter", "twitter.com"),
+               ("twitter", "x.com"), ("kaggle", "kaggle.com"), ("leetcode", "leetcode.com"), ("medium", "medium.com"),
+               ("behance", "behance.net"), ("dribbble", "dribbble.com"), ("stackoverflow", "stackoverflow.com"),
+               ("scholar", "scholar.google.")]
+
+
+def _link_site(url: str) -> str:
+    host = _host(url if "://" in url else "https://" + url).lower().removeprefix("www.")
+    for site, domain in _LINK_SITES:
+        if host == domain or host.endswith("." + domain) or (domain.endswith(".") and host.startswith(domain)):
+            return site
+    return ""
+
+
+def profile_links(profile: dict) -> dict[str, str]:
+    """{'linkedin': …, 'github': …, 'portfolio': …, 'twitter': …} sorted by domain, so a GitHub address saved in the
+    portfolio box still goes only to GitHub fields, and a portfolio is never a LinkedIn / GitHub / social profile."""
+    out: dict[str, str] = {}
+    cands = [("portfolio", profile.get("portfolio")), ("linkedin", profile.get("linkedin")), ("github", profile.get("github"))]
+    cands += [((l.get("label") or "").lower(), l.get("url")) for l in profile.get("links") or [] if isinstance(l, dict)]
+    for hint, url in cands:
+        url = (url or "").strip()
+        if not url:
+            continue
+        site = _link_site(url)
+        if not site:
+            if hint in ("linkedin", "github"):
+                continue                       # not a linkedin.com / github.com address: don't trust it for that box
+            site = "portfolio"
+        out.setdefault(site, url)
+    return out
 
 
 def _profile_block(profile: dict) -> str:
@@ -914,7 +1431,10 @@ def _profile_block(profile: dict) -> str:
         + f"\n    - Affiliated / degree-awarding university: {ed.get('university') or '(not given — same as the college, or not stated)'}"
         + (f"\n    - Grade: {ed.get('grade')}" if ed.get("grade") else "")
         for ed in profile.get("education", [])) or "  (Not provided)"
-    code, national = split_phone(profile.get("phone", ""), prefs_country(profile))
+    country = home_country(profile)
+    code, national = split_phone(profile.get("phone", ""), country)
+    first, last, full = name_parts(profile)
+    links = profile_links(profile)
     exp = "\n".join(
         f"  • {e.get('role', '')} at {e.get('company', '')} ({e.get('start', '')} – {e.get('end') or 'Present'})"
         + "".join(f"\n    - {b}" for b in (e.get("bullets") or [])[:3])
@@ -939,17 +1459,19 @@ def _profile_block(profile: dict) -> str:
     links_block = ("\n- Other links: " + "; ".join(other) if other else "") + \
         ("\n- Project links (use for 'portfolio / work samples / website' questions):\n" + "\n".join(proj_links[:6]) if proj_links else "")
     return f"""=== CANDIDATE ===
-- Full name: {profile.get('name', '')}
+- First name (given name): {first}
+- Last name (surname / family name): {last or first + '  (only one name — repeat it if a last name is required)'}
+- Full name: {full}
 - Email: {profile.get('email', '')}
+- Phone country code: {code or '(unknown)'}{f' ({_CODE_COUNTRY[code]})' if code in _CODE_COUNTRY else ''}
+- Phone number WITHOUT country code: {national or profile.get('phone', '')}{'  (10-digit Indian mobile)' if code == '+91' else ''}
 - Phone (full, international): {(code + ' ' + national).strip() if national else profile.get('phone', '')}
-- Phone country code: {code or '(unknown)'}
-- Phone number WITHOUT country code: {national or profile.get('phone', '')}
 - Current location: {profile.get('location', '')}
-- Home country: {prefs.get('home_country', '')}
+- Home country: {country}
 - Languages: {', '.join(langs) if isinstance(langs, list) else langs}
-- LinkedIn: {profile.get('linkedin', '')}
-- GitHub: {profile.get('github', '')}
-- Portfolio: {profile.get('portfolio', '')}{links_block}
+- LinkedIn URL (only for LinkedIn fields): {links.get('linkedin') or '(none — leave LinkedIn fields empty)'}
+- GitHub URL (only for GitHub / code fields): {links.get('github') or '(none)'}
+- Portfolio / personal website: {links.get('portfolio') or '(none — use the GitHub URL if a portfolio/website is required)'}{links_block}
 - Summary: {profile.get('summary', '')}
 
 === SKILLS ===
@@ -990,11 +1512,25 @@ BASIC RULES:
 7. After filling, click the Submit/Apply button.
 8. Report the final status: SUCCESS or the reason for stopping.
 
+NAME RULES:
+- "First name" / "Given name" → the FIRST NAME above. "Last name" / "Surname" / "Family name" → the LAST NAME above.
+  "Full name" / "Name" / "Legal name" → the FULL NAME. Never put the full name in a first-name box, never swap them.
+- "Middle name" → leave empty. "Preferred name" → the first name.
+
+LINK / URL RULES (each link goes ONLY in its own box):
+- LinkedIn box → only the LinkedIn URL (linkedin.com). GitHub box → only the GitHub URL (github.com).
+- Portfolio / Personal website / Website box → the portfolio URL (if none and the box is required, the GitHub URL).
+- Twitter / X, Facebook, Instagram, Kaggle, Medium, Behance or any other site's box → only a link of THAT site from
+  "Other links"; if there is none, leave it empty. Never put the LinkedIn or GitHub URL in another site's box.
+- "Any other link" / "Additional links" → the portfolio or a project link, not LinkedIn again.
+
 DROPDOWN / SELECT FIELD RULES:
-- For native <select> elements: Use the built-in `dropdown_options` action to see available options, then `select_dropdown` to pick the best match.
-- For custom dropdowns (React Select, Material UI, etc.): Click the dropdown to open it, then click the matching option text.
-- For combobox/autocomplete fields: Type the value slowly (50ms delay per character), wait 500ms for suggestions to appear, then click the matching suggestion.
-- ALWAYS use the `dropdown_options` action first to see what options are available before trying to select.
+- For EVERY dropdown, select, combobox, autocomplete or search-as-you-type box (country, phone country code / flag,
+  city, college, degree, notice period, gender, "how did you hear"…) use `choose_option` with the field's index and the
+  value you want. It opens the list, types the search, WAITS for the options to finish loading, clicks the matching
+  option and tells you what the field shows. Do NOT type into a dropdown and click an option yourself.
+- If choose_option lists the options instead, call it again with the exact option text (or a shorter `search` word).
+- Country fields → the home country above (India → "India"). Never pick "Indiana", "Indian Ocean…" or another country.
 - If an option says "Other" and the form has a text field next to it, select "Other" and type the specific value.
 - For "Years of Experience" dropdowns, pick the option that matches the candidate's total experience.
 - For "Salary" / "Expected CTC" dropdowns, use the Q&A answers provided above.
@@ -1013,17 +1549,19 @@ EDUCATION RULES (college vs university — they are different things):
   If no university is given, use the college name there too.
 - If there is only ONE field ("School / University", "Education institution"), enter the college attended.
 - For a college / university dropdown or autocomplete: FIRST search for the exact college name (type it, or its distinctive
-  part, e.g. "CVR College" — not just "College of Engineering"), wait for suggestions and pick the matching one. Try one
+  part, e.g. choose_option(value="CVR College of Engineering", search="CVR")), and pick the matching one. Try one
   short variant or common abbreviation if nothing matches (e.g. "JNTU" for "Jawaharlal Nehru Technological University").
   Only if it is truly not in the list, choose "Other" / "Not listed" and type the full name in the text box that appears.
   Never pick a different college or the university in place of the college.
 
-PHONE RULES:
-- Look at the phone field first. If the form has a SEPARATE country-code picker or prefix box (a flag, "+1" dropdown,
-  "Country code" field), set it to the candidate's country code above and type ONLY the number WITHOUT country code.
-- If the field already shows a prefix such as "+91" inside or beside the input, type only the number without the code.
-- If it is a single plain phone field with no country code shown, type the full international number (with the code).
-- Never type the country code twice (no "+91 +91…" or "9191…"), no leading 0 before the number.
+PHONE RULES (Indian numbers: country code +91, then a 10-digit mobile number):
+- `prefill_basic_fields` usually sets the phone and its country code already — read its result first.
+- If the form has a SEPARATE country-code picker or prefix box (a flag, "+1" dropdown, "Country code" field), set it with
+  `choose_option` (value="+91", or the country name "India") and type ONLY the 10-digit number WITHOUT the code.
+- If the field already shows a prefix such as "+91" inside or beside the input, type only the 10-digit number, with
+  clear=false if the "+91" is part of the box's own text.
+- If it is a single plain phone field with no country code shown, type the full international number ("+91 98xxxxxxxx").
+- Never type the country code twice (no "+91 +91…" or "9191…"), no leading 0 before the number, never "+1" for an Indian number.
 
 RADIO BUTTON / CHECKBOX RULES:
 - To tick or untick a checkbox (or a toggle / switch), use the `set_checkbox` action with the box's index and
