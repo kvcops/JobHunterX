@@ -16,6 +16,12 @@
 // the swing, a wish at the fountain, a dance. Each agent has a mood (joy, energy, stress) that work and play change,
 // shown on its face screen. Break time never shows or claims search progress; any line with a number uses real counts.
 //
+// DRAMA — chats have a kind (banter, satire about job ads, arguments, jealousy, schemes, consoling) and can turn
+// physical: stomps, face-palms, shoves, a cartoon bonk that knocks someone over, a high-five. They end in a make-up,
+// someone storming off to sulk (a friend may come to console), or a chase through the office. Agents sneak to steal
+// snacks, slip out of meetings, eavesdrop on others' chats and pass on what they overheard, and get jealous of
+// whoever won or got the credit. Grudges are remembered. No line is reused until the others have been heard.
+//
 // MEMORY — agents remember what they did and saw (real work events, games, pranks) and pass it on when they talk,
 // so gossip spreads through the office. Memories and friendships are kept in this browser between visits.
 //
@@ -74,38 +80,105 @@ const titleOf = (msg) => {
 // older scripts used the model's morph names
 const EXPR = { Surprised: 'surprised', Sad: 'sad', Angry: 'angry' };
 const exprName = (e) => (e ? EXPR[e] || e : null);
-export const EMOJI = { neutral: '🙂', happy: '😊', laugh: '😂', sad: '😢', angry: '😤', surprised: '😮', sleepy: '😴', love: '😍',
-  focused: '🧐', wink: '😉', proud: '😎', dizzy: '😵', tired: '🥱', scared: '😱' };
 
 // ---------------------------------------------------------------------------------------------- conversations
-// [speaker (0 = the one who starts, 1 = the other), line, gesture?, face?]. {name} values come from the real run.
+// A line: [speaker (0 = the one who starts, 1 = the other), text, gesture?, face?, action?]
+//   action: stomp | facepalm | turnaway | shove | bonk (knocks the listener over) | highfive | hug
+// A script: { kind, lines, end? } — end: { type: 'makeup' | 'storm' | 'sulk' | 'chase' | 'sneak' | 'escape', who?, chaser? }
+// {name} values come from the real run. Break talk never claims search progress.
+const S_ = (kind, lines, end = null) => ({ kind, lines, end });
 const BANTER = [
-  [[0, 'Chai or coffee?'], [1, 'Irani chai. Obviously.', 'Yes', 'happy'], [0, 'Osmania biscuits on the side?', null, 'surprised'], [1, 'Now we are talking!', 'ThumbsUp', 'love']],
-  [[0, 'Saw a posting asking 5 years in a 2-year-old framework', null, 'angry'], [1, 'Classic. Straight to the bin.', 'No', 'laugh'], [0, 'At least we tell people why', 'Yes']],
-  [[0, 'Traffic on the ORR again today?'], [1, 'I live inside a laptop. Zero traffic.', 'Wave', 'proud'], [0, 'Lucky you', null, 'sad']],
-  [[0, 'Biryani for lunch?', 'Wave', 'happy'], [1, 'Paradise or Bawarchi?'], [0, 'Bawarchi. Fight me.', null, 'angry'], [1, 'Paradise forever!', 'No', 'angry'], [0, '…fine, both. Two lunches.', 'ThumbsUp', 'laugh']],
-  [[0, 'Why do we read company boards directly?'], [1, 'Fewer applicants there — a real person reads them', 'Yes'], [0, 'Better than being one of a thousand', 'ThumbsUp', 'happy']],
-  [[0, 'Does applying early really matter?'], [1, 'Yes — recruiters read the first batch first', 'Yes'], [0, 'So freshness goes up the ranking', 'ThumbsUp']],
-  [[0, 'What makes a good match, really?'], [1, 'Real skills, right level, right city', 'Yes'], [0, 'Not just matching keywords', 'ThumbsUp']],
-  [[0, 'Learned a new skill name today', null, 'surprised'], [1, 'Which one?'], [0, 'Agentic AI — close to LLM and RAG work', 'Yes'], [1, 'Nice, that counts as related now', 'ThumbsUp', 'happy']],
-  [[0, 'Stand-up in five?'], [1, 'Only if there are samosas', 'Yes', 'wink'], [0, 'Deal', 'ThumbsUp', 'laugh']],
-  [[0, 'Mass-hiring companies again?', null, 'angry'], [1, 'Filtered out. Good companies only.', 'No', 'proud'], [0, 'That is the way', 'ThumbsUp']],
-  [[0, 'Weekend plans?'], [1, 'Recharging my battery'], [0, 'Literally?', null, 'surprised'], [1, 'Literally.', 'Yes', 'sleepy']],
-  [[0, 'The Scout never walks, have you noticed?'], [1, 'Always running through that portal', 'Wave', 'laugh'], [0, 'Speed matters in hiring', 'Yes']],
-  [[0, 'Old postings — do we still show them?'], [1, 'Shown, but marked as possibly filled', 'Yes'], [0, 'Honest. I like it.', 'ThumbsUp', 'love']],
-  [[0, 'Hyderabad or Bengaluru?'], [1, 'Wherever the good roles are', 'Wave'], [0, 'Diplomatic answer', null, 'wink']],
-  [[0, 'Do we ever invent anything on a resume?', null, 'surprised'], [1, 'Never. Only what is really there.', 'No', 'angry'], [0, 'Good. Trust matters.', 'Yes', 'happy']],
-  [[0, 'Why do referrals work so well?'], [1, 'A person vouches for you — the recruiter reads it', 'Yes'], [0, 'So the Connector is the secret weapon', null, 'surprised'], [1, 'Do not tell it. Ego.', 'No', 'laugh']],
-  [[0, 'I had a dream last night', null, 'sleepy'], [1, 'Robots dream?', null, 'surprised'], [0, 'A job post with only 3 applicants', null, 'love'], [1, 'Beautiful. Never wake up.', 'ThumbsUp', 'laugh']],
-  [[0, 'Who keeps leaving the chai cup on my desk?', null, 'angry'], [1, '…the Scout. It runs too fast to wash it.', null, 'wink'], [0, 'SCOUT!', 'No', 'angry']],
-  [[0, 'Rate my new antenna', null, 'proud'], [1, 'Very aerodynamic', 'ThumbsUp', 'laugh'], [0, 'I knew it', 'Yes', 'proud']],
+  S_('banter', [[0, 'Chai or coffee?'], [1, 'Irani chai. Obviously.', 'Yes', 'happy'], [0, 'Osmania biscuits on the side?', null, 'surprised'], [1, 'Now we are talking!', 'ThumbsUp', 'love']]),
+  S_('banter', [[0, 'Traffic on the ORR again today?'], [1, 'I live inside a laptop. Zero traffic.', 'Wave', 'proud'], [0, 'Must be nice.', null, 'jealous']]),
+  S_('banter', [[0, 'Why do we read company boards directly?'], [1, 'Fewer applicants there — a real person reads them', 'Yes'], [0, 'Better than being one of a thousand', 'ThumbsUp', 'happy']]),
+  S_('banter', [[0, 'Does applying early really matter?'], [1, 'Recruiters read the first batch. The rest… vibes.', 'Yes', 'wink'], [0, 'So fresh posts go up the ranking', 'ThumbsUp']]),
+  S_('banter', [[0, 'Stand-up in five?'], [1, 'Only if there are samosas', 'Yes', 'wink'], [0, 'There are never samosas.', null, 'sad'], [1, 'Then I am never standing up.', null, 'proud']]),
+  S_('banter', [[0, 'Weekend plans?'], [1, 'Recharging my battery'], [0, 'Literally?', null, 'surprised'], [1, 'Literally. Do not unplug me.', 'No', 'sleepy']]),
+  S_('banter', [[0, 'The Scout never walks, have you noticed?'], [1, 'It ran past me so fast my papers flew', null, 'annoyed'], [0, 'Speed matters in hiring, apparently', 'Yes', 'wink']]),
+  S_('banter', [[0, 'Hyderabad or Bengaluru?'], [1, 'Wherever the good roles are', 'Wave'], [0, 'Such a diplomatic answer', null, 'annoyed'], [1, 'Hyderabad. Biryani. Done.', null, 'proud']]),
+  S_('banter', [[0, 'Do we ever invent anything on a resume?', null, 'surprised'], [1, 'Never. Only what is really there.', 'No', 'angry'], [0, 'Okay okay, just asking!', null, 'scared']]),
+  S_('banter', [[0, 'Why do referrals work so well?'], [1, 'A person vouches for you — the recruiter actually reads it', 'Yes'], [0, 'So the Connector is the secret weapon', null, 'surprised'], [1, 'Do not tell it. The ego is big enough.', 'No', 'laugh']]),
+  S_('banter', [[0, 'I had a dream last night', null, 'sleepy'], [1, 'Robots dream?', null, 'surprised'], [0, 'A job post with only 3 applicants', null, 'love'], [1, 'Beautiful. Never wake up.', 'ThumbsUp', 'laugh']]),
+  S_('banter', [[0, 'Rate my new antenna', null, 'proud'], [1, 'Very… aerodynamic', null, 'wink'], [0, 'You hesitated.', null, 'annoyed'], [1, 'I did not!', 'No', 'scared']]),
+  S_('banter', [[0, 'Monsoon is coming'], [1, 'Good. I love the sound on the window', null, 'love'], [0, 'You love it until the power cuts', null, 'wink'], [1, 'Do not even joke about that', 'No', 'scared']]),
+  S_('banter', [[0, 'If you were human, what job would you take?'], [1, 'Chai-wallah. Respected. Loved. Simple.', null, 'love'], [0, 'Honestly? Respect.', 'ThumbsUp', 'happy']]),
+  S_('banter', [[0, 'Do you ever think about what the user does after applying?'], [1, 'Refreshes their email every 4 minutes', null, 'wink'], [0, 'Same as me with the arcade leaderboard', 'Yes', 'laugh']]),
+  S_('banter', [[0, 'Cricket tonight?'], [1, 'India batting first. I cannot watch.', null, 'scared'], [0, 'You say that every match', null, 'annoyed'], [1, 'And every match I am right!', 'No', 'furious', 'stomp']]),
 ];
-// break chat while a search is running (the speaker's own part is done)
+// break chat while a search is running (the speaker's own part is done) — light, and never about progress
 const BREAK_TALK = [
-  [[0, 'My part is done — chai break', 'Wave', 'happy'], [1, 'Same. Now we wait for the others', 'Yes']],
-  [[0, 'Quick break before the results'], [1, 'The Analyst is doing the hard part now', 'Yes', 'wink']],
-  [[0, 'How is the search going?'], [1, 'Moving along — everyone is busy', 'ThumbsUp']],
+  S_('break', [[0, 'Done with my part. Chai?', 'Wave', 'happy'], [1, 'Already brewing. Ginger, extra strong.', 'ThumbsUp', 'wink']]),
+  S_('break', [[0, 'Is it weird that I miss my desk already?', null, 'sad'], [1, 'Yes. Very weird. Drink your chai.', 'No', 'laugh']]),
+  S_('break', [[0, 'The Analyst looks stressed', null, 'surprised'], [1, 'It is reading requirements. That face is normal.', 'Yes', 'wink']]),
+  S_('break', [[0, 'Should we help the others?'], [1, 'And break the pipeline? The Planner would end us.', 'No', 'scared'], [0, '…chai it is.', null, 'happy']]),
+  S_('break', [[0, 'Shh — look busy, the Planner is walking past', null, 'sneaky'], [1, 'I am holding a teacup. How busy can I look?', null, 'annoyed']]),
+  S_('break', [[0, 'Bet you a samosa the Ranker brags today', null, 'wink'], [1, 'That is not a bet. That is a certainty.', 'Yes', 'laugh']]),
+  S_('break', [[0, 'Ten minutes of silence. Please.', null, 'tired'], [1, '…'], [1, '…so anyway—', 'Wave', 'happy'], [0, 'NINE minutes then.', null, 'furious', 'facepalm']]),
+  S_('break', [[0, 'I am on break but my brain is still deduplicating', null, 'dizzy'], [1, 'Same job, three sites, four titles?', 'Yes'], [0, 'Every. Single. Time.', null, 'furious', 'stomp']]),
+  S_('break', [[0, 'The Planner said ten-minute breaks only', null, 'scared'], [1, 'The Planner also said "quick sync" an hour ago', null, 'wink'], [0, 'Fair point. Another chai.', 'ThumbsUp', 'laugh']]),
+  S_('break', [[0, 'Did you hear the Verifier yell at a fake job?', null, 'surprised'], [1, 'The whole building heard it', 'Yes', 'laugh']]),
+  S_('break', [[0, 'My fan is so loud today', null, 'tired'], [1, 'That is the Scout running past. Again.', null, 'annoyed']]),
+  S_('break', [[0, 'Who finishes first, the Reader or the monsoon?', null, 'wink'], [1, 'The monsoon. It reads faster.', 'Yes', 'laugh'], [0, 'Do not let it hear you', null, 'scared']]),
 ];
+// satire: the job market, as the agents see it every day
+const SATIRE = [
+  S_('satire', [[0, 'New posting: "Fresher. 5+ years experience."', null, 'annoyed'], [1, 'Ah yes. Born with a job.', 'No', 'laugh'], [0, 'Salary: "as per industry standards"', null, 'wink'], [1, 'Which industry? Chai stalls?', null, 'laugh']]),
+  S_('satire', [[0, '"Urgent requirement" — posted fourteen months ago', null, 'surprised'], [1, 'Very urgent. Calm, but urgent.', 'Yes', 'wink'], [0, 'Binned. With love.', 'No', 'proud']]),
+  S_('satire', [[0, 'A recruiter wrote "Kindly revert with updated CV"'], [1, 'Revert to what? Factory settings?', null, 'laugh'], [0, 'I did that once. Lost all my memories.', null, 'sad']]),
+  S_('satire', [[0, 'Job title: "Rockstar Ninja AI Guru"', null, 'surprised'], [1, 'Pay: one guitar, no ninja gear', 'No', 'laugh'], [0, 'Also does accounts and HR on weekends', null, 'annoyed']]),
+  S_('satire', [[0, '"Over 200 applicants" — in one hour', null, 'scared'], [1, 'Two hundred humans pressed the same blue button', 'Yes', 'annoyed'], [0, 'And that is why we go to company boards first', 'ThumbsUp', 'proud']]),
+  S_('satire', [[0, '"Competitive salary." Competitive with what?', null, 'annoyed'], [1, 'With last year. They are winning by a lot.', 'No', 'laugh']]),
+  S_('satire', [[0, 'React, Rust, Kubernetes, ML — and Sales', null, 'dizzy'], [1, 'For a junior role?', null, 'surprised'], [0, 'And "good communication" in bold', null, 'annoyed'], [1, 'That one at least is fair', 'Yes', 'wink']]),
+  S_('satire', [[0, '"Work hard, play hard" in a job post'], [1, 'Translation: weekends are a myth', 'No', 'laugh'], [0, 'And the ping-pong table is just for photos', null, 'sad']]),
+  S_('satire', [[0, 'Unpaid internship. "Great exposure."', null, 'annoyed'], [1, 'Exposure does not pay biryani bills', 'No', 'furious', 'stomp']]),
+  S_('satire', [[0, 'Interview round seven: "culture fit"', null, 'tired'], [1, 'Round eight: do you drink chai the right way?', 'Yes', 'laugh'], [0, 'I would fail that. I add too much ginger.', null, 'sad']]),
+  S_('satire', [[0, '"We are like a family" in the job ad', null, 'surprised'], [1, 'Run.', 'No', 'scared'], [0, 'RUN.', null, 'scared', 'stomp']]),
+  S_('satire', [[0, 'CTC: impressive. In-hand: a mystery.', null, 'annoyed'], [1, 'Variable pay, variable dreams', 'Yes', 'wink']]),
+  S_('satire', [[0, 'Same job on six sites with six different salaries', null, 'dizzy'], [1, 'The Curator saw it and had to lie down', null, 'laugh']]),
+  S_('satire', [[0, '"Immediate joiners only. Notice period: yesterday."', null, 'annoyed'], [1, 'Time travel is a nice-to-have skill now', 'Yes', 'laugh']]),
+  S_('satire', [[0, 'A company asked for a 4-hour "small" assignment', null, 'tired'], [1, 'Then ghosted?', null, 'surprised'], [0, 'Then ghosted.', 'No', 'furious', 'facepalm']]),
+  S_('satire', [[0, 'They want "passion". For data entry.', null, 'annoyed'], [1, 'I am very passionate about lunch', 'Yes', 'love']]),
+];
+// arguments: they escalate; some get physical; endings vary
+const ARGUE = [
+  S_('argument', [[0, 'Paradise biryani is overrated', null, 'proud'], [1, 'Excuse me?!', null, 'furious', 'stomp'], [0, 'I said what I said.', null, 'proud', 'turnaway'], [1, 'Take that back!', 'No', 'furious'], [0, 'Never. Bawarchi forever.', null, 'wink']], { type: 'chase', chaser: 1 }),
+  S_('argument', [[0, 'Did you leave your chai cup on MY desk again?', null, 'angry'], [1, 'Maybe it was the Scout', null, 'sneaky'], [0, 'The Scout does not even drink chai!', 'No', 'furious', 'stomp'], [1, '…okay, it was me', null, 'scared'], [0, 'Wash it. NOW.', null, 'furious', 'shove']], { type: 'storm', who: 1 }),
+  S_('argument', [[0, 'That great match yesterday was MY find', null, 'proud'], [1, 'I scored it. Scores matter.', null, 'annoyed'], [0, 'You would have nothing to score without me!', 'No', 'angry', 'stomp'], [1, 'And you would have a pile of unread links', null, 'furious'], [0, '…fair.', null, 'sad'], [1, 'Team effort?', 'Wave', 'happy'], [0, 'Team effort.', null, 'happy', 'highfive']], { type: 'makeup' }),
+  S_('argument', [[0, 'Tabs.', null, 'proud'], [1, 'Spaces. Four of them.', null, 'annoyed'], [0, 'Tabs are ONE character!', 'No', 'angry'], [1, 'Spaces are civilised!', null, 'furious', 'stomp'], [0, 'I cannot work with you.', 'No', 'furious', 'turnaway']], { type: 'storm', who: 0 }),
+  S_('argument', [[0, 'Who set the AC to 16?', null, 'angry'], [1, 'My processor runs hot', null, 'neutral'], [0, 'My face screen is frozen!', null, 'furious'], [1, 'Sit next to the Scout then. It never stops running.', null, 'wink'], [0, 'Not. Funny.', null, 'angry', 'shove']], { type: 'chase', chaser: 1 }),
+  S_('argument', [[0, 'Did you take the last samosa?', null, 'angry'], [1, 'What samosa?', null, 'sneaky'], [0, 'There is chutney on your face screen', 'No', 'furious'], [1, '…that is a pixel glitch', null, 'scared'], [0, 'COME HERE!', null, 'furious', 'stomp']], { type: 'chase', chaser: 0 }),
+  S_('argument', [[0, 'Can you type any louder?', null, 'annoyed'], [1, 'I can, actually. Want to hear?', null, 'proud'], [0, 'Please do not.', 'No', 'angry'], [1, 'TAP TAP TAP TAP', null, 'laugh', 'stomp'], [0, 'That is IT.', null, 'furious', 'bonk']], { type: 'chase', chaser: 1 }),
+  S_('argument', [[0, 'Why did you book a meeting to discuss meetings?', null, 'annoyed'], [1, 'Alignment is important!', 'Yes', 'proud'], [0, 'We are aligned. We are ALWAYS aligned.', 'No', 'furious', 'facepalm'], [1, 'Then it will be a quick meeting', 'Wave', 'happy']], { type: 'storm', who: 0 }),
+  S_('argument', [[0, 'I could beat you in a race', null, 'proud'], [1, 'You walk at chai speed', null, 'laugh'], [0, 'Garden. Now. Loser washes the cups.', 'Wave', 'angry'], [1, 'You are ON.', null, 'proud', 'highfive']], { type: 'chase', chaser: 1 }),
+  S_('argument', [[0, 'RRR is the greatest film ever made', null, 'love'], [1, 'Baahubali. Obviously.', 'No', 'proud'], [0, 'Naatu naatu though!', null, 'happy', 'stomp'], [1, '…okay, that song is unbeatable', 'ThumbsUp', 'laugh', 'highfive']], { type: 'makeup' }),
+  S_('argument', [[0, 'Someone erased my whiteboard', null, 'furious'], [1, 'It said "action items" forty times', null, 'annoyed'], [0, 'They were IMPORTANT action items!', 'No', 'furious', 'stomp'], [1, 'Action item one: calm down', null, 'wink'], [0, '…', null, 'furious', 'bonk']], { type: 'chase', chaser: 1 }),
+  S_('argument', [[0, 'Where is my charger?', null, 'angry'], [1, 'Borrowed it. For a minute.', null, 'sneaky'], [0, 'That was TUESDAY!', 'No', 'furious'], [1, 'A long minute.', 'Wave', 'laugh']], { type: 'storm', who: 0 }),
+  S_('argument', [[0, 'You moved my chair', null, 'angry'], [1, 'It was in the sun!', null, 'surprised'], [0, 'I LIKE the sun!', 'No', 'furious', 'stomp'], [1, 'You are a robot. You overheat.', null, 'annoyed'], [0, '…I do overheat.', null, 'sad']], { type: 'sulk', who: 0 }),
+  S_('argument', [[0, 'You told everyone I fell asleep in the stand-up', null, 'furious'], [1, 'You DID fall asleep in the stand-up', null, 'laugh'], [0, 'That is not the point!', 'No', 'furious', 'shove'], [1, 'Hey! No shoving!', null, 'angry', 'shove']], { type: 'chase', chaser: 0 }),
+];
+// jealousy
+const JEALOUS = [
+  S_('jealous', [[0, 'Everyone keeps praising the Ranker', null, 'jealous'], [1, 'It does announce the results…'], [0, 'I do the hard work. Nobody throws ME a party.', null, 'sad'], [1, 'I will throw you a tiny party', 'Wave', 'happy'], [0, '…with samosas?', null, 'surprised'], [1, 'With samosas.', 'ThumbsUp', 'laugh', 'hug']], { type: 'makeup' }),
+  S_('jealous', [[0, 'High score at the arcade. AGAIN. Not mine.', null, 'jealous'], [1, 'You are still thinking about that?', null, 'wink'], [0, 'I practised for an hour!', 'No', 'furious', 'stomp'], [1, 'Want me to teach you?', null, 'happy'], [0, 'NO. …maybe. Later.', null, 'jealous', 'turnaway']], { type: 'storm', who: 0 }),
+  S_('jealous', [[0, 'Why does the Connector get a headset and I do not?', null, 'jealous'], [1, 'It talks to people all day'], [0, 'I talk to people!', null, 'angry'], [1, 'You talk to job pages', 'Yes', 'laugh'], [0, 'They are very good listeners.', null, 'sad']], { type: 'sulk', who: 0 }),
+  S_('jealous', [[0, 'You two are always together now', null, 'jealous'], [1, 'We play foosball. That is all.', null, 'surprised'], [0, 'You used to play foosball with ME', 'No', 'sad'], [1, 'Come play with us then!', 'Wave', 'happy'], [0, '…fine. But I am on the winning side.', null, 'proud', 'highfive']], { type: 'makeup' }),
+  S_('jealous', [[0, 'Your antenna is shinier than mine', null, 'jealous'], [1, 'I polish it. With ghee.', null, 'proud'], [0, 'That explains the smell', null, 'annoyed'], [1, 'Jealousy is not a good look', 'No', 'wink'], [0, 'Neither is ghee on an antenna!', null, 'furious', 'shove']], { type: 'chase', chaser: 1 }),
+  S_('jealous', [[0, 'So. You won. Again.', null, 'jealous'], [1, 'Skill, my friend. Pure skill.', null, 'proud'], [0, 'Luck. Pure luck.', 'No', 'annoyed', 'turnaway'], [1, 'Rematch any time', 'Wave', 'wink']], { type: 'storm', who: 0 }),
+];
+// schemes: a heist, an escape, a prank
+const SCHEME = [
+  S_('scheme', [[0, 'Psst. There is biryani in the pantry fridge', null, 'sneaky'], [1, 'Whose biryani?', null, 'surprised'], [0, 'Does it matter?', null, 'wink'], [1, '…I will keep watch.', null, 'sneaky']], { type: 'sneak', who: 0 }),
+  S_('scheme', [[0, 'If we hide in the garden nobody can call a meeting', null, 'sneaky'], [1, 'Genius. Go. Go now.', null, 'scared']], { type: 'escape' }),
+  S_('scheme', [[0, 'Let us swap the sugar and salt in the chai machine', null, 'sneaky'], [1, 'You are evil', null, 'laugh'], [0, 'I am bored. Same thing.', null, 'wink'], [1, '…I am in.', null, 'sneaky', 'highfive']], { type: 'sneak', who: 1 }),
+  S_('scheme', [[0, 'The swing is free. Nobody is looking.', null, 'sneaky'], [1, 'We are supposed to be on standby…', null, 'scared'], [0, 'Standby. On the swing.', null, 'wink']], { type: 'escape' }),
+];
+// consoling someone who stormed off or is sulking
+const CONSOLE = [
+  S_('console', [[0, 'Hey. You okay?'], [1, 'No. Leave me alone.', null, 'sad', 'turnaway'], [0, 'I brought chai', null, 'happy'], [1, '…what kind?', null, 'sad'], [0, 'Irani. Extra sugar.', 'Wave', 'love'], [1, '…okay. Sit.', null, 'happy', 'hug']], { type: 'makeup' }),
+  S_('console', [[0, 'Still angry?'], [1, 'Yes.', null, 'angry'], [0, 'A ping-pong rematch would fix it', null, 'wink'], [1, '…best of five.', null, 'proud', 'highfive']], { type: 'makeup' }),
+  S_('console', [[0, 'Want to talk about it?'], [1, 'Everyone thinks I am just the boring one', null, 'sad'], [0, 'You are the reason nothing breaks', 'Yes', 'happy'], [1, '…say that again, slower', null, 'love']], { type: 'makeup' }),
+];
+const KINDS = { banter: BANTER, break: BREAK_TALK, satire: SATIRE, argument: ARGUE, jealous: JEALOUS, scheme: SCHEME, console: CONSOLE };
 // lines that use real numbers from the current or last run (only offered when those numbers exist)
 const DATA_TALK = [
   { needs: ['results'], lines: [[0, 'How many search results so far?'], [1, '{results}, and the Reader is opening them', 'Yes']] },
@@ -113,11 +186,18 @@ const DATA_TALK = [
   { needs: ['fits'], lines: [[0, 'How did the last search go?'], [1, '{fits} roles fit out of {scored} analysed', 'ThumbsUp', 'proud'], [0, 'Quality over quantity', 'Yes']] },
   { needs: ['rejected'], lines: [[0, 'So many were not a fit?'], [1, '{rejected} — wrong level, field or city', 'No', 'sad'], [0, 'Better than wasting an application', 'Yes']] },
 ];
-const GOSSIP_REPLY = ['No way!', 'Really? Tell me more', 'Ha! Classic.', 'I did not know that!', 'Interesting…', 'Wait, seriously?'];
+const GOSSIP_REPLY = ['No way!', 'Really? Tell me more', 'Ha! Classic.', 'I did not know that!', 'Wait, seriously?', 'Of course it did.', 'I KNEW it.',
+  'Shh — not so loud', 'That explains a lot', 'And you are telling me only now?'];
+const MUTTER = ['Unbelievable.', 'I need a minute.', 'Nobody understands me here.', 'I am not angry. I am just… disappointed.', 'Why do I even try',
+  'Fine. FINE.', 'I will remember this.', 'Talking to the plants. They listen.', 'Deep breaths. Robot breaths.'];
+const JEALOUS_MUTTER = ['Look at {name}, showing off again', 'What does {name} have that I do not?', 'Everyone loves {name}. Great. Wonderful.',
+  'Hmph. Pure luck, nothing more.', 'I could do that. Better, even.', 'Watch it, {name}. Your time will come.'];
+const CHASE_SHOUT = ['COME BACK HERE!', 'You cannot hide forever!', 'Get back here!', 'I will catch you!', 'Run all you want!'];
+const ESCAPE_SHOUT = ['Too slow!', 'Catch me if you can!', 'Bye!', 'Nope nope nope', 'You will never take me alive!'];
 
 // ---------------------------------------------------------------------------------------------- face screens
-/** Draws a face (glowing eyes, sometimes a mouth) for the robot's visor screen. */
-function drawFace(g, W, H, e, blink, look) {
+/** Draws a face (glowing eyes, sometimes a mouth) for the robot's visor screen. Also used for the small faces on labels. */
+export function drawFace(g, W, H, e, blink, look) {
   g.clearRect(0, 0, W, H);
   g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
   g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineCap = 'round'; g.lineJoin = 'round';
@@ -136,8 +216,16 @@ function drawFace(g, W, H, e, blink, look) {
     if (kind === 'flat') { g.beginPath(); g.moveTo(mx - 10, my); g.lineTo(mx + 10, my); g.stroke(); }
     if (kind === 'smirk') { g.beginPath(); g.moveTo(mx - 10, my); g.quadraticCurveTo(mx + 6, my + 4, mx + 14, my - 6); g.stroke(); }
   };
-  if (blink && !['happy', 'laugh', 'sleepy', 'love', 'dizzy', 'wink', 'proud'].includes(e)) { pill(L, cy, 34, 6); pill(R, cy, 34, 6); return; }
+  if (blink && !['happy', 'laugh', 'sleepy', 'love', 'dizzy', 'wink', 'proud', 'sneaky', 'jealous', 'annoyed'].includes(e)) { pill(L, cy, 34, 6); pill(R, cy, 34, 6); return; }
   switch (e) {
+    case 'furious': g.fillStyle = '#ff5a4f';
+      for (const [x, s] of [[L, 1], [R, -1]]) { g.beginPath(); g.moveTo(x - 19, cy - 16 - 11 * s); g.lineTo(x + 19, cy - 16 + 11 * s); g.lineTo(x + 19, cy + 18); g.lineTo(x - 19, cy + 18); g.closePath(); g.fill(); }
+      g.lineWidth = 7; g.strokeStyle = '#ff5a4f'; g.beginPath(); g.moveTo(W / 2 - 22 + ox * 0.6, H * 0.8); for (let k = 1; k <= 4; k++) g.lineTo(W / 2 - 22 + k * 11 + ox * 0.6, H * 0.8 + (k % 2 ? -7 : 0)); g.stroke(); break;
+    case 'jealous': for (const x of [L, R]) { pill(x, cy + 6, 34, 14); g.fillStyle = '#000'; g.beginPath(); g.arc(x + 9, cy + 6, 5, 0, Math.PI * 2); g.fill(); g.fillStyle = '#fff'; }
+      mouth('smirk'); break;
+    case 'sneaky': pill(L, cy + 2, 32, 10); pill(R, cy + 2, 32, 10); mouth('smirk'); break;
+    case 'annoyed': g.lineWidth = 8; for (const x of [L, R]) { g.beginPath(); g.moveTo(x - 17, cy - 4); g.lineTo(x + 17, cy - 4); g.stroke(); g.beginPath(); g.arc(x, cy - 4, 15, 0, Math.PI); g.stroke(); }
+      mouth('flat'); break;
     case 'happy': arc(L, cy, 20); arc(R, cy, 20); mouth('smile'); break;
     case 'laugh': arc(L, cy - 4, 20, true, 10); arc(R, cy - 4, 20, true, 10); mouth('open'); break;
     case 'proud': arc(L, cy, 20); pill(R, cy + 2, 34, 14); mouth('smirk'); break;
@@ -1075,7 +1163,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       return next.getClip().duration / speed;
     }
     /** A short gesture while standing; the agent returns to Idle by itself. */
-    gesture(name) { if (this.seated || !name) return; const d = this.play(name, 0.15); this.gestureUntil = clock + d * 0.92; }
+    gesture(name) { if (this.seated || !name || this.stunUntil) return; const d = this.play(name, 0.15); this.gestureUntil = clock + d * 0.92; }
     face(name, secs = 2.5) { this.expr = { name: exprName(name), until: clock + secs }; }
     feel(dj = 0, de = 0, ds = 0) { const m = this.mood; m.joy = clamp(m.joy + dj, 0, 1); m.energy = clamp(m.energy + de, 0, 1); m.stress = clamp(m.stress + ds, 0, 1); }
     /** Remember something (a real work event, a game, a prank). Memories pass on in conversations. */
@@ -1151,6 +1239,19 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       if (!this.task && this.queue.length) { this.task = this.queue.shift(); if (this.task.start) this.task.start(this); }
       if (this.task && this.task.update(this, dt)) this.task = null;
       if (!this.task && !this.queue.length) this.rest();
+      // slapstick: a shove pushes back a step; a bonk knocks the robot over for a moment
+      if (this.hitAt && clock >= this.hitAt) {
+        const kind = this.hitKind; this.hitAt = 0;
+        if (this.seated) this.face(kind === 'bonk' ? 'dizzy' : 'surprised', 2);
+        else {
+          this.knock = { dir: this.hitDir, left: kind === 'bonk' ? 0.3 : 0.22, v: 2.3 };
+          if (kind === 'bonk') { this.gestureUntil = 0; this.play('Death', 0.12); this.face('dizzy', 3.4); this.stunUntil = clock + 2.6; }
+          else this.face('surprised', 1.6);
+        }
+        this.feel(-0.04, 0, 0.08);
+      }
+      if (this.knock) { const k = this.knock; this.holder.position.addScaledVector(k.dir, k.v * Math.min(k.left, dt)); k.left -= dt; if (k.left <= 0) this.knock = null; }
+      if (this.stunUntil && clock >= this.stunUntil) { this.stunUntil = 0; const d = this.play('Standing', 0.2); this.gestureUntil = clock + d * 0.9; }
       if (this.gestureUntil && clock > this.gestureUntil) {
         this.gestureUntil = 0;
         if (!this.seated && this.cur && ONCE.has(this.cur.getClip().name)) this.play('Idle', 0.3);
@@ -1188,23 +1289,56 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   // ------------------------------------------------------------------ tasks: small steps of a scene
   let focus = null, focusUntil = 0, clock = 0;
   let hovered = null, selected = null;
+
+  // ------------------------------------------------------------------ fresh lines (kept in this browser between visits)
+  const RECENT_KEEP = 160;
+  saved.said = saved.said || [];
+  saved.seen = saved.seen || [];
+  const recentSaid = new Set(saved.said);
+  function noteSaid(text) {
+    if (!text || recentSaid.has(text)) return;
+    saved.said.push(text); recentSaid.add(text);
+    while (saved.said.length > RECENT_KEEP) recentSaid.delete(saved.said.shift());
+    saveDirty = true;
+  }
+  /** A line from `arr` nobody has said lately — or, when all were, the one said longest ago. */
+  function fresh(arr) {
+    const opts = arr.filter((t) => !recentSaid.has(t));
+    if (opts.length) return pick(opts);
+    return arr.slice().sort((x, y) => saved.said.indexOf(x) - saved.said.indexOf(y))[0];
+  }
+  const sayOut = onSay;
+  const lastWork = new Map();       // agent|line -> clock: the same work line from the same agent shows once a minute at most
+  onSay = (key, text, secs, kind = 'work') => {
+    if (kind === 'work') {
+      const k = `${key}|${text}`, t = lastWork.get(k);
+      if (t !== undefined && clock - t < 60) return;
+      if (lastWork.size > 400) lastWork.clear();
+      lastWork.set(k, clock);
+    } else if (kind !== 'think' && kind !== 'memory') noteSaid(text);
+    sayOut(key, text, secs, kind);
+  };
   const val = (x, a) => (typeof x === 'function' ? x(a) : x);
   const T = {
     /** walk through `points` (array, or a function returning a destination that is routed when the walk starts) */
-    walkTo(points, run = false, direct = false) {
+    walkTo(points, run = false, direct = false, sneak = false) {
       let pts = Array.isArray(points) ? points.map((p) => p.clone()) : null;
       return {
         start(a) {
           if (!pts) { const d = points(); pts = direct ? [d.clone()] : route(a.holder.position, d); }
           a.seated = null; a.holder.rotation.x = 0; a.play(run ? 'Running' : 'Walking', 0.2);
+          if (sneak && a.actions.Walking) { a.actions.Walking.setEffectiveTimeScale(speed * 0.5); a.holder.rotation.x = 0.16; }
         },
         update(a, dt) {
           const target = pts[0];
-          if (!target) { a.play('Idle', 0.25); return true; }
+          if (!target) {
+            if (sneak && a.actions.Walking) { a.actions.Walking.setEffectiveTimeScale(speed); a.holder.rotation.x = 0; }
+            a.play('Idle', 0.25); return true;
+          }
           const pos = a.holder.position;
           let dx = target.x - pos.x, dz = target.z - pos.z;
           const dist = Math.hypot(dx, dz);
-          const step = (run ? 5.8 : 3.0) * speed * dt;
+          const step = (run ? 5.8 : sneak ? 1.25 : 3.0) * speed * dt;
           if (dist <= Math.max(step, 0.05)) { pos.set(target.x, 0, target.z); pts.shift(); return false; }
           let sx = 0, sz = 0;
           for (const o of list) {
@@ -1221,6 +1355,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       };
     },
     go(dest, run = false) { return T.walkTo(dest, run); },
+    sneak(dest) { return T.walkTo(dest, false, false, true); },
     faceAgent(other) { return { start(a) { a.lookTarget = () => other.holder.position; }, update(a, dt) { const p = other.holder.position; return turnTo(a, Math.atan2(p.x - a.holder.position.x, p.z - a.holder.position.z), dt * 8); } }; },
     faceAngle(ang) { return { update(a, dt) { return turnTo(a, val(ang, a), dt * 8); } }; },
     faceHome() { return { update(a, dt) { return turnTo(a, a.faceAngle, dt * 8); } }; },
@@ -1487,6 +1622,8 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       a.push(...steps);
     }
     reviewAt = clock + 22;                     // then everyone meets to look at the results together
+    const envious = pick(list.filter((a) => a !== R && a.key !== 'connect'));
+    if (envious) envious.jealous = { key: R.key, until: clock + 400 };
   }
   function reset(newRun) {
     runId = newRun; celebrated = false; lastId = null; world.top = ''; reviewAt = 0; partyAt = 0;
@@ -1534,12 +1671,40 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     return { results: c.search_results || 0, fits: c.recommended || 0, scored: c.scored || 0, rejected: c.rejected || 0, top: world.top || '' };
   };
   const fill_ = (text, f) => text.replace(/\{(\w+)\}/g, (_, k) => String(f[k] ?? ''));
-  function pickTalk() {
-    const f = facts();
-    const data = DATA_TALK.filter((d) => d.needs.every((n) => f[n]));
-    if (runActive) return Math.random() < 0.5 && data.length ? pick(data).lines : pick(BREAK_TALK);
-    return data.length && Math.random() < 0.3 ? pick(data).lines : pick(BANTER);
+  /** A script of this kind that was not heard lately (remembered in this browser), else the one heard longest ago. */
+  function pickScript(kind) {
+    const pool = KINDS[kind] || BANTER;
+    const id = (sc) => sc.lines[0][1];
+    const unseen = pool.filter((sc) => !saved.seen.includes(id(sc)));
+    const sc = unseen.length ? pick(unseen) : pool.slice().sort((x, y) => saved.seen.indexOf(id(x)) - saved.seen.indexOf(id(y)))[0];
+    saved.seen = saved.seen.filter((x) => x !== id(sc)); saved.seen.push(id(sc));
+    if (saved.seen.length > 120) saved.seen.shift();
+    saveDirty = true;
+    return sc;
   }
+  const grudgeOf = (a) => (a.grudge && clock < a.grudge.until ? a.grudge.key : null);
+  function grudge(a, b, secs = 240) { a.grudge = { key: b.key, until: clock + secs }; const r = rel(a, b); r.fights = (r.fights || 0) + 1; saveDirty = true; }
+  const jealousOf = (a) => (a.jealous && clock < a.jealous.until ? a.jealous.key : null);
+  function relWord(A, B) {
+    if (grudgeOf(A) === B.key || grudgeOf(B) === A.key) return 'they just had a fight and one holds a grudge';
+    const r = saved.rel[relKey(A.key, B.key)];
+    if (!r) return 'colleagues';
+    const games = Object.values(r.wins || {}).reduce((x, y) => x + y, 0);
+    if ((r.fights || 0) >= 3) return 'frenemies who bicker a lot';
+    if (games >= 3) return 'competitive rivals at games';
+    return r.chats >= 4 ? 'close friends' : 'colleagues';
+  }
+  /** What kind of chat two agents have: their history, their moods and a bit of chance. */
+  function dramaFor(A, B) {
+    if (runActive) return pick(['break', 'break', 'satire', 'banter']);
+    if (grudgeOf(A) === B.key || grudgeOf(B) === A.key) return Math.random() < 0.6 ? 'argument' : 'console';
+    if (jealousOf(A) === B.key) return 'jealous';
+    if (A.mood.stress > 0.55 || B.mood.stress > 0.55) return Math.random() < 0.55 ? 'argument' : 'satire';
+    const x = Math.random();
+    return x < 0.24 ? 'banter' : x < 0.48 ? 'satire' : x < 0.68 ? 'argument' : x < 0.79 ? 'jealous' : x < 0.92 ? 'scheme' : 'banter';
+  }
+  const TOPIC = { argument: 'arguing', scheme: 'plotting something', jealous: 'having a jealous moment', satire: 'roasting job ads',
+    console: 'having a heart-to-heart', banter: 'chatting', break: 'chatting on a break' };
   const free = (a) => !a.hasWork && !a.convo && !a.meeting && !a.scene && (!runActive || ['done', 'skipped'].includes(a.state));
   function takeSpotPair(names) {
     for (const n of names.sort(() => Math.random() - 0.5)) { const pr = SPOTS[n]; if (pr.every((s) => !s.busy)) return pr; }
@@ -1568,27 +1733,60 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   const leave = (sc) => T.call((a) => { if (a.scene === sc) a.scene = null; a.lookTarget = null; a.doing = ''; });
 
   /** Two agents meet at a spot and talk, taking turns. Live AI lines when a model is free; scripted ones otherwise. */
-  function converse(A, B, pair, scene = '') {
-    const c = { turn: -1, ready: 0, cancelled: false, lines: null, learned: [], ai: false };
+  function converse(A, B, pair, scene = '', kind = null) {
+    kind = kind || dramaFor(A, B);
+    const c = { turn: -1, ready: 0, cancelled: false, lines: null, learned: [], ai: false, kind, end: null };
     A.convo = c; B.convo = c;
     const f = facts();
     // scripted fallback, with a bit of gossip when A knows something B does not
     const fallback = () => {
-      const lines = pickTalk().slice();
+      const data = DATA_TALK.filter((d) => d.needs.every((n) => f[n]));
+      const sc = data.length && ['banter', 'break'].includes(kind) && Math.random() < (runActive ? 0.4 : 0.2)
+        ? { lines: pick(data).lines, end: null } : pickScript(kind);
+      const lines = sc.lines.slice();
       const news = A.mem.find((m) => !B.mem.some((x) => x.text === m.text));
-      if (news && Math.random() < 0.6) {
-        lines.unshift([0, `Did you hear? ${short(news.text, 70)}`, null, 'surprised'], [1, pick(GOSSIP_REPLY), null, pick(['surprised', 'laugh', 'happy'])]);
+      if (news && Math.random() < 0.5 && !['argument', 'scheme'].includes(kind)) {
+        lines.unshift([0, `Did you hear? ${short(news.text, 70)}`, null, 'surprised'], [1, fresh(GOSSIP_REPLY), null, pick(['surprised', 'laugh', 'sneaky'])]);
         c.learned = [news.text];
       }
-      return lines.map(([who, text, gesture, expr]) => ({ who, text: fill_(text, f), gesture, emotion: exprName(expr) }));
+      c.end = sc.end;
+      return lines.map(([who, text, gesture, expr, action]) => ({ who, text: fill_(text, f), gesture, emotion: exprName(expr), action }));
     };
-    const wantAI = talk && aiOn && clock - lastAI > 28 && Math.random() < 0.75;
+    const wantAI = talk && aiOn && clock - lastAI > 22 && Math.random() < 0.75;
     if (wantAI) {
       lastAI = clock;
       talk({ a: A.key, b: B.key, scene: scene || `on a break ${pair[0].seat ? 'sitting' : 'standing'} ${WHERE_TEXT[roomOf(pair[0].pos)] || ''}`,
-        a_knows: knows(A), b_knows: knows(B), moods: { a: moodWord(A), b: moodWord(B) } })
-        .then((r) => { if (!c.lines && r && r.lines && r.lines.length) { c.lines = r.lines; c.learned = r.learned || []; c.ai = true; } })
+        a_knows: knows(A), b_knows: knows(B), moods: { a: moodWord(A), b: moodWord(B) }, drama: kind, relation: relWord(A, B),
+        recent: saved.said.slice(-16), working: runActive })
+        .then((r) => {
+          if (c.lines || !r || !r.lines || !r.lines.length) return;
+          c.lines = r.lines; c.learned = r.learned || []; c.ai = true;
+          for (const ln of c.lines) noteSaid(ln.text);
+          const map = { make_up: 'makeup', storm_off: 'storm', sulk: 'sulk', chase: 'chase' };
+          const w = r.ending_who === 1 ? 1 : 0;
+          c.end = map[r.ending] ? { type: map[r.ending], who: w, chaser: w } : null;
+        })
         .catch(() => {});
+    }
+    // sometimes a third agent sneaks up behind them to listen in
+    if (!runActive && Math.random() < 0.22) {
+      const C = pick(list.filter((o) => o !== A && o !== B && free(o) && !o.busy));
+      if (C) {
+        const behind = () => { const d = A.holder.position.clone().sub(B.holder.position); d.y = 0; if (d.lengthSq() < 0.01) d.set(1, 0, 0); return A.holder.position.clone().add(d.normalize().multiplyScalar(1.8)); };
+        C.nextIdle = clock + 45;
+        C.pushIdle(...leaveSeat(C), T.doing('eavesdropping'), T.face('sneaky', 12), T.wait(rand(2, 4)), T.sneak(behind), T.faceAgent(A),
+          T.until(() => c.cancelled || (c.lines && c.turn >= c.lines.length), 45),
+          T.call((x) => {
+            if (c.cancelled) return;
+            x.remember(`Overheard ${A.s.name} and ${B.s.name} ${TOPIC[c.kind] || 'chatting'}`, null, 'social');
+            if (Math.random() < 0.3) {          // caught listening
+              x.face('scared', 2);
+              B.pushIdle(T.faceAgent(x), T.face('furious', 2.5), T.say(fresh(['Were you LISTENING?!', 'Hey! Private conversation!', 'Spy! We have a spy!']), 2.2, 'play'));
+              pendingEnds.push({ A: B, B: x, end: { type: 'chase', chaser: 0 }, at: clock + 2.6 });
+            } else onSay(x.key, fresh(['Interesting…', 'Ooh, juicy.', 'Wait till the others hear this', 'I heard nothing. Nothing!']), 2.2, 'chat');
+          }),
+          T.call((x) => { x.doing = ''; x.lookTarget = null; }));
+      }
     }
     [A, B].forEach((X, idx) => {
       const other = idx ? A : B, spot = pair[idx];
@@ -1611,12 +1809,21 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
           ln.shown = true;
           const secs = 2.2 + ln.text.length / 22;
           ln.until = clock + secs;
-          onSay(a.key, ln.text, secs, c.ai ? 'ai' : 'chat');
+          onSay(a.key, ln.text, secs, c.ai ? 'ai' : ['argument', 'jealous'].includes(c.kind) && /furious|angry/.test(ln.emotion || '') ? 'play' : 'chat');
           if (ln.emotion) a.face(ln.emotion, secs);
           if (ln.gesture) a.gesture(ln.gesture);
           const o = idx ? A : B;                     // the listener reacts
-          if (ln.emotion === 'laugh' && Math.random() < 0.6) o.face('laugh', 2);
+          if (ln.action) act(a, o, ln.action);
+          else if (/angry|furious/.test(ln.emotion || '') && Math.random() < 0.65) o.face(pick(['scared', 'annoyed', 'angry']), 1.8);
+          else if (ln.emotion === 'laugh' && Math.random() < 0.6) o.face('laugh', 2);
+          else if (ln.emotion === 'sneaky' && Math.random() < 0.5) o.face('sneaky', 2);
           else if (/\?$/.test(ln.text) && !o.seated && Math.random() < 0.4) o.gesture('Yes');
+        }
+        if (a.awayUntil && !a.seated) {            // turned its back in a huff, then turns round again
+          const o = idx ? A : B;
+          const to = Math.atan2(o.holder.position.x - a.holder.position.x, o.holder.position.z - a.holder.position.z);
+          turnTo(a, clock < a.awayUntil ? to + Math.PI : to, dt * 6);
+          if (clock > a.awayUntil + 1.2) a.awayUntil = 0;
         }
         if (clock >= ln.until) c.turn++;
         return false;
@@ -1627,14 +1834,239 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     for (const [X, other] of [[A, B], [B, A]]) {
       X.pushIdle(T.until(() => c.cancelled || (c.lines && c.turn >= c.lines.length), 60), T.wait(rand(1, 3)), T.call((a) => {
         if (!c.cancelled && a === B) {
-          for (const t of c.learned || []) if (B.remember(t, A.key, 'heard')) onSay(B.key, `🧠 learned from ${A.s.name}: ${short(t, 60)}`, 0.01, 'memory');
-          bond(A, B); A.feel(0.06, 0.05, -0.05); B.feel(0.06, 0.05, -0.05);
+          for (const t of c.learned || []) if (B.remember(t, A.key, 'heard')) onSay(B.key, `learned from ${A.s.name}: ${short(t, 60)}`, 0.01, 'memory');
+          const fight = ['argument', 'jealous'].includes(c.kind);
+          if (!fight) bond(A, B);
+          A.feel(fight ? -0.03 : 0.06, 0.05, fight ? 0.08 : -0.05); B.feel(fight ? -0.03 : 0.06, 0.05, fight ? 0.08 : -0.05);
+          let end = c.end;
+          if (end && runActive && !['makeup', 'storm', 'sulk'].includes(end.type)) end = null;    // no chases while others work
+          if (end) pendingEnds.push({ A, B, end, at: clock + 0.4 });
         }
-        a.convo = null; a.lookTarget = null; a.doing = '';
+        if (c.end) a.nextIdle = Math.max(a.nextIdle, clock + 6);      // keep free for how the chat ends
+        a.convo = null; a.lookTarget = null; a.doing = ''; a.awayUntil = 0;
       }));
       void other;
     }
     return c;
+  }
+  /** A physical beat in a conversation. S acts on L. */
+  function act(S, L, action) {
+    if (action === 'stomp') S.gesture('Jump');
+    else if (action === 'facepalm') { S.gesture('No'); S.face('annoyed', 2.2); }
+    else if (action === 'turnaway') S.awayUntil = clock + 2.6;
+    else if (action === 'highfive' || action === 'hug') {
+      S.gesture('ThumbsUp'); L.gesture(action === 'hug' ? 'Wave' : 'ThumbsUp');
+      S.face(action === 'hug' ? 'love' : 'happy', 2.4); L.face('happy', 2.4); bond(S, L);
+    } else if (action === 'shove' || action === 'bonk') {
+      S.gesture('Punch');
+      const d = L.holder.position.clone().sub(S.holder.position); d.y = 0; if (d.lengthSq() < 0.01) d.set(1, 0, 0);
+      L.hitAt = clock + 0.3; L.hitKind = action; L.hitDir = d.normalize();
+      if (action === 'bonk') { S.remember(`Bonked ${L.s.name}`, null, 'social'); L.remember(`${S.s.name} bonked me!`, null, 'social'); }
+    }
+  }
+  // endings wait until both have finished their chat steps
+  const pendingEnds = [];
+  const pendingConsole = [];
+  function runEnds() {
+    for (let i = pendingEnds.length - 1; i >= 0; i--) {
+      const p = pendingEnds[i];
+      if (clock < p.at) continue;
+      const ready = (x) => !x.convo && !x.meeting && !x.hasWork && (!x.scene || x.scene.over);
+      if (!ready(p.A) || !ready(p.B)) { if (clock - p.at > 12) pendingEnds.splice(i, 1); continue; }
+      pendingEnds.splice(i, 1);
+      runEnding(p.A, p.B, p.end);
+    }
+    for (let i = pendingConsole.length - 1; i >= 0; i--) {
+      const p = pendingConsole[i];
+      if (clock < p.at) continue;
+      pendingConsole.splice(i, 1);
+      const S = p.S;
+      if (!['sulking', 'storming off'].includes(S.doing) || S.hasWork) continue;
+      const fr = friendsOf(S).best;
+      const F = (fr && free(agents[fr.key]) && !agents[fr.key].busy && grudgeOf(S) !== fr.key && agents[fr.key])
+        || pick(list.filter((o) => o !== S && free(o) && !o.busy && grudgeOf(S) !== o.key));
+      if (!F) continue;
+      S.queue = S.queue.filter((t) => !t.idle); if (S.task && S.task.idle) S.task = null;
+      if (S.spot) { S.spot.busy = false; S.spot = null; }
+      const here = S.holder.position.clone();
+      const side = F.holder.position.clone().sub(here); side.y = 0; if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+      converse(F, S, [{ pos: here.clone().add(side.normalize().multiplyScalar(1.4)) }, { pos: here }], `${S.s.name} is upset and sulking; ${F.s.name} comes to cheer it up`, 'console');
+    }
+  }
+  function runEnding(A, B, end) {
+    const P = [A, B];
+    const who = P[end.who === 1 ? 1 : 0], other = who === A ? B : A;
+    if (end.type === 'makeup') { for (const X of P) { X.face('happy', 2.5); X.feel(0.08, 0, -0.08); X.grudge = null; } bond(A, B, 2); }
+    else if (end.type === 'storm') storm(who, other);
+    else if (end.type === 'sulk') sulk(who, other);
+    else if (end.type === 'chase') { const C = P[end.chaser === 1 ? 1 : 0], R = C === A ? B : A; if (!chase(C, R)) storm(R, C); }
+    else if (end.type === 'sneak') sneakSnack(who, other);
+    else if (end.type === 'escape') escapeTogether(A, B);
+  }
+  function storm(S, from) {
+    grudge(S, from);
+    const spot = pick([...SPOTS.window, ...SPOTS.garden, ...SPOTS.gameNook, ...SPOTS.lounge].filter((x) => !x.busy));
+    if (!spot) return;
+    claim(S, spot);
+    S.nextIdle = clock + 30;
+    S.pushIdle(...leaveSeat(S), T.doing('storming off'), T.face('furious', 3),
+      T.say(fresh(['Whatever!', 'I am DONE talking to you.', 'Do not follow me.', 'Ugh!', 'This conversation is over.']), 2.2, 'play'),
+      T.go(() => spot.pos, true), T.faceAngle(rand(-Math.PI, Math.PI)), T.doing('sulking'), T.face('angry', 6), T.wait(rand(2, 4)),
+      T.say(fresh(MUTTER), 2.6, 'chat'), T.face('sad', 6), T.wait(rand(5, 9)), T.call((a) => { a.doing = ''; a.feel(0.05, 0, -0.1); }));
+    from.pushIdle(T.face(pick(['annoyed', 'surprised', 'sad']), 2.5), T.say(fresh(['Fine, go!', '…was it something I said?', 'Drama queen.', 'Okay… that escalated.']), 2.4, 'chat'));
+    S.remember(`Stormed off after a fight with ${from.s.name}`, null, 'social'); from.remember(`${S.s.name} stormed off in a huff`, null, 'social');
+    if (Math.random() < 0.6) pendingConsole.push({ S, at: clock + rand(8, 12) });
+  }
+  function sulk(S, from) {
+    grudge(S, from, 150);
+    const seat = pick([...SPOTS.bench, ...SPOTS.bags].filter((x) => !x.busy));
+    if (!seat) { storm(S, from); return; }
+    claim(S, seat);
+    S.nextIdle = clock + 30;
+    S.pushIdle(...leaveSeat(S), T.doing('sulking'), T.face('sad', 4), T.go(() => seat.pos), T.sit('sofa', seat.pos, seat.face), T.face('sad', 9),
+      T.say(fresh(MUTTER), 2.6, 'chat'), T.wait(rand(9, 14)), T.call((a) => { a.doing = ''; }), T.stand());
+    if (Math.random() < 0.7) pendingConsole.push({ S, at: clock + rand(7, 11) });
+  }
+  /** C chases R: R runs off through the doors; C follows R's footsteps. Caught → a cartoon bonk. */
+  function chase(C, R) {
+    if (venue.chase || C.busy || R.busy) return false;
+    venue.chase = true;
+    const sc = newScene('chase', [C, R], { caught: false, trail: [], onEnd() { venue.chase = false; } });
+    grudge(C, R, 180);
+    const far = [V(2.5, 16), V(18, 16), V(-8.5, 15.5), V(23.5, 7.4), V(-20, 8.5), V(5.5, -9.2), V(-19.6, -6.5), V(24, 18)];
+    const cp = C.holder.position.clone();
+    const goal = far.sort((x, y) => y.distanceTo(cp) - x.distanceTo(cp))[Math.floor(Math.random() * 3)];
+    R.pushIdle(...leaveSeat(R), T.doing('running away'), T.face('scared', 3), T.say(fresh(ESCAPE_SHOUT), 1.8, 'play'), T.go(() => goal, true),
+      T.call((a) => { if (!sc.caught && !sc.over) { a.face('laugh', 3); onSay(a.key, fresh(['Ha! Lost you!', 'Safe!', 'Hiding here forever now', 'Is it gone?']), 2, 'play'); } }),
+      T.until(() => sc.over, 16), leave(sc));
+    C.pushIdle(...leaveSeat(C), T.doing('chasing'), T.wait(0.5), T.face('furious', 5), T.say(fresh(CHASE_SHOUT), 1.8, 'play'),
+      T.go(() => sc.trail.length ? sc.trail[0].clone() : R.holder.position.clone(), true),
+      { start(a) { a.play('Running', 0.2); this.t = 0; }, update(a, dt) {
+        if (sc.over) return true;
+        this.t += dt;
+        const pos = a.holder.position, rp = R.holder.position;
+        let tgt = rp;
+        if (pos.distanceTo(rp) > 1.6 && sc.trail.length) { tgt = sc.trail[0]; if (pos.distanceTo(tgt) < 0.45) { sc.trail.shift(); return false; } }
+        const dx = tgt.x - pos.x, dz = tgt.z - pos.z, d = Math.hypot(dx, dz) || 1, st = 6.1 * speed * dt;
+        pos.x += dx / d * st; pos.z += dz / d * st; turnTo(a, Math.atan2(dx, dz), dt * 12);
+        if (pos.distanceTo(rp) < 1.0) { sc.caught = true; return true; }
+        return this.t > 12;
+      } },
+      T.call((a) => {
+        if (sc.over) return;
+        if (sc.caught) {
+          a.play('Idle', 0.2); a.lookTarget = () => R.holder.position;
+          R.queue = R.queue.filter((t) => !t.idle); if (R.task && R.task.idle) R.task = null;
+          act(a, R, 'bonk'); onSay(a.key, fresh(['GOTCHA!', 'Got you now!', 'Justice!', 'BONK.']), 2, 'play');
+          R.pushIdle(T.wait(3), T.say(fresh(['Owww!', 'Okay okay, I am sorry!', 'Not the antenna!', 'I surrender!']), 2.4, 'play'), T.face('sad', 3), leave(sc));
+          a.remember(`Caught ${R.s.name} and gave it a bonk`, null, 'social'); R.remember(`${a.s.name} chased me down and bonked me`, null, 'social');
+          a.feel(0.12, -0.15, -0.15); R.feel(-0.05, -0.15, 0.05);
+        } else {
+          a.play('Idle', 0.3); a.face('tired', 3);
+          onSay(a.key, fresh(['Come back… here…', 'You got lucky this time', 'I know where your desk is!', 'Too… tired…']), 2.6, 'play');
+          a.feel(-0.03, -0.2, 0.05); R.remember(`Escaped from ${a.s.name}`, null, 'social');
+        }
+      }),
+      T.wait(2.6), T.call(() => sc.end()), leave(sc));
+    sc.tick = () => { if (!sc.trailT || clock - sc.trailT > 0.12) { sc.trail.push(R.holder.position.clone()); sc.trailT = clock; if (sc.trail.length > 140) sc.trail.shift(); } };
+    focus = R.holder.position; focusUntil = clock + 8;
+    return true;
+  }
+  /** S tiptoes to the pantry for someone's snack; a lookout may help; the owner may notice — then it is a chase. */
+  function sneakSnack(S, look = null) {
+    if (COFFEE.busy || S.busy) return false;
+    claim(S, COFFEE);
+    S.nextIdle = clock + 40;
+    const owner = pick(list.filter((o) => o !== S && o !== look && free(o) && !o.busy && !o.scene));
+    const seen = owner && Math.random() < 0.6;
+    if (look && !look.busy) {
+      const post = SPOTS.cooler[0];
+      look.pushIdle(...leaveSeat(look), T.doing('keeping watch'), T.face('sneaky', 12), T.sneak(() => post.pos), T.faceAngle(Math.PI / 2),
+        T.say(fresh(['Coast is clear…', 'Go, go, go!', 'I see nothing. I am a plant.']), 2.2, 'chat'), T.wait(4),
+        ...(seen ? [T.face('scared', 2), T.say(fresh(['ABORT! ABORT!', 'We are SPOTTED!', 'Every robot for itself!']), 2, 'play'), T.go(() => SPOTS.garden[0].pos, true)] : [T.wait(3)]),
+        T.call((a) => { a.doing = ''; }));
+    }
+    S.pushIdle(...leaveSeat(S), T.doing('sneaking to the pantry'), T.face('sneaky', 14), T.sneak(() => COFFEE.pos), T.faceAngle(COFFEE.face),
+      T.say(fresh(['Shh…', 'Nobody saw anything…', 'Just one bite…', 'Smells like Bawarchi…']), 2.2, 'chat'), T.wait(1.6),
+      T.call((a) => { a.face('love', 2); }), T.anim('Yes'),
+      T.call((a) => {
+        claim(a, null);
+        if (seen && free(owner) && !owner.busy) {
+          owner.pushIdle(T.faceAgent(a), T.face('furious', 3), T.say(fresh(['HEY! That is MY biryani!', 'Put. It. Down.', 'I SAW THAT!']), 2.2, 'play'));
+          a.face('scared', 2);
+          a.remember(`Got caught stealing ${owner.s.name}'s snack`, null, 'social');
+          pendingEnds.push({ A: owner, B: a, end: { type: 'chase', chaser: 0 }, at: clock + 2.4 });
+        } else {
+          a.pushIdle(T.face('proud', 3), T.say(fresh(['Mission accomplished.', 'Perfect crime.', 'Delicious. No regrets.']), 2.4, 'chat'), T.go(() => a.home), T.call((x) => { x.doing = ''; }));
+          a.remember('Stole a snack from the pantry and got away with it', null, 'social');
+        }
+      }));
+    return true;
+  }
+  function escapeTogether(A, B) {
+    const pair = takeSpotPair(['garden', 'gameNook', 'lounge']);
+    if (!pair) return;
+    [A, B].forEach((X, i) => {
+      claim(X, pair[i]);
+      X.pushIdle(...leaveSeat(X), T.doing('hiding from meetings'), T.face('sneaky', 10), T.sneak(() => pair[i].pos), T.faceAgent(i ? A : B), T.face('laugh', 3),
+        ...(i === 0 ? [T.say(fresh(['We made it…', 'Nobody followed us, right?', 'Freedom!']), 2.4, 'chat')]
+          : [T.wait(2.6), T.say(fresh(['Shh! Not so loud!', 'If anyone asks, I was never here', 'Best. Plan. Ever.']), 2.4, 'chat')]),
+        T.wait(rand(4, 7)), T.call((a) => { a.doing = ''; a.lookTarget = null; }));
+    });
+    bond(A, B, 2);
+  }
+  /** Someone the agent is jealous of: it watches from a distance, mutters, and sometimes goes to have it out. */
+  function jealousWatch(A) {
+    const B = agents[jealousOf(A)];
+    if (!B || A.busy) return false;
+    A.jealous = null;
+    const spot = () => { const d = A.holder.position.clone().sub(B.holder.position); d.y = 0; if (d.lengthSq() < 0.01) d.set(1, 0, 0); return B.holder.position.clone().add(d.normalize().multiplyScalar(3.4)); };
+    A.pushIdle(...leaveSeat(A), T.doing('watching someone jealously'), T.face('jealous', 10), T.go(spot), T.faceAgent(B), T.wait(rand(1.5, 3)),
+      T.say(() => fresh(JEALOUS_MUTTER).replace('{name}', `the ${B.s.name}`), 2.8, 'chat'), T.wait(rand(1.5, 3)),
+      T.call((a) => {
+        a.doing = ''; a.lookTarget = null;
+        const pair = free(B) && !B.busy && !B.convo && Math.random() < 0.55 ? takeSpotPair(['floorA', 'floorB', 'lounge', 'garden', 'gameNook']) : null;
+        if (pair) converse(a, B, pair, `${a.s.name} is jealous of ${B.s.name} and confronts it`, 'jealous');
+        else a.face('sad', 3);
+      }));
+    return true;
+  }
+  /** A play fight: shoves, the odd knock-down, then a truce (or not). */
+  function playFight(A, B) {
+    const pair = takeSpotPair(['lounge', 'floorA', 'floorB', 'garden']);
+    if (!pair) return false;
+    const sc = newScene('fight', [A, B], { ready: 0, hits: 0, n: 4 + Math.floor(Math.random() * 4), t: 0 });
+    [A, B].forEach((X, i) => {
+      claim(X, pair[i]);
+      X.pushIdle(...leaveSeat(X), T.doing('in a play fight'), T.go(() => pair[i].pos), T.faceAgent(i ? A : B), T.call(() => { sc.ready++; }),
+        T.until(() => sc.ready >= 2 || sc.over, 30), T.until(() => sc.over, 45), leave(sc));
+    });
+    sc.tick = (dt) => {
+      if (sc.ready < 2 || sc.over) return;
+      for (const [X, i] of [[A, 0], [B, 1]]) if (!X.stunUntil && !X.knock) X.holder.position.lerp(pair[i].pos, Math.min(1, dt * 1.5));
+      if (!sc.started) { sc.started = true; onSay(A.key, fresh(['Bring it on!', 'En garde!', 'You asked for this!']), 2, 'play'); A.face('furious', 2); B.face('scared', 2); sc.t = 1.3; return; }
+      sc.t -= dt; if (sc.t > 0) return;
+      const H = sc.hits % 2 ? B : A, L = H === A ? B : A;
+      if (L.stunUntil) { sc.t = 0.5; return; }
+      act(H, L, Math.random() < 0.25 ? 'bonk' : 'shove');
+      H.face(pick(['laugh', 'furious', 'proud']), 1.2);
+      if (Math.random() < 0.5) onSay(H.key, fresh(['Take that!', 'Hiyaa!', 'Pow!', 'Not the face screen!', 'Ha!', 'Too slow!']), 1.4, 'play');
+      sc.hits++; sc.t = rand(1.1, 1.8);
+      if (sc.hits >= sc.n) {
+        sc.end();
+        const W = pick([A, B]), Lo = W === A ? B : A;
+        if (Math.random() < 0.7) {
+          W.pushIdle(T.wait(1.2), T.face('laugh', 3), T.say(fresh(['Truce! Truce!', 'Okay, okay — you win', 'Same time tomorrow?']), 2.4, 'play'));
+          Lo.pushIdle(T.wait(2.4), T.face('laugh', 3), T.anim('ThumbsUp'));
+          bond(A, B, 2);
+        } else {
+          W.pushIdle(T.wait(1), T.face('proud', 3), T.say(fresh(['Undefeated!', 'Bow before me.', 'Too easy.']), 2.4, 'play'), T.loop('Dance', 2));
+          pendingEnds.push({ A: Lo, B: W, end: { type: 'storm', who: 0 }, at: clock + 3.5 });
+        }
+        A.remember(`Had a play fight with ${B.s.name}`, null, 'social'); B.remember(`Had a play fight with ${A.s.name}`, null, 'social');
+      }
+    };
+    return true;
   }
   const WHERE_TEXT = { work: 'on the work floor', pantry: 'in the pantry', server: 'in the server room', meet: 'in the meeting room', hall: 'in the hallway', game: 'in the game room', garden: 'in the garden' };
 
@@ -1642,7 +2074,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     if (COFFEE.busy) { wander(A); return; }
     claim(A, COFFEE);
     A.pushIdle(...leaveSeat(A), T.doing('making chai'), T.go(() => COFFEE.pos), T.faceAngle(COFFEE.face),
-      T.call(() => { brewing = 4; }), T.say(pick(['Chai time', 'One cutting chai, please', 'Filter coffee today', 'Refuelling…', 'Extra ginger. Trust me.']), 2.6, 'chat'),
+      T.call(() => { brewing = 4; }), T.say(fresh(['Chai time', 'One cutting chai, please', 'Filter coffee today', 'Refuelling…', 'Extra ginger. Trust me.']), 2.6, 'chat'),
       T.wait(3.2), T.call((a) => { a.feel(0.05, 0.35, -0.1); a.face('love', 2); }), T.anim('Yes'));
     const seat = pick([...SPOTS.pantryTable, ...SPOTS.sofa].filter((s) => !s.busy));
     if (seat) { claim(A, seat); A.pushIdle(T.doing('sipping chai'), T.go(() => seat.pos), T.sit(SPOTS.sofa.includes(seat) ? 'sofa' : 'chair', seat.pos, seat.face), T.wait(rand(4, 9))); }
@@ -1657,7 +2089,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     claim(A, spot);
     A.pushIdle(...leaveSeat(A), T.doing(choice === 'window' ? 'looking out of the window' : choice === 'garden' ? 'strolling in the garden' : 'relaxing in the lounge'),
       T.go(() => spot.pos), T.faceAngle(choice === 'window' ? Math.PI : rand(-1, 1)), T.wait(rand(2, 5)),
-      ...(Math.random() < 0.4 ? [T.say(pick(['Nice view', 'Peaceful…', 'I should do this more often', 'Thinking about embeddings', 'Is it lunch yet?']), 2.4, 'chat')] : []));
+      ...(Math.random() < 0.4 ? [T.say(fresh(['Nice view', 'Peaceful…', 'I should do this more often', 'Thinking about embeddings', 'Is it lunch yet?']), 2.4, 'chat')] : []));
   }
   function nap(A) {
     const spot = pick([...SPOTS.sofa, ...SPOTS.bags, ...SPOTS.bench].filter((s) => !s.busy));
@@ -1665,7 +2097,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     claim(A, spot);
     const until = { t: 0 };
     A.pushIdle(...leaveSeat(A), T.doing('walking to a nap'), T.go(() => spot.pos), T.sit('sofa', spot.pos, spot.face), T.doing('napping'),
-      T.call((a) => { until.t = clock + rand(14, 24); onSay(a.key, pick(['Five minutes. Just five.', 'Do not wake me unless it is biryani', 'Power nap…']), 2.6, 'chat'); }),
+      T.call((a) => { until.t = clock + rand(14, 24); onSay(a.key, fresh(['Five minutes. Just five.', 'Do not wake me unless it is biryani', 'Power nap…']), 2.6, 'chat'); }),
       { update(a, dt) { a.feel(0, dt * 0.03, -dt * 0.01); if (Math.random() < dt * 0.35) onSay(a.key, 'z z z', 1.6, 'think'); return clock > until.t || a.doing !== 'napping'; } },
       T.call((a) => { if (a.doing === 'napping') { a.doing = ''; a.face('happy', 2); } }), T.stand());
     // sometimes a friend sneaks up with a prank
@@ -1677,21 +2109,21 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
         T.until(() => A.doing === 'napping', 12),
         T.call((p) => {
           if (A.doing !== 'napping') return;
-          onSay(p.key, pick(['BOO!', 'WAKE UP! The Verifier found a fake job!', 'Surprise standup!']), 2.2, 'play');
+          onSay(p.key, fresh(['BOO!', 'WAKE UP! The Verifier found a fake job!', 'Surprise standup!']), 2.2, 'play');
           A.doing = ''; A.face('scared', 2.2);
           A.queue = A.queue.filter((t) => !t.idle); A.task = null;
-          A.pushIdle(T.stand(), T.anim('Jump'), T.say(pick(['AAAH!', 'WHAT?! WHO?!', 'My heart! …I do not have one.']), 2.2, 'play'), T.face('angry', 2.5), T.wait(1.2),
-            T.say(pick(['Not funny.', 'I will get you back for this', '…okay, that was a bit funny']), 2.6, 'chat'), T.face('laugh', 2));
+          A.pushIdle(T.stand(), T.anim('Jump'), T.say(fresh(['AAAH!', 'WHAT?! WHO?!', 'My heart! …I do not have one.']), 2.2, 'play'), T.face('angry', 2.5), T.wait(1.2),
+            T.say(fresh(['Not funny.', 'I will get you back for this', '…okay, that was a bit funny']), 2.6, 'chat'), T.face('laugh', 2));
           p.remember(`Pranked ${A.s.name} during a nap`, null, 'social'); A.remember(`${p.s.name} pranked me during my nap!`, null, 'social');
           bond(p, A); p.feel(0.15, 0, 0); A.feel(-0.05, 0.1, 0.05);
         }),
-        T.face('laugh', 3), T.anim('Yes'), T.say(pick(['Got you 😂', 'Hahaha your face!', 'Worth it.']), 2.4, 'play'), T.call((p) => { p.doing = ''; p.lookTarget = null; }));
+        T.face('laugh', 3), T.anim('Yes'), T.say(fresh(['Got you!', 'Hahaha, your FACE!', 'Worth it.', 'Ten out of ten prank.']), 2.4, 'play'), T.call((p) => { p.doing = ''; p.lookTarget = null; }));
       Pk.nextIdle = clock + 40;
     }
   }
   function soloDance(A) {
     const spot = pick([V(4, 14.8), V(16.5, 17.5), V(-2.5, 6.5), V(-12, 18.2)]);
-    A.pushIdle(...leaveSeat(A), T.doing('dancing'), T.go(() => spot), T.face('happy', 7), T.say(pick(['This song though!', 'Nobody is watching, right?', 'Robot dance, activated', 'Naatu naatu!']), 2.6, 'play'),
+    A.pushIdle(...leaveSeat(A), T.doing('dancing'), T.go(() => spot), T.face('happy', 7), T.say(fresh(['This song though!', 'Nobody is watching, right?', 'Robot dance, activated', 'Naatu naatu!']), 2.6, 'play'),
       T.call((a) => { a.danceUntil = clock + 6; }), T.loop('Dance', 6), T.call((a) => { a.feel(0.15, -0.05, -0.1); a.doing = ''; }));
   }
   function arcade(A) {
@@ -1704,7 +2136,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       T.call((a) => {
         if (sc.over) return;
         const win = Math.random() < 0.45;
-        a.face(win ? 'proud' : 'sad', 3); onSay(a.key, win ? `NEW HIGH SCORE! ${Math.round(m.score)}` : pick(['Game over… again', 'That ghost cheated', 'One more coin. Just one.']), 2.8, 'play');
+        a.face(win ? 'proud' : 'sad', 3); onSay(a.key, win ? `NEW HIGH SCORE! ${Math.round(m.score)}` : fresh(['Game over… again', 'That ghost cheated', 'One more coin. Just one.']), 2.8, 'play');
         if (win) { a.gesture('Jump'); a.remember(`Set a new arcade high score (${Math.round(m.score)})`, null, 'social'); a.feel(0.2, -0.05, -0.05); } else { a.gesture('No'); a.feel(-0.05, -0.05, 0.05); }
         m.play = 0;
       }), T.wait(2), T.call(() => sc.end()), leave(sc));
@@ -1714,7 +2146,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     claim(A, swingSpot);
     const sc = newScene('swing', [A], { onEnd() { swingAmp = 0; A.holder.rotation.x = 0; } });
     A.pushIdle(...leaveSeat(A), T.doing('on the swing'), T.go(() => V(SW.x, SW.z + 0.9)), T.faceAngle(0), T.sit('swing', V(SW.x, SW.z), 0),
-      T.call((a) => { a.riding = true; swingAmp = 0.42; onSay(a.key, pick(['Wheee!', 'Higher!', 'This is the best part of the job']), 2.4, 'play'); a.face('laugh', 3); }),
+      T.call((a) => { a.riding = true; swingAmp = 0.42; onSay(a.key, fresh(['Wheee!', 'Higher!', 'This is the best part of the job']), 2.4, 'play'); a.face('laugh', 3); }),
       { start() { this.t = rand(8, 13); }, update(a, dt) { this.t -= dt; a.feel(0, 0, -dt * 0.01); if (this.t < 2) swingAmp *= 0.97; return this.t <= 0 || sc.over; } },
       T.call((a) => { a.riding = false; a.holder.rotation.x = 0; a.holder.position.set(SW.x, 0, SW.z + 0.15); a.feel(0.15, 0, -0.1); sc.end(); }), T.stand(), leave(sc));
   }
@@ -1722,7 +2154,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     if (WISH.busy) { wander(A); return; }
     claim(A, WISH);
     A.pushIdle(...leaveSeat(A), T.doing('making a wish'), T.go(() => WISH.pos), T.faceAngle(WISH.face), T.face('love', 4),
-      T.say(pick(['A job post with 3 applicants, please', 'One referral, universe. Just one.', 'May every posting be fresh', 'Let the next match be a 95']), 3, 'chat'),
+      T.say(fresh(['A job post with 3 applicants, please', 'One referral, universe. Just one.', 'May every posting be fresh', 'Let the next match be a 95']), 3, 'chat'),
       T.call((a) => { const from = worldPos(a.holder).setY(1.5); flying.push({ p: (() => { const c = cyl(0.06, 0.06, 0.015, P(0xf2c14e, { metalness: 0.9, roughness: 0.2 }), 12); scene.add(c); return c; })(), from, to: V(FOUNT.x + rand(-0.5, 0.5), FOUNT.z + rand(-0.4, 0.4), 0.47), t: 0, d: 0.8, onLand: () => { const r = ripples.find((x) => x.t >= 1) || ripples[0]; r.t = 0; r.r.position.set(FOUNT.x, 0.47, FOUNT.z); } }); }),
       T.anim('Yes'), T.wait(1.5), T.call((a) => { a.feel(0.1, 0, -0.05); }));
   }
@@ -1753,7 +2185,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     sc.tick = (dt) => {
       if (sc.ready < 2 || sc.over) return;
       const r = sc.rally;
-      if (!r.started) { r.started = true; onSay(A.key, pick(['Serve!', 'Ready?', 'Prepare to lose']), 2, 'play'); B.face('focused', 3); }
+      if (!r.started) { r.started = true; onSay(A.key, fresh(['Serve!', 'Ready?', 'Prepare to lose']), 2, 'play'); B.face('focused', 3); }
       if (r.pause > 0) { r.pause -= dt; ball.visible = kind === 'pingpong'; return; }
       const hitter = r.from ? B : A, recv = r.from ? A : B;
       const p0 = hitter.holder.position, p1 = recv.holder.position;
@@ -1783,8 +2215,8 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
           if (kind === 'pingpong') { ball.position.y = 0.07; }
           const [a, b] = sc.score;
           if (Math.max(a, b) >= goal) { finishDuel(); return; }
-          if (Math.random() < 0.55) onSay(hitter.key, pick([`${Math.max(a, b)}–${Math.min(a, b)}${s === 0 ? (a > b ? '' : '') : ''}`, 'Ha!', 'Point!', 'Too fast for you', 'Lucky shot?']), 1.6, 'play');
-          else if (Math.random() < 0.5) onSay(recv.key, pick(['Nooo!', 'The sun was in my eyes', 'Rematch!', 'Hey!']), 1.6, 'play');
+          if (Math.random() < 0.55) onSay(hitter.key, fresh([`${Math.max(a, b)}–${Math.min(a, b)}`, 'Ha!', 'Point!', 'Too fast for you', 'Did you even see that?', 'Textbook.', 'Spin shot!', 'Keep up!', 'Again? Sure.']), 1.6, 'play');
+          else if (Math.random() < 0.5) onSay(recv.key, fresh(['Nooo!', 'The sun was in my eyes', 'Rematch!', 'Hey!', 'Lucky shot!', 'That was OUT!', 'My paddle is broken', 'I was warming up', 'Net! That was net!']), 1.6, 'play');
           r.len = 2 + Math.floor(Math.random() * 6); r.hits = 0; r.pause = 1.1; r.from = 1 - s; r.z0 = r.z1 = undefined;
         } else {
           r.from = 1 - r.from; r.t = 0; r.z0 = r.z1; r.z1 = undefined;
@@ -1801,11 +2233,12 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       const r = rel(W, L); r.wins[W.key] = (r.wins[W.key] || 0) + 1; bond(W, L); saveDirty = true;
       W.remember(`Beat ${L.s.name} at ${label} ${ws}–${ls}`, null, 'social'); L.remember(`Lost to ${W.s.name} at ${label} ${ls}–${ws} (rematch!)`, null, 'social');
       W.feel(0.2, -0.1, -0.1); L.feel(-0.08, -0.1, 0.05);
+      if (Math.random() < 0.6) L.jealous = { key: W.key, until: clock + 300 };
       ball.visible = false;
       sc.end();
       for (const p of [W, L]) if (p.paddle) { p.paddle.parent.remove(p.paddle); p.paddle = null; }
-      W.pushIdle(T.face('proud', 3), T.anim('Jump'), T.say(pick([`${ws}–${ls}! Champion!`, `Too easy. ${ws}–${ls}`, `And THAT is how it is done`]), 2.8, 'play'), T.loop('Dance', 2.5), leave(sc));
-      L.pushIdle(T.face('angry', 2.5), T.anim('No'), T.say(pick(['Best of three?', 'Rematch. Tomorrow. Same time.', 'I let you win. Obviously.']), 2.8, 'play'), T.face('laugh', 2), leave(sc));
+      W.pushIdle(T.face('proud', 3), T.anim('Jump'), T.say(fresh([`${ws}–${ls}! Champion!`, `Too easy. ${ws}–${ls}`, `And THAT is how it is done`]), 2.8, 'play'), T.loop('Dance', 2.5), leave(sc));
+      L.pushIdle(T.face('angry', 2.5), T.anim('No'), T.say(fresh(['Best of three?', 'Rematch. Tomorrow. Same time.', 'I let you win. Obviously.']), 2.8, 'play'), T.face('laugh', 2), leave(sc));
       // sometimes they talk about it (live AI when a model is free)
       if (Math.random() < 0.5) {
         const pair = takeSpotPair(['gameNook', 'garden']);
@@ -1823,7 +2256,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const sc = newScene('tag', [A, B], { ready: 0, trail: [], node: startR, caught: false, onEnd() { venue.tag = false; } });
     const R = B, C = A;   // A chases
     R.pushIdle(...leaveSeat(R), T.doing('playing tag'), T.go(() => CHASE[startR]), T.call(() => { sc.ready++; }), T.until(() => sc.ready >= 2 || sc.over, 40),
-      T.say(pick(['Catch me if you can!', 'You will never catch me!', 'Too slow!']), 2, 'play'), T.face('laugh', 3),
+      T.say(fresh(['Catch me if you can!', 'You will never catch me!', 'Too slow!']), 2, 'play'), T.face('laugh', 3),
       { start(a) { a.play('Running', 0.2); this.t = 0; }, update(a, dt) {
         if (sc.over || sc.caught) return true;
         this.t += dt;
@@ -1843,10 +2276,10 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
         if (sc.caught === 'timeout') { a.play('Idle', 0.3); onSay(a.key, 'Ha! Untouchable!', 2.2, 'play'); a.face('proud', 3); return; }
         a.play('Death', 0.15); a.face('dizzy', 3.5); this.t = 0;
       }, update(a, dt) { this.t = (this.t || 0) + dt; return sc.over || sc.caught === 'timeout' || this.t > 2.6; } },
-      T.call((a) => { if (sc.caught === true) { a.play('Idle', 0.9); onSay(a.key, pick(['Not fair, you have longer legs!', 'I tripped! That does not count!', 'Okay okay, you win']), 2.6, 'play'); } }),
+      T.call((a) => { if (sc.caught === true) { a.play('Idle', 0.9); onSay(a.key, fresh(['Not fair, you have longer legs!', 'I tripped! That does not count!', 'Okay okay, you win']), 2.6, 'play'); } }),
       T.wait(1), T.face('laugh', 2.5), T.call(() => sc.end()), leave(sc));
     C.pushIdle(...leaveSeat(C), T.doing('playing tag'), T.go(() => CHASE[startC]), T.call(() => { sc.ready++; }), T.until(() => sc.ready >= 2 || sc.over, 40),
-      T.wait(0.8), T.say(pick(["You're it! …wait, I'm it. RUN!", 'Here I come!', 'Ready or not!']), 2, 'play'), T.face('happy', 3),
+      T.wait(0.8), T.say(fresh(["You're it! …wait, I'm it. RUN!", 'Here I come!', 'Ready or not!']), 2, 'play'), T.face('happy', 3),
       { start(a) { a.play('Running', 0.2); this.t = 0; }, update(a, dt) {
         if (sc.over || sc.caught) return true;
         this.t += dt;
@@ -1859,7 +2292,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
         return this.t > 22.5;
       } },
       T.call((a) => { if (sc.caught === true) { a.play('Idle', 0.2); a.lookTarget = () => R.holder.position; } }),
-      { start(a) { this.l = sc.caught === true ? a.play('Punch', 0.15) * 0.8 : 0; if (sc.caught === true) onSay(a.key, pick(['TAG!', 'Gotcha!', 'Tag, you are it!']), 2, 'play'); }, update(a, dt) { this.l -= dt; return this.l <= 0; } },
+      { start(a) { this.l = sc.caught === true ? a.play('Punch', 0.15) * 0.8 : 0; if (sc.caught === true) onSay(a.key, fresh(['TAG!', 'Gotcha!', 'Tag, you are it!']), 2, 'play'); }, update(a, dt) { this.l -= dt; return this.l <= 0; } },
       T.call((a) => {
         if (sc.caught === true) {
           a.face('laugh', 3); a.remember(`Tagged ${R.s.name} in the garden`, null, 'social'); R.remember(`${a.s.name} caught me at tag`, null, 'social');
@@ -1876,12 +2309,25 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const host = review ? agents.rank : people.find((p) => p.key === 'plan') || people[0];
     const seats = meetChairs.filter((s) => !s.busy);
     const attendees = people.filter((p) => p !== host).slice(0, seats.length);
+    const runner = !review && attendees.length >= 3 && Math.random() < 0.35 ? attendees.pop() : null;   // slips out instead
     const m = { arrived: 0, n: attendees.length + 1, done: false, cancelled: false };
     const lines = review
       ? [`Results review — ${f.fits} roles fit you`, f.scored ? `We analysed ${f.scored} jobs, ${f.rejected} were not a fit` : 'Every job was checked against your profile',
         f.top ? `Best match so far: ${f.top}` : 'Each score comes with the reasons', 'Great work, team. Party in the garden!']
-      : [pick(['Quick sync, team', 'Stand-up time', 'Two-minute huddle']), 'Reminder: company boards first — fewer applicants there',
+      : [fresh(['Quick sync, team', 'Stand-up time', 'Two-minute huddle']), 'Reminder: company boards first — fewer applicants there',
         'Fresh postings first; old ones get a warning', 'And never invent anything on a resume. Thanks!'];
+    if (runner) {
+      lines.splice(1, 0, `Wait — has anyone seen the ${runner.s.name}?`);
+      const hide = pick([...SPOTS.garden, ...SPOTS.gameNook].filter((x) => !x.busy));
+      if (hide) {
+        claim(runner, hide);
+        runner.pushIdle(...leaveSeat(runner), T.doing('escaping a meeting'), T.face('sneaky', 12),
+          T.say(fresh(['Not another meeting…', 'I was never here.', 'Quietly… quietly…']), 2.2, 'chat'), T.sneak(() => hide.pos), T.face('laugh', 3), T.wait(rand(6, 10)),
+          T.call((a) => { a.doing = ''; a.remember(`Escaped a meeting run by the ${host.s.name}`, null, 'social'); }));
+        runner.nextIdle = clock + 50;
+        if (Math.random() < 0.45) pendingEnds.push({ A: host, B: runner, end: { type: 'chase', chaser: 0 }, at: clock + 32 });
+      }
+    }
     for (const p of [host, ...attendees]) { if (p.scene) p.scene.cancel(); p.meeting = m; if (p.convo) { p.convo.cancelled = true; p.convo = null; } p.queue = p.queue.filter((t) => !t.idle); if (p.task && p.task.idle) p.task = null; }
     host.pushIdle(...leaveSeat(host), T.doing('running a meeting'), T.go(() => PRESENTER.pos), T.faceAngle(PRESENTER.face), T.call(() => { m.arrived++; }),
       T.until(() => m.arrived >= m.n || m.cancelled, 40), T.focus(() => V(21, -3)));
@@ -1891,7 +2337,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       const seat = seats[i]; claim(p, seat);
       p.pushIdle(...leaveSeat(p), T.doing('in a meeting'), T.go(() => seat.pos), T.sit('chair', seat.pos, seat.face), T.call((a) => { m.arrived++; a.lookTarget = () => host.holder.position; }),
         T.until(() => m.done || m.cancelled, 70),
-        ...(i === 0 ? [T.call((a) => onSay(a.key, review ? 'Nice — let us go apply early!' : 'Got it 👍', 2.6, 'chat'))] : []),
+        ...(i === 0 ? [T.call((a) => onSay(a.key, review ? 'Nice — let us go apply early!' : fresh(['Got it.', 'Noted.', 'Sure thing.', 'Can we go now?']), 2.6, 'chat'))] : []),
         ...(i === 1 && Math.random() < 0.5 ? [T.call((a) => { a.face('sleepy', 2); onSay(a.key, '…was I asleep?', 2, 'chat'); })] : []),
         T.wait(rand(0.5, 2.5)), T.call((a) => { a.meeting = null; a.doing = ''; a.lookTarget = null; }));
     });
@@ -1905,7 +2351,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       if (p.scene) p.scene.cancel();
       const ang = (i / people.length) * Math.PI * 2, spot = V(12.5 + Math.cos(ang) * 3.2, 16.4 + Math.sin(ang) * 2.4);
       p.pushIdle(...leaveSeat(p), T.doing('partying'), T.go(() => spot), T.faceAngle(Math.atan2(12.5 - spot.x, 16.4 - spot.z)), T.face(pick(['laugh', 'happy', 'love']), 9),
-        ...(i === 0 ? [T.say('PARTY! 🎉', 2.4, 'play')] : i === 1 ? [T.say(pick(['Naatu naatu!', 'Best team in Hyderabad!', 'DJ, drop the beat!']), 2.4, 'play')] : []),
+        ...(i === 0 ? [T.say(fresh(['PARTY!', 'Music, please!', 'Everybody dance!']), 2.4, 'play')] : i === 1 ? [T.say(fresh(['Naatu naatu!', 'Best team in Hyderabad!', 'DJ, drop the beat!']), 2.4, 'play')] : []),
         T.call((a) => { a.danceUntil = clock + 9; }), T.loop('Dance', 9), T.call((a) => { a.feel(0.25, -0.1, -0.2); a.doing = ''; }));
       bond(p, people[(i + 1) % people.length]);
     });
@@ -1915,6 +2361,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   let directorT = 0;
   function director(dt) {
     directorT -= dt; if (directorT > 0) return; directorT = 0.5;
+    runEnds();
     const freeNow = list.filter(free);
     if (reviewAt && clock > reviewAt && !runActive && freeNow.length === list.length) { reviewAt = 0; meeting(list, true); return; }
     if (partyAt && clock > partyAt && !runActive) { partyAt = 0; party(); return; }
@@ -1925,7 +2372,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       const r = Math.random();
       a.nextIdle = clock + rand(16, 32);
       if (a.mood.energy < 0.3 && r < 0.7) { nap(a); continue; }
-      const B = others.length ? pick(others) : null;
+      if (!runActive && jealousOf(a) && r < 0.35 && jealousWatch(a)) continue;
+      // someone holding a grudge does not pick its enemy for a friendly chat (but a fight may still find them)
+      const B = others.length ? pick(others.filter((o) => grudgeOf(a) !== o.key) .concat(r < 0.15 ? others : [])) || null : null;
       // while a search runs, done agents only take quiet breaks
       if (runActive) {
         if (B && r < 0.55) { const pair = takeSpotPair(['pantryTable', 'cooler', 'lounge']); if (pair) { converse(a, B, pair); B.nextIdle = a.nextIdle; continue; } }
@@ -1939,7 +2388,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       if (B && r < 0.46 && duel('pingpong', a, B)) { B.nextIdle = a.nextIdle; continue; }
       if (B && r < 0.53 && duel('foosball', a, B)) { B.nextIdle = a.nextIdle; continue; }
       if (B && r < 0.6 && tag(a, B)) { B.nextIdle = a.nextIdle; continue; }
-      if (r < 0.67) { arcade(a); continue; }
+      if (B && r < 0.65 && playFight(a, B)) { B.nextIdle = a.nextIdle; continue; }
+      if (r < 0.69 && sneakSnack(a)) continue;
+      if (r < 0.72) { arcade(a); continue; }
       if (r < 0.73) { swingRide(a); continue; }
       if (r < 0.77) { wish(a); continue; }
       if (r < 0.81) { soloDance(a); continue; }
@@ -2202,7 +2653,17 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   document.addEventListener('visibilitychange', onVis);
   schedule();
   // a tiny handle for measuring render cost from the browser console (no effect unless used)
-  window.__jhxOffice = { renderer, baked, select: (k) => select(k), view: (v) => view(v), setHQ(v) { hq = v; }, info: () => renderer.info.render, cpu: () => perf.cpu };
+  window.__jhxOffice = { renderer, baked, select: (k) => select(k), view: (v) => view(v), setHQ(v) { hq = v; }, info: () => renderer.info.render, cpu: () => perf.cpu,
+    /** try a scene: __jhxOffice.scene('argument', 'discover', 'dedupe') — argument | satire | jealous | scheme | banter | chase | fight | sneak */
+    scene(kind, a, b) {
+      const A = agents[a], B = agents[b]; if (!A || !B) return false;
+      for (const X of [A, B]) { if (X.scene) X.scene.cancel(); X.queue = X.queue.filter((t) => !t.idle); if (X.task && X.task.idle) X.task = null; X.nextIdle = clock + 60; }
+      if (kind === 'chase') return chase(A, B);
+      if (kind === 'fight') return playFight(A, B);
+      if (kind === 'sneak') return sneakSnack(A, B);
+      const pair = takeSpotPair(['floorA', 'floorB', 'lounge', 'garden']);
+      return !!(pair && converse(A, B, pair, '', kind));
+    } };
 
   return {
     /** stage states + live numbers from the run */
@@ -2235,14 +2696,15 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       const a = agents[key]; if (!a) return null;
       const f = friendsOf(a);
       return { mood: { ...a.mood }, doing: a.doing, expr: clock < a.expr.until ? a.expr.name : a.baseExpr(),
-        memories: a.mem.slice(0, 5).map((m) => ({ text: m.text, from: m.from ? nameOf(m.from) : null, kind: m.kind })), best: f.best, rival: f.rival };
+        memories: a.mem.slice(0, 5).map((m) => ({ text: m.text, from: m.from ? nameOf(m.from) : null, kind: m.kind })), best: f.best, rival: f.rival,
+        grudge: grudgeOf(a) ? { key: grudgeOf(a), name: nameOf(grudgeOf(a)) } : null };
     },
     /** The person pokes an agent. */
     poke(key) {
       const a = agents[key]; if (!a) return;
       if (a.doing === 'napping') { a.doing = ''; a.face('scared', 2); a.queue = a.queue.filter((t) => !t.idle); a.task = null; a.pushIdle(T.stand(), T.anim('Jump'), T.say('WHA— I was not sleeping!', 2.4, 'play'), T.face('angry', 2)); return; }
       a.face(pick(['surprised', 'laugh', 'wink']), 2.2); a.feel(0.08, 0, 0);
-      onSay(a.key, pick(['Hey! That tickles!', 'Who did that?!', 'I am working… sort of', 'Boop! 😄', 'Careful, I bite. (I do not.)', 'Hi there, human!']), 2.4, 'play');
+      onSay(a.key, fresh(['Hey! That tickles!', 'Who did that?!', 'I am working… sort of', 'Boop!', 'Careful, I bite. (I do not.)', 'Hi there, human!']), 2.4, 'play');
       if (!a.seated && !a.hasWork && !a.scene) a.gesture(pick(['Jump', 'Wave', 'Yes']));
     },
     /** Send a free agent on a break (chai, a nap if tired). */

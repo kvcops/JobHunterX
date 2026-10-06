@@ -453,6 +453,10 @@ class OfficeChatIn(BaseModel):
     a_knows: list[str] = Field(default_factory=list)
     b_knows: list[str] = Field(default_factory=list)
     moods: dict[str, str] = Field(default_factory=dict)
+    drama: str = "banter"
+    relation: str = ""
+    recent: list[str] = Field(default_factory=list, max_length=30)
+    working: bool = False
 
 
 class OfficeAskIn(BaseModel):
@@ -464,7 +468,8 @@ class OfficeAskIn(BaseModel):
 async def office_chat(body: OfficeChatIn):
     """A live break-time conversation between two agents (204 when no model is free — the office uses scripted talk)."""
     from jobhunterx.services import office
-    out = await office.chat(body.a, body.b, body.scene, body.a_knows, body.b_knows, body.moods)
+    out = await office.chat(body.a, body.b, body.scene, body.a_knows, body.b_knows, body.moods,
+                            drama=body.drama, relation=body.relation, recent=body.recent, working=body.working)
     return out or Response(status_code=204)
 
 

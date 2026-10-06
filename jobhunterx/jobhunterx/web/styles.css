@@ -1605,7 +1605,10 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 
 /* agents' office v2: emotions, kinds of talk, the agent card (mood, memories, friends, ask) */
 .aw3d-name { gap: 6px; padding: 3px 10px 3px 7px; backdrop-filter: blur(6px); }
-.aw3d-emo { font-size: .86rem; line-height: 1; filter: saturate(1.1); }
+.aw3d-face { width: 22px; height: 14px; border-radius: 4px; background: #000; flex: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+/* a label moved out of the way keeps a thin pointer down to its robot */
+.aw3d-tag::after { content: ""; position: absolute; left: 50%; top: 100%; width: 1.5px; height: var(--lead, 0px); margin-left: -.75px;
+  background: hsl(var(--h) 55% 60% / .7); transform-origin: top center; transform: rotate(var(--lead-a, 0rad)); pointer-events: none; }
 .aw3d-name .dot { margin-left: 2px; }
 .aw3d-say { position: relative; box-shadow: 0 10px 24px -14px rgba(0, 0, 0, .45); }
 .aw3d-tag .aw3d-say.is-ai { font-style: normal; font-weight: 450; color: var(--ink); border-style: solid; border-color: hsl(var(--h) 60% 62%);
@@ -1623,7 +1626,7 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .aw3d-loading { gap: 10px; display: flex; align-items: center; justify-content: center; }
 .aw3d-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 .aw3d-card { width: min(340px, calc(100% - 20px)); max-height: calc(100% - 110px); overflow-y: auto; gap: 8px; }
-.aw3d-card-emo { font-size: 1.2rem; line-height: 1; }
+.aw3d-card-face { width: 34px; height: 21px; border-radius: 6px; background: #000; flex: none; }
 .aw3d-meters { display: grid; gap: 4px; }
 .aw3d-meter { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; font-size: .68rem; color: var(--text-2); }
 .aw3d-meter i { height: 6px; border-radius: 99px; background: var(--card-hi); overflow: hidden; }
