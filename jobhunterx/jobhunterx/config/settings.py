@@ -92,6 +92,8 @@ class Settings(BaseSettings):
     # --- Matching / discovery tuning (JSON overrides, see intelligence/policy.py) ---
     match_policy_json: str = ""
     max_jobs_per_search: int = 60
+    enable_linkedin_source: bool = True     # LinkedIn's public (logged-out) job feed: newest posts, resolved to employer boards
+    linkedin_max_applicants: int = 150      # skip LinkedIn posts that already show this many applicants
     max_llm_jd_extractions_per_search: int = 40
     watch_interval_hours: float = 4.0            # how often watchlist boards are checked while the app runs; 0 = off
     fetch_timeout_s: float = 12.0

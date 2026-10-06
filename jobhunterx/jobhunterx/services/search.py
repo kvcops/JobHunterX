@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from jobhunterx import storage
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
-from jobhunterx.discovery import ats, dedupe, page, search, validate, watchlist
+from jobhunterx.discovery import ats, dedupe, linkedin, page, registry, search, validate, watchlist
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
@@ -72,6 +72,7 @@ BOARD_JOBS_PER_BOARD = 15
 BOARD_CONCURRENCY = 8
 WATCH_BOARDS_MAX = 80
 WATCH_NEW_PER_CHECK = 20
+REGISTRY_PER_RUN = 25         # remembered employer boards checked per run (a rotating slice, least recently checked first)
 
 
 def _now() -> str:
@@ -263,7 +264,9 @@ def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
 
 async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompany]]], snap: CandidateSnapshot,
                          include_remote: bool, titles: list[str],
-                         on_board_done: Optional[Callable[[], Awaitable[None]]] = None) -> list[JobPosting]:
+                         on_board_done: Optional[Callable[[], Awaitable[None]]] = None,
+                         names: Optional[dict[tuple[str, str], str]] = None,
+                         counts: Optional[dict[tuple[str, str], int]] = None) -> list[JobPosting]:
     """For each ATS board (watchlist or discovered), pull its open jobs and keep the relevant ones.
 
     Jobs outside the candidate's locations are dropped here. A foreign
@@ -275,6 +278,8 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
     sem = asyncio.Semaphore(BOARD_CONCURRENCY)
 
     async def one(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
+        if counts is not None:
+            counts[(ref.kind, ref.token.lower())] = 0
         async with sem:
             queries = titles[:3] or None
             city = next((p.city for p in snap.locations if p.city), "")
@@ -284,14 +289,17 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
         if not jobs:
             return []
         jobs = [j for j in jobs if _location_prefilter(j, snap, include_remote)]
+        known_name = company.name if company else (names or {}).get((ref.kind, ref.token.lower()))
         for j in jobs:
             j.id = j.id or str(uuid.uuid4())
-            if company:
-                j.company = company.name          # ATS boards often carry a token or legal-entity name
+            if company or (known_name and (not j.company or j.company.lower() == ref.token.lower())):
+                j.company = known_name            # ATS boards often carry a token or legal-entity name
         keep = [(j, _title_relevance(j, snap)) for j in jobs]
         keep = [jr for jr in keep if jr[1] > 0]
         keep.sort(key=lambda jr: (-jr[1], _age_days(jr[0])))
         picked = [j for j, _ in keep[:BOARD_JOBS_PER_BOARD]]
+        if counts is not None:
+            counts[(ref.kind, ref.token.lower())] = len(picked)
         # Some board APIs (e.g. SmartRecruiters) list jobs without their text — fetch it for the ones we keep.
         adapter = ats.ADAPTERS[ref.kind]
 
@@ -376,9 +384,43 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
 
     # 3. Discover -------------------------------------------------------------
     await run.stage("discover")
+    use_linkedin = not watch_mode and settings.enable_linkedin_source
+
+    async def already_seen(p: JobPosting) -> bool:
+        p.fingerprint = p.fingerprint or dedupe.fingerprint(p)
+        return bool(await storage.job_exists_many([p]))
+
+    async def from_linkedin() -> list[JobPosting]:
+        if not use_linkedin:
+            return []
+        async def note(msg: str) -> None:
+            await run.say("discover", msg, "info")
+        try:
+            posts, st = await linkedin.discover(
+                scope.titles, scope.locations or [scope.country or "India"],
+                labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
+                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2),
+                max_applicants=settings.linkedin_max_applicants, skip=already_seen, on_progress=note)
+        except Exception as exc:                  # a blocked or changed feed never fails the search
+            log.warning("linkedin_source_failed", error=str(exc)[:160])
+            return []
+        bits = [f"{len(posts)} fresh LinkedIn posts kept"]
+        if st.get("first_party"):
+            bits.append(f"{st['first_party']} found on the employer's own job board")
+        if st.get("crowded"):
+            bits.append(f"{st['crowded']} skipped — already {settings.linkedin_max_applicants}+ applicants")
+        if st.get("agencies"):
+            bits.append(f"{st['agencies']} from staffing agencies / mass recruiters dropped")
+        if st.get("seen"):
+            bits.append(f"{st['seen']} you've already seen")
+        await run.say("discover", " · ".join(bits), "good" if posts else "info")
+        return posts
+
+    linkedin_task = asyncio.create_task(from_linkedin())
     leads = []
     if queries:
-        await run.say("discover", f"Searching job sites and company career pages ({len(queries)} searches)", "work")
+        await run.say("discover", f"Searching job sites and company career pages ({len(queries)} searches)"
+                      + (" while reading the newest LinkedIn posts" if use_linkedin else ""), "work")
         async def query_progress(done: int, total: int) -> None:
             await run.progress("discover", done, total, f"Web searches: {done} of {total} done")
         leads = await search.run_queries(queries, on_progress=query_progress)
@@ -395,12 +437,19 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     if queries:
         await run.say("discover", f"Found {len(leads)} search results"
                       + (f", including {len(boards)} company career boards" if boards else ""), "info")
+    registry.remember([(r, "") for r in boards.values()], source="search")
     known = {(r.kind, r.token.lower()) for r, _ in watch_refs}
     found_refs = [(r, watchlist.find_board(r)) for k, r in boards.items() if k not in known][:12]
-    board_refs = watch_refs + found_refs
+    known |= {(r.kind, r.token.lower()) for r, _ in found_refs}
+    remembered = registry.pick(REGISTRY_PER_RUN, exclude=known)
+    reg_names = {(r.kind, r.token.lower()): n for r, n in remembered if n}
+    board_refs = watch_refs + found_refs + [(r, watchlist.find_board(r)) for r, _ in remembered]
     if watch_refs:
         await run.say("discover", f"Opening {len(watch_refs)} researched companies' own job boards — "
                       "new roles there are usually seen before the crowd arrives", "work")
+    if remembered:
+        await run.say("discover", f"Re-checking {len(remembered)} more employer boards found in earlier searches "
+                      f"({registry.size()} remembered so far)", "work")
     for ref, _ in found_refs[:6]:
         await run.say("discover", f"Opening {_pretty_board(ref.token)}'s careers board on {ref.kind.title()}", "work")
     boards_done = {"n": 0}
@@ -412,9 +461,13 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
 
     if board_refs:
         await run.progress("discover", 0, len(board_refs), f"Company job boards: 0 of {len(board_refs)} checked")
-    board_jobs = await _expand_boards(board_refs, snap, scope.include_remote, scope.titles, on_board_done=board_progress)
+    board_counts: dict[tuple[str, str], int] = {}
+    board_jobs = await _expand_boards(board_refs, snap, scope.include_remote, scope.titles, on_board_done=board_progress,
+                                      names=reg_names, counts=board_counts)
+    registry.polled({k: n for k, n in board_counts.items() if k not in {(r.kind, r.token.lower()) for r, _ in watch_refs}})
     if board_refs:
         await run.say("discover", f"Pulled {len(board_jobs)} relevant openings straight from employer boards", "good")
+    board_jobs += await linkedin_task
     if watch_mode:
         before = len(board_jobs)
         stale_after = get_policy().stale_after_days
@@ -434,6 +487,11 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     skipped = len(posting_leads) - len(worth)
     if skipped:
         await run.say("normalize", f"Skipped {skipped} search results that are job lists or clearly outside your locations", "info")
+    if worth and not watch_mode:             # pages already read in an earlier search are not fetched again
+        seen = await storage.job_exists_many([JobPosting(canonical_url=dedupe.canonical_url(l.url)) for l in worth])
+        if seen:
+            worth = [l for i, l in enumerate(worth) if i not in seen]
+            await run.say("normalize", f"Skipped {len(seen)} job pages you've already seen in earlier searches", "info")
     to_read = worth[: max_jobs * 2]
     if to_read:
         await run.say("normalize", f"Opening {len(to_read)} job pages to read the full descriptions", "work")
@@ -481,6 +539,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     c["duplicates"] = dups
     for p in unique:
         p.id = p.id or str(uuid.uuid4())
+    if not watch_mode and unique:
+        # Jobs from earlier searches are already in your list: a new search spends its time only on new ones.
+        seen = await storage.job_exists_many(unique)
+        if seen:
+            unique = [p for i, p in enumerate(unique) if i not in seen]
+            await run.say("dedupe", f"Left out {len(seen)} jobs you've already seen — this search brings only new ones", "info")
     # Shortlist: which postings are the candidate's field? One AI call scores them all; the cap then keeps the best.
     pool = sorted(unique, key=lambda p: -_title_relevance(p, snap))[:TRIAGE_MAX]
     rest = unique[len(pool):] if len(unique) > TRIAGE_MAX else []

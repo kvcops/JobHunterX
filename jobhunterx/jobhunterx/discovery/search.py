@@ -83,25 +83,56 @@ def _norm_query(q: str) -> str:
     return " ".join(sorted(set(tokens(q))))
 
 
-def deterministic_queries(scope: SearchScope, limit: int) -> list[str]:
-    """ATS-anchored queries from titles × places; no extra vocabulary."""
+def deterministic_queries(scope: SearchScope, limit: int, round_: int = 0) -> list[str]:
+    """ATS-anchored queries from titles × places; no extra vocabulary. Each round pairs titles with other hosts."""
     hosts = [*ats_site_hints(), *INDIA_SITE_HINTS]
     places = list(scope.locations)
     if scope.include_remote:
         places.append(f"remote {scope.country}".strip())
     places = places or [scope.country]
     out = []
-    for ti, title in enumerate(scope.titles[:4]):
+    for ti, title in enumerate(scope.titles[:6]):
         for pi, place in enumerate(places[:3]):
-            host = hosts[(ti * 3 + pi) % len(hosts)]
+            host = hosts[(ti * 3 + pi + round_ * 5) % len(hosts)]
             out.append(f'site:{host} "{title}" {place}'.strip())
             out.append(f'"{title}" {place}'.strip())
     return out[:limit]
 
 
+# ---------------------------------------------------------------- query history (so every run asks something new)
+HISTORY_KEEP = 120
+HISTORY_FRESH_S = 3 * 86400          # a query asked in the last 3 days goes to the back of the line
+_hist = None
+
+
+def _history():
+    global _hist
+    if _hist is None:
+        from diskcache import Cache
+        _hist = Cache(str(get_settings().cache_full_path / "query_history"))
+    return _hist
+
+
+def _recent(profile_hash: str) -> tuple[dict[str, float], int]:
+    h = _history().get(profile_hash) or {}
+    return h.get("used", {}), h.get("round", 0)
+
+
+def _record(profile_hash: str, queries: list[str]) -> None:
+    import time
+    used, round_ = _recent(profile_hash)
+    now = time.time()
+    used.update({_norm_query(q): now for q in queries})
+    used = dict(sorted(used.items(), key=lambda kv: -kv[1])[:HISTORY_KEEP])
+    _history().set(profile_hash, {"used": used, "round": round_ + 1}, expire=60 * 86400)
+
+
 async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries: int) -> tuple[list[str], str]:
-    """Return (queries, method)."""
-    base = deterministic_queries(scope, max_queries)
+    """Return (queries, method). Queries asked in the last few days go last, so repeated runs find new postings."""
+    import time
+    used, round_ = _recent(snap.profile_hash)
+    base = deterministic_queries(scope, max_queries * 3, round_)
+    recent = [q for q, t in sorted(used.items(), key=lambda kv: -kv[1]) if time.time() - t < HISTORY_FRESH_S][:20]
     user = (
         f"Target titles: {', '.join(scope.titles)}\n"
         f"Adjacent titles: {', '.join(snap.adjacent_titles[:6])}\n"
@@ -109,10 +140,12 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
         f"Candidate level: {snap.seniority.value}, ~{snap.professional_years:g} years\n"
         f"Locations: {', '.join(scope.locations) or scope.country}; remote accepted: {scope.include_remote}; country: {scope.country}\n"
         f"Applicant-tracking-system job hosts you may target with site: {', '.join([*ats_site_hints(), *INDIA_SITE_HINTS])}"
+        + ("\nAlready searched in the last few days (their words, sorted) — write DIFFERENT queries: other title "
+           "wordings, other skills, other hosts:\n- " + "\n- ".join(recent) if recent else "")
     )
     plan, _ = await call_structured(
         task="search_plan", version=PLAN_VERSION, model=_Plan, system=_PLAN_SYSTEM, user=user,
-        chain="fast", max_tokens=900, cache_parts=(snap.profile_hash, user),
+        chain="fast", max_tokens=900, cache_parts=(snap.profile_hash, user, str(round_)),
     )
     method = "llm" if plan else "fallback"
     seen: set[str] = set()
@@ -130,7 +163,12 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
         if k and k not in seen:
             seen.add(k)
             queries.append(q)
-    return queries[:max_queries], method
+    now = time.time()
+    # never-asked first, then the longest ago; the stable sort keeps the interleaved order inside each group
+    queries.sort(key=lambda q: used.get(_norm_query(q), 0) if now - used.get(_norm_query(q), 0) < HISTORY_FRESH_S else 0)
+    queries = queries[:max_queries]
+    _record(snap.profile_hash, queries)
+    return queries, method
 
 
 def router_config() -> dict:

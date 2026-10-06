@@ -55,6 +55,8 @@ RERANK_BUDGET_S = 12.0        # a slow model never holds the search up: fusion o
 COMPANIES_PER_QUERY = 10      # company names resolved to job boards per query
 BOARD_JOBS_PER_COMPANY = 4
 RESOLVE_BUDGET_S = 8.0
+TIMELIMIT = "m"               # only pages from the last month: older job pages are almost always closed
+PAGE_ROTATION = 3             # the same query asked again reads results page 2, then 3, then 1 again
 
 # Hosts that only aggregate other employers' posts: fine as discovery leads, never better than the employer's own page.
 AGGREGATORS = ("linkedin.com", "naukri.com", "indeed.", "glassdoor.", "foundit.in", "monsterindia.com", "shine.com",
@@ -203,11 +205,21 @@ def _variants(q: Query) -> list[tuple[str, str, list[str]]]:
 
 
 # ---------------------------------------------------------------- 2. fan-out
-async def _engine_search(engine: _Engine, query: str) -> list[dict]:
+def _page_for(query: str) -> int:
+    """Asked before? Then read the next page of results — the first page is what the last run already saw."""
+    key = "page:" + " ".join(sorted(set(re.findall(r"[a-z0-9]+", query.lower()))))
+    store = _cache()
+    n = store.get(key, 0)
+    store.set(key, n + 1, expire=14 * 86400)
+    return 1 + n % PAGE_ROTATION
+
+
+async def _engine_search(engine: _Engine, query: str, page: int = 1) -> list[dict]:
     def run():
         from ddgs import DDGS
         with DDGS(timeout=10) as d:
-            return list(d.text(query, max_results=PER_ENGINE, region="in-en", backend=engine.name))
+            return list(d.text(query, max_results=PER_ENGINE, region="in-en", backend=engine.name,
+                               timelimit=TIMELIMIT, page=page))
     try:
         res = await asyncio.wait_for(asyncio.to_thread(run), timeout=14)
         engine.fails = 0
@@ -227,8 +239,9 @@ async def fan_out(query: str, variants: Optional[list[tuple[str, str, list[str]]
     jobs = []
     for name, text, engines in (variants or [("raw", query, ENGINES)]):
         live = [_engines[e] for e in engines if _engines[e].rest_until <= now] or [_engines[e] for e in engines]
-        jobs += [(name, e, text) for e in live]
-    tasks = [asyncio.ensure_future(_engine_search(e, text)) for _, e, text in jobs]
+        page = _page_for(text)
+        jobs += [(name, e, text, page) for e in live]
+    tasks = [asyncio.ensure_future(_engine_search(e, text, page)) for _, e, text, page in jobs]
     pending = set(tasks)
     while pending:                                 # once most engines answered, stragglers get a short grace, not 14 s
         quorum = len(pending) <= len(tasks) * 0.3
@@ -240,7 +253,7 @@ async def fan_out(query: str, variants: Optional[list[tuple[str, str, list[str]]
         t.cancel()
     results = [t.result() if t.done() and not t.cancelled() and not t.exception() else [] for t in tasks]
     hits: dict[str, Hit] = {}
-    for (vname, engine, _), rows in zip(jobs, results):
+    for (vname, engine, _, _), rows in zip(jobs, results):
         weight = 1.0 if vname == "raw" else 0.9
         for rank, r in enumerate(rows):
             url = r.get("href") or r.get("url") or ""
@@ -408,6 +421,10 @@ async def resolve_companies(hits: list[Hit], q: Query) -> list[Hit]:
                         found.append((kind, slug, name))
             if found:
                 break
+        if found:                                   # later searches re-check this board on their own
+            from jobhunterx.discovery import registry
+            from jobhunterx.domain.job import AtsRef
+            registry.remember([(AtsRef(kind=k, token=t), n) for k, t, n in found], source="deep_search")
         return found
 
     async def jobs_from(kind: str, token: str, company: str, base: float) -> list[Hit]:
