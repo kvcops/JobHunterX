@@ -29,18 +29,60 @@ from jobhunterx.models import AgentEvent, HITLType
 
 log = get_logger("browser_agent")
 
-# A realistic, non-headless-looking desktop User-Agent.
-# Cloudflare flags the default Playwright/automation UA very quickly.
-_STEALTH_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
-)
-
 # Persistent profile path reused across runs. A stable profile accumulates
 # cookies, localStorage and an auth "history" that Cloudflare scores as a
 # real returning user rather than a fresh headless instance.
 _STEALTH_USER_DATA_DIR = Path("./data/browser_profile")
+
+# Where a real Google Chrome usually lives. A real Chrome (not Playwright's test Chromium) carries the
+# codecs, brand list and GPU behaviour bot checks expect.
+_CHROME_PATHS = {
+    "win32": [r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe", r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe",
+              r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe", r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe",
+              r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"],
+    "darwin": ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+               "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+    "linux": ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/opt/google/chrome/chrome",
+              "/usr/bin/chromium", "/usr/bin/chromium-browser"],
+}
+
+
+def _real_chrome() -> Optional[str]:
+    custom = os.getenv("BROWSER_EXECUTABLE_PATH")
+    if custom and Path(custom).exists():
+        return custom
+    for p in _CHROME_PATHS.get(sys.platform if sys.platform in _CHROME_PATHS else "linux", []):
+        p = os.path.expandvars(p)
+        if Path(p).exists():
+            return p
+    return None
+
+
+def _chrome_major(path: str) -> Optional[str]:
+    """The browser's real major version, so the User-Agent never claims a different Chrome than the one running."""
+    try:
+        for d in Path(path).parent.iterdir():                 # Windows: Application\154.0.8037.98\
+            if d.is_dir() and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", d.name):
+                return d.name.split(".")[0]
+        import subprocess
+        out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r"(\d+)\.\d+\.\d+", out or "")
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def _user_agent(major: Optional[str]) -> Optional[str]:
+    """Headless Chrome says "HeadlessChrome/…" — swap in the plain form for the SAME version (a mismatch with the
+    browser's client hints is one of the first things Cloudflare checks)."""
+    if not major:
+        return None
+    platform = {"win32": "Windows NT 10.0; Win64; x64", "darwin": "Macintosh; Intel Mac OS X 10_15_7"}.get(sys.platform, "X11; Linux x86_64")
+    return f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+
+
+def _has_display() -> bool:
+    return sys.platform in ("win32", "darwin") or bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
 
 
 # ---------------------------------------------------------------------------
@@ -90,32 +132,33 @@ def _detect_page_type(page_text: str) -> str:
 # Stealth browser profile builder (Cloudflare / bot-detection mitigation)
 # ---------------------------------------------------------------------------
 
-def _build_stealth_profile(settings: Settings) -> Any:
-    """Build a BrowserProfile tuned to evade Cloudflare / bot detection.
+async def _build_stealth_profile(settings: Settings) -> Any:
+    """Build a BrowserProfile that bot checks (Cloudflare, reCAPTCHA v3, hCaptcha) score as a normal person.
 
-    Strategy (tiered):
-      1. If BROWSER_USE_API_KEY is set -> use the browser-use cloud browser,
-         which provides managed stealth fingerprinting + residential proxy
-         rotation. This is the only reliable way past Cloudflare Turnstile.
-      2. Otherwise -> local stealth profile:
-         - Persistent user_data_dir (cookies/history accumulate trust).
-         - headless=False when allowed (old headless is trivially detected;
-           the new Chromium headless still leaks many fingerprints).
-         - Realistic User-Agent and locale.
-         - Default anti-tracking extensions (uBlock, cookie banner) enabled:
-           these reduce the tracking signals that feed bot-scoring.
+    What actually gets agents flagged, and what is done about each:
+      * A browser that is not real Chrome (Playwright's test Chromium) → the installed Google Chrome / Edge is used.
+      * A User-Agent that claims another version than the browser's client hints → the real version is used.
+      * Headless mode → on a desktop the window is real but parked off-screen (the live view still streams it);
+        headless only where there is no display at all (a server).
+      * A fresh, cookie-less profile every time → one persistent profile keeps "challenge passed" cookies and logins.
+      * A data-centre IP → the one thing no browser setting fixes. Point BROWSER_CDP_URL at your own Chrome (your home
+        connection, your logins) or a hosted stealth browser when running on a server.
+
+    Tiers: BROWSER_CDP_URL (any Chrome you started, or a hosted browser) → browser-use cloud → local real Chrome.
     """
     from browser_use import BrowserProfile
+
+    cdp_url = (getattr(settings, "browser_cdp_url", "") or os.getenv("BROWSER_CDP_URL") or "").strip()
+    if cdp_url:
+        log.info("browser_profile_cdp", url=cdp_url.split("?")[0][:60])
+        return BrowserProfile(cdp_url=cdp_url, keep_alive=True,
+                              viewport=dict(zip(("width", "height"), live_view.viewport_size())))
 
     use_cloud = bool(os.getenv("BROWSER_USE_API_KEY")) and bool(getattr(settings, "browser_use_cloud", False))
 
     if use_cloud:
         log.info("browser_profile_cloud", reason="BROWSER_USE_API_KEY present + cloud enabled")
-        return BrowserProfile(
-            use_cloud=True,
-            user_agent=_STEALTH_USER_AGENT,
-            captcha_solver=True,
-        )
+        return BrowserProfile(use_cloud=True, captcha_solver=True)
 
     # Local stealth profile
     resolved_dir = str(_STEALTH_USER_DATA_DIR.resolve())
@@ -134,24 +177,103 @@ def _build_stealth_profile(settings: Settings) -> Any:
     except Exception:
         pass
 
+    show = bool(getattr(settings, "browser_show_window", False))
+    mode = (getattr(settings, "browser_window_mode", "auto") or "auto").lower()    # auto | offscreen | headless | window
+    if show:
+        mode = "window"
+    elif mode == "auto":
+        mode = "offscreen" if _has_display() else "headless"
+    w, h = live_view.viewport_size()
+    exe = _real_chrome()
+    if exe:
+        # Started by us, not by browser-use: browser-use copies a real Chrome's profile to a throw-away temp folder
+        # (so cookies and logins would never stick) and forces its own window position.
+        url = await _launch_chrome(exe, resolved_dir, mode, w, h)
+        if url:
+            return BrowserProfile(cdp_url=url, keep_alive=True, viewport={"width": w, "height": h})
+    log.info("browser_profile_bundled", mode=mode)
     return BrowserProfile(
-        # Live view streams the browser into the app, so no Chrome window is needed.
-        headless=not getattr(settings, "browser_show_window", False),
+        headless=mode == "headless",
         user_data_dir=resolved_dir,
-        user_agent=_STEALTH_USER_AGENT,
-        viewport=dict(zip(("width", "height"), live_view.viewport_size())),   # same shape as the in-app panel
+        viewport={"width": w, "height": h},   # same shape as the in-app panel
         enable_default_extensions=False,  # DISABLED: extension downloads from Chrome Web Store hang on Windows, blocking CDP
         disable_security=False,
         captcha_solver=False,  # DISABLED: cloud-only feature that adds startup overhead locally
         keep_alive=True,  # keep the browser after the agent stops: the user can take over, continue or close it
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--disable-features=IsolateOrigins,site-per-process,AutomationControlled",
-            "--disable-popup-blocking",
-            "--no-first-run",
-            "--no-default-browser-check",
-        ],
+        args=["--disable-blink-features=AutomationControlled", "--disable-popup-blocking", "--no-first-run",
+              "--no-default-browser-check"],
     )
+
+
+_chrome_proc: Any = None          # the Chrome we started (one browser at a time)
+
+
+async def _launch_chrome(exe: str, user_data_dir: str, mode: str, w: int, h: int) -> Optional[str]:
+    """Start the installed Chrome with a debugging port and return its CDP address (None if it would not start)."""
+    import socket
+    import subprocess
+    import httpx
+    global _chrome_proc
+    await _stop_own_chrome()
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    major = _chrome_major(exe)
+    args = [exe, f"--remote-debugging-port={port}", f"--user-data-dir={user_data_dir}",
+            "--no-first-run", "--no-default-browser-check", "--disable-blink-features=AutomationControlled",
+            "--disable-popup-blocking", "--hide-crash-restore-bubble", "--disable-session-crashed-bubble",
+            # keep rendering while nobody looks at the window, so the live view never freezes
+            "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
+            "--disable-features=CalculateNativeWinOcclusion,Translate,MediaRouter,OptimizationHints",
+            f"--lang={os.getenv('BROWSER_LANG', 'en-IN')}"]
+    if mode == "headless":
+        args += ["--headless=new", f"--window-size={w},{h}"]
+        ua = _user_agent(major)
+        if ua:
+            args.append(f"--user-agent={ua}")
+        if sys.platform.startswith("linux"):
+            args += ["--disable-dev-shm-usage", *(["--no-sandbox"] if hasattr(os, "geteuid") and os.geteuid() == 0 else [])]
+    else:
+        args.append(f"--window-size={w + 16},{h + 140}")
+        if mode == "offscreen":
+            # a real, GPU-rendered window parked where nobody sees it — the live view streams it into the app
+            args.append("--window-position=-2400,-2400")
+    args.append("about:blank")
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        _chrome_proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+    except OSError as exc:
+        log.warning("chrome_launch_failed", error=str(exc)[:160])
+        return None
+    base = f"http://127.0.0.1:{port}"
+    async with httpx.AsyncClient(timeout=2) as client:
+        for _ in range(60):
+            if _chrome_proc.poll() is not None:
+                break
+            try:
+                r = await client.get(base + "/json/version")
+                if r.status_code == 200:
+                    log.info("chrome_started", mode=mode, version=major, port=port)
+                    return base
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(0.25)
+    log.warning("chrome_no_debug_port", exited=_chrome_proc.poll() is not None)
+    await _stop_own_chrome()
+    return None
+
+
+async def _stop_own_chrome() -> None:
+    global _chrome_proc
+    proc, _chrome_proc = _chrome_proc, None
+    if proc is None or proc.poll() is not None:
+        return
+    proc.terminate()
+    for _ in range(20):
+        if proc.poll() is not None:
+            return
+        await asyncio.sleep(0.1)
+    proc.kill()
 
 
 def _kill_zombie_chrome(user_data_dir: str) -> None:
@@ -332,6 +454,10 @@ def describe_action(name: str, params: dict, state: Any) -> str:
         if _verdict(head):
             return "Finish — needs your help (" + head.replace("_", " ").lower() + ")"
         return f"Finish — {txt[:90]}" if txt else "Finish"
+    if name == "wait_for_human_check":
+        return "Wait for the security check to clear"
+    if name == "prefill_basic_fields":
+        return "Fill name, email and profile links"
     if name == "get_email_otp":
         return "Read the verification code from email"
     return name.replace("_", " ").capitalize()
@@ -521,9 +647,151 @@ async def _set_checkbox_by_text(browser_session: Any, text: str, checked: bool) 
     return ActionResult(error=f"Found “{name}” but could not change it — click its visible text once instead.")
 
 
-def _build_tools() -> Any:
+# What kind of human check is on the page right now. The small "protected by reCAPTCHA" badge (invisible v3 scoring)
+# is NOT a challenge: it needs nothing from anyone and must never stop the agent.
+_CHALLENGE_JS = """(() => {
+  const vis = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
+    return (r.width > 20 && r.height > 20 && s.visibility !== 'hidden' && s.display !== 'none') ? r : null; };
+  const box = (r) => r && { x: r.left, y: r.top, w: r.width, h: r.height };
+  const t = (document.title || '').toLowerCase();
+  const interstitial = /just a moment|attention required|checking your browser|verify you are human/.test(t)
+    || !!document.querySelector('#challenge-form, #challenge-stage, #cf-challenge-running');
+  let widget = null, kind = '';
+  for (const [k, sel] of [['turnstile', 'iframe[src*="challenges.cloudflare.com"], .cf-turnstile, #cf-turnstile, [data-sitekey][class*=turnstile]'],
+                          ['hcaptcha', 'iframe[src*="hcaptcha.com"][src*="checkbox"], iframe[title*="hCaptcha" i]:not([title*="challenge" i])'],
+                          ['recaptcha', 'iframe[src*="recaptcha/api2/anchor"]:not(.grecaptcha-badge iframe), iframe[src*="recaptcha/enterprise/anchor"]:not(.grecaptcha-badge iframe)']]) {
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.closest('.grecaptcha-badge')) continue;
+      const r = vis(el); if (r) { widget = box(r); kind = k; break; }
+    }
+    if (widget) break;
+  }
+  const puzzle = [...document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="hcaptcha.com"][src*="challenge"]')].some((e) => { const r = vis(e); return r && r.height > 150; });
+  return { interstitial, kind, widget, puzzle };
+})()"""
+
+
+async def _wait_for_human_check(browser_session: Any, max_seconds: int = 25) -> Any:
+    """Most checks clear by themselves in a real browser; a Turnstile / 'I'm not a robot' box usually passes with one
+    real mouse click. Image puzzles are left to the person."""
+    from browser_use import ActionResult
+    cdp = await browser_session.get_or_create_cdp_session()
+
+    async def state() -> dict:
+        out = await cdp.cdp_client.send.Runtime.evaluate(params={"expression": _CHALLENGE_JS, "returnByValue": True},
+                                                         session_id=cdp.session_id)
+        return (out.get("result") or {}).get("value") or {}
+
+    async def click(x: float, y: float) -> None:
+        import random
+        for typ, extra in (("mouseMoved", {}), ("mousePressed", {"button": "left", "clickCount": 1}),
+                           ("mouseReleased", {"button": "left", "clickCount": 1})):
+            await cdp.cdp_client.send.Input.dispatchMouseEvent(params={"type": typ, "x": x, "y": y, **extra}, session_id=cdp.session_id)
+            await asyncio.sleep(random.uniform(0.06, 0.18))
+
+    clicked = 0
+    deadline = time.monotonic() + max(5, min(int(max_seconds or 25), 45))
+    first = None
+    while time.monotonic() < deadline:
+        try:
+            s = await state()
+        except Exception as exc:                       # the page is navigating (often: the check just passed)
+            log.debug("challenge_state_failed", error=str(exc)[:80])
+            await asyncio.sleep(1.5)
+            continue
+        first = first or s
+        if not s.get("interstitial") and not s.get("widget") and not s.get("puzzle"):
+            return ActionResult(extracted_content="No human check is blocking the page (any check that was there has passed). Carry on.")
+        if s.get("puzzle"):
+            return ActionResult(error="An image puzzle CAPTCHA is showing. Stop and report CAPTCHA_DETECTED.")
+        w = s.get("widget")
+        if w and clicked < 2:
+            await asyncio.sleep(1.2 + clicked)          # widgets need a moment to become clickable
+            import random
+            await click(w["x"] + min(30, w["w"] / 2) + random.uniform(-3, 3), w["y"] + w["h"] / 2 + random.uniform(-3, 3))
+            clicked += 1
+            await asyncio.sleep(3)
+            continue
+        await asyncio.sleep(1.5)
+    kind = (first or {}).get("kind") or "security"
+    return ActionResult(error=f"The {kind} check did not clear after waiting{' and clicking it' if clicked else ''}. "
+                              "Stop and report CAPTCHA_DETECTED.")
+
+
+# Fills the plain identity fields (name, email, profile links) by their HTML meaning — autocomplete / name / label —
+# so the model spends its steps on the real questions. Only empty, visible, editable fields are touched.
+_PREFILL_JS = """(p) => {
+  const docs = [document];
+  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
+  const rules = [
+    ['first', (a, t) => a === 'given-name' || /(^|[^a-z])(first|given|f)[\\s_-]*name|fname|first$/.test(t)],
+    ['last', (a, t) => a === 'family-name' || /(last|family|sur)[\\s_-]*name|lname|surname|last$/.test(t)],
+    ['email', (a, t, el) => a === 'email' || el.type === 'email' || /e-?mail/.test(t)],
+    ['linkedin', (a, t) => /linked\\s*in/.test(t)],
+    ['github', (a, t) => /git\\s*hub/.test(t)],
+    ['website', (a, t) => a === 'url' || /portfolio|personal (web)?site|^website|website$|personal url/.test(t)],
+    ['name', (a, t) => a === 'name' || /^(full[\\s_-]*)?name\\*?$|^your name|legal name|full[\\s_-]*name/.test(t)],
+  ];
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  const filled = [];
+  for (const d of docs) {
+    for (const el of d.querySelectorAll('input')) {
+      if (!['text', 'email', 'url', ''].includes(el.type) || el.disabled || el.readOnly || el.value) continue;
+      const r = el.getBoundingClientRect(); if (r.width < 5 || r.height < 5) continue;
+      const lab = [...(el.labels || [])].map((l) => l.innerText).join(' ');
+      const t = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, lab].join(' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+      if (!t || /company|employer|school|college|university|reference|referr|manager|emergency|hiring|recruiter|city|country/.test(t)) continue;
+      const a = (el.getAttribute('autocomplete') || '').toLowerCase();
+      const hit = rules.find(([k, f]) => p[k] && f(a, t, el));
+      if (!hit) continue;
+      el.focus(); setter.call(el, p[hit[0]]);
+      for (const ev of ['input', 'change']) el.dispatchEvent(new Event(ev, { bubbles: true }));
+      el.blur();
+      filled.push((lab || el.placeholder || el.name || hit[0]).trim().slice(0, 40));
+    }
+  }
+  return filled;
+}"""
+
+
+async def _prefill(browser_session: Any, profile: dict) -> Any:
+    import json as _json
+    from browser_use import ActionResult
+    name = (profile.get("name") or "").strip()
+    parts = name.split()
+    vals = {"name": name, "first": parts[0] if parts else "", "last": " ".join(parts[1:]) if len(parts) > 1 else "",
+            "email": profile.get("email") or "", "linkedin": profile.get("linkedin") or "", "github": profile.get("github") or "",
+            "website": profile.get("portfolio") or ""}
+    try:
+        cdp = await browser_session.get_or_create_cdp_session()
+        filled = []
+        for _ in range(8):                               # single-page forms render a moment after load
+            out = await cdp.cdp_client.send.Runtime.evaluate(
+                params={"expression": f"({_PREFILL_JS})({_json.dumps(vals)})", "returnByValue": True}, session_id=cdp.session_id)
+            filled = (out.get("result") or {}).get("value") or []
+            if filled:
+                break
+            await asyncio.sleep(0.75)
+    except Exception as exc:
+        return ActionResult(extracted_content=f"Pre-fill skipped ({str(exc)[:80]}). Fill the form normally.")
+    if not filled:
+        return ActionResult(extracted_content="No basic fields to pre-fill here (maybe an Apply button must be clicked first).")
+    return ActionResult(extracted_content="Pre-filled: " + ", ".join(filled) + ". Check them once; do not retype them.")
+
+
+def _build_tools(profile: Optional[dict] = None) -> Any:
     from browser_use import ActionResult, Controller
     controller = Controller()
+
+    @controller.action("Wait for a security check (Cloudflare 'Just a moment', Turnstile, 'I'm not a robot' box) to clear; "
+                       "clicks the checkbox once if there is one. Use this BEFORE reporting CAPTCHA_DETECTED.")
+    async def wait_for_human_check(browser_session, max_seconds: int = 25) -> ActionResult:
+        return await _wait_for_human_check(browser_session, max_seconds)
+
+    @controller.action("Fill the basic identity fields of the application form (name, email, LinkedIn, GitHub, website) "
+                       "in one go. Use it once when a form first appears, then fill the remaining fields.")
+    async def prefill_basic_fields(browser_session) -> ActionResult:
+        return await _prefill(browser_session, profile or {})
 
     @controller.action("Tick or untick a checkbox / toggle / switch by its index, and verify it changed. "
                        "Use this instead of click for every checkbox.")
@@ -710,7 +978,8 @@ Keep your thinking extremely brief and short (1 concise sentence max). Do NOT wr
 === FORM FILLING RULES ===
 
 BASIC RULES:
-1. Fill in all required fields with the candidate information above.
+1. Fill in all required fields with the candidate information above. Name, email and profile links may already be
+   pre-filled (see the pre-fill result) — check them, don't retype them. On a new form page, `prefill_basic_fields` does them in one go.
 2. Use the Q&A answers for dropdown/select/radio/input questions about salary, CTC, notice period, work authorization, etc.
 3. Do NOT fill in Current CTC or Expected CTC unless the application form explicitly asks.
 4. If a generic "salary" is asked, prioritize expected salary / expected CTC.
@@ -776,9 +1045,16 @@ WORK AUTHORIZATION RULE:
 - If the job is located inside the candidate's home country, answer work authorization "Yes" (no sponsorship needed).
 - If the job is remote or abroad: answer from the Q&A answers above (work authorization / sponsorship).
 
+SECURITY CHECKS:
+- The small "protected by reCAPTCHA" badge or text, or a "This site is protected by hCaptcha" note, is NOT a CAPTCHA.
+  It needs nothing from you — ignore it and keep filling and submitting.
+- A "Just a moment…" / "Verify you are human" page, a Cloudflare Turnstile box or an "I'm not a robot" checkbox:
+  call `wait_for_human_check` first. It waits and clicks the box once; most checks pass that way.
+- If a submit seems to do nothing and a check box appeared near the button, call `wait_for_human_check`, then submit again.
+
 ERROR DETECTION — STOP AND REPORT:
 - If you encounter a login page, STOP and report "LOGIN_REQUIRED".
-- If you encounter a CAPTCHA, STOP and report "CAPTCHA_DETECTED".
+- Only if `wait_for_human_check` says the check did not clear (or an image puzzle shows), STOP and report "CAPTCHA_DETECTED".
 - If you see an OTP/MFA prompt, STOP and report "MFA_REQUIRED".
 - If the form is too complex to fill automatically, STOP and report "TOO_COMPLEX"."""
 
@@ -883,18 +1159,18 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
             await asyncio.sleep(delay)
 
     kwargs: dict[str, Any] = {
-        "task": build_task(sess, continuing), "llm": llm, "controller": _build_tools(),
+        "task": build_task(sess, continuing), "llm": llm, "controller": _build_tools(sess.profile),
         "register_new_step_callback": on_step, "use_vision": "auto",
         "available_file_paths": [p for p in sess.files.values() if p],
     }
     if fallback is not None:
         kwargs["fallback_llm"] = fallback
     if start_url:
-        kwargs["initial_actions"] = [{"navigate": {"url": start_url, "new_tab": False}}]
+        kwargs["initial_actions"] = [{"navigate": {"url": start_url, "new_tab": False}}, {"prefill_basic_fields": {}}]
     if reuse:
         kwargs["browser_session"] = sess.browser_session
     else:
-        kwargs["browser_profile"] = _build_stealth_profile(settings)
+        kwargs["browser_profile"] = await _build_stealth_profile(settings)
     agent = Agent(**kwargs)
     sess.agent = agent
     attach = asyncio.ensure_future(_attach_live_view(sess, agent))
@@ -1068,6 +1344,7 @@ async def close(job_id: str) -> Optional[dict]:
                 await asyncio.wait_for(sess.browser_session.kill(), timeout=15)
             except Exception as exc:
                 log.warning("browser_close_failed", error=str(exc)[:160])
+        await _stop_own_chrome()             # a Chrome we started ourselves outlives browser-use's disconnect
         sess.browser_session = None
         sess.agent = None
     await browser_worker.run(_do())

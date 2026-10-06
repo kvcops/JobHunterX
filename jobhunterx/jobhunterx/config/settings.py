@@ -65,10 +65,15 @@ class Settings(BaseSettings):
     # --- Auto-apply ---
     browser_show_window: bool = False   # also open a real Chrome window (debugging); default: live view in the app only
     browser_max_steps: int = 40         # agent steps per run before it hands back to you
-    browser_step_delay_s: float = 3.0   # pause between agent steps (keeps free-tier LLMs under their RPM)
+    browser_step_delay_s: float = 1.0   # pause between agent steps (429s are retried with backoff anyway)
     apply_with_cover_letter: bool = True  # prepare a cover letter before applying
     apply_with_cv: bool = True            # prepare a full CV too (uploaded only where a form asks for a separate CV)
     browser_use_cloud: bool = False     # set True + BROWSER_USE_API_KEY in .env to use stealth cloud browsers
+    # auto: real Chrome window parked off-screen on a desktop (looks human to bot checks), headless on a server
+    browser_window_mode: str = "auto"   # auto | offscreen | headless | window
+    # drive a Chrome you started yourself (chrome --remote-debugging-port=9222 --user-data-dir=…) or a hosted
+    # stealth browser (Browserbase, Steel, Browser Use cloud…): its IP, cookies and logins are used
+    browser_cdp_url: str = ""
 
     # --- Web Search API Provider Keys & Router Settings ---
     enable_web_search_apis: bool = True
