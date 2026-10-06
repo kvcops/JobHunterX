@@ -54,6 +54,7 @@ export function initialState() {
     },
     jobs: { byId: {} },
     watch: { status: 'idle', data: null, error: null, checking: false, run: null, feed: [] },   // run = live background check
+    monitors: { status: 'idle', items: [], error: null, busy: {} },   // companies you watch (Company Scout recipes)
     setup: { data: null, error: null, saving: false, tests: {} },   // API keys; checked before anything else
     details: {},            // jobId -> { status, job, error }
     list: {

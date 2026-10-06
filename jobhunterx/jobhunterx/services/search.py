@@ -223,7 +223,8 @@ _TRIAGE_SYS = """You shortlist job postings for one candidate before a detailed 
 3 = squarely the candidate's field and a level they can realistically get;
 2 = a related role they could credibly apply for (adjacent field, or one level above/below);
 1 = weak link (shares a word but different work);
-0 = a different field, or clearly far above/below their level.
+0 = a different field, or two or more levels above/below their level (e.g. Senior / Lead / Principal / Staff / Manager
+    titles for someone with under 3 years; intern roles for someone with 5+ years).
 Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager". Score every index."""
 TRIAGE_MAX = 140
 
@@ -239,7 +240,7 @@ async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[d
            f"Strongest skills: {', '.join(s.name for s in snap.skills[:10])}")
     lines = "\n".join(f"[{i}] {p.title[:90]} | {p.company[:40]} | {(p.location_raw or '')[:40]}" for i, p in enumerate(jobs))
     try:
-        res, _ = await call_structured(task="search_triage", version="v1", model=_Triage, system=_TRIAGE_SYS,
+        res, _ = await call_structured(task="search_triage", version="v2", model=_Triage, system=_TRIAGE_SYS,
                                        user=f"CANDIDATE\n{who}\n\nPOSTINGS\n{lines}", chain="fast", max_tokens=3000,
                                        cache_parts=(snap.profile_hash, lines))
     except Exception as exc:
@@ -435,6 +436,22 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         if index_leads:
             await run.say("discover", f"{len(index_leads)} matching openings found instantly among {st['rows']:,} postings on "
                           f"{st['boards']:,} Indian employers' own job boards (refreshed daily)", "good")
+    # Companies you watch yourself: listed with the recipe the Company Scout learned (seconds, no browser, no AI).
+    from jobhunterx.services import monitors
+    monitor_meta: dict[str, tuple[str, str, str]] = {}          # url → (company, title, location)
+    monitor_leads = []
+    pairs = await monitors.jobs_for_search(scope.titles)
+    if pairs:
+        await run.say("discover", f"Checking {len({m['id'] for m, _ in pairs})} companies you watch on their own careers sites", "work")
+        fresh = list(pairs)                       # level and field are judged by the AI shortlist below
+        seen = await storage.job_exists_many([JobPosting(canonical_url=dedupe.canonical_url(l.url)) for _, l in fresh])
+        fresh = [x for i, x in enumerate(fresh) if i not in seen]
+        for m, l in fresh:
+            monitor_meta[l.url] = (m["company"], l.title, l.location)
+            monitor_leads.append(search.Lead(url=l.url, title=l.title, snippet=f"{m['company']} · {l.location}",
+                                             provider="monitor", query=f"your company: {m['company']}"))
+        await run.say("discover", f"{len(monitor_leads)} new openings at the companies you watch"
+                      + (f" ({len(seen)} you've already seen)" if seen else ""), "good" if monitor_leads else "info")
     leads = []
     if queries:
         await run.say("discover", f"Searching job sites and company career pages ({len(queries)} searches)"
@@ -442,7 +459,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         async def query_progress(done: int, total: int) -> None:
             await run.progress("discover", done, total, f"Web searches: {done} of {total} done")
         leads = await search.run_queries(queries, on_progress=query_progress)
-    leads = index_leads + leads              # employers' own postings first
+    leads = monitor_leads + index_leads + leads              # employers' own postings first
     c["search_results"] = len(leads)
     posting_leads, boards = [], {}
     for lead in leads:
@@ -531,6 +548,13 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 await run.progress("normalize", pages_done["n"], len(to_read), f"Job pages: {pages_done['n']} of {len(to_read)} read")
         if p is None:
             return None
+        if lead.url in monitor_meta:              # the careers site's own list knows the company, title and place
+            company, title, where = monitor_meta[lead.url]
+            p.company = company
+            if not p.title or len(p.title) < 5 or p.title.lower() in ("job details", "job description", "careers"):
+                p.title = title
+            if not p.location_raw and not p.locations:
+                p.location_raw = where
         if p:
             p.discovered_by_query = lead.query
             narrated["n"] += 1
@@ -567,7 +591,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     # Shortlist: which postings are the candidate's field? One AI call scores them all; the cap then keeps the best.
     pool = sorted(unique, key=lambda p: -_title_relevance(p, snap))[:TRIAGE_MAX]
     rest = unique[len(pool):] if len(unique) > TRIAGE_MAX else []
-    fit = await _triage(snap, pool) if len(pool) > max_jobs // 2 else None
+    fit = await _triage(snap, pool)
     if fit:
         before = len(pool)
         pool = [p for p in pool if fit.get(p.id, 1) > 0] or pool

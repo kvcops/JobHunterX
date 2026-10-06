@@ -93,7 +93,8 @@ class Watcher:
                 return {"status": "no_profile"}
             snap = await profile_svc.get_snapshot(profile)
             companies = watchlist.for_candidate(snap)
-            if not watchlist.board_refs(companies):
+            from jobhunterx.services import monitors
+            if not watchlist.board_refs(companies) and not await monitors.ready():
                 result = {"status": "no_watchlist", "at": _now().isoformat(), "cities": watchlist.cities_for(snap)}
                 await self._record(result)
                 return result

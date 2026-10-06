@@ -236,6 +236,26 @@ async def browser_websocket(websocket: WebSocket):
         live_view.remove_client(websocket)
 
 
+@app.websocket("/ws/scout")
+async def scout_websocket(websocket: WebSocket):
+    """Watch-only stream of the Company Scout's browser (no input: the scout never needs a hand)."""
+    if not _ws_origin_ok(websocket):
+        await websocket.close(code=1008)
+        return
+    from jobhunterx.agents import live_view
+    await websocket.accept()
+    await live_view.add_client(websocket, "scout")
+    try:
+        while True:
+            await websocket.receive_text()
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        pass
+    except Exception as exc:
+        log.debug("scout_ws_error", error=str(exc)[:160])
+    finally:
+        live_view.remove_client(websocket, "scout")
+
+
 # JobHunterX has no service worker. A browser that once ran another web app on this address keeps asking for that
 # app's /sw.js (a 404 every page load); this one removes itself, so the browser drops the leftover worker for good.
 _SW_UNREGISTER = """self.addEventListener('install', () => self.skipWaiting());
@@ -252,8 +272,18 @@ async def leftover_service_worker():
 
 # Static files (frontend) — mounted last so API routes take priority
 _web_dir = Path(__file__).resolve().parent.parent / "web"
+class _FreshStatic(StaticFiles):
+    """App code is revalidated on every load (cheap 304s), so an update shows without a hard refresh."""
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        if path == "" or path.endswith((".js", ".css", ".html")) or path in (".", "index.html"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 if _web_dir.exists():
-    app.mount("/", StaticFiles(directory=str(_web_dir), html=True), name="static")
+    app.mount("/", _FreshStatic(directory=str(_web_dir), html=True), name="static")
 
 
 # ---------------------------------------------------------------------------

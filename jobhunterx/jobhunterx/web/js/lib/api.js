@@ -170,6 +170,13 @@ export const api = {
   watchlist: (scope, o) => request('/watchlist', { query: { scope }, timeout: 45_000, ...o }),
   checkWatchlist: (o) => request('/watchlist/check', { method: 'POST', ...o }),
 
+  // companies you watch yourself (the Company Scout agent learns each careers site once)
+  monitors: (o) => request('/monitors', o),
+  addMonitor: (body, o) => request('/monitors', { method: 'POST', body, ...o }),
+  checkMonitor: (id, o) => request(`/monitors/${enc(id)}/check`, { method: 'POST', timeout: 90_000, ...o }),
+  rescoutMonitor: (id, o) => request(`/monitors/${enc(id)}/rescout`, { method: 'POST', ...o }),
+  deleteMonitor: (id, o) => request(`/monitors/${enc(id)}`, { method: 'DELETE', ...o }),
+
   // documents
   generateDocument: (jobId, kind, o) => request(`/jobs/${enc(jobId)}/documents`, { method: 'POST', body: { kind }, timeout: 120_000, ...o }),
   generateCv: (focus, o) => request('/documents/cv', { method: 'POST', body: focus ? { focus } : {}, timeout: 120_000, ...o }),

@@ -631,6 +631,75 @@ function onWatchDone(d) {
 }
 
 // ---------------------------------------------------------------------------
+// Companies you watch yourself — the Company Scout agent finds each careers site and its filters once
+// ---------------------------------------------------------------------------
+function upsertMonitor(m) {
+  if (!m) return;
+  setSlice('monitors', (s) => {
+    const items = s.items.some((x) => x.id === m.id) ? s.items.map((x) => (x.id === m.id ? m : x)) : [m, ...s.items];
+    return { ...s, items };
+  });
+}
+function monitorBusy(id, on) {
+  setSlice('monitors', (s) => ({ ...s, busy: { ...s.busy, [id]: on } }));
+}
+export async function loadMonitors() {
+  setSlice('monitors', (s) => ({ ...s, status: s.items.length ? 'refreshing' : 'loading', error: null }));
+  try {
+    const res = await api.monitors();
+    setSlice('monitors', { status: 'ready', items: res.monitors || [] });
+  } catch (err) {
+    setSlice('monitors', { status: 'error', error: errorText(err) });
+  }
+}
+export async function addMonitor(company, location, keyword) {
+  try {
+    const res = await api.addMonitor({ company, location, keyword });
+    upsertMonitor(res.monitor);
+    toast(res.monitor.status === 'ready' ? `${company} is ready — it was scouted before`
+      : `The Company Scout is finding ${company}'s careers site. This takes about a minute.`, 'info', 6000);
+    return true;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return false;
+  }
+}
+export async function checkMonitor(id) {
+  monitorBusy(id, true);
+  try {
+    upsertMonitor((await api.checkMonitor(id)).monitor);
+  } catch (err) {
+    toast(errorText(err), 'danger');
+  } finally {
+    monitorBusy(id, false);
+  }
+}
+export async function rescoutMonitor(id) {
+  try {
+    upsertMonitor((await api.rescoutMonitor(id)).monitor);
+  } catch (err) {
+    toast(errorText(err), 'danger');
+  }
+}
+export async function removeMonitor(id) {
+  try {
+    await api.deleteMonitor(id);
+    setSlice('monitors', (s) => ({ ...s, items: s.items.filter((x) => x.id !== id) }));
+  } catch (err) {
+    toast(errorText(err), 'danger');
+  }
+}
+function onMonitorUpdated(m) {
+  const before = getState().monitors.items.find((x) => x.id === m.id);
+  upsertMonitor(m);
+  if (before && before.status !== m.status && m.status === 'ready' && before.status === 'scouting') {
+    toast(`${m.company}: ${m.message}`, 'success', 8000);
+  } else if (before && before.status !== m.status && m.status === 'failed') {
+    toast(`${m.company}: ${m.error || 'scouting failed'}`, 'danger', 9000);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Settings, models, usage, pipeline mode, reset
 // ---------------------------------------------------------------------------
 async function loadInto(slice, call) {
@@ -906,6 +975,9 @@ function onMessage(msg) {
       return;
     case 'watch.done':
       onWatchDone(msg.data || {});
+      return;
+    case 'monitor.updated':
+      if (msg.data && msg.data.monitor) onMonitorUpdated(msg.data.monitor);
       return;
     default:
   }

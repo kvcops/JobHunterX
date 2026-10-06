@@ -94,16 +94,17 @@ def _blocked(res: FetchResult) -> bool:
 
 async def fetch(url: str, *, method: str = "GET", json_body: Any = None, timeout: Optional[float] = None,
                 accept: str = "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-                client: Optional[httpx.AsyncClient] = None) -> FetchResult:
+                client: Optional[httpx.AsyncClient] = None, headers: Optional[dict[str, str]] = None,
+                content: Optional[str] = None) -> FetchResult:
     """Fetch with SSRF checks on every hop. Never raises for HTTP/network errors.
 
     A page that answers with a bot wall (403 / 429 / 503, a Cloudflare challenge) gets one more try through curl_cffi,
     which sends the same TLS and HTTP/2 fingerprint as a real Chrome — many career sites only block the plain
     Python fingerprint."""
     timeout = timeout or get_settings().fetch_timeout_s
-    res = await _fetch_plain(url, method, json_body, timeout, accept, client or _client())
+    res = await _fetch_plain(url, method, json_body, timeout, accept, client or _client(), headers, content)
     if method == "GET" and _blocked(res):
-        retry = await _fetch_browserlike(url, timeout, accept)
+        retry = await _fetch_browserlike(url, timeout, accept, headers)
         if retry is not None and retry.ok and not _blocked(retry):
             log.debug("fetch_unblocked", url=url[:80], first=res.status)
             return retry
@@ -111,8 +112,9 @@ async def fetch(url: str, *, method: str = "GET", json_body: Any = None, timeout
 
 
 async def _fetch_plain(url: str, method: str, json_body: Any, timeout: float, accept: str,
-                       client: httpx.AsyncClient) -> FetchResult:
-    headers = {"User-Agent": _UA, "Accept": accept}
+                       client: httpx.AsyncClient, extra: Optional[dict[str, str]] = None,
+                       content: Optional[str] = None) -> FetchResult:
+    headers = {"User-Agent": _UA, "Accept": accept, **(extra or {})}
     current = url
     for _ in range(MAX_REDIRECTS + 1):
         try:
@@ -120,11 +122,12 @@ async def _fetch_plain(url: str, method: str, json_body: Any, timeout: float, ac
         except UnsafeURLError as exc:
             return FetchResult(url=current, error=str(exc))
         try:
-            async with client.stream(method, current, headers=headers, json=json_body, timeout=timeout) as resp:
+            body_kw: dict[str, Any] = {"content": content} if content is not None else {"json": json_body}
+            async with client.stream(method, current, headers=headers, timeout=timeout, **body_kw) as resp:
                 if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("location"):
                     current = urljoin(current, resp.headers["location"])
                     if resp.status_code == 303:
-                        method, json_body = "GET", None
+                        method, json_body, content = "GET", None, None
                     continue
                 chunks, size = [], 0
                 async for chunk in resp.aiter_bytes():
@@ -145,7 +148,8 @@ async def _fetch_plain(url: str, method: str, json_body: Any, timeout: float, ac
 _cffi: Optional[tuple[asyncio.AbstractEventLoop, Any]] = None
 
 
-async def _fetch_browserlike(url: str, timeout: float, accept: str) -> Optional[FetchResult]:
+async def _fetch_browserlike(url: str, timeout: float, accept: str,
+                             extra: Optional[dict[str, str]] = None) -> Optional[FetchResult]:
     """GET through curl_cffi impersonating Chrome; redirects followed by hand so every hop passes the SSRF check."""
     global _cffi
     try:
@@ -163,7 +167,7 @@ async def _fetch_browserlike(url: str, timeout: float, accept: str) -> Optional[
         except UnsafeURLError as exc:
             return FetchResult(url=current, error=str(exc))
         try:
-            r = await session.get(current, timeout=timeout, allow_redirects=False, headers={"Accept": accept},
+            r = await session.get(current, timeout=timeout, allow_redirects=False, headers={"Accept": accept, **(extra or {})},
                                   max_recv_speed=0)
         except Exception as exc:                       # curl errors: treat like any network failure
             return FetchResult(url=current, error=f"{type(exc).__name__}: {str(exc)[:120]}")

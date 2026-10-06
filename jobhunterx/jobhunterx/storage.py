@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS apply_sessions (
     job_id TEXT PRIMARY KEY, person_id TEXT, status TEXT NOT NULL, data_json TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS company_monitors (
+    id TEXT PRIMARY KEY, person_id TEXT, company TEXT NOT NULL, location TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_company_monitors_person ON company_monitors(person_id);
 """
 
 SCHEMA_VERSION = 4
@@ -204,7 +209,7 @@ async def delete_person(pid: str) -> None:
     for jid in ids:
         await legacy.delete_job(jid)
     async with _conn() as db:
-        for table in ("profiles", "documents", "search_runs", "apply_sessions"):
+        for table in ("profiles", "documents", "search_runs", "apply_sessions", "company_monitors"):
             await db.execute(f"DELETE FROM {table} WHERE person_id = ?", (pid,))
         await db.execute("DELETE FROM people WHERE id = ?", (pid,))
         await db.commit()
@@ -486,6 +491,53 @@ async def latest_apply_session() -> Optional[dict]:
     where, params = _scope()
     async with _conn() as db:
         cur = await db.execute(f"SELECT data_json FROM apply_sessions WHERE {where} ORDER BY updated_at DESC LIMIT 1", params)
+        row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Custom company monitors (Company Scout recipes)
+# ---------------------------------------------------------------------------
+
+async def save_monitor(m: dict) -> None:
+    m["updated_at"] = _now()
+    async with _conn() as db:
+        await db.execute(
+            "INSERT INTO company_monitors (id, person_id, company, location, status, data_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, "
+            "data_json = excluded.data_json, updated_at = excluded.updated_at, location = excluded.location",
+            (m["id"], m.get("person_id"), m["company"], m.get("location", ""), m.get("status", ""),
+             json.dumps(m, default=str), m.get("created_at") or _now(), m["updated_at"]))
+        await db.commit()
+
+
+async def list_monitors(person_id: Optional[str] = None) -> list[dict]:
+    pid = person_id if person_id is not None else active_person()
+    async with _conn() as db:
+        cur = await db.execute("SELECT data_json FROM company_monitors WHERE person_id IS ? ORDER BY created_at DESC", (pid,))
+        return [json.loads(r[0]) for r in await cur.fetchall()]
+
+
+async def get_monitor(monitor_id: str) -> Optional[dict]:
+    async with _conn() as db:
+        cur = await db.execute("SELECT data_json FROM company_monitors WHERE id = ?", (monitor_id,))
+        row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+
+async def delete_monitor(monitor_id: str) -> bool:
+    async with _conn() as db:
+        cur = await db.execute("DELETE FROM company_monitors WHERE id = ?", (monitor_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def find_monitor_recipe(company: str, location: str) -> Optional[dict]:
+    """A recipe any profile already learned for this company + place: scouting is one-time work, not per person."""
+    async with _conn() as db:
+        cur = await db.execute("SELECT data_json FROM company_monitors WHERE lower(company) = lower(?) AND "
+                               "lower(location) = lower(?) AND status = 'ready' ORDER BY updated_at DESC LIMIT 1",
+                               (company.strip(), location.strip()))
         row = await cur.fetchone()
         return json.loads(row[0]) if row else None
 

@@ -355,6 +355,68 @@ async def get_watchlist(scope: Literal["mine", "all"] = "mine"):
             "companies": [watchlist.public_view(c) for c in companies], "status": watcher.status()}
 
 
+# ---------------------------------------------------------------------------
+# Custom company monitors — the Company Scout agent learns each company's careers site once
+# ---------------------------------------------------------------------------
+
+class MonitorIn(BaseModel):
+    company: str = Field(min_length=2, max_length=80)
+    location: str = Field(default="", max_length=80)
+    keyword: str = Field(default="", max_length=80)
+
+
+async def _default_keyword() -> str:
+    """The role word the scout types when the user gave none: the profile's first target title."""
+    profile = await profile_svc.get_profile()
+    if not profile or profile.is_empty():
+        return ""
+    snap = await profile_svc.get_snapshot(profile)
+    return snap.target_titles[0] if snap.target_titles else ""
+
+
+@router.get("/monitors")
+async def list_monitors():
+    from jobhunterx.services import monitors
+    return {"monitors": [monitors.public(m) for m in await storage.list_monitors()]}
+
+
+@router.post("/monitors", status_code=201)
+async def add_monitor(body: MonitorIn):
+    from jobhunterx.services import monitors
+    if any(m["company"].lower() == body.company.strip().lower() and m.get("location", "").lower() == body.location.strip().lower()
+           for m in await storage.list_monitors()):
+        raise HTTPException(409, f"{body.company} is already watched for that location.")
+    return {"monitor": await monitors.add(body.company, body.location, body.keyword, await _default_keyword())}
+
+
+@router.post("/monitors/{monitor_id}/check")
+async def check_monitor(monitor_id: str):
+    from jobhunterx.services import monitors
+    m = await storage.get_monitor(monitor_id)
+    if not m:
+        raise HTTPException(404, "Monitor not found")
+    if not m.get("recipe"):
+        raise HTTPException(409, "This company has not been scouted yet.")
+    kw = [m["keyword"]] if m.get("keyword") else ([k] if (k := await _default_keyword()) else None)
+    return {"monitor": await monitors.check(monitor_id, kw)}
+
+
+@router.post("/monitors/{monitor_id}/rescout", status_code=202)
+async def rescout_monitor(monitor_id: str):
+    from jobhunterx.services import monitors
+    m = await monitors.rescout(monitor_id, await _default_keyword())
+    if not m:
+        raise HTTPException(404, "Monitor not found")
+    return {"monitor": m}
+
+
+@router.delete("/monitors/{monitor_id}")
+async def delete_monitor(monitor_id: str):
+    if not await storage.delete_monitor(monitor_id):
+        raise HTTPException(404, "Monitor not found")
+    return {"deleted": True}
+
+
 @router.post("/watchlist/check", status_code=202)
 async def check_watchlist():
     from jobhunterx.services.watcher import watcher

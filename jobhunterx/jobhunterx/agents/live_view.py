@@ -23,6 +23,9 @@ log = get_logger("live_view")
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
 _clients: set[Any] = set()
 _latest_frame: Optional[str] = None          # last frame message (JSON) for late joiners
+# The Company Scout's browser streams on its own channel, so it never mixes with the auto-apply view.
+_scout_clients: set[Any] = set()
+_scout_latest: Optional[str] = None
 _frame_meta: dict[str, float] = {}           # deviceWidth / deviceHeight of the last frame
 _panel: tuple[int, int] = (0, 0)             # size of the live-view area in the app (CSS px)
 
@@ -111,8 +114,14 @@ async def _send_all(msg: str) -> None:
         _clients.discard(ws)
 
 
-def publish_frame(data_b64: str, metadata: dict) -> None:
-    global _latest_frame
+def publish_frame(data_b64: str, metadata: dict, channel: str = "apply") -> None:
+    global _latest_frame, _scout_latest
+    if channel == "scout":
+        _scout_latest = json.dumps({"type": "frame", "data": data_b64, "w": metadata.get("deviceWidth"),
+                                    "h": metadata.get("deviceHeight")})
+        if _scout_clients:
+            _on_main(_send_to(_scout_clients, _scout_latest))
+        return
     _frame_meta.update({k: metadata.get(k) for k in ("deviceWidth", "deviceHeight") if metadata.get(k)})
     msg = json.dumps({"type": "frame", "data": data_b64, "w": _frame_meta.get("deviceWidth"), "h": _frame_meta.get("deviceHeight")})
     _latest_frame = msg
@@ -120,24 +129,38 @@ def publish_frame(data_b64: str, metadata: dict) -> None:
         _on_main(_send_all(msg))
 
 
-def clear_frame() -> None:
-    global _latest_frame
+def clear_frame(channel: str = "apply") -> None:
+    global _latest_frame, _scout_latest
+    if channel == "scout":
+        _scout_latest = None
+        if _scout_clients:
+            _on_main(_send_to(_scout_clients, json.dumps({"type": "idle"})))
+        return
     _latest_frame = None
     if _clients:
         _on_main(_send_all(json.dumps({"type": "idle"})))
 
 
-async def add_client(ws: Any) -> None:
-    _clients.add(ws)
-    if _latest_frame:
+async def _send_to(clients: set[Any], msg: str) -> None:
+    for ws in list(clients):
         try:
-            await ws.send_text(_latest_frame)
+            await ws.send_text(msg)
         except Exception:
-            _clients.discard(ws)
+            clients.discard(ws)
 
 
-def remove_client(ws: Any) -> None:
-    _clients.discard(ws)
+async def add_client(ws: Any, channel: str = "apply") -> None:
+    clients, latest = (_scout_clients, _scout_latest) if channel == "scout" else (_clients, _latest_frame)
+    clients.add(ws)
+    if latest:
+        try:
+            await ws.send_text(latest)
+        except Exception:
+            clients.discard(ws)
+
+
+def remove_client(ws: Any, channel: str = "apply") -> None:
+    (_scout_clients if channel == "scout" else _clients).discard(ws)
 
 
 def frame_size() -> tuple[float, float]:
@@ -151,8 +174,9 @@ class Screencast:
 
     PARAMS = {"format": "jpeg", "quality": 62, "maxWidth": 1280, "maxHeight": 1600, "everyNthFrame": 1}
 
-    def __init__(self, browser_session: Any):
+    def __init__(self, browser_session: Any, channel: str = "apply"):
         self.session = browser_session
+        self.channel = channel
         self.sid: Optional[str] = None
         self._task: Optional[asyncio.Task] = None
         self._registered = False
@@ -161,7 +185,7 @@ class Screencast:
         if self.sid and session_id and session_id != self.sid:
             return
         try:
-            publish_frame(event["data"], event.get("metadata") or {})
+            publish_frame(event["data"], event.get("metadata") or {}, self.channel)
         finally:
             client = self.session.cdp_client
             asyncio.ensure_future(self._ack(client, event.get("sessionId"), session_id))
