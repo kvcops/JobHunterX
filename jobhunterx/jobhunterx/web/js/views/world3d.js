@@ -33,14 +33,22 @@ import * as SkeletonUtils from '../../vendor/three-addons/SkeletonUtils.js';
 import { RoomEnvironment } from '../../vendor/three-addons/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from '../../vendor/three-addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from '../../vendor/three-addons/BufferGeometryUtils.js';
-import { EffectComposer } from '../../vendor/three-addons/postprocessing/EffectComposer.js';
-import { RenderPass } from '../../vendor/three-addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from '../../vendor/three-addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from '../../vendor/three-addons/postprocessing/OutputPass.js';
 
 const ROBOT_URL = '/assets/models/robot.glb';
 const ROBOT_HEIGHT = 2.35;
 const SAVE_KEY = 'jhx.office.v2';
+// The robot's own "Sitting" clip, measured on robot.glb at this height: the hips end 0.40 up and 0.33 behind where it
+// stood, feet still on the floor — a seat about 0.35 high. So seats are built that high, and a seated robot is lifted by
+// (seat top − SIT_DROP) and moved SIT_FWD forward, which puts its hips on the seat instead of inside it or on the backrest.
+const SIT_DROP = 0.33;
+const SIT_FWD = 0.27;
+const SEAT_H = { chair: 0.4, desk: 0.4, sofa: 0.48 };
+const STOOL_H = 0.42, BENCH_H = 0.43;
+// Feet stay planted only when the clip plays at the speed the robot moves: its Walking clip covers ~2.0 units/s and
+// Running ~3.1 units/s (measured on the planted foot). Movement speeds below, clip speed = speed / stride.
+const STRIDE = { Walking: 2.0, Running: 3.1 };
+const WALK_SPEED = 2.6, RUN_SPEED = 4.8, SNEAK_SPEED = 1.1;
+const MIN_GAP = 0.85;                 // two standing robots never stand closer than this (body width ~0.7)
 
 // Work floor x ∈ [-15, 15], z ∈ [-11.5, 11.5]. West wing: server room · hall · pantry. East wing: meeting room.
 // South (z > 11.5): game room (x < -1) and garden (x > -1).
@@ -253,11 +261,15 @@ function writeSaved(d) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(d))
 
 export async function createWorld(container, { dark = false, reducedMotion = false, onSay = () => {}, onSelect = () => {}, talk = null } = {}) {
   // ------------------------------------------------------------------ renderer / scene / post-processing
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  let pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75);
+  // Light on memory and GPU: no post-processing (a bloom pass kept several full-size render buffers alive), shadows
+  // drawn once (robots use soft blob shadows, so the shadow map only holds furniture that never moves), a pixel ratio
+  // of at most 1.5, and plain standard materials (no clearcoat / sheen shader variants).
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'default' });
+  let pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
   renderer.setPixelRatio(pixelRatio);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.autoUpdate = false;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.domElement.className = 'aw3d-gl';
@@ -266,14 +278,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 320);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
   scene.environment = envTex;
   scene.environmentIntensity = 0.5;
-  const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.2, 0.18, 1.1);
-  composer.addPass(bloom);
-  composer.addPass(new OutputPass());
-  let hq = true;                       // bloom + full pixel ratio; dropped automatically on slow machines
 
   const owned = new Set();
   // identical materials are shared, so static props that look alike merge into one draw call (see bakeStatic);
@@ -286,7 +293,12 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const m = make(); owned.add(m); if (key) matCache.set(key, m); else m.userData.unique = true; return m;
   };
   const M = (color, extra = {}, unique = false) => made('S', color, extra, unique, () => new THREE.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.03, ...extra }));
-  const P = (color, extra = {}, unique = false) => made('P', color, extra, unique, () => new THREE.MeshPhysicalMaterial({ color, roughness: 0.35, metalness: 0.05, clearcoat: 0.6, clearcoatRoughness: 0.25, ...extra }));
+  // "polished" surfaces: a standard material with lower roughness (clearcoat/sheen cost a second shading layer per pixel)
+  const PHYSICAL_ONLY = ['clearcoat', 'clearcoatRoughness', 'sheen', 'sheenColor', 'transmission'];
+  const P = (color, extra = {}, unique = false) => {
+    const std = Object.fromEntries(Object.entries(extra).filter(([k]) => !PHYSICAL_ONLY.includes(k)));
+    return M(color, { roughness: 0.35, metalness: 0.05, ...std }, unique);
+  };
   const glow = (color, k = 1.6) => M(color, { emissive: color, emissiveIntensity: k, roughness: 0.4 });
   const shade = (o) => {
     o.traverse((c) => {
@@ -310,18 +322,15 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   sun.position.set(14, 34, 26);
   sun.target.position.set(1, 0, 4.5); scene.add(sun.target);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(1536, 1536);
   Object.assign(sun.shadow.camera, { left: -34, right: 34, top: 26, bottom: -26, near: 1, far: 110 });
   sun.shadow.bias = -0.0005;
   sun.shadow.normalBias = 0.03;
-  sun.shadow.radius = 3;
+  sun.shadow.radius = 2;
   scene.add(sun);
-  const fill = new THREE.PointLight(0xffd9b0, 16, 30, 1.6); fill.position.set(-6, 7, 2); scene.add(fill);
-  const pantryLamp = new THREE.PointLight(0xffc98a, 14, 16, 1.6); pantryLamp.position.set(-20, 5, 6.5); scene.add(pantryLamp);
-  const serverGlow = new THREE.PointLight(0x5aa8ff, 10, 14, 1.6); serverGlow.position.set(-20, 4, -6.5); scene.add(serverGlow);
-  const meetLamp = new THREE.PointLight(0xfff1dd, 12, 20, 1.6); meetLamp.position.set(21, 6, -1); scene.add(meetLamp);
-  const gameGlow = new THREE.PointLight(0xc77dff, 12, 20, 1.6); gameGlow.position.set(-13, 5, 16); scene.add(gameGlow);
-  const gardenLamp = new THREE.PointLight(0xffd59a, 10, 26, 1.6); gardenLamp.position.set(12, 5, 16); scene.add(gardenLamp);
+  // one warm fill light for the whole floor. Every extra point light is paid for on every pixel of every lit
+  // material, so the rooms get their mood from emissive props (lamps, screens, LEDs, neon) instead of six lamps.
+  const fill = new THREE.PointLight(0xffd9b0, 16, 46, 1.4); fill.position.set(-2, 8, 4); scene.add(fill);
 
   // ------------------------------------------------------------------ textures
   function canvasTex(w, h, draw, repeat) {
@@ -390,7 +399,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
 
   const wallMat = M(0xf4ede4, { roughness: 0.85 }, true), trimMat = M(0xd8cabb, {}, true), partMat = M(0xe9e0d4, { roughness: 0.85 }, true);
   const glass = M(0xbfe0ff, { emissive: 0x9fd0ff, emissiveIntensity: 0.45, roughness: 0.15 });
-  const glassPane = new THREE.MeshPhysicalMaterial({ color: 0xd5ebff, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.2, depthWrite: false });
+  const glassPane = new THREE.MeshStandardMaterial({ color: 0xd5ebff, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.2, depthWrite: false });
   owned.add(glassPane);
   put(box(52.5, 4.6, 0.5, wallMat), 1, 2.3, -11.25);                               // north
   put(box(0.5, 4.6, 32.5, wallMat), -25.25, 2.3, 4.75);                            // west (pantry, game room)
@@ -419,7 +428,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     put(rbox(w, 0.55, 0.7, planterM, 0.08), c, 0.28, 11.5);
     const hd = rbox(w - 0.1, 0.6, 0.6, hedgeM, 0.25); put(hd, c, 0.85, 11.5);
   }
-  const balM = new THREE.MeshPhysicalMaterial({ color: 0xe8f4ff, roughness: 0.05, transparent: true, opacity: 0.25, depthWrite: false }); owned.add(balM);
+  const balM = new THREE.MeshStandardMaterial({ color: 0xe8f4ff, roughness: 0.05, transparent: true, opacity: 0.25, depthWrite: false }); owned.add(balM);
   for (const [cx, cz, w, d] of [[13, 21, 28, 0.06], [27, 16.25, 0.06, 9.5]]) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(w, 1.1, d), balM); b.position.set(cx, 0.55, cz); scene.add(b);
     put(box(w + 0.05, 0.08, d + 0.1, trimMat), cx, 1.12, cz);
@@ -433,6 +442,16 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   plate('Pantry', -18.2, 1.68); plate('Server room', -18.2, -0.83); plate('Meeting room', 15.08, 4.6, Math.PI / 2);
   plate('Game room', -10, 11.58, 0, 2.2); plate('Garden', 4.2, 11.88, 0, 1.45);
 
+  // each room's lamp as a soft pool of coloured light painted on its floor: no light source, so it costs a few pixels
+  // instead of a lighting term on every lit pixel of the office (strong at night, faint by day; see setTheme)
+  const poolTex = canvasTex(128, 128, (g, w) => { const gr = g.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, w); });
+  const pools = [[-20, 6.5, 6.5, 0xffa95c], [-20, -6.3, 6, 0x4f8cff], [21, -1.5, 9, 0xffe2b8], [-13, 16.2, 9, 0xb46bff], [12.5, 16.2, 10, 0xffc870], [0, 1, 12, 0xffd2a0]]
+    .map(([x, z, r, c]) => {
+      const m = new THREE.MeshBasicMaterial({ map: poolTex, color: c, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+      owned.add(m);
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, r * 2), m); p.rotation.x = -Math.PI / 2; p.position.set(x, 0.024, z); p.renderOrder = 1; scene.add(p);
+      return m;
+    });
   const rug = new THREE.Mesh(new THREE.PlaneGeometry(13, 7.5), M(0xc96f4a, { roughness: 0.95 }));
   rug.rotation.x = -Math.PI / 2; rug.position.set(0, 0.014, 0.6); rug.receiveShadow = true; scene.add(rug);
   const rugIn = new THREE.Mesh(new THREE.PlaneGeometry(11.6, 6.1), M(0xe6c4a0, { roughness: 0.95 }));
@@ -464,10 +483,11 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     return scr;
   }
   function chairAt(group, x, z, ry = 0, m = chairM) {
+    // sized for the robots (knees at ~0.45): the seat top is at SEAT_H.chair
     const c = new THREE.Group(); c.position.set(x, 0, z); c.rotation.y = ry;
-    const seat = rbox(0.82, 0.12, 0.8, m, 0.06); seat.position.y = 0.62; c.add(seat);
-    const back = rbox(0.8, 0.82, 0.1, m, 0.05); back.position.set(0, 1.07, -0.36); c.add(back);
-    const leg = cyl(0.045, 0.045, 0.6, metal, 8); leg.position.y = 0.31; c.add(leg);
+    const seat = rbox(0.82, 0.12, 0.8, m, 0.06); seat.position.y = SEAT_H.chair - 0.06; c.add(seat);
+    const back = rbox(0.8, 0.78, 0.1, m, 0.05); back.position.set(0, SEAT_H.chair + 0.4, -0.36); c.add(back);
+    const leg = cyl(0.045, 0.045, SEAT_H.chair - 0.1, metal, 8); leg.position.y = (SEAT_H.chair - 0.1) / 2; c.add(leg);
     for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; const sp = box(0.36, 0.04, 0.05, metal); sp.position.set(Math.cos(a) * 0.18, 0.04, Math.sin(a) * 0.18); sp.rotation.y = -a; c.add(sp); }
     group.add(c);
     return c;
@@ -482,7 +502,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const pad = new THREE.Mesh(new THREE.CircleGeometry(2.6, 48), new THREE.MeshBasicMaterial({ color: hsl(s.hue, 0.7, 0.6), transparent: true, opacity: 0.12, depthWrite: false }));
     owned.add(pad.material);
     pad.rotation.x = -Math.PI / 2; pad.position.y = 0.022; g.add(pad); parts.pad = pad;
-    const deskG = new THREE.Group(); deskG.position.z = 1.35; g.add(deskG); parts.desk = deskG;
+    // desks sit 0.2 lower than they are modelled (top at ~0.85, elbow height for a seated robot); the legs just go
+    // through the floor, where nobody sees them
+    const deskG = new THREE.Group(); deskG.position.set(0, -0.2, 1.35); g.add(deskG); parts.desk = deskG;
     chairAt(g, 0, -0.25);
     if (s.prop === 'desk') { deskAt(deskG); parts.screen = monitorAt(deskG, s.hue); }
     if (s.prop === 'board') {
@@ -498,7 +520,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     }
     if (s.prop === 'portal') {
       deskAt(deskG, 2.0, 0.9);
-      const globe = dyn(sphere(0.36, P(hsl(s.hue, 0.6, 0.6), { emissive: hsl(s.hue, 0.7, 0.35), emissiveIntensity: 0.4 }), 24)); globe.position.set(0.5, 1.45, 1.35); g.add(globe); parts.globe = globe;
+      const globe = dyn(sphere(0.36, P(hsl(s.hue, 0.6, 0.6), { emissive: hsl(s.hue, 0.7, 0.35), emissiveIntensity: 0.4 }), 24)); globe.position.set(0.5, 1.45, 0); deskG.add(globe); parts.globe = globe;
       const arch = new THREE.Group(); arch.position.set(0, 0, -3.15); g.add(arch);
       const ringM = M(hsl(s.hue, 0.8, 0.55), { emissive: hsl(s.hue, 0.9, 0.5), emissiveIntensity: 1.1 }, true);
       const ring = shade(new THREE.Mesh(new THREE.TorusGeometry(1.3, 0.14, 14, 48, Math.PI), ringM)); ring.position.y = 1.9; arch.add(ring);
@@ -580,8 +602,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     }
     const pile = dyn(new THREE.Group()); pile.position.set(-0.75, 1.07, 0.1); deskG.add(pile); parts.pile = pile; parts.count = 0;
     if (s.key === 'validate' || s.key === 'match') {
-      const bin = cyl(0.42, 0.34, 0.8, P(0x6b717c), 24, true); bin.position.set(1.9, 0.4, 1.1); g.add(bin);
-      parts.bin = dyn(new THREE.Group()); parts.bin.position.set(1.9, 0, 1.1); g.add(parts.bin); parts.binCount = 0;
+      // on the left of the desk: the walk out to the front of the desk passes on the right (sideOut → sideFront)
+      const bin = cyl(0.42, 0.34, 0.8, P(0x6b717c), 24, true); bin.position.set(-1.9, 0.4, 1.1); g.add(bin);
+      parts.bin = dyn(new THREE.Group()); parts.bin.position.set(-1.9, 0, 1.1); g.add(parts.bin); parts.binCount = 0;
     }
     stations[s.key] = parts;
   }
@@ -600,14 +623,14 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   const cooler = new THREE.Group(); put(cooler, -15.8, 0, 10.6);
   { const b = rbox(0.6, 1.1, 0.6, white, 0.06); b.position.y = 0.55; cooler.add(b);
     const bottle = cyl(0.25, 0.25, 0.7, P(0x8fc8ff, { transparent: true, opacity: 0.7, roughness: 0.05 }), 16); bottle.position.y = 1.45; cooler.add(bottle); }
-  const tableTop = cyl(0.95, 0.95, 0.08, wood, 40); put(tableTop, -20, 1.0, 7.2);
-  put(cyl(0.08, 0.1, 1.0, metal, 10), -20, 0.5, 7.2);
-  for (const x of [-21.25, -18.75]) { put(cyl(0.32, 0.32, 0.08, teal, 16), x, 0.72, 7.2); put(cyl(0.05, 0.05, 0.7, metal, 8), x, 0.36, 7.2); }
+  const tableTop = cyl(0.95, 0.95, 0.08, wood, 40); put(tableTop, -20, 0.8, 7.2);
+  put(cyl(0.08, 0.1, 0.8, metal, 10), -20, 0.4, 7.2);
+  for (const x of [-21.25, -18.75]) { put(cyl(0.32, 0.32, 0.08, teal, 16), x, STOOL_H - 0.04, 7.2); put(cyl(0.05, 0.05, STOOL_H - 0.08, metal, 8), x, (STOOL_H - 0.08) / 2, 7.2); }
   const sofa = new THREE.Group(); put(sofa, -21, 0, 10.8, Math.PI);
   { const sm = P(0x9a5d7a, { roughness: 0.9, clearcoat: 0, sheen: 1, sheenColor: new THREE.Color(0xd9a0bf) });
-    const seat = rbox(3.0, 0.5, 1.0, sm, 0.15); seat.position.y = 0.45; sofa.add(seat);
-    const back = rbox(3.0, 0.9, 0.3, sm, 0.12); back.position.set(0, 0.95, -0.42); sofa.add(back);
-    for (const x of [-1.6, 1.6]) { const a = rbox(0.3, 0.7, 1.0, sm, 0.12); a.position.set(x, 0.6, 0); sofa.add(a); } }
+    const seat = rbox(3.0, 0.5, 1.0, sm, 0.15); seat.position.y = SEAT_H.sofa - 0.25; sofa.add(seat);
+    const back = rbox(3.0, 0.9, 0.3, sm, 0.12); back.position.set(0, SEAT_H.sofa + 0.25, -0.42); sofa.add(back);
+    for (const x of [-1.6, 1.6]) { const a = rbox(0.3, 0.6, 1.0, sm, 0.12); a.position.set(x, SEAT_H.sofa - 0.05, 0); sofa.add(a); } }
   // wall clock (real time) on the pantry wall
   const clockTex = canvasTex(256, 256, () => {});
   const clockMat = new THREE.MeshBasicMaterial({ map: clockTex, transparent: true }); owned.add(clockMat);
@@ -647,13 +670,13 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   { const g = new THREE.Group(); put(g, -16.9, 0, -5.2, -Math.PI / 2); deskAt(g, 1.8, 0.8); monitorAt(g, 205, 0, -0.1); }
 
   // ------------------------------------------------------------------ meeting room
-  put(rbox(1.7, 0.12, 9.2, wood, 0.05), 21, 1.0, -2.6);
-  for (const z of [-6.6, 1.4]) put(rbox(0.3, 0.98, 0.3, metal, 0.04), 21, 0.49, z);
+  put(rbox(1.7, 0.12, 9.2, wood, 0.05), 21, 0.8, -2.6);
+  for (const z of [-6.6, 1.4]) put(rbox(0.3, 0.78, 0.3, metal, 0.04), 21, 0.39, z);
   const meetChairs = [];
   for (const z of [-6, -4, -2, 0]) for (const [x, ry] of [[19.55, Math.PI / 2], [22.45, -Math.PI / 2]]) {
     const g = new THREE.Group(); scene.add(g);
     chairAt(g, x, z, ry);
-    meetChairs.push({ pos: V(x, z), face: ry, busy: false });
+    meetChairs.push({ pos: V(x, z), face: ry, busy: false, h: SEAT_H.chair });
   }
   const boardTex = canvasTex(1024, 512, () => {});
   const tickerTex = canvasTex(1024, 320, () => {});
@@ -717,7 +740,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     a.tex.needsUpdate = true;
   }
   const bagSpots = [];
-  for (const [x, z, c] of [[-21.6, 19.7, 0xf06292], [-19.7, 20.0, 0xffb74d]]) { const b = sphere(0.72, P(c, { roughness: 0.85, clearcoat: 0, sheen: 1 }), 22); b.scale.set(1, 0.55, 1); put(b, x, 0.36, z); bagSpots.push({ pos: V(x, z), seat: true, face: 0 }); }
+  for (const [x, z, c] of [[-21.6, 19.7, 0xf06292], [-19.7, 20.0, 0xffb74d]]) { const b = sphere(0.72, P(c, { roughness: 0.85 }), 22); b.scale.set(1, 0.5, 1); put(b, x, 0.2, z); bagSpots.push({ pos: V(x, z), seat: true, face: 0, h: 0.42 }); }
   { const r = new THREE.Mesh(new THREE.CircleGeometry(2.4, 40), M(0x6a4fb3, { roughness: 1 })); r.rotation.x = -Math.PI / 2; r.position.set(-20.5, 0.02, 19.6); r.receiveShadow = true; scene.add(r); }
 
   // ------------------------------------------------------------------ garden
@@ -745,17 +768,17 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   }
   const benchM = M(0xa77b52, { roughness: 0.6 });
   { const g = new THREE.Group(); put(g, 14, 0, 19.75, 0);
-    const s = rbox(2.6, 0.1, 0.6, benchM, 0.03); s.position.y = 0.58; g.add(s);
-    const b = rbox(2.6, 0.5, 0.08, benchM, 0.03); b.position.set(0, 0.95, -0.3); b.rotation.x = -0.12; g.add(b);
-    for (const x of [-1.1, 1.1]) { const l = rbox(0.1, 0.56, 0.5, metal, 0.02); l.position.set(x, 0.28, 0); g.add(l); } }
-  const benchSpots = [{ pos: V(13.4, 19.65), seat: true, face: 0 }, { pos: V(14.6, 19.65), seat: true, face: 0 }];
+    const s = rbox(2.6, 0.1, 0.6, benchM, 0.03); s.position.y = BENCH_H - 0.05; g.add(s);
+    const b = rbox(2.6, 0.5, 0.08, benchM, 0.03); b.position.set(0, BENCH_H + 0.32, -0.3); b.rotation.x = -0.12; g.add(b);
+    for (const x of [-1.1, 1.1]) { const l = rbox(0.1, BENCH_H - 0.07, 0.5, metal, 0.02); l.position.set(x, (BENCH_H - 0.07) / 2, 0); g.add(l); } }
+  const benchSpots = [{ pos: V(13.4, 19.65), seat: true, face: 0, h: BENCH_H }, { pos: V(14.6, 19.65), seat: true, face: 0, h: BENCH_H }];
   // swing: an A-frame; the seat swings and whoever sits on it swings with it
   const SW = { x: 21.5, z: 16, top: 3.1 };
   for (const x of [SW.x - 1.3, SW.x + 1.3]) for (const dz of [-0.8, 0.8]) { const l = cyl(0.07, 0.07, 3.3, P(0xe8e2d8), 8); l.position.set(x, 1.55, SW.z + dz / 2); l.rotation.x = dz > 0 ? -0.26 : 0.26; scene.add(l); shade(l); }
   put(cyl(0.08, 0.08, 2.8, P(0xe8e2d8), 10), SW.x, SW.top, SW.z).rotation.z = Math.PI / 2;
   const swing = dyn(new THREE.Group()); swing.position.set(SW.x, SW.top, SW.z); scene.add(swing);
-  for (const x of [-0.42, 0.42]) { const r = cyl(0.015, 0.015, 2.5, metal, 5); r.position.set(x, -1.25, 0); swing.add(r); }
-  const seat = rbox(1.0, 0.07, 0.42, benchM, 0.03); seat.position.set(0, -2.5, 0); swing.add(seat);
+  for (const x of [-0.42, 0.42]) { const r = cyl(0.015, 0.015, SW.top - 0.44, metal, 5); r.position.set(x, -(SW.top - 0.44) / 2, 0); swing.add(r); }
+  const seat = rbox(1.0, 0.07, 0.42, benchM, 0.03); seat.position.set(0, 0.44 - SW.top, 0); swing.add(seat);
   const swingSpot = { pos: V(SW.x, SW.z), seat: true, face: 0, busy: false };
   let swingAmp = 0, swingT = 0;
   // fairy lights on poles across the garden (they glow at night)
@@ -778,7 +801,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const st = stations[key]; st.count = Math.max(0, n);
     const want = Math.min(10, st.count);
     while (st.pile.children.length < want) {
-      const p = new THREE.Mesh(paperGeo, paperM); p.castShadow = true;
+      const p = new THREE.Mesh(paperGeo, paperM);
       p.position.y = st.pile.children.length * 0.03; p.rotation.y = (Math.random() - 0.5) * 0.3; st.pile.add(p);
     }
     while (st.pile.children.length > want) st.pile.remove(st.pile.children[st.pile.children.length - 1]);
@@ -805,7 +828,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   const planeM = new THREE.MeshStandardMaterial({ color: 0xffffff, side: THREE.DoubleSide, roughness: 0.8 }); owned.add(planeM);
   /** A paper plane from the Connector's desk out over the garden: a note on its way to a real person. */
   function launchPlane(from) {
-    const p = new THREE.Mesh(planeGeo, planeM); p.castShadow = true; p.position.copy(from); scene.add(p);
+    const p = new THREE.Mesh(planeGeo, planeM); p.position.copy(from); scene.add(p);
     const to = V(rand(-2, 14), rand(24, 30), rand(4, 7));
     flying.push({ p, from: from.clone(), to, t: 0, d: 2.6, plane: true });
   }
@@ -918,6 +941,8 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       if (geos.length > 1) geos.forEach((g) => g.dispose());
     }
     scene.traverse((o) => { if (!isDyn(o) && o !== scene && !o.isLight) { o.matrixAutoUpdate = false; o.updateMatrix(); } });
+    // the shadow map is drawn once, so anything that moves must not cast into it (its shadow would stay behind)
+    scene.traverse((o) => { if (o.isMesh && isDyn(o)) o.castShadow = false; });
     return { meshes: victims.length, merged: n };
   }
   const baked = bakeStatic();
@@ -936,15 +961,20 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   let saveDirty = false;
   const faceTextures = [];
 
+  // all nine robots share one skeleton, so their part shapes are identical: build each geometry once and share it
+  const geoCache = new Map();
+  const geo = (key, make) => { if (!geoCache.has(key)) geoCache.set(key, make()); return geoCache.get(key); };
   /**
-   * Builds one character on the model's skeleton: the original low-poly meshes are hidden and smooth parts are attached
-   * to the bones (so every animation still drives them) — a glossy shell, graphite joints, accents in the agent's
-   * colour, a glowing chest light, a head with a face screen, and the agent's own gear.
+   * Builds one character on the model's skeleton: the original low-poly meshes are hidden and parts are attached to the
+   * bones (so every animation still drives them). The look is a machine, not a toy: a satin light-grey shell (head,
+   * chest, pelvis, upper arms, thighs) over a dark graphite frame (neck, forearms, shins, hands), dark metal joints,
+   * accents in the agent's colour, a glowing chest light, a face screen and the agent's own gear.
    */
   function styleRobot(model, s) {
-    const shell = P(0xf6f4f1, { roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.08 });
-    const accent = P(hsl(s.hue, 0.68, 0.55), { roughness: 0.25, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.1 }, true);
-    const joint = P(0x2a2d35, { roughness: 0.3, metalness: 0.7, clearcoat: 0.5 });
+    const shell = M(0xeceae6, { roughness: 0.42, metalness: 0.08 });
+    const frame = M(0x343842, { roughness: 0.4, metalness: 0.55 });
+    const accent = M(hsl(s.hue, 0.55, 0.52), { roughness: 0.36, metalness: 0.12 }, true);
+    const joint = M(0x1f2228, { roughness: 0.32, metalness: 0.7 });
     const coreM = M(hsl(s.hue, 0.9, 0.62), { emissive: hsl(s.hue, 0.95, 0.6), emissiveIntensity: 2.4, roughness: 0.3 }, true);
     model.traverse((o) => { if (o.isMesh) { o.visible = false; o.userData.hidden = true; } });
     model.updateMatrixWorld(true);
@@ -954,76 +984,79 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const at = (n) => B(n).getWorldPosition(new THREE.Vector3());
     const parts = [];
     const part = (mesh, bone) => { mesh.traverse((c) => { if (c.isMesh) { c.castShadow = false; c.receiveShadow = true; parts.push(c); } }); B(bone).attach(mesh); return mesh; };
-    const smooth = (geo, m) => new THREE.Mesh(geo, m);
+    const unitSphere = geo('sphere', () => new THREE.SphereGeometry(1, 16, 12));
     /** a rounded limb from p0 to p1 */
     const limb = (p0, p1, r, m, bone, shrink = 0) => {
       const dir = p1.clone().sub(p0), len = Math.max(0.05, dir.length() - shrink * 2);
-      const g = smooth(new THREE.CapsuleGeometry(r, Math.max(0.01, len - r * 2), 6, 18), m);
+      const body = Math.max(0.01, len - r * 2);
+      const g = new THREE.Mesh(geo(`cap|${r}|${body.toFixed(3)}`, () => new THREE.CapsuleGeometry(r, body, 4, 12)), m);
       g.position.copy(p0).add(p1).multiplyScalar(0.5);
       g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
       return part(g, bone);
     };
-    const ball = (p, r, m, bone, sc = [1, 1, 1]) => { const g = smooth(new THREE.SphereGeometry(r, 28, 20), m); g.position.copy(p); g.scale.set(...sc); return part(g, bone); };
+    const ball = (p, r, m, bone, sc = [1, 1, 1]) => { const g = new THREE.Mesh(unitSphere, m); g.position.copy(p); g.scale.set(r * sc[0], r * sc[1], r * sc[2]); return part(g, bone); };
 
-    // pelvis, torso, belt, chest light, neck
-    const hip = at('Hips'), abd = at('Abdomen'), neck = at('Neck'), headB = at('Head');
-    ball(hip.clone().add(V3(0, 0.03, 0)), 1, shell, 'Body', [0.28, 0.16, 0.22]);
-    const torsoC = V3(0, 1.03, -0.03);
-    ball(torsoC, 1, shell, 'Body', [0.35, 0.33, 0.27]);
-    const belt = smooth(new THREE.TorusGeometry(1, 0.11, 12, 36), accent); belt.rotation.x = Math.PI / 2; belt.scale.set(0.3, 0.235, 0.3); belt.position.set(0, 0.79, -0.03); part(belt, 'Body');
-    const core = smooth(new THREE.CircleGeometry(0.075, 28), coreM); core.position.set(0, 1.1, torsoC.z + 0.262); core.rotation.x = -0.12;
-    const coreRing = smooth(new THREE.TorusGeometry(0.09, 0.014, 8, 28), joint); coreRing.position.copy(core.position); coreRing.rotation.x = -0.12;
+    // pelvis, abdomen, chest, belt, chest light, neck
+    const hip = at('Hips'), neck = at('Neck'), headB = at('Head');
+    ball(hip.clone().add(V3(0, 0.03, 0)), 1, shell, 'Body', [0.27, 0.14, 0.21]);
+    ball(V3(0, 0.88, -0.03), 1, frame, 'Body', [0.23, 0.15, 0.19]);
+    const torsoC = V3(0, 1.07, -0.03);
+    ball(torsoC, 1, shell, 'Body', [0.36, 0.29, 0.27]);
+    const belt = new THREE.Mesh(geo('belt', () => new THREE.TorusGeometry(1, 0.11, 10, 28)), accent);
+    belt.rotation.x = Math.PI / 2; belt.scale.set(0.28, 0.22, 0.28); belt.position.set(0, 0.79, -0.03); part(belt, 'Body');
+    const core = new THREE.Mesh(geo('core', () => new THREE.CircleGeometry(0.075, 24)), coreM); core.position.set(0, 1.12, torsoC.z + 0.262); core.rotation.x = -0.12;
+    const coreRing = new THREE.Mesh(geo('coreRing', () => new THREE.TorusGeometry(0.09, 0.016, 8, 24)), accent); coreRing.position.copy(core.position); coreRing.rotation.x = -0.12;
     part(core, 'Body'); part(coreRing, 'Body');
-    limb(neck.clone().add(V3(0, -0.04, 0)), headB.clone().add(V3(0, 0.06, 0)), 0.08, joint, 'Body');
+    limb(neck.clone().add(V3(0, -0.04, 0)), headB.clone().add(V3(0, 0.06, 0)), 0.07, frame, 'Body');
 
-    // arms
+    // arms: shell upper arm, graphite forearm and hand
     for (const side of ['L', 'R']) {
       const sh = at(`Shoulder${side}`), el = at(`LowerArm${side}`), wr = at(`Palm2${side}`), mid = at(`Middle1${side}`);
-      ball(sh, 0.115, accent, `Shoulder${side}`);
-      limb(at(`UpperArm${side}`), el, 0.088, shell, `UpperArm${side}`);
-      ball(el, 0.088, joint, `LowerArm${side}`);
-      limb(el, wr, 0.082, shell, `LowerArm${side}`, 0.02);
-      const hand = smooth(new THREE.SphereGeometry(1, 24, 16), accent);
-      hand.position.copy(wr).lerp(mid, 0.45); hand.scale.set(0.115, 0.095, 0.13);
+      ball(sh, 0.118, accent, `Shoulder${side}`);
+      limb(at(`UpperArm${side}`), el, 0.09, shell, `UpperArm${side}`);
+      ball(el, 0.078, joint, `LowerArm${side}`);
+      limb(el, wr, 0.072, frame, `LowerArm${side}`, 0.02);
+      const hand = new THREE.Mesh(unitSphere, frame);
+      hand.position.copy(wr).lerp(mid, 0.45); hand.scale.set(0.11, 0.09, 0.125);
       hand.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), mid.clone().sub(wr).normalize());
       part(hand, `Palm2${side}`);
     }
-    // legs
+    // legs: shell thigh, graphite shin, a solid shoe in the agent's colour
     for (const side of ['L', 'R']) {
       const th = at(`UpperLeg${side}`), kn = at(`LowerLeg${side}`), ft = at(`Foot${side}`);
       limb(th, kn, 0.118, shell, `UpperLeg${side}`);
-      ball(kn, 0.1, joint, `LowerLeg${side}`);
-      limb(kn, ft.clone().add(V3(0, 0.08, 0)), 0.1, shell, `LowerLeg${side}`, 0.01);
-      const shoe = rbox(0.22, 0.13, 0.36, accent, 0.065); shoe.position.copy(ft).add(V3(0, 0.06, 0.07)); part(shoe, `Foot${side}`);
+      ball(kn, 0.092, joint, `LowerLeg${side}`);
+      limb(kn, ft.clone().add(V3(0, 0.08, 0)), 0.085, frame, `LowerLeg${side}`, 0.01);
+      const shoe = rbox(0.24, 0.14, 0.4, accent, 0.065); shoe.position.copy(ft).add(V3(0, 0.065, 0.08)); part(shoe, `Foot${side}`);
     }
 
-    // head: a glossy helmet with a face screen, ears and an antenna
-    const rx = 0.36, ry = 0.31, rz = 0.33;
+    // head: a helmet with a face screen, ears and an antenna (a little smaller than before: less of a bobble-head)
+    const rx = 0.34, ry = 0.29, rz = 0.31;
     const head = new THREE.Group();
     head.position.set(headB.x, headB.y + ry + 0.06, headB.z + 0.02);
-    const helmet = smooth(new THREE.SphereGeometry(1, 40, 30), shell); helmet.scale.set(rx, ry, rz); head.add(helmet);
+    const helmet = new THREE.Mesh(geo('helmet', () => new THREE.SphereGeometry(1, 32, 22)), shell); helmet.scale.set(rx, ry, rz); head.add(helmet);
     const fc = document.createElement('canvas'); fc.width = 256; fc.height = 160;
     const faceTex = new THREE.CanvasTexture(fc); faceTex.colorSpace = THREE.SRGBColorSpace; faceTextures.push(faceTex);
-    const faceM = new THREE.MeshPhysicalMaterial({ color: 0x07080b, roughness: 0.1, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.04,
+    const faceM = new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 0.15, metalness: 0.3,
       emissive: hsl(s.hue, 0.85, 0.8), emissiveMap: faceTex, emissiveIntensity: 2.4 });
     owned.add(faceM);
-    const visor = smooth(new THREE.SphereGeometry(1, 40, 24, Math.PI / 2 - 0.8, 1.6, Math.PI / 2 - 0.52, 1.02), faceM);
+    const visor = new THREE.Mesh(geo('visor', () => new THREE.SphereGeometry(1, 32, 18, Math.PI / 2 - 0.8, 1.6, Math.PI / 2 - 0.52, 1.02)), faceM);
     visor.scale.set(rx * 1.02, ry * 1.02, rz * 1.02); head.add(visor);
     for (const sx of [-1, 1]) {
-      const ear = cyl(0.1, 0.1, 0.07, joint, 24); ear.rotation.z = Math.PI / 2; ear.position.set(sx * rx * 0.97, -0.01, -0.02); head.add(ear);
-      const ring = smooth(new THREE.TorusGeometry(0.07, 0.016, 8, 24), coreM); ring.rotation.y = Math.PI / 2; ring.position.set(sx * (rx * 0.97 + 0.04), -0.01, -0.02); head.add(ring);
+      const ear = cyl(0.095, 0.095, 0.07, joint, 16); ear.rotation.z = Math.PI / 2; ear.position.set(sx * rx * 0.97, -0.01, -0.02); head.add(ear);
+      const ring = new THREE.Mesh(geo('earRing', () => new THREE.TorusGeometry(0.066, 0.015, 6, 18)), coreM); ring.rotation.y = Math.PI / 2; ring.position.set(sx * (rx * 0.97 + 0.04), -0.01, -0.02); head.add(ring);
     }
     const antenna = new THREE.Group(); antenna.position.set(0.09, ry * 0.93, -0.05); head.add(antenna);
     const stalk = cyl(0.011, 0.015, 0.2, joint, 6); stalk.position.y = 0.1; antenna.add(stalk);
     const tipM = M(hsl(s.hue, 0.9, 0.62), { emissive: hsl(s.hue, 0.9, 0.62), emissiveIntensity: 2, roughness: 0.4 }, true);
-    const tip = sphere(0.042, tipM, 12); tip.position.y = 0.22; antenna.add(tip);
+    const tip = sphere(0.042, tipM, 10); tip.position.y = 0.22; antenna.add(tip);
     gear(s.gear, head, { rx, ry, rz, hue: s.hue });
     part(head, 'Head');
     // gear worn on the body (tie, bow tie, scarf, backpack, lanyard), around the chest
     const body = new THREE.Group(); body.position.set(0, neck.y, torsoC.z);
     if (bodyGear(s.gear, body, s.hue, 0.27)) part(body, 'Body');
     for (const p of parts) p.userData.gear = true;
-    return { head, faceTex, fc, tipM, antenna, hand: B('Palm2R'), accent, coreM, parts };
+    return { head, headBase: head.quaternion.clone(), faceTex, fc, tipM, antenna, hand: B('Palm2R'), accent, coreM, parts };
   }
   function gear(kind, head, { rx, ry, rz, hue }) {
     const add = (o, x, y, z) => { o.position.set(x, y, z); head.add(o); return o; };
@@ -1104,6 +1137,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }); owned.add(blobMat);
   const blobGeo = new THREE.PlaneGeometry(1.5, 1.5);
 
+  const _yaw = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
   class Agent {
     constructor(s) {
       this.s = s; this.key = s.key;
@@ -1135,7 +1169,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       this.task = null;
       this.carry = new THREE.Group(); this.carry.position.set(0, 1.25, 0.62); this.carry.visible = false; this.holder.add(this.carry);
       this.carried = 0;
-      this.seated = null;               // null | 'desk' | 'chair' | 'sofa'
+      this.seated = null;               // null | 'desk' | 'chair' | 'sofa' | 'swing'
+      this.moveRate = 0;                // units/s while walking (drives the walk clip's speed), 0 when standing
+      this.headYaw = 0;
       this.state = 'pending';
       this.nextIdle = rand(1, 6);
       this.convo = null;
@@ -1178,7 +1214,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     setCarry(n) {
       this.carried = Math.max(0, n);
       const want = Math.min(6, this.carried);
-      while (this.carry.children.length < want) { const p = new THREE.Mesh(paperGeo, paperM); p.castShadow = true; p.position.y = this.carry.children.length * 0.035; p.rotation.y = (Math.random() - 0.5) * 0.25; this.carry.add(p); }
+      while (this.carry.children.length < want) { const p = new THREE.Mesh(paperGeo, paperM); p.position.y = this.carry.children.length * 0.035; p.rotation.y = (Math.random() - 0.5) * 0.25; this.carry.add(p); }
       while (this.carry.children.length > want) this.carry.remove(this.carry.children[this.carry.children.length - 1]);
       this.carry.visible = this.carried > 0;
     }
@@ -1265,19 +1301,28 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       this.glowK += (g - this.glowK) * Math.min(1, dt * 8);
       this.rig.accent.emissive.copy(hsl(this.s.hue, 0.7, 0.5)).multiplyScalar(this.glowK);
       this.mixer.update(dt);
+      // the head turns a little toward whatever the eyes look at (on top of the animation)
+      this.headYaw += (this.look * 0.45 - this.headYaw) * Math.min(1, dt * 5);
+      this.rig.head.quaternion.copy(this.rig.headBase).multiply(_yaw.setFromAxisAngle(_up, this.headYaw));
       this.blob.visible = this.holder.visible;
       this.blob.position.x = this.holder.position.x; this.blob.position.z = this.holder.position.z;
-      this.blob.position.y = 0.03 + Math.max(0, this.holder.position.y);
+      this.blob.position.y = this.seated ? 0.03 : 0.03 + Math.max(0, this.holder.position.y);
     }
+    /** Sit on a seat whose centre is `pos` and top is `h` high, facing `ang`: hips on the seat, not in it. */
+    sitOn(kind, pos, ang, h = SEAT_H[kind] || SEAT_H.chair) {
+      this.holder.position.set(pos.x + Math.sin(ang) * SIT_FWD, Math.max(0, h - SIT_DROP), pos.z + Math.cos(ang) * SIT_FWD);
+      this.holder.rotation.set(0, ang, 0);
+      this.seated = kind;
+      this.play('Sitting', 0.35);
+    }
+    /** The centre of this agent's own desk chair. */
+    deskSeat() { return this.home.clone().add(V(-this.s.face[0] * 0.25, -this.s.face[1] * 0.25)); }
     // nothing queued: during a search, agents whose part has not started wait at their desk
     rest() {
       const wantDesk = runActive && this.state === 'pending';
       if (wantDesk) {
         if (!this.atHome()) { this.prepWork(); return; }
-        if (this.seated !== 'desk') {
-          this.seated = 'desk'; this.holder.position.copy(this.home).add(V(-this.s.face[0] * 0.25, -this.s.face[1] * 0.25));
-          this.holder.rotation.y = this.faceAngle; this.play('Sitting', 0.4);
-        }
+        if (this.seated !== 'desk') this.sitOn('desk', this.deskSeat(), this.faceAngle);
         return;
       }
       if (this.seated === 'desk' && runActive) { this.push(T.stand()); return; }
@@ -1327,18 +1372,20 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
         start(a) {
           if (!pts) { const d = points(); pts = direct ? [d.clone()] : route(a.holder.position, d); }
           a.seated = null; a.holder.rotation.x = 0; a.play(run ? 'Running' : 'Walking', 0.2);
-          if (sneak && a.actions.Walking) { a.actions.Walking.setEffectiveTimeScale(speed * 0.5); a.holder.rotation.x = 0.16; }
+          a.moveRate = run ? RUN_SPEED : sneak ? SNEAK_SPEED : WALK_SPEED;
+          if (sneak) a.holder.rotation.x = 0.16;
         },
         update(a, dt) {
           const target = pts[0];
           if (!target) {
-            if (sneak && a.actions.Walking) { a.actions.Walking.setEffectiveTimeScale(speed); a.holder.rotation.x = 0; }
+            if (sneak) a.holder.rotation.x = 0;
+            a.moveRate = 0;
             a.play('Idle', 0.25); return true;
           }
           const pos = a.holder.position;
           let dx = target.x - pos.x, dz = target.z - pos.z;
           const dist = Math.hypot(dx, dz);
-          const step = (run ? 5.8 : sneak ? 1.25 : 3.0) * speed * dt;
+          const step = a.moveRate * speed * dt;
           if (dist <= Math.max(step, 0.05)) { pos.set(target.x, 0, target.z); pts.shift(); return false; }
           let sx = 0, sz = 0;
           for (const o of list) {
@@ -1367,13 +1414,23 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     call(fn) { return { start(a) { fn(a); }, update() { return true; } }; },
     until(cond, timeout = 10) { let t = 0; return { update(a, dt) { t += dt; return cond() || t > timeout; } }; },
     focus(fn) { return { start(a) { focus = fn(a); focusUntil = clock + 6; }, update() { return true; } }; },
-    sit(kind, pos, ang) {
+    /** turn to face the way the seat faces, then sit down on it (h: the seat's top; default by kind) */
+    sit(kind, pos, ang, h) {
+      return { update(a, dt) { if (!turnTo(a, ang, dt * 10)) return false; a.sitOn(kind, pos, ang, h); return true; } };
+    },
+    /** walk to just in front of a seat, turn and sit: the robot never walks into the furniture */
+    goSit(kind, spotOrPos, ang, h) {
+      const pos = spotOrPos.pos || spotOrPos, face = ang ?? spotOrPos.face ?? 0, top = h ?? spotOrPos.h;
+      const front = () => V(pos.x + Math.sin(val(face)) * SIT_FWD, pos.z + Math.cos(val(face)) * SIT_FWD);
+      return [T.go(front), { update(a, dt) { const f = val(face); if (!turnTo(a, f, dt * 10)) return false; a.sitOn(kind, pos, f, top); return true; } }];
+    },
+    stand() {
+      let left = 0, dur = 0, y0 = 0;
       return {
-        start(a) { a.holder.position.set(pos.x, 0, pos.z); a.holder.rotation.y = ang; a.seated = kind; a.play('Sitting', 0.35); },
-        update() { return true; },
+        start(a) { a.holder.rotation.x = 0; y0 = a.holder.position.y; dur = left = a.seated ? a.play('Standing', 0.25) * 0.9 : 0; a.seated = null; if (!dur) a.holder.position.y = 0; },
+        update(a, dt) { left -= dt; a.holder.position.y = dur > 0 ? y0 * Math.max(0, left / dur) : 0; return left <= 0; },
       };
     },
-    stand() { let left = 0; return { start(a) { a.holder.rotation.x = 0; left = a.seated ? a.play('Standing', 0.25) * 0.9 : 0; a.seated = null; }, update(a, dt) { left -= dt; return left <= 0; } }; },
     doing(label) { return { start(a) { a.doing = label; }, update() { return true; } }; },
   };
   function turnTo(a, ang, k) {
@@ -1384,7 +1441,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     return false;
   }
   function throwPaper(from, to, onLand) {
-    const p = new THREE.Mesh(paperGeo, paperM); p.castShadow = true; scene.add(p);
+    const p = new THREE.Mesh(paperGeo, paperM); scene.add(p);
     flying.push({ p, from: from.clone(), to: to.clone(), t: 0, d: 0.7, onLand });
   }
   const worldPos = (obj) => obj.getWorldPosition(new THREE.Vector3());
@@ -1633,7 +1690,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       if (a.convo) a.convo.cancelled = true; a.convo = null;
       if (a.meeting) a.meeting.cancelled = true; a.meeting = null;
       if (a.spot) a.spot.busy = false; a.spot = null;
-      a.seated = null; a.doing = ''; a.lookTarget = null; a.holder.rotation.x = 0; a.play('Idle', 0.1);
+      a.seated = null; a.doing = ''; a.lookTarget = null; a.holder.rotation.x = 0; a.holder.position.y = 0; a.moveRate = 0; a.play('Idle', 0.1);
       if (!a.atHome()) a.push(T.go(() => a.home), T.faceHome());
     }
     for (const k of Object.keys(stations)) { setPile(k, 0); if (stations[k].bin) { stations[k].bin.clear(); stations[k].binCount = 0; } }
@@ -1642,9 +1699,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
 
   // ------------------------------------------------------------------ office life (breaks, chats, games, meetings)
   const SPOTS = {
-    pantryTable: [{ pos: V(-21.25, 7.2), seat: true, face: Math.PI / 2 }, { pos: V(-18.75, 7.2), seat: true, face: -Math.PI / 2 }],
+    pantryTable: [{ pos: V(-21.25, 7.2), seat: true, face: Math.PI / 2, h: STOOL_H }, { pos: V(-18.75, 7.2), seat: true, face: -Math.PI / 2, h: STOOL_H }],
     cooler: [{ pos: V(-16.6, 9.3) }, { pos: V(-17.9, 10.2) }],
-    sofa: [{ pos: V(-21.7, 10.75), seat: true, face: Math.PI }, { pos: V(-20.3, 10.75), seat: true, face: Math.PI }],
+    sofa: [{ pos: V(-21.7, 10.75), seat: true, face: Math.PI, h: SEAT_H.sofa }, { pos: V(-20.3, 10.75), seat: true, face: Math.PI, h: SEAT_H.sofa }],
     lounge: [{ pos: V(23.2, 7.4) }, { pos: V(24.6, 7.0) }],
     floorA: [{ pos: V(-3.6, 3.4) }, { pos: V(-2.2, 3.4) }],
     floorB: [{ pos: V(3.4, 5.0) }, { pos: V(4.8, 5.0) }],
@@ -1791,8 +1848,9 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     [A, B].forEach((X, idx) => {
       const other = idx ? A : B, spot = pair[idx];
       claim(X, spot);
-      X.pushIdle(...leaveSeat(X), T.doing('chatting'), T.go(() => spot.pos), T.faceAgent(other),
-        ...(spot.seat ? [T.sit('chair', spot.pos, Math.atan2(pair[1 - idx].pos.x - spot.pos.x, pair[1 - idx].pos.z - spot.pos.z))] : []),
+      const toOther = Math.atan2(pair[1 - idx].pos.x - spot.pos.x, pair[1 - idx].pos.z - spot.pos.z);
+      X.pushIdle(...leaveSeat(X), T.doing('chatting'),
+        ...(spot.seat ? T.goSit('chair', spot, spot.face ?? toOther, spot.h) : [T.go(() => spot.pos), T.faceAgent(other)]),
         T.call(() => { c.ready++; }), T.until(() => c.ready >= 2 || c.cancelled, 30));
     });
     // the starter waits a few seconds for live lines, "typing", then falls back to scripted talk
@@ -1923,7 +1981,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     if (!seat) { storm(S, from); return; }
     claim(S, seat);
     S.nextIdle = clock + 30;
-    S.pushIdle(...leaveSeat(S), T.doing('sulking'), T.face('sad', 4), T.go(() => seat.pos), T.sit('sofa', seat.pos, seat.face), T.face('sad', 9),
+    S.pushIdle(...leaveSeat(S), T.doing('sulking'), T.face('sad', 4), ...T.goSit('sofa', seat), T.face('sad', 9),
       T.say(fresh(MUTTER), 2.6, 'chat'), T.wait(rand(9, 14)), T.call((a) => { a.doing = ''; }), T.stand());
     if (Math.random() < 0.7) pendingConsole.push({ S, at: clock + rand(7, 11) });
   }
@@ -2077,12 +2135,12 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       T.call(() => { brewing = 4; }), T.say(fresh(['Chai time', 'One cutting chai, please', 'Filter coffee today', 'Refuelling…', 'Extra ginger. Trust me.']), 2.6, 'chat'),
       T.wait(3.2), T.call((a) => { a.feel(0.05, 0.35, -0.1); a.face('love', 2); }), T.anim('Yes'));
     const seat = pick([...SPOTS.pantryTable, ...SPOTS.sofa].filter((s) => !s.busy));
-    if (seat) { claim(A, seat); A.pushIdle(T.doing('sipping chai'), T.go(() => seat.pos), T.sit(SPOTS.sofa.includes(seat) ? 'sofa' : 'chair', seat.pos, seat.face), T.wait(rand(4, 9))); }
+    if (seat) { claim(A, seat); A.pushIdle(T.doing('sipping chai'), ...T.goSit(SPOTS.sofa.includes(seat) ? 'sofa' : 'chair', seat), T.wait(rand(4, 9))); }
   }
   function wander(A) {
     const choice = pick(['window', 'desk', 'racks', 'lounge', 'garden']);
     claim(A, null);
-    if (choice === 'desk') { A.pushIdle(...leaveSeat(A), T.doing('tidying its desk'), T.go(() => A.home), T.faceHome(), T.sit('desk', A.home.clone().add(V(-A.s.face[0] * 0.25, -A.s.face[1] * 0.25)), A.faceAngle), T.wait(rand(3, 7))); return; }
+    if (choice === 'desk') { A.pushIdle(...leaveSeat(A), T.doing('tidying its desk'), ...T.goSit('desk', A.deskSeat(), A.faceAngle), T.wait(rand(3, 7))); return; }
     if (choice === 'racks') { A.pushIdle(...leaveSeat(A), T.doing('checking the servers'), T.go(() => RACKS.pos), T.faceAngle(RACKS.face), T.call(() => { serverBusy = 1.2; }), T.anim('Yes')); return; }
     const spot = pick(SPOTS[choice === 'window' ? 'window' : choice === 'garden' ? 'garden' : 'lounge'].filter((s) => !s.busy));
     if (!spot) return;
@@ -2096,7 +2154,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     if (!spot) { coffeeBreak(A); return; }
     claim(A, spot);
     const until = { t: 0 };
-    A.pushIdle(...leaveSeat(A), T.doing('walking to a nap'), T.go(() => spot.pos), T.sit('sofa', spot.pos, spot.face), T.doing('napping'),
+    A.pushIdle(...leaveSeat(A), T.doing('walking to a nap'), ...T.goSit('sofa', spot), T.doing('napping'),
       T.call((a) => { until.t = clock + rand(14, 24); onSay(a.key, fresh(['Five minutes. Just five.', 'Do not wake me unless it is biryani', 'Power nap…']), 2.6, 'chat'); }),
       { update(a, dt) { a.feel(0, dt * 0.03, -dt * 0.01); if (Math.random() < dt * 0.35) onSay(a.key, 'z z z', 1.6, 'think'); return clock > until.t || a.doing !== 'napping'; } },
       T.call((a) => { if (a.doing === 'napping') { a.doing = ''; a.face('happy', 2); } }), T.stand());
@@ -2145,7 +2203,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     if (swingSpot.busy) { wander(A); return; }
     claim(A, swingSpot);
     const sc = newScene('swing', [A], { onEnd() { swingAmp = 0; A.holder.rotation.x = 0; } });
-    A.pushIdle(...leaveSeat(A), T.doing('on the swing'), T.go(() => V(SW.x, SW.z + 0.9)), T.faceAngle(0), T.sit('swing', V(SW.x, SW.z), 0),
+    A.pushIdle(...leaveSeat(A), T.doing('on the swing'), T.go(() => V(SW.x, SW.z + SIT_FWD + 0.4)), T.sit('swing', V(SW.x, SW.z), 0, 0.475),
       T.call((a) => { a.riding = true; swingAmp = 0.42; onSay(a.key, fresh(['Wheee!', 'Higher!', 'This is the best part of the job']), 2.4, 'play'); a.face('laugh', 3); }),
       { start() { this.t = rand(8, 13); }, update(a, dt) { this.t -= dt; a.feel(0, 0, -dt * 0.01); if (this.t < 2) swingAmp *= 0.97; return this.t <= 0 || sc.over; } },
       T.call((a) => { a.riding = false; a.holder.rotation.x = 0; a.holder.position.set(SW.x, 0, SW.z + 0.15); a.feel(0.15, 0, -0.1); sc.end(); }), T.stand(), leave(sc));
@@ -2335,7 +2393,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     host.pushIdle(T.call(() => { m.done = true; if (review) partyAt = clock + 6; }), T.wait(1), T.call((a) => { a.meeting = null; a.doing = ''; }));
     attendees.forEach((p, i) => {
       const seat = seats[i]; claim(p, seat);
-      p.pushIdle(...leaveSeat(p), T.doing('in a meeting'), T.go(() => seat.pos), T.sit('chair', seat.pos, seat.face), T.call((a) => { m.arrived++; a.lookTarget = () => host.holder.position; }),
+      p.pushIdle(...leaveSeat(p), T.doing('in a meeting'), ...T.goSit('chair', seat), T.call((a) => { m.arrived++; a.lookTarget = () => host.holder.position; }),
         T.until(() => m.done || m.cancelled, 70),
         ...(i === 0 ? [T.call((a) => onSay(a.key, review ? 'Nice — let us go apply early!' : fresh(['Got it.', 'Noted.', 'Sure thing.', 'Can we go now?']), 2.6, 'chat'))] : []),
         ...(i === 1 && Math.random() < 0.5 ? [T.call((a) => { a.face('sleepy', 2); onSay(a.key, '…was I asleep?', 2, 'chat'); })] : []),
@@ -2445,12 +2503,12 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     hemi.color.set(isDark ? 0xaab4ff : 0xfff6ec); hemi.groundColor.set(isDark ? 0x15151b : 0xc9b8a6);
     hemi.intensity = isDark ? 0.35 : 0.55; sun.intensity = isDark ? 0.9 : 2.4; sun.color.set(isDark ? 0xb8c4ff : 0xfff0dc);
     scene.environmentIntensity = isDark ? 0.28 : 0.5;
-    fill.intensity = isDark ? 30 : 16; pantryLamp.intensity = isDark ? 26 : 12; serverGlow.intensity = isDark ? 22 : 8; meetLamp.intensity = isDark ? 22 : 10;
-    gameGlow.intensity = isDark ? 30 : 10; gardenLamp.intensity = isDark ? 28 : 6;
+    fill.intensity = isDark ? 44 : 16;
+    pools.forEach((m, i) => { m.opacity = isDark ? (i === pools.length - 1 ? 0.16 : 0.34) : 0.05; });
     bulbM.emissiveIntensity = isDark ? 3 : 0.35;
-    renderer.toneMappingExposure = isDark ? 1.12 : 1.0;
-    bloom.strength = isDark ? 0.55 : 0.2; bloom.radius = isDark ? 0.35 : 0.15;
+    renderer.toneMappingExposure = isDark ? 1.18 : 1.0;
     boardSig = '';
+    renderer.shadowMap.needsUpdate = true;
   }
   setTheme(dark);
 
@@ -2525,7 +2583,6 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const w = container.clientWidth, h = container.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
-    composer.setSize(w, h);
     camera.aspect = w / h;
     camera.fov = w / h < 1.3 ? 42 : 32;
     camera.updateProjectionMatrix();
@@ -2544,19 +2601,26 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   const confObj = new THREE.Object3D();
   function frame(now) {
     raf = 0; if (disposed) return;
+    // 30 frames a second is smooth for robots walking about and halves GPU/CPU work; 60 only while the person moves
+    // the camera or something flies through the air
+    const lively = dragging || performance.now() < cam.userUntil || flying.length > 0 || confetti.visible;
+    if (!lively && now - last < 1000 / 30 - 3) { schedule(); return; }
     const tFrame = performance.now();
     const rawDt = (now - last) / 1000;
     let dt = Math.min(0.12, rawDt); last = now;
     clock += dt;
-    // quality: if this machine cannot keep ~30 fps with bloom, drop bloom and the pixel ratio (once)
-    if (!perf.checked && clock > 2.5 && rawDt < 0.5) { perf.n++; perf.sum += rawDt; if (perf.n >= 90) { perf.checked = true; if (perf.sum / perf.n > 1 / 30) { hq = false; pixelRatio = 1; renderer.setPixelRatio(1); composer.setPixelRatio(1); resize(); } } }
+    // quality: if this machine cannot keep ~24 fps, drop the pixel ratio to 1 (once)
+    if (!perf.checked && clock > 2.5 && rawDt < 0.5) { perf.n++; perf.sum += rawDt; if (perf.n >= 60) { perf.checked = true; if (perf.sum / perf.n > 1 / 24 && pixelRatio > 1) { pixelRatio = 1; renderer.setPixelRatio(1); resize(); } } }
     const load = queueLoad();
     speed = load > 40 ? 2.2 : load > 20 ? 1.6 : 1;
     if (reducedMotion) dt *= 0.0001;
     director(dt);
     for (const sc of scenes) if (sc.tick) sc.tick(dt);
     for (const a of list) {
-      for (const act of Object.values(a.actions)) if (act.isRunning()) act.setEffectiveTimeScale(speed);
+      for (const [n, act] of Object.entries(a.actions)) {
+        if (!act.isRunning()) continue;
+        act.setEffectiveTimeScale(STRIDE[n] && a.moveRate ? (a.moveRate * speed) / STRIDE[n] : speed);
+      }
       // mood drifts: work tires, breaks restore; joy returns to its usual level
       const m = a.mood;
       if (a.hasWork) { m.energy = clamp(m.energy - dt * 0.004, 0, 1); m.stress = clamp(m.stress + dt * 0.002, 0, 1); }
@@ -2565,11 +2629,29 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       a.update(dt);
       if (a.danceUntil && clock < a.danceUntil && Math.random() < dt * 2.2) emitNote(worldPos(a.holder).setY(ROBOT_HEIGHT + 0.3), a.s.hue);
     }
+    // nobody stands inside anybody: standing robots closer than MIN_GAP ease apart (seated ones stay put and push)
+    for (let i = 0; i < list.length; i++) {
+      const A = list[i];
+      if (!A.holder.visible || A.riding) continue;
+      for (let j = i + 1; j < list.length; j++) {
+        const B = list[j];
+        if (!B.holder.visible || B.riding || (A.seated && B.seated)) continue;
+        const pa = A.holder.position, pb = B.holder.position;
+        let dx = pb.x - pa.x, dz = pb.z - pa.z;
+        const d = Math.hypot(dx, dz);
+        if (d >= MIN_GAP) continue;
+        if (d < 1e-3) { dx = 1; dz = 0; } else { dx /= d; dz /= d; }
+        const push = (MIN_GAP - d) * Math.min(1, dt * 8);
+        const ka = A.seated ? 0 : B.seated ? 1 : 0.5, kb = 1 - ka;
+        pa.x -= dx * push * ka; pa.z -= dz * push * ka;
+        pb.x += dx * push * kb; pb.z += dz * push * kb;
+      }
+    }
     // the swing (and whoever rides it)
     swingT += dt;
     const sAng = Math.sin(swingT * 1.9) * swingAmp;
     swing.rotation.x = sAng;
-    for (const a of list) if (a.riding) { const sp = worldPos(seat); a.holder.position.set(sp.x, sp.y - 0.6, sp.z - 0.05); a.holder.rotation.x = sAng; }
+    for (const a of list) if (a.riding) { const sp = worldPos(seat); a.holder.position.set(sp.x, sp.y + 0.035 - SIT_DROP, sp.z + SIT_FWD); a.holder.rotation.x = sAng; }
     for (let i = flying.length - 1; i >= 0; i--) {
       const f = flying[i]; f.t += (dt * speed) / f.d;
       const u = Math.min(1, f.t);
@@ -2632,7 +2714,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const ph = cam.phiNow;
     camera.position.set(look.x + Math.sin(cam.theta) * Math.sin(ph) * cam.rNow, look.y + Math.cos(ph) * cam.rNow, look.z + Math.cos(cam.theta) * Math.sin(ph) * cam.rNow);
     camera.lookAt(look);
-    if (hq) composer.render(); else renderer.render(scene, camera);
+    renderer.render(scene, camera);
     perf.cpu = (perf.cpu || 0) * 0.95 + (performance.now() - tFrame) * 0.05;
     if (frameCb) {
       const w = container.clientWidth, h = container.clientHeight, out = {};
@@ -2651,9 +2733,12 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
   io.observe(container);
   const onVis = () => { last = performance.now(); schedule(); };
   document.addEventListener('visibilitychange', onVis);
+  // compile every shader before the first frame (in parallel where the GPU driver allows), so opening the office
+  // shows the loading note a moment longer instead of freezing the page on the first frames
+  if (renderer.extensions.has('KHR_parallel_shader_compile')) { try { await renderer.compileAsync(scene, camera); } catch { /* compiles on first use */ } }
   schedule();
   // a tiny handle for measuring render cost from the browser console (no effect unless used)
-  window.__jhxOffice = { renderer, baked, select: (k) => select(k), view: (v) => view(v), setHQ(v) { hq = v; }, info: () => renderer.info.render, cpu: () => perf.cpu,
+  window.__jhxOffice = { renderer, baked, select: (k) => select(k), view: (v) => view(v), info: () => renderer.info.render, cpu: () => perf.cpu,
     /** try a scene: __jhxOffice.scene('argument', 'discover', 'dedupe') — argument | satire | jealous | scheme | banter | chase | fight | sneak */
     scene(kind, a, b) {
       const A = agents[a], B = agents[b]; if (!A || !B) return false;
@@ -2735,7 +2820,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
       boardTex.dispose(); tickerTex.dispose(); clockTex.dispose(); noteTex.dispose(); faceTextures.forEach((t) => t.dispose());
       for (const a of arcades) a.tex.dispose();
       owned.forEach((m) => { if (m.map) m.map.dispose(); if (m.dispose) m.dispose(); });
-      envTex.dispose(); pmrem.dispose(); composer.dispose && composer.dispose();
+      envTex.dispose();
       renderer.dispose(); el.remove();
     },
   };
