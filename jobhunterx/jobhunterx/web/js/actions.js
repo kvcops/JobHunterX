@@ -1076,7 +1076,7 @@ export async function startFree(keys = {}) {
     await api.setupFree();
     await loadSetup();
     setSlice('setup', { saving: false });
-    toast('Using free Kilo models. Next: your resume.', 'success');
+    toast('Using free Kilo and LLM7 models. Next: your resume.', 'success');
     setSlice('app', { phase: 'booting' });
     await startSession();
   } catch (err) {

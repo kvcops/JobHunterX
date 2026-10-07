@@ -1,5 +1,5 @@
 // First-run setup: API keys. Shown before anything else when no AI key is configured and the user
-// has not chosen Kilo's free models — without AI the resume can't be read and every search would stall.
+// has not chosen the free no-key models (Kilo, LLM7) — without AI the resume can't be read and every search would stall.
 // Layout rule: the whole form fits on one screen — compact rows, no inner scrolling.
 import { html, useState } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
@@ -66,7 +66,7 @@ export function SetupView() {
         <p class="lead">JobHunterX uses AI to read your resume and every job. Start free with no key,
           or add a free key — each takes about a minute.</p></div>
       <ul class="setup-why">
-        <li><${Icon} name="check" size=${15} /> <span><strong>No key</strong> works: Kilo's free models. <strong>One key</strong> is faster and private.</span></li>
+        <li><${Icon} name="check" size=${15} /> <span><strong>No key</strong> works: free models from Kilo, with LLM7 as a backup. <strong>One key</strong> is faster and private.</span></li>
         <li><${Icon} name="bolt" size=${15} /> <span><strong>Two or three</strong> make searches much faster — each free plan allows only a few calls a minute.</span></li>
         <li><${Icon} name="shield" size=${15} /> <span>Saved only on your computer, in <code>jobhunterx/.env</code>. Nothing is paid.</span></li>
       </ul>
@@ -79,7 +79,7 @@ export function SetupView() {
         </div>
         ${setup.error ? html`<${Notice} tone="danger">${setup.error}</${Notice}>` : null}
         <div class="setup-free">
-          <div class="grow"><strong>No key? Start free with Kilo</strong>
+          <div class="grow"><strong>No key? Start free with Kilo and LLM7</strong>
             <span class="muted small">Free AI models, no sign-up. Slower when busy, and these free models may use your prompts
               (resume text, job posts) to train — add a key below if that matters to you.</span></div>
           <${Button} busy=${setup.saving} onClick=${() => startFree(Object.fromEntries(entered.map(([k, v]) => [k, v.trim()])))}>Start free <${Icon} name="arrow" size=${14} /></${Button}>

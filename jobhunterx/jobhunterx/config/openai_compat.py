@@ -1,5 +1,5 @@
 """
-Direct client for OpenAI-compatible chat APIs: Kilo Gateway and NVIDIA NIM.
+Direct client for OpenAI-compatible chat APIs: Kilo Gateway, LLM7 and NVIDIA NIM.
 
 Why not LiteLLM here: Kilo's free models must be called with *no* Authorization
 header (any token, even a placeholder, is rejected with 401 INVALID_TOKEN), and
@@ -16,6 +16,7 @@ import httpx
 
 KILO_BASE = "https://api.kilo.ai/api/gateway"
 NIM_BASE = "https://integrate.api.nvidia.com/v1"
+LLM7_BASE = "https://api.llm7.io/v1"     # no key: one request at a time per client, small daily token quota
 
 
 class ChatError(Exception):

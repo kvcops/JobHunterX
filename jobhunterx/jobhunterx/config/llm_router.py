@@ -110,8 +110,9 @@ _inflight: Dict[str, int] = {}
 
 def _eta(model: str) -> float:
     wait = M.budget(model).eta()
-    if model.startswith("nim/"):
-        wait = max(wait, M.budget(M.NIM_ACCOUNT).eta())     # NIM's 40/min is shared by all its models
+    shared = M.account_limiter(model)
+    if shared:
+        wait = max(wait, M.budget(shared).eta())     # NIM / LLM7 limits are shared by all their models
     return wait
 
 
@@ -192,12 +193,23 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
     return sem_map[key]
 
 
+def _llm7_gate() -> asyncio.Semaphore:
+    """One LLM7 call at a time (per event loop): a second parallel call from the same client gets a 429."""
+    loop_key = id(asyncio.get_running_loop())
+    sem_map = _semaphores.setdefault(loop_key, {})
+    if "llm7" not in sem_map:
+        sem_map["llm7"] = asyncio.Semaphore(1)
+    return sem_map["llm7"]
+
+
 def _get_provider_key(model: str) -> str:
     """Extract provider key from model name."""
     if model.startswith("kilo/"):
         return model                    # Kilo limits are per model: a busy one hands over to the next free model
     if model.startswith("nim/"):
         return "nvidia"
+    if model.startswith("llm7/"):
+        return "llm7"                   # limits count per client: a 429 rests every LLM7 model
     if model.startswith("gemini/"):
         return "gemini"
     elif model.startswith("groq/"):
@@ -467,20 +479,24 @@ async def call_llm(
             log.info("llm_cache_hit", model=model)
             return {**cached, "cache_hit": True}
 
-    # --- Kilo Gateway / NVIDIA NIM: direct OpenAI-compatible calls (Kilo's free pool must get no auth header) ---
-    if model.startswith(("kilo/", "nim/")):
+    # --- Kilo / LLM7 / NVIDIA NIM: direct OpenAI-compatible calls (no-key pools must get no auth header) ---
+    if model.startswith(("kilo/", "nim/", "llm7/")):
         from jobhunterx.config import openai_compat as oc
         provider = M.provider_of(model)
         key = M.provider_key(provider)
-        base = oc.KILO_BASE if provider == "kilo" else oc.NIM_BASE
+        base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE}[provider]
         json_mode = any("JSON object" in (m.get("content") or "") for m in messages if m.get("role") == "system")
         est = sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024)
-        if provider == "nvidia":
-            await M.budget(M.NIM_ACCOUNT).acquire(0)       # 40 requests/minute shared by every NIM model
+        shared = M.account_limiter(model)
+        if shared:
+            await M.budget(shared).acquire(0)             # NIM 40/min and LLM7: shared by all their models
         await _enforce_rate_limit(model, est)
         # thinking models need room: a tiny budget can end before the answer starts
         budget_out = max(1500, int(kwargs.get("max_tokens") or 1024))
+        one_at_a_time = _llm7_gate() if provider == "llm7" else None   # LLM7 refuses a 2nd parallel call from one client
         try:
+            if one_at_a_time:
+                await one_at_a_time.acquire()
             for attempt in range(2):
                 try:
                     out = await oc.chat(base, model.split("/", 1)[1], messages, key=None if key == M.KILO_FREE else key,
@@ -495,6 +511,9 @@ async def call_llm(
             if exc.status == 429:
                 _record_rate_limit(model)
             raise
+        finally:
+            if one_at_a_time:
+                one_at_a_time.release()
         content = _THINK_RE.sub("", out["content"])
         result = {"content": content, "tokens_in": out["tokens_in"] or max(1, est // 2), "tokens_out": out["tokens_out"] or max(1, len(content) // 4),
                   "model": model, "latency_ms": out["latency_ms"], "cache_hit": False}
@@ -689,7 +708,9 @@ async def call_llm_with_fallback(
 
     # Chain order among models that can answer now; busy ones go last, least busy first.
     etas = {m: _eta(m) for m in usable}
-    ready = [m for m in usable if etas[m] <= SPILL_WAIT_S and _inflight.get(m, 0) < MAX_INFLIGHT]
+    llm7_busy = any(n > 0 for k, n in _inflight.items() if k.startswith("llm7/"))   # LLM7 takes one call at a time
+    ready = [m for m in usable if etas[m] <= SPILL_WAIT_S and _inflight.get(m, 0) < MAX_INFLIGHT
+             and not (llm7_busy and m.startswith("llm7/"))]
     order = ready + sorted((m for m in usable if m not in ready), key=lambda m: (etas[m], _inflight.get(m, 0)))
     if order and usable and order[0] != usable[0]:
         log.info("llm_spill", chain=chain_name, busy=usable[0], wait_s=round(etas[usable[0]], 1), to=order[0])

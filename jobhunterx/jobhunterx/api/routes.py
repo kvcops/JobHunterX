@@ -80,9 +80,10 @@ def _setup_status() -> dict:
     s = get_settings()
     have = {name: bool(getattr(s, f"{name}_api_key")) for name in (*_LLM_KEYS, *_SEARCH_KEYS, "kilo")}
     kilo_on = app_state.llm_provider_enabled("kilo")
+    free_on = sum(app_state.llm_provider_enabled(p) for p in ("kilo", "llm7"))   # no-key providers turned on
     free_ok = bool(app_state.get("setup.free_ok"))
-    return {"llm_ready": any(have[n] for n in _LLM_KEYS) or (kilo_on and free_ok), "keys": have,
-            "llm_count": sum(have[n] for n in _LLM_KEYS) + int(kilo_on), "kilo_on": kilo_on, "free_ok": free_ok}
+    return {"llm_ready": any(have[n] for n in _LLM_KEYS) or (free_on > 0 and free_ok), "keys": have,
+            "llm_count": sum(have[n] for n in _LLM_KEYS) + free_on, "kilo_on": kilo_on, "free_ok": free_ok}
 
 
 @router.get("/setup")
@@ -92,10 +93,10 @@ async def setup_status():
 
 @router.post("/setup/free")
 async def setup_free():
-    """Start without any key: Kilo's free models do the AI work (they may use prompts for training — the UI says so)."""
+    """Start without any key: free no-key models (Kilo, LLM7) do the AI work (they may use prompts for training — the UI says so)."""
     from jobhunterx.config import app_state
     cur = app_state.get("llm.providers")
-    cur["kilo"] = True
+    cur.update({"kilo": True, "llm7": True})
     await app_state.set("llm.providers", cur)
     await app_state.set("setup.free_ok", True)
     return _setup_status()

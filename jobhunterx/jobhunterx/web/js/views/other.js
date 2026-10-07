@@ -399,6 +399,8 @@ const LLM_META = {
   google: { name: 'Google AI Studio', field: 'google_api_key', hint: 'Gemma 4 31B and Gemini 3.5 Flash Lite', url: 'aistudio.google.com' },
   kilo: { name: 'Kilo Gateway', field: 'kilo_api_key', hint: 'Free models with no key — Nemotron 3 Super, Laguna S, Ling Flash · 200 requests/hour per model', url: 'kilo.ai (key optional)',
     free: true, note: 'Free models may use your prompts (resume text, job posts) to train. Turn off if that matters to you.' },
+  llm7: { name: 'LLM7', field: null, hint: 'Free models with no key — DeepSeek V4 Pro, MiniMax M3, GLM 5.3 Flash · one call at a time, small daily allowance, used as a backup after Kilo', url: 'llm7.io (no key)',
+    free: true, note: 'Its privacy terms are not published, so treat prompts as public. When its daily allowance is used up, the next model answers instead.' },
   nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Nemotron Nano 3, GPT-OSS 20B, GLM Flash, DeepSeek Flash · 40 requests/min', url: 'build.nvidia.com' },
   groq: { name: 'Groq', field: 'groq_api_key', hint: 'GPT-OSS, Kimi K2, Qwen3 — very fast', url: 'console.groq.com' },
   mistral: { name: 'Mistral', field: 'mistral_api_key', hint: 'Mistral Medium / Small / Large (latest)', url: 'console.mistral.ai' },
@@ -551,7 +553,7 @@ function AgentSection({ d, mode }) {
   </section>`;
 }
 
-const PROVIDER_NAMES = { google: 'Google', kilo: 'Kilo (free)', nvidia: 'NVIDIA NIM', groq: 'Groq', mistral: 'Mistral' };
+const PROVIDER_NAMES = { google: 'Google', kilo: 'Kilo (free)', llm7: 'LLM7 (free)', nvidia: 'NVIDIA NIM', groq: 'Groq', mistral: 'Mistral' };
 const SEARCH_NAMES = { tinyfish: 'TinyFish', tavily: 'Tavily', exa: 'Exa', brave: 'Brave Search', deep: 'Deep Search (free)', ddgs: 'DuckDuckGo (free)' };
 
 function UsageBody({ u }) {
@@ -575,10 +577,10 @@ function UsageBody({ u }) {
 
 function SettingsOverview({ d }) {
   if (!d) return null;
-  const llm = ['google', 'kilo', 'nvidia', 'groq', 'mistral'];
+  const llm = ['google', 'kilo', 'llm7', 'nvidia', 'groq', 'mistral'];
   const search = d.search_providers || [];
   const on = (kind, p) => !d.providers || !d.providers[kind] || d.providers[kind][p] !== false;
-  const llmReady = llm.filter((p) => (p === 'kilo' || d[`${p}_configured`]) && on('llm', p)).length;
+  const llmReady = llm.filter((p) => (p === 'kilo' || p === 'llm7' || d[`${p}_configured`]) && on('llm', p)).length;
   const searchReady = search.filter((p) => (p === 'ddgs' || p === 'deep' || d[`${p}_configured`]) && on('search', p)).length;
   const item = (ok, label, value) => html`<div class=${`ov-item ${ok ? 'ok' : 'warn'}`}><span class="ov-dot"></span><span class="grow">${label}</span><strong>${value}</strong></div>`;
   return html`<div class="set-overview">

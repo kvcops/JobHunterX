@@ -117,7 +117,7 @@ class Settings(BaseSettings):
         providers = []
         if self.google_api_key:
             providers.append("google")
-        providers.append("kilo")               # Kilo's free pool needs no key
+        providers += ["kilo", "llm7"]         # free pools that need no key
         if self.nvidia_api_key:
             providers.append("nvidia")
         if self.groq_api_key:

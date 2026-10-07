@@ -19,11 +19,11 @@ from jobhunterx.config.logging import get_logger
 log = get_logger("app_state")
 
 SEARCH_PROVIDERS = ["tinyfish", "tavily", "exa", "brave", "deep", "ddgs"]   # deep + ddgs need no key
-LLM_PROVIDERS = ["google", "kilo", "nvidia", "groq", "mistral"]   # kilo needs no key (free pool)
+LLM_PROVIDERS = ["google", "kilo", "llm7", "nvidia", "groq", "mistral"]   # kilo and llm7 need no key
 
 # Seeded on first start; later releases only ever add keys.
 DEFAULTS: dict[str, Any] = {
-    "llm.providers": {"google": True, "kilo": True, "nvidia": True, "groq": True, "mistral": True},
+    "llm.providers": {"google": True, "kilo": True, "llm7": True, "nvidia": True, "groq": True, "mistral": True},
     "llm.overrides": {},                       # chain -> preferred first model id
     "search.providers": {p: True for p in SEARCH_PROVIDERS},
     "search.order": list(SEARCH_PROVIDERS),
@@ -34,7 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "search.strategy": "smart",
     "search.strategy_v2": False,               # set once the old "fallback" default has been moved to "smart"
     "people.active": None,
-    "setup.free_ok": False,                    # the user chose to start on Kilo's free models without any key
+    "setup.free_ok": False,                    # the user chose to start on the free no-key models (Kilo, LLM7)
 }
 
 _cache: dict[str, Any] = copy.deepcopy(DEFAULTS)
