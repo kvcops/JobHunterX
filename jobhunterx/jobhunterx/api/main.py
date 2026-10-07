@@ -90,6 +90,9 @@ async def lifespan(app: FastAPI):
     from jobhunterx.api.routes import emit as api_emit
     from jobhunterx.services.watcher import watcher
     watcher.start(api_emit)
+    # the office's dialogue bank: AI writes conversations in batches every hour or two (none while a search runs)
+    from jobhunterx.services import office
+    office.start_refills()
 
     # Ensure directories
     settings.cache_full_path

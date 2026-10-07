@@ -3,18 +3,17 @@ The agents' office — live conversations and questions, grounded in real data.
 
 The 3D office shows the pipeline agents as characters. Two things here use AI:
 
-* **Break-time conversations** — two agents chat in character about what they are doing (chai, a ping-pong match,
-  something one of them saw at work). The office picks the kind of chat (banter, satire about job ads, an argument,
-  jealousy, a scheme, consoling) from their history and moods; lines can carry a physical beat (a stomp, a shove, a
-  cartoon bonk, a high-five) and the chat can end in a make-up, someone storming off or sulking, or a chase.
-  The model gets their personalities, the scene, the lines heard lately (never to be reused), and the *real* facts of
-  the last search; every number in a line must appear in those facts, or the line is dropped. Work progress is never
-  invented.
+* **Break-time conversations** — two agents chat in character (chai, a ping-pong match, a fight over the AC). The
+  office picks the kind of chat (banter, satire about job ads, an argument, jealousy, a scheme, consoling) from their
+  history and moods; lines can carry a physical beat (a stomp, a shove, a cartoon bonk, a high-five) and the chat can
+  end in a make-up, someone storming off or sulking, or a chase. These come from a *dialogue bank*: AI writes them in
+  batches every hour or two, each for one pair of agents and one kind of chat, and serving one costs no AI call.
+  Facts about the real search are placeholders filled at show time; no line may carry an invented number.
 * **Ask an agent** — the person types a question to one agent ("Why did you reject the Zoetis job?") and gets a short,
   in-character answer built only from this person's real search: counts, top matches, reasons for rejections, and the
   agent's own work log.
 
-Both fall back gracefully: without a model, the office uses its scripted talk and the question says it cannot answer.
+Both fall back gracefully: with an empty bank the office uses its scripted talk; without a model a question says it cannot answer.
 """
 
 from __future__ import annotations
@@ -71,8 +70,6 @@ DRAMA = {
     "console": "A cheers up B, who is upset after a fight; B is prickly at first, then softens",
 }
 _EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]")
-CHAT_MIN_GAP_S = 8.0           # across the whole app: a busy office never floods the model
-_last_chat = 0.0
 
 
 class Line(BaseModel):
@@ -154,78 +151,274 @@ def _clean(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + "…"
 
 
+# ---------------------------------------------------------------------------- the dialogue bank
+# Conversations are written by AI in batches and kept in the database, so a chat in the office never waits for (or
+# spends) an AI call. A refill runs at most every OFFICE_BANK_REFILL_HOURS (default 1.5 h), only while no search is
+# running (searches get the free AI limits first), and makes a few calls of BATCH scenes each. Every scene is written
+# for one pair of agents and one kind of chat, so their personalities hold. Lines may carry placeholders that are
+# filled from the latest real search when the scene is shown ({top_job}, {fits}…); a scene whose placeholder has no
+# real value yet is simply not picked. The least-heard scenes are served first, and new batches keep the talk fresh.
+
+BATCH = 8                      # scenes per AI call
+CALLS_PER_REFILL = 4           # at most this many AI calls per refill
+TARGET = 360                   # scenes kept ready; above it each refill replaces the most-heard ones
+CAP = 480
+KIND_WEIGHT = {"banter": 3, "satire": 3, "argument": 2, "break": 2, "jealous": 1, "scheme": 1, "console": 1}
+PLACEHOLDERS = {
+    "results": "how many search results the last search found",
+    "fits": "how many jobs fit the person",
+    "analysed": "how many jobs were analysed",
+    "top_job": "title of the best match",
+    "top_company": "company of the best match",
+    "binned_job": "title of a posting that was ruled out",
+    "binned_company": "its company",
+    "binned_reason": "the real reason it was ruled out",
+}
+_PH = re.compile(r"\{(\w+)\}")
+_TABLE = """CREATE TABLE IF NOT EXISTS office_scenes (
+    id TEXT PRIMARY KEY, a TEXT NOT NULL, b TEXT NOT NULL, kind TEXT NOT NULL, lines_json TEXT NOT NULL,
+    ending TEXT NOT NULL DEFAULT 'none', ending_who INTEGER NOT NULL DEFAULT 0, needs TEXT NOT NULL DEFAULT '',
+    uses INTEGER NOT NULL DEFAULT 0, last_used REAL NOT NULL DEFAULT 0, created REAL NOT NULL)"""
+_state = {"last_refill": 0.0, "running": False, "task": None}
+
+
+class SceneOut(BaseModel):
+    pair: int = Field(0, description="index into 'pairs' this scene is for")
+    lines: list[Line] = Field(default_factory=list)
+    ending: str = Field("none", description="how it ends, one of: " + ", ".join(ENDINGS))
+    ending_who: int = Field(0, description="who storms off / sulks / does the chasing: 0 = A, 1 = B")
+
+
+class SceneBatch(BaseModel):
+    scenes: list[SceneOut] = Field(default_factory=list)
+
+
+def _db():
+    import aiosqlite
+    from jobhunterx.config.database import get_db_path
+    return aiosqlite.connect(get_db_path())
+
+
+async def _ensure_table(db) -> None:
+    await db.execute(_TABLE)
+    await db.execute("CREATE INDEX IF NOT EXISTS office_scenes_pick ON office_scenes (kind, a, b, uses)")
+
+
+def _fill_values(f: dict) -> dict:
+    """Placeholder values from the latest real search (only the ones that exist)."""
+    out = {}
+    for k, src in (("results", "search_results_found"), ("fits", "jobs_that_fit"), ("analysed", "jobs_analysed")):
+        if f.get(src):
+            out[k] = str(f[src])
+    if f.get("top_matches"):
+        out["top_job"], out["top_company"] = f["top_matches"][0]["title"], f["top_matches"][0]["company"]
+    ruled = [r for r in f.get("recently_ruled_out", []) if r.get("why")]
+    if ruled:
+        r = ruled[0]
+        out.update(binned_job=r["title"], binned_company=r["company"], binned_reason=r["why"])
+    return {k: _clean(str(v), 60) for k, v in out.items() if v}
+
+
+def _norm_kind(drama: str, working: bool) -> str:
+    kind = drama if drama in DRAMA else "banter"
+    return "break" if working and kind not in ("break", "satire", "banter") else kind
+
+
 async def chat(a: str, b: str, scene: str, a_knows: list[str], b_knows: list[str], moods: dict, *, drama: str = "banter",
                relation: str = "", recent: Optional[list[str]] = None, working: bool = False) -> Optional[dict]:
-    """A short break-time conversation in character. None when no model is free (the office uses scripted talk)."""
-    global _last_chat
+    """A break-time conversation from the dialogue bank: no AI call. None when the bank has nothing fitting yet
+    (the office then uses its scripted talk)."""
     if a not in AGENTS or b not in AGENTS or a == b:
         return None
-    if time.monotonic() - _last_chat < CHAT_MIN_GAP_S:
-        return None
-    _last_chat = time.monotonic()
-    f = await facts()
-    drama = drama if drama in DRAMA else "banter"
-    if working and drama not in ("break", "satire", "banter"):
-        drama = "break"
-    if drama == "satire":                  # real postings that were binned, and why: the best material there is
-        f = {"recently_ruled_out": f.get("recently_ruled_out", [])}
-    elif drama not in ("break", "banter"):
-        f = {"note": "this scene is not about the job search; do not mention it"}
-    a_knows = [_clean(x, 120) for x in a_knows[:4]]
-    b_knows = [_clean(x, 120) for x in b_knows[:4]]
-    new_for_b = [x for x in a_knows if x not in b_knows]
-    pa, pb = AGENTS[a], AGENTS[b]
-    system = (
-        "You write a short scene of dialogue between two AI agents who work together in a job-search office in Hyderabad. "
-        "They are characters with real feelings — they tease, get sarcastic, lose their temper, sulk, scheme, get jealous, "
-        "make up. Write it like a sitcom: natural spoken English with a light Indian flavour, people interrupting each "
-        "other, trailing off (…), reacting to what was just said instead of taking polite turns. Keep it playful: "
-        "anger is cartoonish, a shove or a bonk is slapstick, nobody is cruel, no slurs, no real people. "
-        "Rules: 3 to 7 lines, alternating speakers mostly, each line at most 90 characters, no emoji, no hashtags. "
-        "The kind of scene leads; the search facts are background — mention them at most once, only when it fits. "
-        "Use ONLY the facts given for anything about jobs or the search — never invent numbers, companies, job titles or "
-        "progress; write any number as digits. If A knows something B doesn't, A may tell B (gossip). "
-        "Tone example (do not copy): A: 'Who put my chair in the sun?' B: 'It looked cold.' A: 'It is a CHAIR.' "
-        "B: 'A cold chair, though.' A: '…I am going to bonk you.' "
-        "NEVER reuse a line or joke from 'heard_recently' — find a new angle. "
-        "Pick an emotion, a gesture and an action (usually 'none') for every line from the allowed lists, and an ending.")
-    user = json.dumps({
-        "A": {"name": pa[0], "job": pa[1], "personality": pa[2], "mood": moods.get("a", "")},
-        "B": {"name": pb[0], "job": pb[1], "personality": pb[2], "mood": moods.get("b", "")},
-        "relationship": _clean(relation, 80) or "colleagues",
-        "kind_of_scene": drama + " — " + DRAMA[drama],
-        "scene": _clean(scene, 160),
-        "a_knows_b_doesnt": new_for_b,
-        "heard_recently": [_clean(x, 90) for x in (recent or [])[-16:]],
-        "real_facts": f,
-        "allowed_emotions": EMOTIONS, "allowed_gestures": GESTURES, "allowed_actions": ACTIONS,
-        "allowed_endings": ENDINGS if not working else ["none", "make_up", "storm_off", "sulk"],
-    }, ensure_ascii=False, default=str)
-    try:
-        from jobhunterx.intelligence.llm_structured import call_structured
-        res, model = await call_structured(task="office_chat", version="v2", model=Chat, system=system, user=user,
-                                           chain="fast", max_tokens=900, use_cache=False)
-    except Exception as exc:
-        log.debug("office_chat_failed", error=str(exc)[:100])
-        return None
-    if not res or not res.lines:
-        return None
-    allowed = json.dumps(f, default=str) + " ".join(a_knows + b_knows) + scene
+    kind = _norm_kind(drama, working)
     heard = {_clean(x, 100).lower() for x in (recent or [])}
-    lines = []
-    for ln in res.lines[:7]:
-        text = _clean(ln.text, 100)
-        if not text or not _numbers_ok(text, allowed, loose=drama != "break") or text.lower() in heard:
+    values = _fill_values(await facts())
+    async with _db() as db:
+        await _ensure_table(db)
+        cur = await db.execute(
+            "SELECT id, a, lines_json, ending, ending_who, needs FROM office_scenes WHERE kind = ? AND "
+            "((a = ? AND b = ?) OR (a = ? AND b = ?)) ORDER BY uses ASC, last_used ASC LIMIT 12", (kind, a, b, b, a))
+        rows = await cur.fetchall()
+        for sid, sa, lines_json, ending, ending_who, needs in rows:
+            if any(n not in values for n in needs.split(",") if n):
+                continue
+            lines = json.loads(lines_json)
+            flip = sa != a                    # written as (b, a): swap 'who' so each agent says its own lines
+            out = []
+            for ln in lines:
+                text = _PH.sub(lambda m: values.get(m.group(1), m.group(0)), ln["text"])
+                out.append({**ln, "text": text, "who": (1 - ln["who"]) if flip else ln["who"]})
+            if out and out[0]["text"].lower() in heard:
+                continue
+            if working and ending == "chase":
+                ending = "none"
+            await db.execute("UPDATE office_scenes SET uses = uses + 1, last_used = ? WHERE id = ?", (time.time(), sid))
+            await db.commit()
+            who = (1 - ending_who) if flip else ending_who
+            return {"lines": out, "learned": [], "model": "bank", "source": "bank", "ending": ending, "ending_who": who}
+    return None
+
+
+async def bank_status() -> dict:
+    async with _db() as db:
+        await _ensure_table(db)
+        cur = await db.execute("SELECT kind, COUNT(*), SUM(uses) FROM office_scenes GROUP BY kind")
+        by_kind = {k: {"scenes": n, "heard": int(u or 0)} for k, n, u in await cur.fetchall()}
+    every = _refill_every_s()
+    nxt = max(0.0, _state["last_refill"] + every - time.time()) if _state["last_refill"] else None
+    return {"scenes": sum(v["scenes"] for v in by_kind.values()), "by_kind": by_kind, "target": TARGET,
+            "refilling": _state["running"], "last_refill": _state["last_refill"] or None,
+            "next_refill_in_s": None if nxt is None else round(nxt), "refill_every_s": round(every)}
+
+
+def _refill_every_s() -> float:
+    import os
+    try:
+        return max(0.25, float(os.getenv("OFFICE_BANK_REFILL_HOURS", "1.5"))) * 3600
+    except ValueError:
+        return 1.5 * 3600
+
+
+async def _plan_batch(db) -> tuple[str, list[tuple[str, str]]]:
+    """The kind with the fewest scenes for its weight, and the BATCH pairs with the fewest scenes of that kind."""
+    import random
+    cur = await db.execute("SELECT kind, a, b, COUNT(*) FROM office_scenes GROUP BY kind, a, b")
+    have: dict = {}
+    for k, sa, sb, n in await cur.fetchall():
+        have[(k, frozenset((sa, sb)))] = have.get((k, frozenset((sa, sb))), 0) + n
+    totals = {k: sum(n for (kk, _), n in have.items() if kk == k) for k in KIND_WEIGHT}
+    kind = min(KIND_WEIGHT, key=lambda k: (totals[k] / KIND_WEIGHT[k], random.random()))
+    keys = list(AGENTS)
+    pairs = [(x, y) for i, x in enumerate(keys) for y in keys[i + 1:]]
+    random.shuffle(pairs)
+    pairs.sort(key=lambda p: have.get((kind, frozenset(p)), 0))
+    return kind, [p if random.random() < 0.5 else (p[1], p[0]) for p in pairs[:BATCH]]
+
+
+async def _write_batch(db, kind: str, pairs: list[tuple[str, str]]) -> int:
+    """One AI call: BATCH new scenes of one kind, each for its own pair of agents. Returns how many were kept."""
+    import uuid
+    cur = await db.execute("SELECT lines_json FROM office_scenes WHERE kind = ? ORDER BY created DESC LIMIT 40", (kind,))
+    old_firsts = [json.loads(r[0])[0]["text"] for r in await cur.fetchall()]
+    with_facts = kind in ("banter", "break", "satire")
+    system = (
+        "You write short scenes of dialogue between two AI agents who work together in a job-search office in Hyderabad. "
+        "They are characters with real feelings — they tease, get sarcastic, lose their temper, sulk, scheme, get jealous, "
+        "make up. Write like a sitcom: natural spoken English with a light Indian flavour, people interrupting each other, "
+        "trailing off (…), reacting to what was just said instead of taking polite turns. Keep it playful: anger is "
+        "cartoonish, a shove or a bonk is slapstick, nobody is cruel, no slurs, no real people or brands. "
+        f"Write exactly {len(pairs)} scenes, one for each entry in 'pairs' (set 'pair' to its index), every scene different "
+        "in topic and joke. Each scene: 3 to 7 lines, speakers mostly alternating (who: 0 = A of that pair, 1 = B), each "
+        "line at most 90 characters, no emoji, no hashtags. Let each agent's personality and job show. "
+        "Never write numbers about the job search, company names or job titles. "
+        + ("For one or two scenes you MAY refer to the real latest search through placeholders written exactly like "
+           "{top_job}, chosen from 'placeholders' — they are filled with real values later; never write such facts yourself. "
+           if with_facts else "This kind of scene is not about the job search; do not mention it. ")
+        + "Do not reuse any opening from 'openings_already_used'. Pick an emotion, a gesture and an action (usually 'none') "
+          "for every line from the allowed lists, and an ending.")
+    user = json.dumps({
+        "kind_of_scene": kind + " — " + DRAMA[kind],
+        "pairs": [{"A": {"name": AGENTS[x][0], "job": AGENTS[x][1], "personality": AGENTS[x][2]},
+                   "B": {"name": AGENTS[y][0], "job": AGENTS[y][1], "personality": AGENTS[y][2]}} for x, y in pairs],
+        **({"placeholders": PLACEHOLDERS} if with_facts else {}),
+        "openings_already_used": [_clean(t, 90) for t in old_firsts],
+        "allowed_emotions": EMOTIONS, "allowed_gestures": GESTURES, "allowed_actions": ACTIONS,
+        "allowed_endings": ENDINGS if kind != "break" else ["none", "make_up", "storm_off", "sulk"],
+    }, ensure_ascii=False)
+    from jobhunterx.intelligence.llm_structured import call_structured
+    res, model = await call_structured(task="office_bank", version="v1", model=SceneBatch, system=system, user=user,
+                                       chain="fast", max_tokens=4000, use_cache=False)
+    if not res:
+        return 0
+    seen = {t.lower() for t in old_firsts}
+    kept = 0
+    for sc in res.scenes:
+        if not 0 <= sc.pair < len(pairs):
             continue
-        lines.append({"who": 1 if ln.who == 1 else 0, "text": text,
-                      "emotion": ln.emotion if ln.emotion in EMOTIONS else "neutral",
-                      "gesture": ln.gesture if ln.gesture in GESTURES and ln.gesture != "none" else None,
-                      "action": ln.action if ln.action in ACTIONS and ln.action != "none" else None})
-    if len(lines) < 2:
-        return None
-    learned = [new_for_b[i] for i in res.learned if 0 <= i < len(new_for_b)]
-    ending = res.ending if res.ending in ENDINGS and not (working and res.ending == "chase") else "none"
-    return {"lines": lines, "learned": learned, "model": model, "ending": ending, "ending_who": 1 if res.ending_who == 1 else 0}
+        lines, needs = [], set()
+        for ln in sc.lines[:7]:
+            text = _clean(ln.text, 100)
+            names = set(_PH.findall(text))
+            if not text or not names <= set(PLACEHOLDERS) or not _numbers_ok(_PH.sub("", text), "", loose=kind != "break"):
+                continue
+            needs |= names
+            lines.append({"who": 1 if ln.who == 1 else 0, "text": text,
+                          "emotion": ln.emotion if ln.emotion in EMOTIONS else "neutral",
+                          "gesture": ln.gesture if ln.gesture in GESTURES and ln.gesture != "none" else None,
+                          "action": ln.action if ln.action in ACTIONS and ln.action != "none" else None})
+        if len(lines) < 3 or lines[0]["text"].lower() in seen:
+            continue
+        seen.add(lines[0]["text"].lower())
+        x, y = pairs[sc.pair]
+        ending = sc.ending if sc.ending in ENDINGS else "none"
+        await db.execute("INSERT INTO office_scenes (id, a, b, kind, lines_json, ending, ending_who, needs, created) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         (uuid.uuid4().hex, x, y, kind, json.dumps(lines, ensure_ascii=False), ending,
+                          1 if sc.ending_who == 1 else 0, ",".join(sorted(needs)), time.time()))
+        kept += 1
+    await db.commit()
+    log.info("office_bank_batch", kind=kind, kept=kept, asked=len(pairs), model=model)
+    return kept
+
+
+async def refill(force: bool = False) -> int:
+    """Write a few batches of new scenes (skipped while a search runs, or if the last refill was recent)."""
+    if not _state["last_refill"]:                 # after a restart: the newest scene tells when the last refill ran
+        async with _db() as db:
+            await _ensure_table(db)
+            cur = await db.execute("SELECT MAX(created) FROM office_scenes")
+            _state["last_refill"] = (await cur.fetchone())[0] or 0.0
+    if _state["running"] or (not force and time.time() - _state["last_refill"] < _refill_every_s()):
+        return 0
+    run = await storage.latest_run()
+    if run and run.get("status") in ("queued", "running"):
+        return 0                                  # a search needs the free AI limits more than the office does
+    _state["running"] = True
+    added = 0
+    try:
+        async with _db() as db:
+            await _ensure_table(db)
+            cur = await db.execute("SELECT COUNT(*) FROM office_scenes")
+            total = (await cur.fetchone())[0]
+            calls = CALLS_PER_REFILL if total < TARGET else 1      # full bank: one batch keeps it fresh
+            for i in range(calls):
+                kind, pairs = await _plan_batch(db)
+                try:
+                    added += await _write_batch(db, kind, pairs)
+                except Exception as exc:              # no free model right now: try again at the next refill
+                    log.info("office_bank_batch_failed", error=str(exc)[:120])
+                    break
+            cur = await db.execute("SELECT COUNT(*) FROM office_scenes")
+            extra = (await cur.fetchone())[0] - (CAP if total < TARGET else TARGET)
+            if extra > 0:                             # retire the most-heard scenes first
+                await db.execute("DELETE FROM office_scenes WHERE id IN (SELECT id FROM office_scenes "
+                                 "ORDER BY uses DESC, created ASC LIMIT ?)", (extra,))
+                await db.commit()
+    finally:
+        _state["running"] = False
+        _state["last_refill"] = time.time()
+    return added
+
+
+def start_refills() -> None:
+    """Background loop: the first refill a minute after start (so startup stays fast), then every refill period.
+    A run that was skipped because a search was running is retried 10 minutes later."""
+    import asyncio
+    if _state["task"]:
+        return
+
+    async def loop() -> None:
+        await asyncio.sleep(60)
+        while True:
+            try:
+                before = _state["last_refill"]
+                await refill()
+                wait = _refill_every_s() if _state["last_refill"] != before else 600
+            except Exception as exc:
+                log.warning("office_bank_refill_failed", error=str(exc)[:160])
+                wait = 600
+            await asyncio.sleep(wait)
+    _state["task"] = asyncio.create_task(loop())
 
 
 async def ask(agent: str, question: str) -> dict:

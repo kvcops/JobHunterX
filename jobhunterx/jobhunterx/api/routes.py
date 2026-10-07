@@ -532,11 +532,18 @@ class OfficeAskIn(BaseModel):
 
 @router.post("/office/chat")
 async def office_chat(body: OfficeChatIn):
-    """A live break-time conversation between two agents (204 when no model is free — the office uses scripted talk)."""
+    """A break-time conversation from the dialogue bank — no AI call (204 when none fits yet: the office uses scripted talk)."""
     from jobhunterx.services import office
     out = await office.chat(body.a, body.b, body.scene, body.a_knows, body.b_knows, body.moods,
                             drama=body.drama, relation=body.relation, recent=body.recent, working=body.working)
     return out or Response(status_code=204)
+
+
+@router.get("/office/bank")
+async def office_bank():
+    """How many conversations are ready, by kind, and when the next batch is written."""
+    from jobhunterx.services import office
+    return await office.bank_status()
 
 
 @router.post("/office/ask")

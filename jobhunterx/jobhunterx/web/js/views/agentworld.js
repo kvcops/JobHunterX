@@ -136,7 +136,7 @@ function MiniFace({ expr, drawFace, cls = 'aw3d-face' }) {
 }
 const AI_KEY = 'jhx.office.ai';
 const readAI = () => { try { return localStorage.getItem(AI_KEY) !== '0'; } catch { return true; } };
-const KIND_WORD = { work: 'work', chat: 'chat', ai: 'live AI chat', play: 'play', think: 'thinking', ask: 'answer', memory: 'memory' };
+const KIND_WORD = { work: 'work', chat: 'chat', ai: 'AI-written chat', play: 'play', think: 'thinking', ask: 'answer', memory: 'memory' };
 const LOG_KEEP = 80;
 
 /**
@@ -166,6 +166,7 @@ function World3D({ run, items, states, lastLine }) {
   const [ask, setAsk] = useState('');
   const [asking, setAsking] = useState(false);
   const [qa, setQA] = useState({});                  // agent key -> [{ q, a }]
+  const [bank, setBank] = useState(null);            // the dialogue bank: how many AI-written chats are ready
   const [, tick] = useState(0);
   const c = run.counts || {};
 
@@ -236,6 +237,7 @@ function World3D({ run, items, states, lastLine }) {
   });
   useEffect(() => { if (world.current) world.current.setFollow(follow); }, [follow, mode]);
   useEffect(() => { if (showLog && logEnd.current) logEnd.current.scrollIntoView({ block: 'end' }); }, [log, showLog]);
+  useEffect(() => { if (showLog) api.officeBank().then(setBank).catch(() => setBank(null)); }, [showLog]);
   // the selected robot's card shows where it is and how it feels; refresh that twice a second while a card is open
   useEffect(() => {
     if (!selected) return undefined;
@@ -294,7 +296,7 @@ function World3D({ run, items, states, lastLine }) {
           const cls = ['aw3d-tag', `is-${st}`, say ? 'talking' : '', selected === key ? 'is-selected' : ''].join(' ');
           return html`<div key=${d.key} data-key=${key} class=${cls} style=${{ '--h': d.hue, opacity: 0 }}
             ref=${(el) => { if (el && tags.current[key] !== el && sizer.current) sizer.current.observe(el); tags.current[key] = el; }}>
-            ${say ? html`<div class=${`aw3d-say is-${say.kind}`}>${sayBody(say)}${say.kind === 'ai' ? html`<span class="aw3d-ai" title="Live AI conversation">AI</span>` : null}</div>` : null}
+            ${say ? html`<div class=${`aw3d-say is-${say.kind}`}>${sayBody(say)}${say.kind === 'ai' ? html`<span class="aw3d-ai" title="Written by AI (from the office's dialogue bank)">AI</span>` : null}</div>` : null}
             <div class="aw3d-name"><canvas class="aw3d-face" width="48" height="30" aria-hidden="true"></canvas>${d.name}<span class="dot"></span></div>
           </div>`;
         })}
@@ -304,7 +306,8 @@ function World3D({ run, items, states, lastLine }) {
         ${ROOMS.map(([k, label]) => html`<button type="button" key=${k} class="aw3d-chip" aria-pressed=${room === k ? 'true' : 'false'} onClick=${() => goRoom(k)}>${label}</button>`)}
       </div>
       ${showLog ? html`<aside class="aw3d-log" aria-label="Office talk">
-        <div class="aw3d-log-head"><div><strong>Office talk</strong><span class="muted small">work updates, chats, games and gossip</span></div>
+        <div class="aw3d-log-head"><div><strong>Office talk</strong><span class="muted small">work updates, chats, games and gossip</span>
+          ${bank ? html`<span class="muted small">${bank.scenes} AI-written chats ready${bank.refilling ? ' · writing more now' : bank.next_refill_in_s != null ? ` · more in ${Math.max(1, Math.round(bank.next_refill_in_s / 60))} min` : ''}</span>` : null}</div>
           <button type="button" class="aw3d-x" aria-label="Close" onClick=${() => setShowLog(false)}>×</button></div>
         <ol class="aw3d-log-list">
           ${log.length ? log.map((l) => { const d = deskOf(l.key); return html`<li key=${l.id} class=${`is-${l.kind}`} style=${{ '--h': d.hue }}>
@@ -337,7 +340,7 @@ function World3D({ run, items, states, lastLine }) {
         <span class="aw3d-hint">${busy.length ? html`<strong>${busy.join(', ')}</strong> working now` : states.every((x) => x === 'done') ? 'Everyone has finished — break time' : 'No search running — the team is on a break'}
           <span class="muted"> · click a robot · drag to look around · scroll to zoom</span></span>
         <div class="row gap">
-          <button type="button" class="aw3d-btn" aria-pressed=${ai ? 'true' : 'false'} onClick=${toggleAI} title="Let the agents chat live with a free AI model on their breaks">${ai ? 'AI chats on' : 'AI chats off'}</button>
+          <button type="button" class="aw3d-btn" aria-pressed=${ai ? 'true' : 'false'} onClick=${toggleAI} title="Break-time talk written by AI in batches every hour or two (no AI call per chat). Off = built-in lines only.">${ai ? 'AI chats on' : 'AI chats off'}</button>
           <button type="button" class="aw3d-btn" aria-pressed=${showLog ? 'true' : 'false'} onClick=${() => setShowLog(!showLog)}>Office talk${log.length ? ` · ${log.length}` : ''}</button>
           <button type="button" class="aw3d-btn" aria-pressed=${follow ? 'true' : 'false'} onClick=${() => setFollow(!follow)}
             title="Move the camera to wherever agents are working together">${follow ? '● Following the action' : 'Follow the action'}</button>

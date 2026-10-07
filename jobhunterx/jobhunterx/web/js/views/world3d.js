@@ -1795,21 +1795,25 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
     const c = { turn: -1, ready: 0, cancelled: false, lines: null, learned: [], ai: false, kind, end: null };
     A.convo = c; B.convo = c;
     const f = facts();
-    // scripted fallback, with a bit of gossip when A knows something B does not
+    // a bit of gossip first when A knows something B does not (scripted talk and conversations from the bank alike)
+    const gossip = (lines) => {
+      const news = A.mem.find((m) => !B.mem.some((x) => x.text === m.text));
+      if (!news || Math.random() >= 0.5 || ['argument', 'scheme'].includes(kind)) return lines;
+      c.learned = [news.text];
+      return [{ who: 0, text: `Did you hear? ${short(news.text, 70)}`, emotion: 'surprised' },
+        { who: 1, text: fresh(GOSSIP_REPLY), emotion: pick(['surprised', 'laugh', 'sneaky']) }, ...lines];
+    };
+    // scripted fallback (the dialogue bank has nothing for this pair yet)
     const fallback = () => {
       const data = DATA_TALK.filter((d) => d.needs.every((n) => f[n]));
       const sc = data.length && ['banter', 'break'].includes(kind) && Math.random() < (runActive ? 0.4 : 0.2)
         ? { lines: pick(data).lines, end: null } : pickScript(kind);
-      const lines = sc.lines.slice();
-      const news = A.mem.find((m) => !B.mem.some((x) => x.text === m.text));
-      if (news && Math.random() < 0.5 && !['argument', 'scheme'].includes(kind)) {
-        lines.unshift([0, `Did you hear? ${short(news.text, 70)}`, null, 'surprised'], [1, fresh(GOSSIP_REPLY), null, pick(['surprised', 'laugh', 'sneaky'])]);
-        c.learned = [news.text];
-      }
       c.end = sc.end;
-      return lines.map(([who, text, gesture, expr, action]) => ({ who, text: fill_(text, f), gesture, emotion: exprName(expr), action }));
+      return gossip(sc.lines.map(([who, text, gesture, expr, action]) => ({ who, text: fill_(text, f), gesture, emotion: exprName(expr), action })));
     };
-    const wantAI = talk && aiOn && clock - lastAI > 22 && Math.random() < 0.75;
+    // conversations come from the server's dialogue bank (written by AI in batches, no AI call per chat), so most
+    // chats can use one; the scripted talk above is the fallback
+    const wantAI = talk && aiOn && clock - lastAI > 5 && Math.random() < 0.85;
     if (wantAI) {
       lastAI = clock;
       talk({ a: A.key, b: B.key, scene: scene || `on a break ${pair[0].seat ? 'sitting' : 'standing'} ${WHERE_TEXT[roomOf(pair[0].pos)] || ''}`,
@@ -1817,7 +1821,7 @@ export async function createWorld(container, { dark = false, reducedMotion = fal
         recent: saved.said.slice(-16), working: runActive })
         .then((r) => {
           if (c.lines || !r || !r.lines || !r.lines.length) return;
-          c.lines = r.lines; c.learned = r.learned || []; c.ai = true;
+          c.learned = r.learned || []; c.lines = gossip(r.lines); c.ai = true;
           for (const ln of c.lines) noteSaid(ln.text);
           const map = { make_up: 'makeup', storm_off: 'storm', sulk: 'sulk', chase: 'chase' };
           const w = r.ending_who === 1 ? 1 : 0;
