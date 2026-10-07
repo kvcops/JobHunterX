@@ -480,6 +480,105 @@ def _actions_of(model_output: Any, state: Any) -> list[str]:
 
 # ---------------------------------------------------------------------------- building blocks
 
+# Kilo free models that drive the browser well. Measured Oct 2026 with browser-use's output format: all four answer in
+# 1-4 s. Nemotron 3 Nano Omni is left out: it returns no choices for agent-style prompts.
+_KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "poolside/laguna-s-2.1:free", "inclusionai/ling-3.1-flash"]
+# LLM7 free models (no key) after Kilo: a quick backup (small daily quota), the next model answers when it says no.
+_LLM7_BROWSER = ["deepseek-v4-pro", "minimax-m3"]
+
+
+def _json_only(text: str) -> str:
+    """Free models often wrap the JSON in ```json fences or a sentence: keep the outer {...}."""
+    i, j = text.find("{"), text.rfind("}")
+    return text[i:j + 1] if 0 <= i < j else text
+
+
+def _free_llm(provider: str, model: str, key: str) -> Any:
+    """A no-key pool (Kilo, LLM7) through browser-use's OpenAI client. Kilo's free pool rejects any Authorization header
+    and most free models refuse strict JSON-schema output, so: no auth header, the schema goes in the prompt, Kilo's
+    reasoning is off (see openai_compat.KILO_EXTRA), and screenshots are dropped (text models; the page text is still sent)."""
+    import openai
+    from browser_use.llm.openai.chat import ChatOpenAI
+    from jobhunterx.config import models as M
+    from jobhunterx.config import openai_compat as oc
+
+    def text_only(msg: dict) -> dict:
+        parts = msg.get("content")
+        if not isinstance(parts, list):
+            return msg
+        return {**msg, "content": [p for p in parts if not (isinstance(p, dict) and p.get("type") == "image_url")] or ""}
+
+    class FreeChat(ChatOpenAI):
+        def get_client(self) -> Any:
+            client = super().get_client()
+            create = client.chat.completions.create
+
+            async def create_free(*, messages: list, **kw: Any) -> Any:
+                if provider == "kilo":
+                    kw["extra_body"] = oc.KILO_EXTRA
+                resp = await create(messages=[text_only(m) for m in messages], **kw)
+                for choice in resp.choices or []:
+                    if choice.message.content:
+                        choice.message.content = _json_only(choice.message.content)
+                return resp
+
+            client.chat.completions.create = create_free
+            return client
+
+    free = key == M.KILO_FREE
+    base = oc.KILO_BASE if provider == "kilo" else oc.LLM7_BASE
+    return FreeChat(model=model, api_key="no-key" if free else key, base_url=base,
+                    default_headers={"Authorization": openai.Omit()} if free else None,
+                    temperature=0.2, frequency_penalty=None, max_retries=0, timeout=90,
+                    dont_force_structured_output=True, add_schema_to_system_prompt=True)
+
+
+class _LLMChain:
+    """Many models behind one. browser-use switches to its fallback_llm only once per run and then stops, so a
+    Gemini "RESOURCE_EXHAUSTED" followed by one busy fallback ended the whole run. Here every call walks the list
+    (Gemini → Kilo free models → LLM7 → Groq → Mistral → Gemma) and skips models the app's AI router already knows are
+    resting or rate limited (shared state in config.models), so the browser agent and the rest of the app agree."""
+
+    def __init__(self, links: list[tuple[str, Any]]):
+        self._links = links
+        self._cur = links[0][1]
+
+    @property
+    def model(self) -> str:
+        return self._cur.model
+
+    @property
+    def provider(self) -> str:
+        return self._cur.provider
+
+    @property
+    def name(self) -> str:
+        return self._cur.name
+
+    @property
+    def model_name(self) -> str:
+        return self._cur.model
+
+    async def ainvoke(self, messages: list, output_format: Any = None, **kwargs: Any) -> Any:
+        from browser_use.llm.exceptions import ModelProviderError
+        from jobhunterx.config import models as M
+        ready = [(mid, llm) for mid, llm in self._links
+                 if not M.resting(mid) and not M.key_rejected(M.provider_of(mid))] or self._links
+        last: Optional[Exception] = None
+        for mid, llm in ready:
+            self._cur = llm
+            try:
+                out = await llm.ainvoke(messages, output_format, **kwargs)
+            except ModelProviderError as exc:          # rate limits, server errors, bad output: the next model takes over
+                last = exc
+                M.mark_failure(mid, f"{getattr(exc, 'status_code', '')} {exc.message}")
+                log.warning("browser_llm_handover", model=mid, error=str(exc.message)[:160])
+                continue
+            M.mark_success(mid)
+            return out
+        raise last or RuntimeError("No AI model answered")
+
+
 def _build_llms() -> tuple[Any, Any]:
     from browser_use.llm.google.chat import ChatGoogle
     try:
@@ -491,25 +590,34 @@ def _build_llms() -> tuple[Any, Any]:
     except ImportError:
         ChatMistral = None
     from jobhunterx.config import app_state as _app_state
+    from jobhunterx.config import models as M
     s = get_settings()
     google_key = (s.google_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) if _app_state.llm_provider_enabled("google") else None
     groq_key = (s.groq_api_key or os.getenv("GROQ_API_KEY")) if _app_state.llm_provider_enabled("groq") else None
     mistral_key = (s.mistral_api_key or os.getenv("MISTRAL_API_KEY")) if _app_state.llm_provider_enabled("mistral") else None
-    candidates: list[Any] = []
+    kilo_key = M.provider_key("kilo") if _app_state.llm_provider_enabled("kilo") else None
+    llm7_on = _app_state.llm_provider_enabled("llm7")
+    links: list[tuple[str, Any]] = []
     if google_key:
-        candidates.append(ChatGoogle(model="gemini-3.5-flash-lite", api_key=google_key, temperature=0.2, max_retries=6,
-                                     retry_base_delay=4.0, retry_max_delay=40.0, retryable_status_codes=[429, 500, 502, 503, 504]))
+        # 429 / RESOURCE_EXHAUSTED is not retried here: the next model in the chain answers at once instead
+        links.append(("gemini/gemini-3.5-flash-lite", ChatGoogle(
+            model="gemini-3.5-flash-lite", api_key=google_key, temperature=0.2, max_retries=3,
+            retry_base_delay=2.0, retry_max_delay=10.0, retryable_status_codes=[500, 502, 503, 504])))
+    if kilo_key:
+        links += [(f"kilo/{m}", _free_llm("kilo", m, kilo_key)) for m in _KILO_BROWSER]
+    if llm7_on:
+        links += [(f"llm7/{m}", _free_llm("llm7", m, M.KILO_FREE)) for m in _LLM7_BROWSER]
     if groq_key and ChatGroq is not None:
-        candidates.append(ChatGroq(model="openai/gpt-oss-120b", api_key=groq_key, temperature=0.2, max_retries=6))
+        links.append(("groq/openai/gpt-oss-120b", ChatGroq(model="openai/gpt-oss-120b", api_key=groq_key, temperature=0.2, max_retries=1)))
     if mistral_key and ChatMistral is not None:
-        candidates.append(ChatMistral(model="mistral-small-latest", api_key=mistral_key, temperature=0.2, max_retries=6))
-    if google_key and len(candidates) < 2:
+        links.append(("mistral/mistral-small-latest", ChatMistral(model="mistral-small-latest", api_key=mistral_key, temperature=0.2, max_retries=1)))
+    if google_key:
         # last resort only: free Gemma is slow and often overloaded, so don't sit in long retry loops on it
-        candidates.append(ChatGoogle(model="gemma-4-31b-it", api_key=google_key, temperature=0.2, max_retries=1,
-                                     retry_base_delay=2.0, retry_max_delay=5.0))
-    if not candidates:
+        links.append(("gemini/gemma-4-31b-it", ChatGoogle(model="gemma-4-31b-it", api_key=google_key, temperature=0.2, max_retries=1,
+                                                          retry_base_delay=2.0, retry_max_delay=5.0)))
+    if not links:
         raise RuntimeError("No AI provider is available for the browser agent. Add a key or turn a provider on in Settings.")
-    return candidates[0], (candidates[1] if len(candidates) > 1 else None)
+    return _LLMChain(links), None        # the chain does the falling back; browser-use's one-time fallback is not needed
 
 
 # Runs on the element the agent picked: finds the real checkbox (native input, its <label>, or an ARIA
