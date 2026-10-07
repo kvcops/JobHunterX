@@ -6,7 +6,7 @@ import { useStore } from '../state/store.js';
 import {
   loadWatchlist, checkWatchlistNow, navigate, setList, loadMonitors, addMonitor, checkMonitor, rescoutMonitor, removeMonitor,
 } from '../actions.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, PageHead, Tabs, Icon, Monogram, Notice, Spinner } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, PageHead, Tabs, Icon, Monogram, Notice, Spinner, Portal } from '../components/ui.js';
 import { CompanySection } from './jobdetail.js';
 import { runProgress } from './discover.js';
 import {
@@ -105,27 +105,93 @@ function useScoutFrames(canvas) {
   return has;
 }
 
+const WIN_KEY = 'jhx.scout.window';
+const readWin = () => { try { const v = JSON.parse(localStorage.getItem(WIN_KEY) || 'null'); return v && typeof v === 'object' ? v : {}; } catch { return {}; } };
+const saveWin = (v) => { try { localStorage.setItem(WIN_KEY, JSON.stringify(v)); } catch { /* private mode: not remembered */ } };
+const EDGE = 8;                                   // px kept between the window and the edge of the screen
+
+/**
+ * The scout's live browser as a small floating window. It is rendered straight into <body> (a card's backdrop blur
+ * would otherwise become its frame and push it off the page), always kept fully on screen, and can be minimised to a
+ * title bar, made big (never taller than the screen) or dragged anywhere by its title bar. Double-click the title bar
+ * to put it back in the corner. Size and place are remembered in this browser.
+ */
 function ScoutWindow({ m }) {
   const canvas = useRef();
+  const box = useRef();
   const has = useScoutFrames(canvas);
-  const [big, setBig] = useState(false);
+  const [win, setWin] = useState(() => ({ mode: 'small', pos: null, ...readWin() }));   // mode: small | big | min
+  const update = (patch) => setWin((cur) => { const next = { ...cur, ...patch }; saveWin(next); return next; });
+  const free = () => window.innerWidth > 760;      // on phones the window is a bottom sheet, never dragged
+  const keepOnScreen = (p) => {
+    const el = box.current;
+    if (!p || !el) return p;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;   // without scrollbars
+    return { x: Math.round(Math.min(Math.max(EDGE, p.x), Math.max(EDGE, vw - w - EDGE))),
+             y: Math.round(Math.min(Math.max(EDGE, p.y), Math.max(EDGE, vh - h - EDGE))) };
+  };
+  // whenever the window or the screen changes size, slide it back inside the screen (an effect, not a layout effect:
+  // the portal draws the window in its own effect, which runs first)
+  useEffect(() => {
+    const fit = () => setWin((cur) => { if (!cur.pos) return cur; const p = keepOnScreen(cur.pos); return p.x === cur.pos.x && p.y === cur.pos.y ? cur : { ...cur, pos: p }; });
+    fit();
+    const ro = new ResizeObserver(fit); if (box.current) ro.observe(box.current);
+    window.addEventListener('resize', fit);
+    return () => { ro.disconnect(); window.removeEventListener('resize', fit); };
+  }, [win.mode]);
+  const drag = useRef(null);
+  const onDown = (e) => {
+    if (!free() || e.button !== 0 || (e.target.closest && e.target.closest('button'))) return;
+    const r = box.current.getBoundingClientRect();
+    drag.current = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    box.current.classList.add('is-dragging');
+  };
+  const onMove = (e) => {
+    if (!drag.current) return;
+    const p = keepOnScreen({ x: e.clientX - drag.current.dx, y: e.clientY - drag.current.dy });
+    box.current.style.left = `${p.x}px`; box.current.style.top = `${p.y}px`;      // moved directly: no re-render per pixel
+    box.current.style.right = 'auto'; box.current.style.bottom = 'auto';
+    drag.current.last = p;
+  };
+  const onUp = () => {
+    if (!drag.current) return;
+    const p = drag.current.last; drag.current = null;
+    box.current.classList.remove('is-dragging');
+    if (p) update({ pos: p });
+  };
   const steps = (m.steps || []).slice().reverse();
-  let host = '';
-  try { host = m.url ? new URL(m.url).host : ''; } catch { host = ''; }
-  return html`<div class=${`scout-window card ${big ? 'is-big' : ''}`} role="region" aria-label=${`Company Scout working on ${m.company}`}>
-    <div class="scout-bar">
+  const big = win.mode === 'big', min = win.mode === 'min';
+  const place = win.pos && free() ? { left: `${win.pos.x}px`, top: `${win.pos.y}px`, right: 'auto', bottom: 'auto' } : {};
+  return html`<${Portal}><div ref=${box} class=${`scout-window card is-${win.mode}`} style=${place} role="region"
+      aria-label=${`Company Scout working on ${m.company}`}>
+    <div class="scout-bar" onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp}
+      onDblClick=${(e) => { if (!(e.target.closest && e.target.closest('button'))) update({ pos: null }); }}
+      title=${free() ? 'Drag to move · double-click to put it back in the corner' : ''}>
       <span class="live-dot"></span>
-      <strong class="grow">Company Scout · ${m.company}${m.location ? ` · ${m.location}` : ''}</strong>
-      <button type="button" class="link-btn small" onClick=${() => setBig(!big)} aria-label=${big ? 'Make the window small' : 'Make the window big'}>
-        <${Icon} name=${big ? 'x' : 'external'} size=${14} /></button>
+      <strong class="grow scout-title">Company Scout · ${m.company}${m.location ? ` · ${m.location}` : ''}</strong>
+      <div class="scout-ctrls">
+        <button type="button" class="icon-btn" onClick=${() => update({ mode: min ? 'small' : 'min' })}
+          aria-label=${min ? 'Show the scout window' : 'Minimise the scout window'} title=${min ? 'Show' : 'Minimise'}>
+          <${Icon} name=${min ? 'external' : 'minus'} size=${14} /></button>
+        ${min ? null : html`<button type="button" class="icon-btn" onClick=${() => update({ mode: big ? 'small' : 'big' })}
+          aria-label=${big ? 'Make the window small' : 'Make the window big'} title=${big ? 'Smaller' : 'Bigger'}>
+          <${Icon} name=${big ? 'shrink' : 'enlarge'} size=${14} /></button>`}
+        ${win.pos ? html`<button type="button" class="icon-btn" onClick=${() => update({ pos: null })}
+          aria-label="Put the window back in the corner" title="Back to the corner"><${Icon} name="corner" size=${14} /></button>` : null}
+      </div>
     </div>
-    <div class="scout-url muted small" title=${m.url || ''}>${host ? html`<${Icon} name="globe" size=${12} /> ${m.url}` : 'Starting the browser…'}</div>
-    <div class="scout-screen">
-      <canvas ref=${canvas} aria-label="Live view of the scout's browser"></canvas>
-      ${has ? null : html`<div class="scout-wait"><${Spinner} size=${16} /> <span>${m.status === 'queued' ? 'Waiting for the scout…' : 'Opening the browser…'}</span></div>`}
+    ${min ? html`<div class="scout-now muted small">${steps[0] ? steps[0].text : 'Starting the browser…'}</div>` : null}
+    <div class="scout-body" hidden=${min}>
+      <div class="scout-url muted small" title=${m.url || ''}>${m.url ? html`<${Icon} name="globe" size=${12} /> ${m.url}` : 'Starting the browser…'}</div>
+      <div class="scout-screen">
+        <canvas ref=${canvas} aria-label="Live view of the scout's browser"></canvas>
+        ${has ? null : html`<div class="scout-wait"><${Spinner} size=${16} /> <span>${m.status === 'queued' ? 'Waiting for the scout…' : 'Opening the browser…'}</span></div>`}
+      </div>
+      <ol class="scout-steps">${steps.slice(0, big ? 6 : 3).map((st, i) => html`<li key=${steps.length - i} class=${i === 0 ? 'is-now' : ''}>${st.text}</li>`)}</ol>
     </div>
-    <ol class="scout-steps">${steps.slice(0, big ? 10 : 3).map((st, i) => html`<li key=${steps.length - i} class=${i === 0 ? 'is-now' : ''}>${st.text}</li>`)}</ol>
-  </div>`;
+  </div></${Portal}>`;
 }
 
 /** Companies you pick yourself. The Company Scout agent opens each careers site once, sets the filters and learns how

@@ -14,6 +14,10 @@ const ICONS = {
   gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm8.5 3a8.5 8.5 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a8 8 0 0 0-2.2-1.3L15.5 2h-4l-.4 2.6a8 8 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.6a8.5 8.5 0 0 0 0 2.6l-2 1.6 2 3.4 2.4-1a8 8 0 0 0 2.2 1.3l.4 2.6h4l.4-2.6a8 8 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3z',
   star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z',
   x: 'M6 6l12 12M18 6 6 18',
+  minus: 'M5 12h14',
+  enlarge: 'M14 4h6v6M10 20H4v-6M20 4l-6 6M4 20l6-6',
+  shrink: 'M20 10h-6V4M4 14h6v6M14 10l6-6M10 14l-6 6',
+  corner: 'M4 4h16v16H4zM13 13h7v7h-7z',
   check: 'M5 12.5l4.5 4.5L19 7.5',
   alert: 'M12 4 2.5 20h19zM12 10v4.5M12 17.5v.5',
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 8v6m0-9.5v.5',
@@ -406,7 +410,7 @@ export function PageHead({ title, sub, actions }) {
 
 // ---------------------------------------------------------------------------- portal + select
 /** Renders children into <body> so dropdowns are never clipped by scrolling panes or transformed cards. */
-function Portal({ children }) {
+export function Portal({ children }) {
   const host = useRef(null);
   if (!host.current) { host.current = document.createElement('div'); host.current.className = 'portal'; }
   useEffect(() => {

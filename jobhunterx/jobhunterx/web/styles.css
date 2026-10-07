@@ -1684,11 +1684,22 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 @media (max-width: 760px) { .monitor-head { flex-wrap: wrap; } .monitor-actions { width: 100%; justify-content: flex-start; } .monitor-feed, .monitor-jobs { padding-left: 0; } }
 .my-companies-title { margin: 0 0 4px; font-size: 1.05rem; font-weight: 600; }
 
-/* Company Scout live window (floats bottom-right while a scout runs) */
+/* Company Scout live window: floats bottom-right while a scout runs; minimise, bigger/smaller, drag by the title bar.
+   It is rendered into <body>, so `fixed` means the screen; the big size is limited by the screen's height too. */
 .scout-window { position: fixed; right: 18px; bottom: 18px; z-index: 60; width: min(420px, calc(100vw - 32px)); padding: 10px;
-  display: flex; flex-direction: column; gap: 6px; box-shadow: 0 24px 48px -20px rgba(0,0,0,.45); background: var(--card-solid); }
-.scout-window.is-big { width: min(900px, calc(100vw - 32px)); }
-.scout-bar { display: flex; align-items: center; gap: 8px; font-size: .84rem; }
+  display: flex; flex-direction: column; gap: 6px; box-shadow: 0 24px 48px -20px rgba(0,0,0,.45); background: var(--card-solid);
+  max-height: calc(100dvh - 16px); transition: width .18s ease; }
+.scout-window.is-big { width: min(900px, calc(100vw - 32px), calc((100dvh - 230px) * 1.42)); min-width: min(420px, calc(100vw - 32px)); }
+.scout-window.is-min { width: min(340px, calc(100vw - 32px)); padding: 8px 10px; gap: 2px; }
+.scout-window.is-min .scout-body { display: none; }
+.scout-window.is-dragging { transition: none; user-select: none; box-shadow: 0 30px 60px -18px rgba(0,0,0,.55); }
+.scout-body { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.scout-bar { display: flex; align-items: center; gap: 8px; font-size: .84rem; cursor: grab; touch-action: none; user-select: none; }
+.scout-window.is-dragging .scout-bar { cursor: grabbing; }
+.scout-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scout-ctrls { display: flex; gap: 2px; flex: none; }
+.scout-ctrls .icon-btn { width: 26px; height: 26px; }
+.scout-now { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 16px; }
 .scout-url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
 .scout-screen { position: relative; border-radius: 10px; overflow: hidden; background: #111; aspect-ratio: 1280 / 900; }
 .scout-screen canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -1696,4 +1707,5 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .scout-steps { margin: 0; padding-left: 18px; font-size: .78rem; color: var(--text-2); display: grid; gap: 2px; }
 .scout-steps li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .scout-steps li.is-now { color: var(--ink); font-weight: 500; }
-@media (max-width: 760px) { .scout-window { right: 16px; left: 16px; width: auto; bottom: 16px; } }
+@media (max-width: 760px) { .scout-window, .scout-window.is-big, .scout-window.is-min { right: 16px; left: 16px; width: auto; min-width: 0; bottom: 16px; }
+  .scout-bar { cursor: default; } }
