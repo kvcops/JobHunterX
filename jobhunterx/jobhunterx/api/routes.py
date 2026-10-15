@@ -679,6 +679,10 @@ class CvRequest(BaseModel):
     focus: str = Field("", max_length=120)
 
 
+class DocumentUpdateRequest(BaseModel):
+    content: dict
+
+
 async def _doc_detail(doc) -> dict:
     current = await _current_hash()
     job = None
@@ -737,6 +741,22 @@ async def get_document(doc_id: str):
     if not doc:
         raise HTTPException(404, "Document not found")
     return {"document": await _doc_detail(doc)}
+
+
+@router.patch("/documents/{doc_id}")
+async def update_document(doc_id: str, body: DocumentUpdateRequest):
+    doc = await storage.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    profile = await _profile_or_400()
+    try:
+        updated = await docs_svc.update_document(doc, body.content, profile)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except LookupError:
+        raise HTTPException(404, "Document not found")
+    await _summary_and_publish(doc.job_id) if doc.job_id else None
+    return {"document": await _doc_detail(updated)}
 
 
 def _slug(s: str) -> str:

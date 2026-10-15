@@ -550,6 +550,19 @@ export async function loadDocument(docId) {
     setEntry('docDetails', docId, { status: 'error', doc: null, error: errorText(err) });
   }
 }
+export async function updateDocument(docId, content) {
+  try {
+    const { document } = await api.updateDocument(docId, content);
+    setEntry('docDetails', docId, { status: 'ready', doc: document, error: null });
+    loadDocuments();
+    if (document.job_id && getState().details[document.job_id]) loadDetail(document.job_id, { silent: true });
+    toast('Document saved and PDF updated.', 'success');
+    return document;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return null;
+  }
+}
 export async function deleteDocument(docId) {
   if (!(await confirmAction({ title: 'Delete this document?', body: 'The PDF and its history will be removed.', confirm: 'Delete', tone: 'danger' }))) return;
   try {

@@ -143,7 +143,8 @@ def _company_profile(p: JobPosting) -> Optional[dict]:
 def document_summary(d, current_hash: Optional[str], job: Optional[JobPosting] = None) -> dict:
     return {
         "id": d.id, "kind": d.kind, "job_id": d.job_id, "title": d.title, "focus": d.focus,
-        "created_at": _iso(d.created_at), "profile_hash": d.profile_hash,
+        "created_at": _iso(d.created_at), "updated_at": _iso(d.updated_at), "profile_hash": d.profile_hash,
+        "manually_edited": d.manually_edited,
         "stale": bool(current_hash and d.profile_hash != current_hash),
         "page_count": d.page_count, "has_pdf": d.has_pdf, "warnings_count": len(d.provenance.warnings),
         "job": {"title": job.title, "company": job.company} if job else None,

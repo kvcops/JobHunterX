@@ -602,17 +602,36 @@ async def save_document(doc: GeneratedDocument, pdf: Optional[bytes]) -> str:
 
 
 async def get_document(doc_id: str) -> Optional[GeneratedDocument]:
+    where, params = _scope("id = ?", (doc_id,))
     async with _conn() as db:
-        cur = await db.execute("SELECT data_json FROM documents WHERE id = ?", (doc_id,))
+        cur = await db.execute(f"SELECT data_json FROM documents WHERE {where}", params)
         row = await cur.fetchone()
     return GeneratedDocument.model_validate_json(row[0]) if row else None
 
 
 async def get_document_pdf(doc_id: str) -> Optional[bytes]:
+    where, params = _scope("id = ?", (doc_id,))
     async with _conn() as db:
-        cur = await db.execute("SELECT pdf FROM documents WHERE id = ?", (doc_id,))
+        cur = await db.execute(f"SELECT pdf FROM documents WHERE {where}", params)
         row = await cur.fetchone()
     return row[0] if row else None
+
+
+async def update_document(doc: GeneratedDocument, pdf: bytes) -> bool:
+    where, scope_params = _scope("id = ?", (doc.id,))
+    async with _conn() as db:
+        cur = await db.execute(
+            f"UPDATE documents SET data_json = ?, pdf = ?, title = ?, focus = ?, profile_hash = ? WHERE {where}",
+            (doc.model_dump_json(), pdf, doc.title, doc.focus, doc.profile_hash, *scope_params))
+        if cur.rowcount == 0:
+            return False
+        if doc.kind == "resume" and doc.job_id:
+            await db.execute(
+                "UPDATE jobs SET tailored_pdf = ? WHERE id = ? AND " +
+                ("person_id = ?" if active_person() else "person_id IS NULL"),
+                (pdf, doc.job_id, active_person()) if active_person() else (pdf, doc.job_id))
+        await db.commit()
+    return True
 
 
 async def list_documents(job_id: Optional[str] = None, kind: Optional[str] = None) -> list[GeneratedDocument]:
@@ -644,8 +663,9 @@ async def latest_document_ids(job_ids: list[str]) -> dict[str, dict[str, str]]:
 
 
 async def delete_document(doc_id: str) -> bool:
+    where, params = _scope("id = ?", (doc_id,))
     async with _conn() as db:
-        cur = await db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        cur = await db.execute(f"DELETE FROM documents WHERE {where}", params)
         await db.commit()
         return cur.rowcount > 0
 

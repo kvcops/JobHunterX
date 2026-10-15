@@ -281,15 +281,24 @@ concurrent generation for the same `(job_id, kind)` with 409.
 | POST | `/api/documents/cv` | `{ focus?: string }` | `{ document: DocumentDetail }` |
 | GET | `/api/documents?job_id=&kind=` | – | `{ documents: DocumentSummary[] }` |
 | GET | `/api/documents/{id}` | – | `{ document: DocumentDetail }` |
+| PATCH | `/api/documents/{id}` | `{ content: ResumeContent \| CoverLetterContent }` | `{ document: DocumentDetail }` |
 | GET | `/api/documents/{id}/pdf` | – | `application/pdf` (attachment) |
 | DELETE | `/api/documents/{id}` | – | `{ ok: true }` |
+
+`PATCH /api/documents/{id}` updates the existing document in place. The content is
+validated against the document kind's structured model and rendered immediately
+to a replacement PDF. User-authored edits are accepted without AI fact-check
+rejection, and the response sets `manually_edited` and `updated_at`; the
+original generation provenance remains available in `provenance`. Invalid
+structured content returns the standard `422` validation error. Document reads,
+updates, downloads, and deletes are scoped to the active profile.
 
 ```ts
 type DocumentSummary = {
   id: string; kind: "resume"|"cv"|"cover_letter"; job_id: string|null;
-  title: string; focus: string; created_at: string;
+  title: string; focus: string; created_at: string; updated_at: string;
   profile_hash: string; stale: boolean;          // profile changed since generation
-  page_count: number; has_pdf: boolean; warnings_count: number;
+  page_count: number; has_pdf: boolean; manually_edited: boolean; warnings_count: number;
   job: { title: string; company: string } | null;
 };
 
@@ -432,4 +441,3 @@ Every jobs, documents and search-run query is scoped to the active profile.
 
 Generated documents expose `header.links[]`, `projects[].links[]` and `item_links{ entry text: Link[] }`; each link has
 `text`, what is printed (a short address in the header, the label next to a project).
-

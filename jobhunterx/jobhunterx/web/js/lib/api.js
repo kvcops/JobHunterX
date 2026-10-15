@@ -183,6 +183,7 @@ export const api = {
   generateCv: (focus, o) => request('/documents/cv', { method: 'POST', body: focus ? { focus } : {}, timeout: 120_000, ...o }),
   listDocuments: (query, o) => request('/documents', { query, ...o }),
   getDocument: (id, o) => request(`/documents/${enc(id)}`, o),
+  updateDocument: (id, content, o) => request(`/documents/${enc(id)}`, { method: 'PATCH', body: { content }, ...o }),
   deleteDocument: (id, o) => request(`/documents/${enc(id)}`, { method: 'DELETE', ...o }),
   documentPdfUrl: (id) => `/api/documents/${enc(id)}/pdf`,
 
