@@ -15,6 +15,28 @@ Codes: `bad_request` (400), `forbidden` (403 — cross-site write blocked), `not
 
 ---
 
+## Login (only when `APP_ENV=prod`)
+
+Without `APP_ENV=prod` none of this applies and there is no login. With it, every path except `/login`,
+`/healthz`, `/api/auth/login`, `/api/auth/me` and the login page's static files needs the `jhx_session`
+cookie: API calls without it get `401`, pages redirect to `/login`, WebSockets close with code `4401`.
+Ids of another user's records answer `404`. `/docs`, `/redoc` and `/openapi.json` are off.
+
+| Method | Path | Body | Response |
+|:--|:--|:--|:--|
+| GET | `/api/auth/me` | – | `{ enabled, user: { id, username, is_admin } \| null }` |
+| POST | `/api/auth/login` | `{ username, password }` | `{ user }` + session cookie. `401` wrong login, `429` after 5 wrong tries (15 min) |
+| POST | `/api/auth/logout` | – | `{ ok }`, clears the cookie, `Clear-Site-Data` |
+| POST | `/api/auth/password` | `{ current, new }` | `{ ok }` (not for the admin: that one is set in `.env`) |
+| GET | `/api/auth/users` | – | admin: `{ users: [{ id, username, is_admin, disabled, profiles, keys, signed_in, last_login }] }` |
+| POST | `/api/auth/users` | `{ username, password }` | admin: creates a normal user |
+| PATCH | `/api/auth/users/{id}` | `{ password?, disabled? }` | admin: new password / block sign-in (signs them out) |
+| DELETE | `/api/auth/users/{id}` | – | admin: deletes the user and all their data |
+
+Admin only in prod mode: `POST /api/providers`, `POST /api/models`, `/api/system/*`, `GET /api/usage`,
+`POST /api/pipeline-mode`, `POST /api/reset`. For other users `GET/POST /api/settings` show and save only
+their own keys (`*_api_key` fields).
+
 ## Profile
 
 The candidate profile is a first-class object. `snapshot` is derived from it

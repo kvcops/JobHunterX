@@ -270,7 +270,8 @@ async def run_queries(queries: list[str], per_query: int = 10,
     router = SearchRouter(config=router_config())
     lists, strategy = _provider_lists(router, len(queries))
     deep_router = SearchRouter(config={**router_config(), "DEEP_USE_AI": False}) if strategy == "smart" else None
-    sem = asyncio.Semaphore(QUERY_CONCURRENCY)
+    from jobhunterx.config import capacity
+    sem = asyncio.Semaphore(capacity.plan().get("query_concurrency") or QUERY_CONCURRENCY)
     done = {"n": 0}
 
     async def one(q: str, providers: list[str]) -> list:

@@ -2,7 +2,7 @@
 // Views read the store; actions mutate it.
 import { html, render, useEffect, useLayoutEffect, useRef, useState } from './lib/preact.js';
 import { useStore } from './state/store.js';
-import { boot, navigate, setTheme, retryBoot } from './actions.js';
+import { boot, navigate, setTheme, retryBoot, logout } from './actions.js';
 import { Icon, ConfirmDialog, Toasts, Button } from './components/ui.js';
 import { DiscoverView } from './views/discover.js';
 import { CompaniesView } from './views/companies.js';
@@ -12,6 +12,7 @@ import { OnboardingView } from './views/onboarding.js';
 import { SetupView } from './views/setup.js';
 import { PeoplePicker, ProfileSwitcher } from './views/people.js';
 import { TrackerView, BrowserView, InterventionsView, SettingsView } from './views/other.js';
+import { UsersView } from './views/users.js';
 
 // Ordered the way the work flows: who you are → what fits → what you send → where it stands.
 const NAV_GROUPS = [
@@ -26,11 +27,12 @@ const NAV_GROUPS = [
     { page: 'browser', label: 'Auto-apply', icon: 'globe' },
     { page: 'interventions', label: 'Interventions', icon: 'hand' },
   ] },
-  { label: 'System', items: [{ page: 'settings', label: 'Settings', icon: 'gear' }] },
+  { label: 'System', items: [{ page: 'settings', label: 'Settings', icon: 'gear' },
+    { page: 'users', label: 'Users', icon: 'users', admin: true }] },   // prod mode, admin only
 ];
 const VIEWS = {
   discover: DiscoverView, companies: CompaniesView, profile: ProfileView, documents: DocumentsView, tracker: TrackerView,
-  browser: BrowserView, interventions: InterventionsView, settings: SettingsView,
+  browser: BrowserView, interventions: InterventionsView, settings: SettingsView, users: UsersView,
 };
 
 function Ambient() {
@@ -63,6 +65,9 @@ function Sidebar() {
   const runActive = useStore((s) => !!(s.search.run && ['queued', 'running'].includes(s.search.run.status)));
   const ivCount = useStore((s) => s.interventions.items.length);
   const watchActive = useStore((s) => !!(s.watch.run && ['queued', 'running'].includes(s.watch.run.status)));
+  const auth = useStore((s) => s.auth);
+  const showAdmin = !!(auth.enabled && auth.user && auth.user.is_admin);
+  const groups = NAV_GROUPS.map((g) => ({ ...g, items: g.items.filter((n) => !n.admin || showAdmin) }));
   // One highlight that glides to the active item instead of jumping.
   const groupsRef = useRef();
   const [ind, setInd] = useState(null);
@@ -85,7 +90,7 @@ function Sidebar() {
       </a>
       <div class="nav-groups" ref=${groupsRef}>
         ${ind ? html`<span class="nav-ind" aria-hidden="true" style=${{ transform: `translate(${ind.x}px, ${ind.y}px)`, width: `${ind.w}px`, height: `${ind.h}px` }}></span>` : null}
-        ${NAV_GROUPS.map((g) => html`<div class="nav-group" key=${g.label}>
+        ${groups.map((g) => html`<div class="nav-group" key=${g.label}>
         <div class="nav-label nav-group-label">${g.label}</div>
         <ul class="nav">${g.items.map((n) => html`<li key=${n.page}><a href=${`#/${n.page}`} class=${route.page === n.page ? 'active' : ''}
           aria-current=${route.page === n.page ? 'page' : undefined} title=${n.label}>
@@ -97,6 +102,8 @@ function Sidebar() {
       </div>`)}</div>
       <div class="sidebar-foot">
         <${ProfileSwitcher} />
+        ${auth.enabled && auth.user ? html`<button type="button" class="icon-btn theme-btn" title=${`Signed in as ${auth.user.username} — log out`}
+          aria-label=${`Log out ${auth.user.username}`} onClick=${logout}><${Icon} name="logout" size=${17} /></button>` : null}
         <button type="button" class="icon-btn theme-btn" aria-label=${`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick=${() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
           <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} size=${17} /></button>
       </div>
@@ -107,12 +114,14 @@ function Sidebar() {
 function AppShell() {
   const route = useStore((s) => s.route);
   const activity = useStore((s) => s.activity[0]);
-  const View = VIEWS[route.page] || DiscoverView;
+  const auth = useStore((s) => s.auth);
+  const page = route.page === 'users' && !(auth.enabled && auth.user && auth.user.is_admin) ? 'discover' : route.page;
+  const View = VIEWS[page] || DiscoverView;
   return html`<div class="shell">
     <a class="skip-link" href="#main">Skip to content</a>
     <${Sidebar} />
     <main id="main" class="main" tabindex="-1">
-      <${View} key=${route.page} />
+      <${View} key=${page} />
     </main>
     ${activity ? html`<div class="activity-line" aria-live="polite" key=${activity.id}>${activity.message}</div>` : null}
   </div>`;

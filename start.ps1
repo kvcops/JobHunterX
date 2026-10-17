@@ -80,13 +80,13 @@ if (-not (Test-Path "jobhunterx\.env")) {
 if ($NoStart) { Say "Setup done and checked. Run this command again (without -NoStart) to start the app."; exit 0 }
 
 # ---------------------------------------------------------------- 5. start, then open the browser once it answers
-$port = 8000
+$port = 9000
 $line = Select-String -Path "jobhunterx\.env" -Pattern '^\s*PORT\s*=\s*(\d+)' | Select-Object -First 1
 if ($line) { $port = [int]$line.Matches[0].Groups[1].Value }
 $url = "http://127.0.0.1:$port"
 if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
     Say "Something is already running on port $port - probably JobHunterX in another window. Opening $url"
-    Say "If it is another program, set PORT=8001 in jobhunterx\.env and run this again."
+    Say "If it is another program, set PORT=9001 in jobhunterx\.env and run this again."
     Start-Process $url
     exit 0
 }
@@ -99,7 +99,7 @@ $ready = $false
 for ($i = 0; $i -lt 120; $i++) {
     if ($server.HasExited) { break }
     try {
-        $r = Invoke-WebRequest "$url/api/setup" -UseBasicParsing -TimeoutSec 2
+        $r = Invoke-WebRequest "$url/healthz" -UseBasicParsing -TimeoutSec 2
         if ($r.StatusCode -eq 200) { $ready = $true; break }
     } catch { }
     Start-Sleep -Milliseconds 500

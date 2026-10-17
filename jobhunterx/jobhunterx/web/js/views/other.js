@@ -4,7 +4,7 @@ import { useStore } from '../state/store.js';
 import {
   loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention, markInterventionApplied,
   applyControl, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
-  loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion,
+  loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion, changePassword, setOfficeAI,
 } from '../actions.js';
 import { PeopleManager } from './people.js';
 import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice, reduced } from '../components/ui.js';
@@ -448,33 +448,48 @@ function Toggle({ on, onChange, label }) {
 
 function AiSection({ d, models }) {
   const md = models.data;
+  const own = !!d.restricted;       // prod mode, not the admin: only their own keys, no server switches
+  const meta = Object.entries(LLM_META).filter(([, m]) => !(own && m.free));
   return html`<section class="set-section">
     <div class="row space"><h2>AI providers</h2>
-      <${Button} size="sm" icon="refresh" busy=${models.status === 'refreshing' || models.status === 'loading'} onClick=${refreshModels}>Check available models</${Button}></div>
-    <p class="muted small">Turn a provider off to never use it. Keys are read from your .env file (or system environment) and can be changed here — they are written back to .env.</p>
-    <div class="prov-list">${Object.entries(LLM_META).map(([k, m]) => {
+      ${own ? null : html`<${Button} size="sm" icon="refresh" busy=${models.status === 'refreshing' || models.status === 'loading'} onClick=${refreshModels}>Check available models</${Button}>`}</div>
+    <p class="muted small">${own
+      ? 'Add your own free keys. They are saved encrypted in your account and used only for your searches — no one else can see or use them.'
+      : 'Turn a provider off to never use it. Keys are read from your .env file (or system environment) and can be changed here — they are written back to .env.'}</p>
+    <div class="prov-list">${meta.map(([k, m]) => {
       const st = md && md.providers[k];
       const on = d.providers.llm[k] !== false;
       return html`<div class=${`prov-card ${on ? '' : 'off'}`} key=${k}>
         <div class="prov-head"><div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint} · keys at ${m.url}</div></div>
-          ${st && st.configured ? html`<span class=${`status-dot ${st.reachable === false ? 'bad' : st.reachable ? 'good' : ''}`}
+          ${st && st.configured && !own ? html`<span class=${`status-dot ${st.reachable === false ? 'bad' : st.reachable ? 'good' : ''}`}
             title=${st.error || ''}>${st.reachable === false ? 'Key rejected / unreachable' : st.reachable ? `${st.models_listed} models available` : 'Not checked yet'}</span>` : null}
-          <${Toggle} on=${on} label=${`Use ${m.name}`} onChange=${(v) => setProviders({ llm: { [k]: v } })} /></div>
+          ${own ? null : html`<${Toggle} on=${on} label=${`Use ${m.name}`} onChange=${(v) => setProviders({ llm: { [k]: v } })} />`}</div>
         ${m.free ? html`<div class="row gap small"><${Badge} tone="success">Works without a key</${Badge}><span class="muted">${m.note}</span></div>`
           : html`<${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />`}
       </div>`;
     })}</div>
+    ${own ? null : html`<${ModelChains} md=${md} models=${models} />`}
+  </section>`;
+}
+
+function ModelChains({ md, models }) {
+  return html`
     <h3 class="sub-title">Model for each task</h3>
     <p class="muted small">The chosen model is tried first; if it's busy, rate limited or unavailable the next one in the list takes over automatically. Free-tier limits are shown for each model.</p>
     ${md ? html`<div class="form-grid">${Object.entries(md.chains).map(([key, ch]) => html`<${Field} label=${ch.name}>${(id) => html`<${Select} id=${id} block label=${ch.name}
         value=${ch.selected} onChange=${(v) => setModel(key, v)}
         options=${ch.options.map((mid) => { const m = md.all_models.find((x) => x.id === mid) || { name: mid, limits: {} };
           return [mid, `${m.name}${m.reason ? ` — ${m.reason}` : ''}`, fmtLimit(m.limits || {})]; })} />`}</${Field}>`)}</div>`
-      : models.status === 'error' ? html`<${ErrorBox} message=${models.error} />` : html`<${Skeleton} lines=${3} />`}
-  </section>`;
+      : models.status === 'error' ? html`<${ErrorBox} message=${models.error} />` : html`<${Skeleton} lines=${3} />`}`;
 }
 
 function SearchSection({ d }) {
+  if (d.restricted) return html`<section class="set-section"><h2>Web search</h2>
+    <p class="muted small">Optional. Without a key, the free Deep Search finds jobs for you. Your keys are saved encrypted in your account.</p>
+    <div class="prov-list">${Object.entries(SEARCH_META).filter(([, m]) => m.field).map(([k, m]) => html`<div class="prov-card" key=${k}>
+      <div class="prov-head"><div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint}</div></div></div>
+      <${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />
+    </div>`)}</div></section>`;
   const order = d.providers.search_order;
   const move = (p, dir) => {
     const i = order.indexOf(p); const j = i + dir;
@@ -590,6 +605,43 @@ function SettingsOverview({ d }) {
   </div>`;
 }
 
+function AccountSection() {
+  const auth = useStore((s) => s.auth);
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const user = auth.user || {};
+  const save = async (e) => {
+    e.preventDefault();
+    if (!cur || next.length < 8) return;
+    setBusy(true);
+    if (await changePassword(cur, next)) { setCur(''); setNext(''); }
+    setBusy(false);
+  };
+  return html`<section class="set-section"><h2>Account</h2>
+    <p class="muted small">Signed in as <strong>${user.username}</strong>${user.is_admin ? ' (admin)' : ''}. Logging out clears everything this browser kept for the app.</p>
+    ${user.is_admin ? html`<${Notice} tone="info">The admin password is set by ADMIN_PASSWORD in the server's .env file. Change it there and restart.</${Notice}>`
+      : html`<form class="form-grid" onSubmit=${save} autocomplete="off">
+        <${Field} label="Current password">${(id) => html`<input id=${id} class="input" type="password" autocomplete="current-password" value=${cur}
+          onInput=${(e) => setCur(e.currentTarget.value)} />`}</${Field}>
+        <${Field} label="New password" hint="At least 8 characters. Other devices are signed out.">${(id) => html`<input id=${id} class="input" type="password"
+          autocomplete="new-password" value=${next} onInput=${(e) => setNext(e.currentTarget.value)} />`}</${Field}>
+        <div class="row gap"><${Button} type="submit" variant="primary" busy=${busy} disabled=${!cur || next.length < 8}>Change password</${Button}></div>
+      </form>`}
+  </section>`;
+}
+
+function OfficeSection({ d }) {
+  const on = d.office_ai_enabled !== false;
+  return html`<section class="set-section"><h2>Agents office</h2>
+    <p class="muted small">The 3D office in Discover shows the search agents at work. With AI on, their break-time chats are written by AI
+      in batches every hour or two, and you can ask an agent a question. Off = built-in lines and plain summaries: no AI calls at all.</p>
+    <div class="set-toggles"><div class="set-toggle"><div><strong>Use AI in the agents office</strong>
+      <span class="muted small">${on ? 'On — uses a few AI calls an hour (never while a search runs).' : 'Off — saves every AI call for searches.'}</span></div>
+      <${Toggle} on=${on} label="Use AI in the agents office" onChange=${setOfficeAI} /></div></div>
+  </section>`;
+}
+
 function DataSection() {
   const db = useStore((s) => s.db);
   useEffect(() => { loadDbHealth(); }, []);
@@ -615,11 +667,14 @@ const SETTINGS_SECTIONS = [
   { key: 'ai', label: 'AI providers', icon: 'spark' }, { key: 'search', label: 'Web search', icon: 'search' },
   { key: 'tuning', label: 'Search tuning', icon: 'sliders' }, { key: 'usage', label: 'Usage', icon: 'chart' },
   { key: 'profiles', label: 'Profiles', icon: 'user' }, { key: 'agent', label: 'Auto-apply', icon: 'globe' },
+  { key: 'office', label: 'Agents office', icon: 'users' }, { key: 'account', label: 'Account', icon: 'key' },
   { key: 'look', label: 'Appearance', icon: 'sun' }, { key: 'data', label: 'Data', icon: 'shield' },
 ];
+const USER_SECTIONS = ['ai', 'search', 'profiles', 'account', 'look'];
 
 export function SettingsView() {
   const st = useStore((s) => s.settings);
+  const auth = useStore((s) => s.auth);
   const models = useStore((s) => s.models);
   const usage = useStore((s) => s.usage);
   const mode = useStore((s) => s.pipelineMode);
@@ -627,7 +682,10 @@ export function SettingsView() {
   const motion = useStore((s) => s.motion);
   const [sec, setSec] = useState('ai');
   const d = st.data;
-  const needData = ['ai', 'search', 'tuning', 'agent'].includes(sec);
+  const restricted = !!(auth.enabled && auth.user && !auth.user.is_admin);
+  // prod mode: a normal user gets only their own things; the admin and the local app get everything
+  const sections = SETTINGS_SECTIONS.filter((x) => (restricted ? USER_SECTIONS.includes(x.key) : true) && (x.key !== 'account' || auth.enabled));
+  const needData = ['ai', 'search', 'tuning', 'agent', 'office'].includes(sec);
   const body = () => {
     if (needData && !d) return st.status === 'error' ? html`<${ErrorBox} message=${st.error} onRetry=${loadSettings} />` : html`<${Skeleton} lines=${6} />`;
     switch (sec) {
@@ -638,6 +696,8 @@ export function SettingsView() {
         ${usage.data ? html`<${UsageBody} u=${usage.data} />`
           : usage.status === 'error' ? html`<${ErrorBox} message=${usage.error} />` : html`<${Skeleton} lines=${3} />`}</section>`;
       case 'profiles': return html`<${PeopleManager} />`;
+      case 'account': return html`<${AccountSection} />`;
+      case 'office': return html`<${OfficeSection} d=${d} />`;
       case 'agent': return html`<${AgentSection} key=${JSON.stringify(d.tunables)} d=${d} mode=${mode} />`;
       case 'look': return html`<section class="set-section"><h2>Appearance</h2>
         <div class="field"><span class="field-label">Theme</span><${Seg} label="Theme" options=${[['light', 'Light'], ['dark', 'Dark']]} value=${theme} onChange=${setTheme} /></div>
@@ -650,9 +710,9 @@ export function SettingsView() {
     }
   };
   return html`<div class="view view-settings">
-    <${PageHead} title=${html`Settings`} sub="Providers, keys, search behaviour, profiles and data — all in one place." />
+    <${PageHead} title=${html`Settings`} sub=${restricted ? 'Your AI keys, profiles, account and look.' : 'Providers, keys, search behaviour, profiles and data — all in one place.'} />
     <div class="split split-settings">
-      <nav class="pane card set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map((x) => html`<button type="button" key=${x.key}
+      <nav class="pane card set-nav" aria-label="Settings sections">${sections.map((x) => html`<button type="button" key=${x.key}
         class=${`set-link ${sec === x.key ? 'active' : ''}`} aria-current=${sec === x.key ? 'true' : undefined} onClick=${() => setSec(x.key)}>
         <${Icon} name=${x.icon} size=${16} />${x.label}</button>`)}<${SettingsOverview} d=${d} /></nav>
       <section class="pane card"><div class="scroll pane-pad set-body" key=${sec}>${body()}</div></section>

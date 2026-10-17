@@ -55,6 +55,7 @@ diskcache==5.6.3
 # --- System & Observability ---
 structlog==26.1.0
 psutil==7.2.2
+cryptography==50.0.2       # encrypts users' own API keys in production mode (login on)
 
 # --- Browser Automation ---
 browser-use==0.13.6

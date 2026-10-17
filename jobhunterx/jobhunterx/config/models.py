@@ -161,6 +161,9 @@ def limits(model: str) -> dict[str, Optional[int]]:
 
 
 def provider_key(provider: str) -> Optional[str]:
+    from jobhunterx.config import auth_ctx
+    if provider in auth_ctx.SHARED_POOLS and not auth_ctx.shared_pools_allowed():
+        return None                     # prod mode: the IP-limited free pools are kept for the admin
     s = get_settings()
     env = {"google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "groq": ("GROQ_API_KEY",), "mistral": ("MISTRAL_API_KEY",),
            "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"), "kilo": ("KILO_API_KEY",)}.get(provider)
@@ -168,7 +171,7 @@ def provider_key(provider: str) -> Optional[str]:
         return KILO_FREE                # used without any key
     if env is None:
         return None
-    candidates = [getattr(s, f"{provider}_api_key", None)] + [os.getenv(n) for n in env]
+    candidates = [getattr(s, f"{provider}_api_key", None)] + [auth_ctx.env_key(n) for n in env]
     real = next((k for k in candidates if is_real_key(k)), None)
     if provider == "kilo":
         return real or KILO_FREE       # works without a key
@@ -217,6 +220,9 @@ async def _list_provider(provider: str, key: str) -> list[str]:
 async def refresh_available(force: bool = False) -> dict[str, dict[str, Any]]:
     """Ask each configured provider which models this key can use (cached for 6 h)."""
     global _refresh_lock
+    from jobhunterx.config import auth_ctx
+    if auth_ctx.restricted() is not None:
+        return _available               # the shared list is learned with the server's keys, never a user's
     if _refresh_lock is None:
         _refresh_lock = asyncio.Lock()
     async with _refresh_lock:
@@ -344,14 +350,22 @@ class _ModelBudget:
 _budgets: dict[str, _ModelBudget] = {}
 
 
+def _scope() -> str:
+    from jobhunterx.config import auth_ctx
+    return auth_ctx.scope()
+
+
 def budget(model: str) -> _ModelBudget:
-    if model not in _budgets:
-        _budgets[model] = _ModelBudget(model)
-    return _budgets[model]
+    key = model + _scope()              # a user's own key has its own limits (prod mode)
+    if key not in _budgets:
+        _budgets[key] = _ModelBudget(model)
+    return _budgets[key]
 
 
 def budgets_status() -> dict[str, dict[str, Any]]:
-    return {m: b.status() for m, b in _budgets.items()}
+    sc = _scope()
+    return {k[:len(k) - len(sc)] if sc else k: b.status() for k, b in _budgets.items()
+            if (k.endswith(sc) if sc else "@" not in k)}
 
 
 # ---------------------------------------------------------------------------
@@ -379,12 +393,13 @@ def _fingerprint(key: Optional[str]) -> str:
 
 
 def key_rejected(provider: str) -> bool:
-    hit = _bad_keys.get(provider)
+    slot = provider + _scope()
+    hit = _bad_keys.get(slot)
     if not hit:
         return False
     fp, until = hit
     if fp != _fingerprint(provider_key(provider)) or time.monotonic() >= until:
-        _bad_keys.pop(provider, None)        # key changed or the rest is over: try again
+        _bad_keys.pop(slot, None)            # key changed or the rest is over: try again
         return False
     return True
 
@@ -398,7 +413,7 @@ def mark_failure(model: str, error: str) -> Optional[float]:
     e = (error or "").lower()
     if any(k in e for k in _AUTH_ERR) and not any(k in e for k in _RATE_ERR):
         provider = provider_of(model)
-        _bad_keys[provider] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
+        _bad_keys[provider + _scope()] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
         log.warning("api_key_rejected", provider=provider, rest_s=int(BAD_KEY_REST_S))
         return BAD_KEY_REST_S
     if any(k in e for k in _RATE_ERR):
@@ -415,17 +430,18 @@ def mark_failure(model: str, error: str) -> Optional[float]:
         return rest
     else:
         return None
-    _health[model] = {**_health.get(model, {}), "until": time.monotonic() + rest, "why": "rate limited"}
+    slot = model + _scope()                  # a used-up quota belongs to the key that used it
+    _health[slot] = {**_health.get(slot, {}), "until": time.monotonic() + rest, "why": "rate limited"}
     log.warning("model_resting", model=model, rest_s=int(rest), reason="rate limited")
     return rest
 
 
 def resting(model: str) -> Optional[str]:
     """Why this model is being skipped right now, e.g. 'resting 3 min after Google server errors'."""
-    h = _health.get(model)
-    if not h:
-        return None
-    left = h["until"] - time.monotonic()
-    if left <= 0:
+    now = time.monotonic()
+    sc = _scope()
+    hits = [h for h in (_health.get(model), _health.get(model + sc) if sc else None) if h and h["until"] > now]
+    if not hits:
         return None          # rest is over: try it again (trips are kept, so a new failure rests it longer)
-    return f"resting {max(1, round(left / 60))} min after {h['why']}"
+    h = max(hits, key=lambda x: x["until"])
+    return f"resting {max(1, round((h['until'] - now) / 60))} min after {h['why']}"

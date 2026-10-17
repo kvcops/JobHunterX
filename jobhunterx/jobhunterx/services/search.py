@@ -21,6 +21,7 @@ from typing import Awaitable, Callable, Optional
 from pydantic import BaseModel, Field
 
 from jobhunterx import storage
+from jobhunterx.config import capacity
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
 from jobhunterx.discovery import ats, ats_index, dedupe, linkedin, page, registry, search, validate, watchlist
@@ -67,9 +68,7 @@ VERDICT_WORDS = {"strong": "Strong match", "good": "Good match", "stretch": "Str
                  "incompatible": "Not a fit"}
 
 CHUNK = 6
-FETCH_CONCURRENCY = 6
 BOARD_JOBS_PER_BOARD = 15
-BOARD_CONCURRENCY = 8
 WATCH_BOARDS_MAX = 80
 WATCH_NEW_PER_CHECK = 20
 REGISTRY_PER_RUN = 25         # remembered employer boards checked per run (a rotating slice, least recently checked first)
@@ -276,7 +275,7 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
     out the local roles found by web search.
     """
     out: list[JobPosting] = []
-    sem = asyncio.Semaphore(BOARD_CONCURRENCY)
+    sem = asyncio.Semaphore(_share("board_concurrency"))
 
     async def one(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
         if counts is not None:
@@ -518,7 +517,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
 
     # 4. Normalize ------------------------------------------------------------
     await run.stage("normalize")
-    sem = asyncio.Semaphore(FETCH_CONCURRENCY)
+    sem = asyncio.Semaphore(_share("fetch_concurrency"))
     worth = [l for l in posting_leads if _lead_worth_reading(l, snap)]
     skipped = len(posting_leads) - len(worth)
     if skipped:
@@ -741,41 +740,89 @@ async def connect_top(run: Run, profile: CandidateProfile, snap: CandidateSnapsh
                       + " — open a job and look for “Reach a real person”", "done")
 
 
+def _share(kind: str) -> int:
+    """This search's share of the machine: the measured limit split between the searches running now."""
+    return max(2, capacity.plan()[kind] // max(1, manager.running))
+
+
 class SearchManager:
+    """One search per profile (person) at a time — people never stop each other's searches. How many run at
+    once across the server follows free memory and CPU (config/capacity.py); the rest wait as "queued"."""
+
     def __init__(self):
-        self._task: Optional[asyncio.Task] = None
-        self._run: Optional[Run] = None
+        self._runs: dict[str, tuple[Run, asyncio.Task]] = {}     # person id -> latest run and its task
+        self.running = 0
+
+    @staticmethod
+    def _key(person_id: Optional[str] = None) -> str:
+        return person_id if person_id is not None else (storage.active_person() or "")
 
     @property
     def current(self) -> Optional[dict]:
-        return self._run.data if self._run else None
+        """The open profile's latest run in this process."""
+        hit = self._runs.get(self._key())
+        return hit[0].data if hit else None
+
+    def find(self, run_id: str) -> Optional[dict]:
+        return next((run.data for run, _ in self._runs.values() if run.id == run_id), None)
 
     async def wait(self) -> None:
-        """Wait for the active run to end (completed, failed or cancelled)."""
-        if self._task and not self._task.done():
+        """Wait for the open profile's run to end (completed, failed or cancelled)."""
+        hit = self._runs.get(self._key())
+        if hit and not hit[1].done():
             try:
-                await asyncio.shield(self._task)
+                await asyncio.shield(hit[1])
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def cancel(self, run_id: Optional[str] = None) -> Optional[dict]:
-        if self._run and (run_id is None or self._run.id == run_id) and self._task and not self._task.done():
-            self._task.cancel()
+    async def _stop(self, key: str) -> None:
+        hit = self._runs.get(key)
+        if hit and not hit[1].done():
+            hit[1].cancel()
             try:
-                await asyncio.wait_for(asyncio.shield(self._task), timeout=5)
+                await asyncio.wait_for(asyncio.shield(hit[1]), timeout=5)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
-        return self.current if (run_id is None or (self._run and self._run.id == run_id)) else await storage.get_run(run_id)
+
+    async def cancel(self, run_id: Optional[str] = None) -> Optional[dict]:
+        """Stop the open profile's run (or the run with this id)."""
+        if run_id is None:
+            await self._stop(self._key())
+            return self.current
+        key = next((k for k, (run, _) in self._runs.items() if run.id == run_id), None)
+        if key is None:
+            return await storage.get_run(run_id)
+        await self._stop(key)
+        return self._runs[key][0].data
+
+    async def cancel_person(self, person_id: str) -> None:
+        await self._stop(person_id)
+
+    async def cancel_all(self) -> None:
+        for key in list(self._runs):
+            await self._stop(key)
+
+    async def _admit(self, run: Run) -> None:
+        told = False
+        while self.running >= capacity.plan()["searches"]:
+            if not told:
+                await run.say("understand", "Waiting for a free slot — other searches are running on this server", "info")
+                told = True
+            await asyncio.sleep(2)
+        self.running += 1
 
     async def start(self, profile: CandidateProfile, request: dict, emit: Emit) -> dict:
-        await self.cancel()
+        key = self._key()
+        await self._stop(key)
         run = Run(new_run(profile.content_hash()), emit)
         run.data["mode"] = "watch" if request.get("mode") == "watch" else "search"
-        self._run = run
         await run.publish()
 
         async def _go():
+            admitted = False
             try:
+                await self._admit(run)
+                admitted = True
                 await execute(run, profile, request)
             except asyncio.CancelledError:
                 await run.say(run.data.get("stage", "rank"), "Search stopped — results found so far are kept", "warn")
@@ -796,8 +843,11 @@ class SearchManager:
                     if st["status"] == "running":
                         st["status"] = "failed"
                 await run.publish()
+            finally:
+                if admitted:
+                    self.running -= 1
 
-        self._task = asyncio.create_task(_go())
+        self._runs[key] = (run, asyncio.create_task(_go()))
         return run.data
 
 

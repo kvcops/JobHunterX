@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from jobhunterx import storage
+from jobhunterx.config import auth_ctx
 from jobhunterx.config import database as db
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
@@ -69,7 +70,13 @@ async def _job_dict(job_id: str) -> dict:
         raise ApplyError("This job has no application link.")
     return {"id": job_id, "company": posting.company if posting else row.get("company", ""),
             "role": posting.title if posting else row.get("role", ""), "apply_url": url,
-            "career_page_url": posting.canonical_url if posting else url, "person_id": storage.active_person()}
+            "career_page_url": posting.canonical_url if posting else url, "person_id": storage.active_person(),
+            "user_id": _user_id()}
+
+
+def _user_id() -> Optional[str]:
+    user = auth_ctx.current()
+    return user.id if user else None
 
 
 async def _existing(kind: str, job_id: str, profile_hash: str) -> Optional[GeneratedDocument]:
@@ -169,6 +176,8 @@ async def start(job_id: str, emit: Emit, continuing: bool = False) -> dict:
     existing = ba.get_session(job_id)
     if existing and existing.data["status"] in ("launching", "running", "paused", "stopping"):
         raise ApplyError("The agent is already working on this job.")
+    if ba.busy_for(_user_id()):
+        raise ApplyError(ba.busy_message())       # prod mode: one browser, and another user has it open
 
     if continuing:
         sess = await _restore(job_id)
@@ -208,7 +217,7 @@ async def stop(job_id: str) -> Optional[dict]:
 async def current() -> Optional[dict]:
     from jobhunterx.agents import browser_agent as ba
     sess = ba.current_session()
-    if sess and sess.data.get("person_id") in (None, storage.active_person()):
+    if sess and sess.data.get("person_id") in (None, storage.active_person()) and sess.data.get("user_id") == _user_id():
         return sess.snapshot()
     return await storage.latest_apply_session()
 

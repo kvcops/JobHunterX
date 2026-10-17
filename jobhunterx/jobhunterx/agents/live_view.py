@@ -27,6 +27,9 @@ _latest_frame: Optional[str] = None          # last frame message (JSON) for lat
 _scout_clients: set[Any] = set()
 _scout_latest: Optional[str] = None
 _frame_meta: dict[str, float] = {}           # deviceWidth / deviceHeight of the last frame
+# Prod mode: who may watch each channel (the user whose browser it is) and who each viewer is.
+_owners: dict[str, Optional[str]] = {"apply": None, "scout": None}
+_viewer: dict[Any, dict] = {}
 _panel: tuple[int, int] = (0, 0)             # size of the live-view area in the app (CSS px)
 
 VIEWPORT_WIDTH = 1280                        # desktop layout for every site; the height follows the panel's shape
@@ -101,17 +104,46 @@ def broadcast_event(event: dict) -> None:
     _on_main(ws_manager.broadcast(event))
 
 
+# ---------------------------------------------------------------------------- who may watch
+
+def set_owner(channel: str, user_id: Optional[str]) -> None:
+    """The login user whose browser is on this channel now (None without login: everyone may watch)."""
+    global _latest_frame, _scout_latest
+    if _owners.get(channel) != user_id:
+        if channel == "scout":
+            _scout_latest = None
+        else:
+            _latest_frame = None              # never show the previous owner's last picture
+    _owners[channel] = user_id
+
+
+def _allowed(ws: Any, channel: str) -> bool:
+    from jobhunterx.api.ws import may_receive
+    return may_receive(_viewer.get(ws, {}), _owners.get(channel))
+
+
+def may_control(ws: Any) -> bool:
+    """Only the user whose application it is may click and type in the live browser."""
+    meta = _viewer.get(ws, {})
+    return not meta.get("user_id") or meta["user_id"] == _owners.get("apply")
+
+
+async def close_for(user_id: Optional[str] = None, token_hash: Optional[str] = None, keep: Optional[str] = None) -> None:
+    for ws, meta in list(_viewer.items()):
+        if (token_hash and meta.get("token_hash") == token_hash) or                 (user_id and meta.get("user_id") == user_id and meta.get("token_hash") != keep):
+            _clients.discard(ws)
+            _scout_clients.discard(ws)
+            _viewer.pop(ws, None)
+            try:
+                await ws.close(code=4401)
+            except Exception:
+                pass
+
+
 # ---------------------------------------------------------------------------- frames
 
 async def _send_all(msg: str) -> None:
-    dead = []
-    for ws in list(_clients):
-        try:
-            await ws.send_text(msg)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _clients.discard(ws)
+    await _send_to(_clients, msg, "apply")
 
 
 def publish_frame(data_b64: str, metadata: dict, channel: str = "apply") -> None:
@@ -120,7 +152,7 @@ def publish_frame(data_b64: str, metadata: dict, channel: str = "apply") -> None
         _scout_latest = json.dumps({"type": "frame", "data": data_b64, "w": metadata.get("deviceWidth"),
                                     "h": metadata.get("deviceHeight")})
         if _scout_clients:
-            _on_main(_send_to(_scout_clients, _scout_latest))
+            _on_main(_send_to(_scout_clients, _scout_latest, "scout"))
         return
     _frame_meta.update({k: metadata.get(k) for k in ("deviceWidth", "deviceHeight") if metadata.get(k)})
     msg = json.dumps({"type": "frame", "data": data_b64, "w": _frame_meta.get("deviceWidth"), "h": _frame_meta.get("deviceHeight")})
@@ -134,25 +166,28 @@ def clear_frame(channel: str = "apply") -> None:
     if channel == "scout":
         _scout_latest = None
         if _scout_clients:
-            _on_main(_send_to(_scout_clients, json.dumps({"type": "idle"})))
+            _on_main(_send_to(_scout_clients, json.dumps({"type": "idle"}), "scout"))
         return
     _latest_frame = None
     if _clients:
         _on_main(_send_all(json.dumps({"type": "idle"})))
 
 
-async def _send_to(clients: set[Any], msg: str) -> None:
+async def _send_to(clients: set[Any], msg: str, channel: str) -> None:
     for ws in list(clients):
+        if not _allowed(ws, channel):
+            continue
         try:
             await ws.send_text(msg)
         except Exception:
             clients.discard(ws)
 
 
-async def add_client(ws: Any, channel: str = "apply") -> None:
+async def add_client(ws: Any, channel: str = "apply", meta: Optional[dict] = None) -> None:
     clients, latest = (_scout_clients, _scout_latest) if channel == "scout" else (_clients, _latest_frame)
     clients.add(ws)
-    if latest:
+    _viewer[ws] = meta or {}
+    if latest and _allowed(ws, channel):
         try:
             await ws.send_text(latest)
         except Exception:
@@ -161,6 +196,7 @@ async def add_client(ws: Any, channel: str = "apply") -> None:
 
 def remove_client(ws: Any, channel: str = "apply") -> None:
     (_scout_clients if channel == "scout" else _clients).discard(ws)
+    _viewer.pop(ws, None)
 
 
 def frame_size() -> tuple[float, float]:

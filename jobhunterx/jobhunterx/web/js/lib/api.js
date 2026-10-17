@@ -15,7 +15,7 @@ const FRIENDLY = {
 };
 
 const CODE_BY_STATUS = {
-  400: 'bad_request', 404: 'not_found', 409: 'conflict', 413: 'payload_too_large',
+  400: 'bad_request', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 429: 'too_many_requests', 409: 'conflict', 413: 'payload_too_large',
   422: 'validation_error', 502: 'upstream_error', 500: 'internal_error',
 };
 
@@ -105,6 +105,8 @@ export async function request(path, {
   }
 
   if (!res.ok) {
+    // Login ended (logout elsewhere, expired, disabled): the app goes to the login page (prod mode only).
+    if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('jhx:unauthorized'));
     const env = data && typeof data === 'object' ? data.error : null;
     const code = (env && env.code) || CODE_BY_STATUS[res.status] || 'http_error';
     const legacyDetail = data && typeof data.detail === 'string' ? data.detail : null;
@@ -121,6 +123,15 @@ export async function request(path, {
 const enc = encodeURIComponent;
 
 export const api = {
+  // login (prod mode)
+  me: (o) => request('/auth/me', o),
+  logout: (o) => request('/auth/logout', { method: 'POST', ...o }),
+  changePassword: (current, next, o) => request('/auth/password', { method: 'POST', body: { current, new: next }, ...o }),
+  users: (o) => request('/auth/users', o),
+  createUser: (username, password, o) => request('/auth/users', { method: 'POST', body: { username, password }, ...o }),
+  updateUser: (id, body, o) => request(`/auth/users/${enc(id)}`, { method: 'PATCH', body, ...o }),
+  deleteUser: (id, o) => request(`/auth/users/${enc(id)}`, { method: 'DELETE', timeout: 60_000, ...o }),
+
   // meta / profile
   meta: (o) => request('/meta', o),
   getProfile: (o) => request('/profile', o),

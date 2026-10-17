@@ -760,7 +760,7 @@ python -m jobhunterx.api.main
 
 <div align="center">
 
-### Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting. 🎯
+### Open **[http://127.0.0.1:9000](http://127.0.0.1:9000)** and start hunting. 🎯
 
 </div>
 
@@ -778,9 +778,30 @@ python -m jobhunterx.api.main
 | `pip install` takes forever | Use `uv pip install -r requirements.txt` (step ④). |
 | `uv` not found | Close and reopen the terminal after installing it, or use `pip install uv`. |
 | `No module named jobhunterx` | Run the start command from inside the inner `jobhunterx` folder (`cd jobhunterx`), with the venv on. |
-| Port 8000 is busy | Set `PORT=8001` in `jobhunterx/.env` and open `http://127.0.0.1:8001`. |
+| Port 9000 is busy | Set `PORT=9001` in `jobhunterx/.env` and open `http://127.0.0.1:9001`. |
 | Auto-apply can't open a browser | Install [Google Chrome](https://www.google.com/chrome/). |
 | Searches are slow | Add a second free AI key (Groq). Free plans allow only a few calls per minute each. |
+
+### 🔐 Running it on a server for several people (`APP_ENV=prod`)
+
+Leave `APP_ENV` empty and the app works as it always did: one person, no login. Set these in `jobhunterx/.env` to turn on logins:
+
+```env
+APP_ENV=prod
+HOST=0.0.0.0
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=a-long-password
+SECRET_KEY=a-long-random-text      # encrypts users' saved keys; keep it the same
+# CORS_ORIGINS=https://your-site.example   # only if the UI is served from another address
+```
+
+* Everything (pages, API, live updates) needs a login first. The API docs (`/docs`) are switched off.
+* The admin adds people on the **Users** page (reset a password, block sign-in, delete a user and their data).
+* Every user sees only their own profiles, jobs and documents, and adds their own free AI keys. The free shared
+  models (Kilo, LLM7) stay with the admin, because their limits count per server address.
+* Logging out ends the session on the server and clears what the browser kept for the app.
+* How many searches run at once follows the free memory and CPUs (also inside a 512 MB container). The rest wait in a queue.
+* `GET /healthz` answers without a login, for the host's health check.
 
 ### ⚙️ Handy settings (`.env` or Settings page)
 

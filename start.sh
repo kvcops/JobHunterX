@@ -74,11 +74,11 @@ if [ "${1:-}" = "--no-start" ]; then say "Setup done and checked. Run 'bash star
 
 # ---------------------------------------------------------------- 5. start, then open the browser once it answers
 PORT="$(grep -E '^[[:space:]]*PORT[[:space:]]*=[[:space:]]*[0-9]+' jobhunterx/.env | head -1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
-PORT="${PORT:-8000}"
+PORT="${PORT:-9000}"
 URL="http://127.0.0.1:$PORT"
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   say "Something is already running on port $PORT - probably JobHunterX in another terminal. Opening $URL"
-  say "If it is another program, set PORT=8001 in jobhunterx/.env and run this again."
+  say "If it is another program, set PORT=9001 in jobhunterx/.env and run this again."
   open_url "$URL"; exit 0
 fi
 
@@ -88,7 +88,7 @@ SERVER=$!
 cleanup() { kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null; }
 trap 'cleanup; exit 0' INT TERM
 
-answers() { "$PY" -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=2)" "$URL/api/setup" >/dev/null 2>&1; }
+answers() { "$PY" -c "import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=2)" "$URL/healthz" >/dev/null 2>&1; }
 ready=0
 for _ in $(seq 1 120); do
   kill -0 "$SERVER" 2>/dev/null || break

@@ -76,6 +76,9 @@ export function initialState() {
     db: { status: 'idle', data: null, error: null },
     usage: { status: 'idle', data: null, error: null },
     pipelineMode: { status: 'idle', mode: null, error: null },
+    // Login (prod mode only): enabled=false means the local single-user app with no login at all.
+    auth: { enabled: false, user: null },
+    users: { status: 'idle', data: null, error: null },   // admin: the Users page
   };
 }
 

@@ -23,11 +23,11 @@ if sys.platform == "win32":
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from jobhunterx import storage
+from jobhunterx import auth, storage
 from jobhunterx.api.routes import router
 from jobhunterx.api.ws import manager
 from jobhunterx.config.database import init_db, set_db_path
@@ -73,6 +73,10 @@ async def lifespan(app: FastAPI):
     await init_db()                                                # create / migrate schema (idempotent)
     await app_state.load(str(settings.db_full_path))               # seed defaults, load preferences
     await storage.heal_active_person()
+    await auth.init()                                              # prod mode: users table + admin from .env
+    from jobhunterx.config import capacity
+    capacity.apply_thread_pool()
+    log.info("capacity", mode="prod" if settings.prod else "local", web_workers=1, **capacity.plan())
     from jobhunterx.discovery import ats_index
     ats_index.ensure_background()        # today's India postings from employers' own boards, refreshed in the background
     try:
@@ -88,8 +92,14 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(model_catalog.refresh_available())
     # check watchlist companies' own job boards every few hours while the app runs
     from jobhunterx.api.routes import emit as api_emit
+    from jobhunterx.config import auth_ctx
     from jobhunterx.services.watcher import watcher
+    # prod mode: the background checks run as the admin (their profile, the server's keys); users press "Check now"
+    admin = await auth.admin_user() if settings.prod else None
+    ctx_token = auth_ctx.set_current(admin) if admin else None
     watcher.start(api_emit)
+    if ctx_token is not None:
+        auth_ctx.reset(ctx_token)
     # the office's dialogue bank: AI writes conversations in batches every hour or two (none while a search runs)
     from jobhunterx.services import office
     office.start_refills()
@@ -116,27 +126,43 @@ async def lifespan(app: FastAPI):
 # App
 # ---------------------------------------------------------------------------
 
+_PROD = get_settings().prod
 app = FastAPI(
     title="JobHunterX",
     description="Career Intelligence & Application Agent",
     version="0.1.0",
     lifespan=lifespan,
+    # prod mode: no Swagger / ReDoc / OpenAPI schema at all (the login gate would also send them to /login)
+    docs_url=None if _PROD else "/docs",
+    redoc_url=None if _PROD else "/redoc",
+    openapi_url=None if _PROD else "/openapi.json",
 )
 
-# Local-first app: only the app's own origin (and localhost dev ports) may call the API.
+
+def _csv(value: str) -> list[str]:
+    return [x.strip().rstrip("/") for x in (value or "").split(",") if x.strip()]
+
+
+# Without CORS_ORIGINS: only the app's own origin (and localhost) may call the API, as before.
 def _allowed_origins() -> list[str]:
     st = get_settings()
     hosts = {st.host, "127.0.0.1", "localhost"}
-    return [f"http://{h}:{st.port}" for h in hosts]
+    return [f"http://{h}:{st.port}" for h in hosts] + _csv(st.cors_origins)
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_allowed_origins(),
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Content-Type"],
-)
+def _cors_options() -> dict:
+    st = get_settings()
+    creds = st.cors_allow_credentials
+    if creds is None:
+        creds = bool(_csv(st.cors_origins)) and st.prod       # the login cookie must travel with cross-site calls
+    return {"allow_origins": _allowed_origins(), "allow_credentials": creds,
+            "allow_methods": _csv(st.cors_methods) or ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "allow_headers": _csv(st.cors_headers) or ["Content-Type"]}
+
+
+# The login gate runs inside CORS (so preflight requests are answered) and before everything else.
+app.add_middleware(auth.AuthGate)
+app.add_middleware(CORSMiddleware, **_cors_options())
 
 @app.middleware("http")
 async def _block_cross_site_writes(request: Request, call_next):
@@ -149,8 +175,8 @@ async def _block_cross_site_writes(request: Request, call_next):
     return await call_next(request)
 
 
-_CODES = {400: "bad_request", 403: "forbidden", 404: "not_found", 405: "bad_request", 409: "conflict", 413: "payload_too_large",
-          422: "validation_error", 502: "upstream_error"}
+_CODES = {400: "bad_request", 401: "unauthorized", 403: "forbidden", 404: "not_found", 405: "bad_request", 409: "conflict",
+          413: "payload_too_large", 422: "validation_error", 429: "too_many_requests", 502: "upstream_error"}
 
 
 def _error(status: int, message: str, details: Any = None) -> JSONResponse:
@@ -178,7 +204,21 @@ async def _unhandled(request: Request, exc: Exception):
 
 
 # API routes
+app.include_router(auth.router)
 app.include_router(router)
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    """Liveness for start scripts and hosting health checks (no login needed, no data)."""
+    return {"ok": True}
+
+
+@app.get("/login", include_in_schema=False)
+async def login_page():
+    if not auth.enabled():
+        return RedirectResponse("/", status_code=303)     # no login on this server
+    return FileResponse(str(_web_dir / "login.html"), headers={"Cache-Control": "no-store"})
 
 
 def _ws_origin_ok(websocket: WebSocket) -> bool:
@@ -205,6 +245,10 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+# Static files (frontend) — mounted last so API routes take priority
+_web_dir = Path(__file__).resolve().parent.parent / "web"
+
+
 # ---------------------------------------------------------------------------
 # Live browser view (the auto-apply agent's browser, streamed into the app)
 # ---------------------------------------------------------------------------
@@ -217,16 +261,17 @@ async def browser_websocket(websocket: WebSocket):
         return
     from jobhunterx.agents import browser_agent as ba
     from jobhunterx.agents import live_view
+    from jobhunterx.api.ws import conn_meta
     await websocket.accept()
-    await live_view.add_client(websocket)
+    await live_view.add_client(websocket, meta=conn_meta(websocket))
     try:
         while True:
             try:
                 msg = json.loads(await websocket.receive_text())
             except ValueError:
                 continue
-            if not isinstance(msg, dict):
-                continue
+            if not isinstance(msg, dict) or not live_view.may_control(websocket):
+                continue                                    # prod mode: only the owner drives their browser
             if msg.get("type") in ("mouse", "wheel", "keyboard", "paste"):
                 await ba.forward_input(msg)
             elif msg.get("type") == "viewport":
@@ -246,8 +291,9 @@ async def scout_websocket(websocket: WebSocket):
         await websocket.close(code=1008)
         return
     from jobhunterx.agents import live_view
+    from jobhunterx.api.ws import conn_meta
     await websocket.accept()
-    await live_view.add_client(websocket, "scout")
+    await live_view.add_client(websocket, "scout", meta=conn_meta(websocket))
     try:
         while True:
             await websocket.receive_text()
@@ -273,8 +319,6 @@ async def leftover_service_worker():
     return Response(_SW_UNREGISTER, media_type="application/javascript", headers={"Cache-Control": "no-store"})
 
 
-# Static files (frontend) — mounted last so API routes take priority
-_web_dir = Path(__file__).resolve().parent.parent / "web"
 class _FreshStatic(StaticFiles):
     """App code is revalidated on every load (cheap 304s), so an update shows without a hard refresh."""
 
@@ -299,13 +343,19 @@ def main():
 
     settings = get_settings()
     is_reload = "--reload" in sys.argv
+    reload = is_reload or (not settings.prod and sys.platform != "win32")   # never auto-reload a production server
     try:
         uvicorn.run(
             "jobhunterx.api.main:app",
             host=settings.host,
             port=settings.port,
-            reload=is_reload if is_reload else (False if sys.platform == "win32" else True),
+            # one process on purpose: searches, live updates and the browser live in its memory (see config/capacity.py)
+            workers=1,
+            reload=reload,
             log_level=settings.log_level.lower(),
+            proxy_headers=True,
+            forwarded_allow_ips=settings.forwarded_allow_ips or ("*" if settings.prod else "127.0.0.1"),
+            server_header=not settings.prod,
         )
     except (KeyboardInterrupt, SystemExit):
         pass

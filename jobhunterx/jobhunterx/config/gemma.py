@@ -48,6 +48,7 @@ _loaded_date: str | None = None
 _last_request_mono = 0.0
 _rate_lock: asyncio.Lock | None = None
 _genai_client: Any | None = None
+_user_clients: dict[str, Any] = {}      # prod mode: a client per user's own key (their own quota, not the server's)
 
 
 def _today_str() -> str:
@@ -111,10 +112,11 @@ def _rate_lock_() -> asyncio.Lock:
 
 async def gemma_available() -> bool:
     """True if the API key exists AND the daily RPD budget is not exhausted."""
+    from jobhunterx.config import auth_ctx
     settings = get_settings()
-    if not (settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")):
+    if not (settings.google_api_key or auth_ctx.env_key("GOOGLE_API_KEY", "GEMINI_API_KEY")):
         return False
-    return not is_exhausted()
+    return auth_ctx.restricted() is not None or not is_exhausted()
 
 
 async def call_gemma(
@@ -140,20 +142,34 @@ async def call_gemma(
         system = date_prefix + system
 
     global _last_request_mono, _tokens_used, _requests_today, _genai_client
+    from jobhunterx.config import auth_ctx
     settings = get_settings()
-    api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = settings.google_api_key or auth_ctx.env_key("GOOGLE_API_KEY", "GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("No Google API key configured")
+    # The daily counter belongs to the server's key; a user's own key (prod mode) has its own quota at Google.
+    server_key = auth_ctx.restricted() is None
 
     _load_state()
-    if _requests_today >= _daily_rpd_cap():
+    if server_key and _requests_today >= _daily_rpd_cap():
         log.warning("gemma_budget_exhausted", requests_today=_requests_today)
         raise RuntimeError("gemma_budget_exhausted")
 
-    if _genai_client is None:
+    def _new_client():
         from google import genai
         from google.genai import types
-        _genai_client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=int(_TIMEOUT_S * 1000)))
+        return genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=int(_TIMEOUT_S * 1000)))
+
+    if server_key:
+        if _genai_client is None:
+            _genai_client = _new_client()
+        client = _genai_client
+    else:
+        if api_key not in _user_clients:
+            if len(_user_clients) > 64:
+                _user_clients.clear()
+            _user_clients[api_key] = _new_client()
+        client = _user_clients[api_key]
 
     model = model or MODEL
     # automatic_function_calling off: we never pass tools (also silences "AFC is enabled…" on every call)
@@ -164,7 +180,7 @@ async def call_gemma(
         cfg["max_output_tokens"] = max_tokens
 
     def _sync_call() -> tuple[str, int, int]:
-        response = _genai_client.models.generate_content(
+        response = client.models.generate_content(
             model=model,
             contents=f"SYSTEM INSTRUCTIONS:\n{system}\n\nUSER:\n{user}",
             config=cfg,
@@ -213,10 +229,10 @@ async def call_gemma(
     content, tokens_in, tokens_out = await _run_with_ratelimit()
     latency_ms = (time.monotonic() - t0) * 1000
 
-    _load_state()
-    total_tokens = tokens_in + tokens_out
-    _tokens_used += total_tokens
-    _requests_today += 1
+    if server_key:
+        _load_state()
+        _tokens_used += tokens_in + tokens_out
+        _requests_today += 1
 
     # Record token usage in database
     try:

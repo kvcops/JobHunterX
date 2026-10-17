@@ -76,6 +76,9 @@ async def _scout(m: dict, keyword: str) -> None:
     if _scout_lock is None:
         _scout_lock = asyncio.Lock()
     async with _scout_lock:
+        from jobhunterx.config import auth_ctx
+        user = auth_ctx.current()
+        live_view.set_owner("scout", user.id if user else None)     # prod mode: only this user watches it
         m.update(status="scouting", message=f"Finding {m['company']}'s careers site", steps=[])
         _publish(m)
 

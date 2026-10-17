@@ -342,7 +342,7 @@ class ApplySession:
         self.profile: dict = {}
         self.data: dict[str, Any] = {
             "job_id": job["id"], "company": job.get("company", ""), "role": job.get("role", ""),
-            "apply_url": job.get("apply_url", ""), "person_id": job.get("person_id"),
+            "apply_url": job.get("apply_url", ""), "person_id": job.get("person_id"), "user_id": job.get("user_id"),
             "status": "preparing", "message": "Getting your application kit ready…", "control": "agent",
             "started_at": _now(), "updated_at": _now(), "url": "", "title": "", "live": False,
             "kit": {}, "steps": [], "notice": "", "result": "", "runs": 0,
@@ -371,6 +371,15 @@ def get_session(job_id: str) -> Optional[ApplySession]:
 
 def current_session() -> Optional[ApplySession]:
     return _sessions.get(_current) if _current else None
+
+
+def busy_for(user_id: Optional[str]) -> bool:
+    """True when the one auto-apply browser is in use by another login user (prod mode)."""
+    return any(_alive(s) and s.data.get("user_id") != user_id for s in _sessions.values())
+
+
+def busy_message() -> str:
+    return "The auto-apply browser is busy with another user's application. Try again in a few minutes."
 
 
 def _alive(sess: ApplySession) -> bool:
@@ -591,12 +600,12 @@ def _build_llms() -> tuple[Any, Any]:
         ChatMistral = None
     from jobhunterx.config import app_state as _app_state
     from jobhunterx.config import models as M
-    s = get_settings()
-    google_key = (s.google_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) if _app_state.llm_provider_enabled("google") else None
-    groq_key = (s.groq_api_key or os.getenv("GROQ_API_KEY")) if _app_state.llm_provider_enabled("groq") else None
-    mistral_key = (s.mistral_api_key or os.getenv("MISTRAL_API_KEY")) if _app_state.llm_provider_enabled("mistral") else None
+    # provider_key: the signed-in user's own keys in prod mode (no Kilo / LLM7 for them), the server's otherwise
+    google_key = M.provider_key("google") if _app_state.llm_provider_enabled("google") else None
+    groq_key = M.provider_key("groq") if _app_state.llm_provider_enabled("groq") else None
+    mistral_key = M.provider_key("mistral") if _app_state.llm_provider_enabled("mistral") else None
     kilo_key = M.provider_key("kilo") if _app_state.llm_provider_enabled("kilo") else None
-    llm7_on = _app_state.llm_provider_enabled("llm7")
+    llm7_on = _app_state.llm_provider_enabled("llm7") and bool(M.provider_key("llm7"))
     links: list[tuple[str, Any]] = []
     if google_key:
         # 429 / RESOURCE_EXHAUSTED is not retried here: the next model in the chain answers at once instead
@@ -1876,10 +1885,14 @@ def new_session(job: dict) -> ApplySession:
 async def launch(sess: ApplySession, profile: dict, files: dict[str, str], continuing: bool = False) -> None:
     """Hand the session to the browser worker (returns immediately)."""
     global _current
+    owner = sess.data.get("user_id")
     for other_id, other in list(_sessions.items()):
         if other is not sess and _alive(other):
+            if other.data.get("user_id") != owner:      # prod mode: never close another user's application
+                raise RuntimeError(busy_message())
             await close(other_id)               # one browser at a time
     _current = sess.data["job_id"]
+    live_view.set_owner("apply", owner)
     sess.profile = profile
     sess.files = files
 

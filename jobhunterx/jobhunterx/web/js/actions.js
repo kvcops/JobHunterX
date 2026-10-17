@@ -84,7 +84,11 @@ function onRoute(route) {
   if (route.page === 'tracker') loadTracker();
   if (route.page === 'interventions' || route.page === 'browser') loadInterventions();
   if (route.page === 'browser') loadApplySession();
-  if (route.page === 'settings') { loadSettings(); loadModels(); loadUsage(); loadPipelineMode(); loadPeople().catch(() => {}); }
+  if (route.page === 'settings') {
+    loadSettings(); loadModels(); loadPeople().catch(() => {});
+    if (!isRestricted()) { loadUsage(); loadPipelineMode(); }
+  }
+  if (route.page === 'users' && getState().auth.enabled && isAdmin()) loadUsers();
 }
 export function setTheme(theme) {
   setState((s) => ({ ...s, theme }));
@@ -1175,8 +1179,82 @@ export async function deletePerson(id) {
 }
 
 export async function boot() {
+  window.addEventListener('jhx:unauthorized', goToLogin);
+  // a page restored from the back/forward cache after logout must not show old data
+  window.addEventListener('pageshow', (e) => { if (e.persisted) window.location.reload(); });
+  try {
+    const me = await api.me();
+    setSlice('auth', { enabled: !!me.enabled, user: me.user || null });
+    if (me.enabled && !me.user) { goToLogin(); return; }
+    if (me.enabled) listenForLogout();
+  } catch { /* the server is down: startSession shows the error screen */ }
   connectSocket();
   initRouting();
   api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {});
   await startSession();
+}
+
+// ---------------------------------------------------------------------------
+// Login (prod mode): sign out, users (admin), own password
+// ---------------------------------------------------------------------------
+export const isRestricted = () => { const a = getState().auth; return !!(a.enabled && a.user && !a.user.is_admin); };
+export const isAdmin = () => { const a = getState().auth; return !a.enabled || !!(a.user && a.user.is_admin); };
+
+/** Forget everything this browser kept for the app (theme, picked profile, office memories…). */
+function clearBrowserData() {
+  try { localStorage.clear(); } catch { /* storage unavailable */ }
+  try { sessionStorage.clear(); } catch { /* storage unavailable */ }
+}
+let leaving = false;
+export function goToLogin() {
+  if (!getState().auth.enabled || leaving) return;
+  leaving = true;
+  clearBrowserData();
+  try { if (socket) socket.close(); } catch { /* already closed */ }
+  window.location.replace('/login');
+}
+let authChannel = null;
+function listenForLogout() {
+  try {
+    authChannel = new BroadcastChannel('jhx-auth');
+    authChannel.onmessage = (e) => { if (e.data === 'logout') goToLogin(); };   // signed out in another tab
+  } catch { /* old browser: the next request answers 401 instead */ }
+}
+export async function logout() {
+  try { await api.logout(); } catch { /* the cookie is cleared by the server anyway when it answers */ }
+  try { if (authChannel) authChannel.postMessage('logout'); } catch { /* ignore */ }
+  goToLogin();
+}
+export async function changePassword(current, next) {
+  try {
+    await api.changePassword(current, next);
+    toast('Password changed. Other devices were signed out.', 'success');
+    return true;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return false;
+  }
+}
+export const loadUsers = () => loadInto('users', () => api.users());
+async function usersCall(call, done) {
+  try {
+    setSlice('users', { status: 'ready', data: await call() });
+    if (done) toast(done, 'success');
+    return true;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return false;
+  }
+}
+export const createUser = (username, password) => usersCall(() => api.createUser(username, password), `User ${username} created.`);
+export const resetUserPassword = (u, password) => usersCall(() => api.updateUser(u.id, { password }), `New password set for ${u.username}. They were signed out.`);
+export const setUserDisabled = (u, disabled) => usersCall(() => api.updateUser(u.id, { disabled }), disabled ? `${u.username} can no longer sign in.` : `${u.username} can sign in again.`);
+export async function deleteUser(u) {
+  if (!(await confirmAction({ title: `Delete ${u.username}?`, body: 'Their account and everything they made — profiles, jobs, documents, searches and saved keys — are deleted. This cannot be undone.', confirm: 'Delete user', tone: 'danger', typeToConfirm: u.username }))) return;
+  await usersCall(() => api.deleteUser(u.id), `${u.username} was deleted.`);
+}
+export async function setOfficeAI(on) {
+  if (await saveSettings({ office_ai_enabled: on })) {
+    setSlice('meta', (m) => ({ ...m, data: m.data ? { ...m.data, office_ai: on } : m.data }));
+  }
 }

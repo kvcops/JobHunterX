@@ -6,6 +6,8 @@ import { VERDICT_LABEL } from '../lib/format.js';
 
 const ICONS = {
   search: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm10 17-5.2-5.2',
+  users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 10a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M18 14a6 6 0 0 1 4 7',
+  logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11',
   user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9a8 8 0 0 1 16 0',
   doc: 'M7 3h7l5 5v13H7zM14 3v5h5M9.5 13h7M9.5 17h7',
   board: 'M4 5h16v14H4zM9 5v14M15 5v14',

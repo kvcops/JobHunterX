@@ -228,10 +228,10 @@ async def insert_profile(data: dict) -> str:
     profile_id = _new_id()
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
-        from jobhunterx.config import app_state
+        from jobhunterx import storage
         await db.execute(
             "INSERT INTO profiles (id, data_json, created_at, person_id) VALUES (?, ?, ?, ?)",
-            (profile_id, json.dumps(data), _now_iso(), app_state.get("people.active")),
+            (profile_id, json.dumps(data), _now_iso(), storage.active_person()),
         )
         await db.commit()
     return profile_id
@@ -241,8 +241,8 @@ async def get_latest_profile() -> Optional[dict]:
     """Return the most recently stored profile or None."""
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
-        from jobhunterx.config import app_state
-        pid = app_state.get("people.active")
+        from jobhunterx import storage
+        pid = storage.active_person()        # the signed-in user's open profile in prod mode
         if not pid:
             return None
         cursor = await db.execute(

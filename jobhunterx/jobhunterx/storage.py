@@ -18,6 +18,7 @@ from typing import Any, Optional
 import aiosqlite
 
 from jobhunterx.config import app_state
+from jobhunterx.config import auth_ctx
 from jobhunterx.config import database as legacy
 from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.documents import GeneratedDocument
@@ -89,6 +90,11 @@ async def migrate() -> None:
             if "person_id" not in {r[1] for r in await cur.fetchall()}:
                 await db.execute(f"ALTER TABLE {table} ADD COLUMN person_id TEXT")
             await db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_person ON {table}(person_id)")
+        # prod mode: each person (profile) belongs to one login user; NULL = the local single-user app
+        cur = await db.execute("PRAGMA table_info(people)")
+        if "user_id" not in {r[1] for r in await cur.fetchall()}:
+            await db.execute("ALTER TABLE people ADD COLUMN user_id TEXT")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_people_user ON people(user_id)")
         orphans = 0
         for table in _PERSON_TABLES:
             orphans += (await (await db.execute(f"SELECT COUNT(*) FROM {table} WHERE person_id IS NULL")).fetchone())[0]
@@ -117,7 +123,47 @@ async def migrate() -> None:
 # ---------------------------------------------------------------------------
 
 def active_person() -> Optional[str]:
+    user = auth_ctx.current()
+    if user is not None:            # prod mode: every signed-in user has their own open profile
+        return user.active_person
     return app_state.get("people.active")
+
+
+def _owner(alias: str = "") -> tuple[str, tuple]:
+    """SQL filter for people the current user may see (everyone's in the local single-user app)."""
+    user = auth_ctx.current()
+    if user is None:
+        return "1 = 1", ()
+    return f"{alias}user_id = ?", (user.id,)
+
+
+# Each kind of record, and how to find the person it belongs to.
+_OWNED = {
+    "job": "SELECT person_id FROM jobs WHERE id = ?",
+    "document": "SELECT person_id FROM documents WHERE id = ?",
+    "monitor": "SELECT person_id FROM company_monitors WHERE id = ?",
+    "run": "SELECT person_id FROM search_runs WHERE id = ?",
+    "apply": "SELECT person_id FROM apply_sessions WHERE job_id = ?",
+    "person": "SELECT id FROM people WHERE id = ?",
+}
+
+
+async def owns(kind: str, oid: str) -> bool:
+    """True when the signed-in user owns this record (always True without login). An unknown id is False in
+    prod mode, so a guessed id answers exactly like a missing one."""
+    user = auth_ctx.current()
+    if user is None:
+        return True
+    async with _conn() as db:
+        row = await (await db.execute(f"SELECT 1 FROM people WHERE user_id = ? AND id = ({_OWNED[kind]})",
+                                      (user.id, oid))).fetchone()
+    return row is not None
+
+
+async def people_of_user(user_id: str) -> list[str]:
+    async with _conn() as db:
+        return [r[0] for r in await (await db.execute(
+            "SELECT id FROM people WHERE user_id = ? ORDER BY COALESCE(last_used_at, created_at) DESC", (user_id,))).fetchall()]
 
 
 def _scope(where: str = "", params: tuple = ()) -> tuple[str, tuple]:
@@ -130,13 +176,14 @@ def _scope(where: str = "", params: tuple = ()) -> tuple[str, tuple]:
 
 async def list_people() -> list[dict]:
     """Every person with a few facts for the picker (headline, location, job counts)."""
+    where, params = _owner("p.")
     async with _conn() as db:
         db.row_factory = aiosqlite.Row
         people = [dict(r) for r in await (await db.execute(
             "SELECT p.*, "
             "(SELECT COUNT(*) FROM jobs j WHERE j.person_id = p.id) AS jobs, "
             "(SELECT COUNT(*) FROM jobs j WHERE j.person_id = p.id AND j.saved_at IS NOT NULL) AS saved "
-            "FROM people p ORDER BY COALESCE(p.last_used_at, p.created_at) DESC")).fetchall()]
+            f"FROM people p WHERE {where} ORDER BY COALESCE(p.last_used_at, p.created_at) DESC", params)).fetchall()]
         for r in people:
             row = await (await db.execute("SELECT data_json FROM profiles WHERE person_id = ? ORDER BY created_at DESC LIMIT 1",
                                           (r["id"],))).fetchone()
@@ -153,24 +200,29 @@ async def list_people() -> list[dict]:
 
 
 async def get_person(pid: str) -> Optional[dict]:
+    """The person, or None when it does not exist or belongs to another user."""
+    where, params = _owner()
     async with _conn() as db:
         db.row_factory = aiosqlite.Row
-        row = await (await db.execute("SELECT * FROM people WHERE id = ?", (pid,))).fetchone()
+        row = await (await db.execute(f"SELECT * FROM people WHERE id = ? AND {where}", (pid, *params))).fetchone()
         return dict(row) if row else None
 
 
 async def create_person(name: str) -> str:
     pid = str(uuid.uuid4())
+    user = auth_ctx.current()
     async with _conn() as db:
-        await db.execute("INSERT INTO people (id, name, created_at, last_used_at) VALUES (?, ?, ?, ?)",
-                         (pid, (name or "").strip()[:80] or "New profile", _now(), _now()))
+        await db.execute("INSERT INTO people (id, name, created_at, last_used_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                         (pid, (name or "").strip()[:80] or "New profile", _now(), _now(), user.id if user else None))
         await db.commit()
     return pid
 
 
 async def rename_person(pid: str, name: str) -> bool:
+    where, params = _owner()
     async with _conn() as db:
-        cur = await db.execute("UPDATE people SET name = ? WHERE id = ?", ((name or "").strip()[:80] or "Profile", pid))
+        cur = await db.execute(f"UPDATE people SET name = ? WHERE id = ? AND {where}",
+                               ((name or "").strip()[:80] or "Profile", pid, *params))
         await db.commit()
         return cur.rowcount > 0
 
@@ -180,6 +232,13 @@ async def activate_person(pid: Optional[str]) -> None:
         async with _conn() as db:
             await db.execute("UPDATE people SET last_used_at = ? WHERE id = ?", (_now(), pid))
             await db.commit()
+    user = auth_ctx.current()
+    if user is not None:            # prod mode: remembered per user, never in the shared app state
+        user.active_person = pid
+        async with _conn() as db:
+            await db.execute("UPDATE users SET active_person = ? WHERE id = ?", (pid, user.id))
+            await db.commit()
+        return
     await app_state.set("people.active", pid)
 
 
@@ -204,6 +263,8 @@ async def heal_active_person() -> None:
 
 
 async def delete_person(pid: str) -> None:
+    if not await get_person(pid):
+        return                      # not this user's
     async with _conn() as db:
         ids = [r[0] for r in await (await db.execute("SELECT id FROM jobs WHERE person_id = ?", (pid,))).fetchall()]
     for jid in ids:
@@ -214,6 +275,10 @@ async def delete_person(pid: str) -> None:
         await db.execute("DELETE FROM people WHERE id = ?", (pid,))
         await db.commit()
     if active_person() == pid:
+        if auth_ctx.current() is not None:
+            people = await list_people()
+            await activate_person(people[0]["id"] if people else None)
+            return
         await app_state.set("people.active", None)
         await heal_active_person()
 

@@ -53,6 +53,8 @@ export function SetupView() {
   const [vals, setVals] = useState({});
   const [more, setMore] = useState(false);
   const keys = (setup.data && setup.data.keys) || {};
+  // prod mode, a normal user: no free shared models (they are limited per server address); keys go to their account
+  const freeAllowed = !setup.data || setup.data.free_allowed !== false;
   const tests = setup.tests || {};
   const set = (field) => (v) => setVals((x) => ({ ...x, [field]: v }));
   const entered = Object.entries(vals).filter(([, v]) => v.trim());
@@ -63,27 +65,28 @@ export function SetupView() {
       <div class="brand"><span class="brand-mark"><img src="/assets/logo.svg" alt="" width="34" height="34" /></span>
         <span class="brand-name">JobHunter<span class="serif">X</span></span></div>
       <div class="ob-copy"><h1>First, your free <span class="serif">AI</span></h1>
-        <p class="lead">JobHunterX uses AI to read your resume and every job. Start free with no key,
-          or add a free key — each takes about a minute.</p></div>
+        <p class="lead">${freeAllowed ? 'JobHunterX uses AI to read your resume and every job. Start free with no key, or add a free key — each takes about a minute.'
+          : 'JobHunterX uses AI to read your resume and every job. Add your own free key — it takes about a minute.'}</p></div>
       <ul class="setup-why">
-        <li><${Icon} name="check" size=${15} /> <span><strong>No key</strong> works: free models from Kilo, with LLM7 as a backup. <strong>One key</strong> is faster and private.</span></li>
+        ${freeAllowed ? html`<li><${Icon} name="check" size=${15} /> <span><strong>No key</strong> works: free models from Kilo, with LLM7 as a backup. <strong>One key</strong> is faster and private.</span></li>` : null}
         <li><${Icon} name="bolt" size=${15} /> <span><strong>Two or three</strong> make searches much faster — each free plan allows only a few calls a minute.</span></li>
-        <li><${Icon} name="shield" size=${15} /> <span>Saved only on your computer, in <code>jobhunterx/.env</code>. Nothing is paid.</span></li>
+        <li><${Icon} name="shield" size=${15} /> <span>${freeAllowed ? html`Saved only on your computer, in <code>jobhunterx/.env</code>. Nothing is paid.`
+          : 'Saved encrypted in your account on this server. Only your searches use them. Nothing is paid.'}</span></li>
       </ul>
     </aside>
     <section class="ob-main">
       <div class=${`card setup-card ${more ? 'more' : ''}`}>
         <div class="setup-card-head">
-          <h2>Start free, or add a key</h2>
+          <h2>${freeAllowed ? 'Start free, or add a key' : 'Add your free AI key'}</h2>
           <p class="muted small">Click “Get a free key”, copy it, paste it below. Use “Test” to check it works.</p>
         </div>
         ${setup.error ? html`<${Notice} tone="danger">${setup.error}</${Notice}>` : null}
-        <div class="setup-free">
+        ${freeAllowed ? html`<div class="setup-free">
           <div class="grow"><strong>No key? Start free with Kilo and LLM7</strong>
             <span class="muted small">Free AI models, no sign-up. Slower when busy, and these free models may use your prompts
               (resume text, job posts) to train — add a key below if that matters to you.</span></div>
           <${Button} busy=${setup.saving} onClick=${() => startFree(Object.fromEntries(entered.map(([k, v]) => [k, v.trim()])))}>Start free <${Icon} name="arrow" size=${14} /></${Button}>
-        </div>
+        </div>` : null}
         <div class="setup-rows">
           ${AI.map((p) => html`<${KeyRow} key=${p.id} p=${p} value=${vals[p.field] || ''} onChange=${set(p.field)} test=${tests[p.id]} configured=${keys[p.id]} />`)}
         </div>
@@ -100,7 +103,7 @@ export function SetupView() {
           </div>` : null}
         </div>
         <div class="setup-foot">
-          <span class="muted small">${failed ? 'A key failed the test — fix it or clear it first.' : aiEntered ? 'Ready — you can add more keys later in Settings.' : 'Paste an AI key, or start free above.'}</span>
+          <span class="muted small">${failed ? 'A key failed the test — fix it or clear it first.' : aiEntered ? 'Ready — you can add more keys later in Settings.' : freeAllowed ? 'Paste an AI key, or start free above.' : 'Paste an AI key to continue.'}</span>
           <${Button} variant="primary" busy=${setup.saving} disabled=${!aiEntered || failed}
             onClick=${() => saveSetupKeys(Object.fromEntries(entered.map(([k, v]) => [k, v.trim()])))}>Save and continue <${Icon} name="arrow" size=${15} /></${Button}>
         </div>

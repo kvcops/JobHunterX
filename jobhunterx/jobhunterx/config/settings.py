@@ -58,8 +58,31 @@ class Settings(BaseSettings):
 
     # --- Application ---
     host: str = "127.0.0.1"
-    port: int = 8000
+    port: int = 9000
     log_level: str = "INFO"
+
+    # --- Production mode (APP_ENV=prod): login page, users, per-user data and keys ---
+    # Not set (or anything else) = the local single-user app, exactly as before: no login at all.
+    app_env: str = ""
+    admin_username: str = ""            # the admin account; created / updated from these on every start
+    admin_password: str = ""
+    secret_key: str = ""                # encrypts users' saved API keys; empty = a random one kept in data/.secret_key
+    session_hours: float = 12.0         # a login lasts this long, then the user signs in again
+    cookie_samesite: str = "strict"     # strict | lax | none (none only when the UI is served from another site)
+    cookie_secure: str = "auto"         # auto = Secure on https (also behind a proxy that says so) | true | false
+    # CORS: empty = only this app's own address may call the API (same as before)
+    cors_origins: str = ""              # comma separated, e.g. https://jobs.example.com,https://www.example.com
+    cors_methods: str = ""              # empty = GET,POST,PUT,PATCH,DELETE
+    cors_headers: str = ""              # empty = Content-Type
+    cors_allow_credentials: Optional[bool] = None   # empty = on when CORS_ORIGINS is set and APP_ENV=prod
+    forwarded_allow_ips: str = ""       # trusted proxies for X-Forwarded-*; empty = * in prod, 127.0.0.1 otherwise
+    # The agents office writes its break-time chats and answers with AI; false = built-in lines only, no AI calls
+    office_ai_enabled: bool = True
+
+    @field_validator("cors_allow_credentials", mode="before")
+    @classmethod
+    def _blank_is_auto(cls, v):
+        return None if isinstance(v, str) and not v.strip() else v
     browser_use_headless: bool = True   # legacy; the live view always runs headless unless BROWSER_SHOW_WINDOW=true
     browser_use_headless_original: bool = False # fallback reference
     # --- Auto-apply ---
@@ -112,6 +135,10 @@ class Settings(BaseSettings):
     max_job_pipelines: int = 1    # Max concurrent per-job pipelines (serial to respect rate limits)
 
     @property
+    def prod(self) -> bool:
+        return self.app_env.strip().lower() in ("prod", "production")
+
+    @property
     def available_providers(self) -> list[str]:
         """Return list of providers with configured API keys."""
         providers = []
@@ -146,6 +173,21 @@ class Settings(BaseSettings):
 
 
 @lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Singleton settings instance."""
+def _base_settings() -> Settings:
     return Settings()
+
+
+def get_settings() -> Settings:
+    """The settings singleton — for a signed-in non-admin user (prod mode), a view with their own keys."""
+    base = _base_settings()
+    from jobhunterx.config import auth_ctx
+    user = auth_ctx.restricted()
+    return user.settings_view(base) if user is not None else base
+
+
+def server_settings() -> Settings:
+    """The server's own settings, whoever is asking (startup, admin-only paths)."""
+    return _base_settings()
+
+
+get_settings.cache_clear = _base_settings.cache_clear   # type: ignore[attr-defined]

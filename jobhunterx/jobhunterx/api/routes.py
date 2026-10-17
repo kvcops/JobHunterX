@@ -15,13 +15,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from jobhunterx import storage
+from jobhunterx import auth, storage
 from jobhunterx.agents import extractor
 from jobhunterx.api.ws import manager as ws_manager
+from jobhunterx.config import auth_ctx
 from jobhunterx.config import database as db
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import is_real_key
@@ -35,7 +36,26 @@ from jobhunterx.services.search import manager as search_manager
 
 log = get_logger("routes")
 
-router = APIRouter(prefix="/api")
+# Every id in a URL (or ?job_id=) names something that belongs to one person. With login on (prod mode) it must be
+# one of the signed-in user's own; anything else answers 404, exactly like an id that does not exist.
+_OWNED_PARAMS = {"job_id": "job", "doc_id": "document", "monitor_id": "monitor", "run_id": "run", "person_id": "person"}
+
+
+async def _owner_guard(request: Request) -> None:
+    if auth_ctx.current() is None:
+        return
+    for name, kind in _OWNED_PARAMS.items():
+        val = request.path_params.get(name) or (request.query_params.get(name) if name == "job_id" else None)
+        if val and not await storage.owns(kind, val):
+            raise HTTPException(404, "Not found")
+
+
+router = APIRouter(prefix="/api", dependencies=[Depends(_owner_guard)])
+
+
+def _uid() -> Optional[str]:
+    user = auth_ctx.current()
+    return user.id if user else None
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -63,7 +83,12 @@ async def _current_hash() -> Optional[str]:
 
 @router.get("/meta")
 async def meta():
-    return {"tracking_statuses": storage.TRACKING_STATUSES, "setup": _setup_status()}
+    from jobhunterx.config import app_state
+    user = auth_ctx.current()
+    return {"tracking_statuses": storage.TRACKING_STATUSES, "setup": _setup_status(),
+            "office_ai": app_state.office_ai_enabled(),
+            "auth": {"enabled": auth.enabled(), "user": {"id": user.id, "username": user.username, "is_admin": user.is_admin}
+                     if user else None}}
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +106,11 @@ def _setup_status() -> dict:
     have = {name: bool(getattr(s, f"{name}_api_key")) for name in (*_LLM_KEYS, *_SEARCH_KEYS, "kilo")}
     kilo_on = app_state.llm_provider_enabled("kilo")
     free_on = sum(app_state.llm_provider_enabled(p) for p in ("kilo", "llm7"))   # no-key providers turned on
-    free_ok = bool(app_state.get("setup.free_ok"))
+    free_allowed = auth_ctx.shared_pools_allowed()            # prod mode: users bring their own keys
+    free_ok = bool(app_state.get("setup.free_ok")) and free_allowed
     return {"llm_ready": any(have[n] for n in _LLM_KEYS) or (free_on > 0 and free_ok), "keys": have,
-            "llm_count": sum(have[n] for n in _LLM_KEYS) + free_on, "kilo_on": kilo_on, "free_ok": free_ok}
+            "llm_count": sum(have[n] for n in _LLM_KEYS) + free_on, "kilo_on": kilo_on, "free_ok": free_ok,
+            "free_allowed": free_allowed}
 
 
 @router.get("/setup")
@@ -95,6 +122,9 @@ async def setup_status():
 async def setup_free():
     """Start without any key: free no-key models (Kilo, LLM7) do the AI work (they may use prompts for training — the UI says so)."""
     from jobhunterx.config import app_state
+    if not auth_ctx.shared_pools_allowed():
+        raise HTTPException(403, "On this server the free shared models are not available to users. Add your own free key.")
+    auth.require_admin()
     cur = app_state.get("llm.providers")
     cur.update({"kilo": True, "llm7": True})
     await app_state.set("llm.providers", cur)
@@ -168,6 +198,7 @@ async def put_profile(profile: CandidateProfile):
 
 
 _uploads: dict[str, dict] = {}   # upload id -> status (kept for the session so a reload can resume)
+_upload_owner: dict[str, Optional[str]] = {}   # upload id -> login user (prod mode)
 
 
 async def _process_upload(up: dict, data: bytes) -> dict:
@@ -216,6 +247,10 @@ async def upload_resume(file: UploadFile = File(...), background: bool = Query(F
                                  "or choose “Start free with Kilo”. Without AI, the resume cannot be read.")
     up = {"id": str(uuid.uuid4()), "status": "running", "stage": "received", "file_name": (file.filename or "resume.pdf")[:120],
           "started_at": datetime.now(timezone.utc).isoformat(), "error": None}
+    if len(_uploads) > 200:
+        for old in list(_uploads)[:100]:
+            _uploads.pop(old, None)
+    _upload_owner[up["id"]] = _uid()
     _uploads[up["id"]] = up
     if not background:
         return await _process_upload(up, data)
@@ -232,7 +267,7 @@ async def upload_resume(file: UploadFile = File(...), background: bool = Query(F
 @router.get("/profile/upload/{upload_id}")
 async def upload_status(upload_id: str):
     up = _uploads.get(upload_id)
-    if not up:
+    if not up or _upload_owner.get(upload_id) != _uid():
         raise HTTPException(404, "Upload not found")
     return {"upload": {k: v for k, v in up.items() if k != "result"}, "result": up.get("result")}
 
@@ -321,8 +356,7 @@ async def current_search():
 
 @router.get("/searches/{run_id}")
 async def get_search(run_id: str):
-    run = search_manager.current if search_manager.current and search_manager.current["id"] == run_id \
-        else await storage.get_run(run_id)
+    run = search_manager.find(run_id) or await storage.get_run(run_id)
     if not run:
         raise HTTPException(404, "Search run not found")
     return {"run": run}
@@ -836,7 +870,8 @@ async def get_settings_masked():
     from jobhunterx.config import app_state
     from jobhunterx.config.settings import get_settings
     s = get_settings()
-    file_keys = _env_file_keys()
+    user = auth_ctx.restricted()
+    file_keys = {} if user else _env_file_keys()
     out = {k: getattr(s, k) for k in _BOOL_FIELDS}
     out["primary_search_provider"] = s.primary_search_provider
     out["search_providers"] = list(_SEARCH_PROVIDERS)
@@ -846,12 +881,18 @@ async def get_settings_masked():
         val = getattr(s, f"{name}_api_key")
         out[f"{name}_configured"] = bool(val)
         out[f"{name}_key_masked"] = _mask(val)
-        out[f"{name}_source"] = _source(env_names, file_keys) if val else ""
+        out[f"{name}_source"] = ("your account" if user else _source(env_names, file_keys)) if val else ""
     out["tunables"] = {k: getattr(s, k) for k in _TUNABLES}
     from jobhunterx.tools import deep_search
     out["deep_engines"] = deep_search.engine_status()
     out["providers"] = {"llm": app_state.get("llm.providers"), "search": app_state.get("search.providers"),
                         "search_order": app_state.get("search.order"), "search_strategy": app_state.get("search.strategy")}
+    out["office_ai_enabled"] = app_state.office_ai_enabled()
+    out["restricted"] = user is not None        # prod mode, not the admin: own keys only, server settings read-only
+    out["auth"] = auth.enabled()
+    if user is not None:
+        out["providers"]["llm"] = {p: p not in auth_ctx.SHARED_POOLS for p in app_state.LLM_PROVIDERS}
+        return out
     from jobhunterx.config.settings import _BASE_DIR
     out["env_file"] = str(_BASE_DIR / ".env")
     out["env_file_exists"] = (_BASE_DIR / ".env").exists()
@@ -874,10 +915,31 @@ def _persist_env(updates: dict[str, str]) -> None:
     path.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+_KEY_PROVIDER = {"gemini_api_key": "google", **{f"{p}_api_key": p for p in auth_ctx.USER_KEY_PROVIDERS}}
+
+
+async def _save_own_keys(payload: dict) -> dict:
+    """Prod mode, a normal user: only their own keys can be saved (encrypted in their account, never in .env)."""
+    user = auth_ctx.restricted()
+    extra = [k for k in payload if k not in _KEY_PROVIDER]
+    if extra:
+        raise HTTPException(403, "Only the admin can change server settings. You can add or remove your own keys.")
+    updates = {_KEY_PROVIDER[k]: str(v or "") for k, v in payload.items()}
+    user.keys = await auth.save_user_keys(user.id, updates)
+    user._settings = None                     # this request sees the new keys at once
+    return await get_settings_masked()
+
+
 @router.post("/settings")
 async def update_settings(payload: dict):
     from jobhunterx.config import models as M
     from jobhunterx.config.settings import get_settings
+    if auth_ctx.restricted() is not None:
+        return await _save_own_keys(payload)
+    auth.require_admin()
+    if "office_ai_enabled" in payload:
+        from jobhunterx.config import app_state
+        await app_state.set("office.ai", bool(payload.pop("office_ai_enabled")))
     s = get_settings()
     env: dict[str, str] = {}
     keys_changed = False
@@ -937,6 +999,7 @@ class ProvidersBody(BaseModel):
 async def update_providers(body: ProvidersBody):
     """Turn LLM / search providers on or off, reorder search providers, choose the search strategy."""
     from jobhunterx.config import app_state
+    auth.require_admin()
     if body.llm is not None:
         cur = app_state.get("llm.providers")
         cur.update({k: bool(v) for k, v in body.llm.items() if k in app_state.LLM_PROVIDERS})
@@ -971,6 +1034,7 @@ class ModelSelection(BaseModel):
 @router.post("/models")
 async def set_model(body: ModelSelection):
     from jobhunterx.config.llm_router import FALLBACK_CHAINS, get_model_config, set_model_config
+    auth.require_admin()
     if body.chain not in FALLBACK_CHAINS or body.model_id not in {m["id"] for m in get_model_config()["all_models"]}:
         raise HTTPException(422, "Unknown chain or model")
     await set_model_config(body.chain, body.model_id)
@@ -984,12 +1048,14 @@ async def set_model(body: ModelSelection):
 @router.get("/system/health")
 async def system_health():
     from jobhunterx import db_health
+    auth.require_admin()
     return await db_health.check(db.get_db_path(), repair=False)
 
 
 @router.post("/system/repair")
 async def system_repair():
     from jobhunterx import db_health
+    auth.require_admin()
     report = await db_health.check(db.get_db_path(), repair=True)
     return report
 
@@ -997,6 +1063,7 @@ async def system_repair():
 @router.post("/system/backup")
 async def system_backup():
     from jobhunterx import db_health
+    auth.require_admin()
     path = await db_health.backup(db.get_db_path())
     return {"path": path}
 
@@ -1006,6 +1073,7 @@ async def usage():
     from jobhunterx.config import gemma
     from jobhunterx.config.llm_router import get_model_config
     from jobhunterx.tools.usage_ledger import get_usage_report
+    auth.require_admin()                      # server-wide numbers
     search_report = await get_usage_report()
     llm = await db.get_token_usage_summary()
     by_model = llm.get("by_model", {})
@@ -1045,6 +1113,7 @@ async def get_pipeline_mode():
 @router.post("/pipeline-mode")
 async def set_pipeline_mode(mode: Optional[str] = None):
     global _pipeline_mode
+    auth.require_admin()
     if mode:
         if mode not in ("automatic", "manual"):
             raise HTTPException(422, "mode must be 'automatic' or 'manual'")
@@ -1059,6 +1128,8 @@ class ResumeAgentRequest(BaseModel):
 
 @router.post("/resume-agent")
 async def resume_agent(body: ResumeAgentRequest):
+    if not await storage.owns("job", body.job_id):
+        raise HTTPException(404, "Not found")
     if body.action == "skip":
         from jobhunterx.agents import browser_agent as ba
         await ba.close(body.job_id)
@@ -1073,16 +1144,21 @@ async def resume_agent(body: ResumeAgentRequest):
 @router.post("/stop-browser")
 async def stop_browser():
     from jobhunterx.agents import browser_agent as ba
-    sess = ba.current_session()
+    sess = _own(ba.current_session())
     if sess:
         await apply_svc.stop(sess.data["job_id"])
     return {"status": "ok"}
 
 
+def _own(sess):
+    """The session if it is the signed-in user's (prod mode); None otherwise."""
+    return sess if sess and sess.data.get("user_id") == _uid() else None
+
+
 @router.post("/browser/takeover")
 async def browser_takeover(job_id: str = ""):
     from jobhunterx.agents import browser_agent as ba
-    sess = ba.get_session(job_id) if job_id else ba.current_session()
+    sess = _own(ba.get_session(job_id) if job_id else ba.current_session())
     if sess:
         await ba.take_over(sess.data["job_id"])
     return {"status": "ok"}
@@ -1091,20 +1167,27 @@ async def browser_takeover(job_id: str = ""):
 @router.post("/browser/release")
 async def browser_release(job_id: str = ""):
     from jobhunterx.agents import browser_agent as ba
-    sess = ba.get_session(job_id) if job_id else ba.current_session()
+    sess = _own(ba.get_session(job_id) if job_id else ba.current_session())
     if sess:
         await ba.release(sess.data["job_id"])
     return {"status": "ok"}
 
 
+async def _my_interventions() -> list[dict]:
+    items = await db.get_pending_interventions()
+    if auth_ctx.current() is None:
+        return items
+    return [it for it in items if it.get("job_id") and await storage.owns("job", it["job_id"])]
+
+
 @router.get("/interventions")
 async def interventions():
-    return {"interventions": await db.get_pending_interventions()}
+    return {"interventions": await _my_interventions()}
 
 
 @router.post("/interventions/{session_id}/resolve")
 async def resolve_intervention(session_id: int, status: Literal["resolved", "skipped"] = "resolved"):
-    sessions = await db.get_pending_interventions()
+    sessions = await _my_interventions()
     target = next((s for s in sessions if s.get("id") == session_id), None)
     if not target:
         raise HTTPException(404, "Intervention not found")
@@ -1131,12 +1214,14 @@ async def screenshot(job_id: str):
 
 @router.post("/reset")
 async def reset():
-    await search_manager.cancel()
+    auth.require_admin()
+    await search_manager.cancel_all()
     await apply_svc.cancel_all()
     await db.clear_database()
     await db.init_db()
     from jobhunterx.config import app_state
     await app_state.load(db.get_db_path())
     await app_state.set("people.active", None)
+    await auth.init()                         # prod mode: the database was wiped; the admin from .env comes back
     await emit({"type": "log", "message": "All data was reset.", "data": {"level": "warn", "source": "system"}})
     return {"status": "ok"}

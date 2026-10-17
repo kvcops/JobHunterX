@@ -61,7 +61,10 @@ def get_model_config() -> Dict[str, Any]:
     """Model config for the UI: providers (configured/enabled/reachable), chains and every model with its limits."""
     avail = M.availability()
     providers = {}
+    from jobhunterx.config import auth_ctx
     for p in app_state.LLM_PROVIDERS:
+        if p in auth_ctx.SHARED_POOLS and not auth_ctx.shared_pools_allowed():
+            continue                    # prod mode: not offered to users (IP-limited free pools)
         info = avail.get(p)
         providers[p] = {"configured": bool(M.provider_key(p)), "enabled": app_state.llm_provider_enabled(p),
                         "reachable": None if info is None else info["ok"], "error": info and info["error"],
@@ -186,6 +189,8 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
         key = "default"
         limit = 5
 
+    from jobhunterx.config import auth_ctx
+    key += auth_ctx.scope()             # users with their own keys don't queue behind each other
     loop_key = id(asyncio.get_running_loop())
     sem_map = _semaphores.setdefault(loop_key, {})
     if key not in sem_map:
@@ -203,7 +208,12 @@ def _llm7_gate() -> asyncio.Semaphore:
 
 
 def _get_provider_key(model: str) -> str:
-    """Extract provider key from model name."""
+    """Provider cooldown slot for a model (a signed-in user's own key gets its own slot, prod mode)."""
+    from jobhunterx.config import auth_ctx
+    return _provider_slot(model) + auth_ctx.scope()
+
+
+def _provider_slot(model: str) -> str:
     if model.startswith("kilo/"):
         return model                    # Kilo limits are per model: a busy one hands over to the next free model
     if model.startswith("nim/"):
@@ -233,7 +243,7 @@ def _record_rate_limit(model: str) -> None:
     """Mark a provider as rate-limited with a cooldown period."""
     import time as _time
     provider = _get_provider_key(model)
-    cooldown = _PROVIDER_COOLDOWN.get(provider, 30.0)
+    cooldown = _PROVIDER_COOLDOWN.get(_provider_slot(model), 30.0)
     _provider_rate_limited_until[provider] = _time.monotonic() + cooldown
     _provider_error_counts[provider] = _provider_error_counts.get(provider, 0) + 1
     log.warning(
@@ -373,8 +383,9 @@ async def _call_google_genai(
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """Direct Google GenAI SDK call for all Gemini & Gemma models (bypasses LiteLLM completely)."""
+    from jobhunterx.config import auth_ctx
     settings = get_settings()
-    api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = settings.google_api_key or auth_ctx.env_key("GOOGLE_API_KEY", "GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("No Google API key configured")
 
@@ -596,6 +607,12 @@ async def call_llm(
         params.pop("top_p", None)
         params.pop("top_k", None)
     params.setdefault("max_tokens", 768)
+    # the key is passed with every call: in prod mode it is the signed-in user's own key, never the server's
+    if model.startswith(("groq/", "mistral/")):
+        key = M.provider_key(M.provider_of(model))
+        if not key:
+            raise RuntimeError(f"No API key for {M.provider_of(model)}")
+        params["api_key"] = key
 
     # --- Semaphore + call ---
     sem = _get_semaphore(model)

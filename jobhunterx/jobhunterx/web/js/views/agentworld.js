@@ -4,6 +4,7 @@
 import { html, useEffect, useRef, useState } from '../lib/preact.js';
 import { Icon } from '../components/ui.js';
 import { api } from '../lib/api.js';
+import { useStore } from '../state/store.js';
 
 const DESKS = [
   { key: 'understand', stages: ['understand'], name: 'Profile analyst', role: 'Reads your profile', icon: 'user', hue: 18, act: 'type',
@@ -163,6 +164,7 @@ function World3D({ run, items, states, lastLine }) {
   const [selected, setSelected] = useState(null);
   const [said, setSaid] = useState({});             // agent key -> { text, until, kind }: what each robot is saying now
   const [ai, setAI] = useState(readAI);
+  const serverAI = useStore((s) => !s.meta.data || s.meta.data.office_ai !== false);   // Settings → Agents office
   const [ask, setAsk] = useState('');
   const [asking, setAsking] = useState(false);
   const [qa, setQA] = useState({});                  // agent key -> [{ q, a }]
@@ -189,7 +191,7 @@ function World3D({ run, items, states, lastLine }) {
       .then((w) => {
         if (!alive) { w.dispose(); return; }
         world.current = w;
-        w.setAI(readAI());
+        w.setAI(readAI() && serverAI);
         w.onFrame((pos) => {
           const boxes = [];
           for (const [key, pt] of Object.entries(pos)) {
@@ -264,7 +266,8 @@ function World3D({ run, items, states, lastLine }) {
   const selInfo = selected && world.current ? world.current.info(selected) : null;
   const deskOf = (key) => DESKS.find((d) => STAGE_KEY[d.key] === key) || DESKS[0];
   const stateWord = (st) => (st === 'running' ? 'working now' : st === 'done' ? 'finished' : st === 'failed' ? 'stopped' : 'waiting');
-  const toggleAI = () => { const on = !ai; setAI(on); try { localStorage.setItem(AI_KEY, on ? '1' : '0'); } catch { /* ignore */ } if (world.current) world.current.setAI(on); };
+  useEffect(() => { if (world.current) world.current.setAI(ai && serverAI); }, [ai, serverAI]);
+  const toggleAI = () => { if (!serverAI) return; const on = !ai; setAI(on); try { localStorage.setItem(AI_KEY, on ? '1' : '0'); } catch { /* ignore */ } if (world.current) world.current.setAI(on); };
   async function sendAsk(e) {
     e.preventDefault();
     const q = ask.trim();
@@ -340,7 +343,8 @@ function World3D({ run, items, states, lastLine }) {
         <span class="aw3d-hint">${busy.length ? html`<strong>${busy.join(', ')}</strong> working now` : states.every((x) => x === 'done') ? 'Everyone has finished — break time' : 'No search running — the team is on a break'}
           <span class="muted"> · click a robot · drag to look around · scroll to zoom</span></span>
         <div class="row gap">
-          <button type="button" class="aw3d-btn" aria-pressed=${ai ? 'true' : 'false'} onClick=${toggleAI} title="Break-time talk written by AI in batches every hour or two (no AI call per chat). Off = built-in lines only.">${ai ? 'AI chats on' : 'AI chats off'}</button>
+          <button type="button" class="aw3d-btn" aria-pressed=${ai && serverAI ? 'true' : 'false'} disabled=${!serverAI} onClick=${toggleAI}
+            title=${serverAI ? 'Break-time talk written by AI in batches every hour or two (no AI call per chat). Off = built-in lines only.' : 'AI is turned off for the agents office in Settings — built-in lines only, no AI calls.'}>${!serverAI ? 'AI off' : ai ? 'AI chats on' : 'AI chats off'}</button>
           <button type="button" class="aw3d-btn" aria-pressed=${showLog ? 'true' : 'false'} onClick=${() => setShowLog(!showLog)}>Office talk${log.length ? ` · ${log.length}` : ''}</button>
           <button type="button" class="aw3d-btn" aria-pressed=${follow ? 'true' : 'false'} onClick=${() => setFollow(!follow)}
             title="Move the camera to wherever agents are working together">${follow ? '● Following the action' : 'Follow the action'}</button>
