@@ -1567,6 +1567,10 @@ def name_parts(profile: dict) -> tuple[str, str, str]:
     the last name and everything before it the first name ("Vamsi Krishna Kakarla" → "Vamsi Krishna" + "Kakarla"); leading
     initials as in "K. Vamsi Krishna" are the family initial, so they become the last name only when one word is left."""
     full = re.sub(r"\s+", " ", (profile.get("name") or "")).strip()
+    own_first, own_last = (profile.get("first_name") or "").strip(), (profile.get("last_name") or "").strip()
+    if own_first or own_last:            # the person set their name parts in the profile: never guess from word order
+        return own_first or own_last, own_last, full or " ".join(
+            x for x in (own_first, (profile.get("middle_name") or "").strip(), own_last) if x)
     saved = {re.sub(r"[^a-z]", "", k.lower()): str(v).strip()
              for k, v in (((profile.get("qa_memory") or {}).get("custom_answers")) or {}).items() if v}
     first, last = saved.get("firstname", ""), saved.get("lastname", "") or saved.get("surname", "")
@@ -1650,7 +1654,7 @@ def _profile_block(profile: dict) -> str:
     links_block = ("\n- Other links: " + "; ".join(other) if other else "") + \
         ("\n- Project links (use for 'portfolio / work samples / website' questions):\n" + "\n".join(proj_links[:6]) if proj_links else "")
     return f"""=== CANDIDATE ===
-- First name (given name): {first}
+- First name (given name): {first}{chr(10) + '- Middle name: ' + profile['middle_name'].strip() if (profile.get('middle_name') or '').strip() else ''}
 - Last name (surname / family name): {last or first + '  (only one name — repeat it if a last name is required)'}
 - Full name: {full}
 - Email: {profile.get('email', '')}

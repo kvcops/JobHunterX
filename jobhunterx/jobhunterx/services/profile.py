@@ -32,6 +32,15 @@ async def save_profile(profile: CandidateProfile) -> CandidateProfile:
     return profile
 
 
+def _outdated(snap: CandidateSnapshot, use_llm: bool) -> bool:
+    """Built by an older release: no per-role breakdown, or an AI understanding from before v2 (which could leave level,
+    education and places empty when a free model ran out of room)."""
+    from jobhunterx.intelligence.candidate import VERSION
+    if not snap.experience_breakdown and snap.total_years:
+        return True
+    return use_llm and snap.method == "llm" and snap.understanding_version != VERSION
+
+
 async def get_snapshot(profile: CandidateProfile, *, use_llm: bool = True) -> CandidateSnapshot:
     """Snapshot for this exact profile version (cached per profile hash).
 
@@ -40,14 +49,14 @@ async def get_snapshot(profile: CandidateProfile, *, use_llm: bool = True) -> Ca
     """
     h = profile.content_hash()
     cached = await storage.get_snapshot(h)
-    if cached and profile.experience and not cached.experience_breakdown:
-        cached = None          # snapshot from an older release: rebuild (the AI answer itself is cached)
+    if cached and _outdated(cached, use_llm):
+        cached = None          # snapshot from an older release: rebuild
     if cached and (cached.method == "llm" or not use_llm):
         return cached
     lock = _locks.setdefault(h, asyncio.Lock())
     async with lock:
         cached = await storage.get_snapshot(h)
-        if cached and profile.experience and not cached.experience_breakdown:
+        if cached and _outdated(cached, use_llm):
             cached = None
         if cached and (cached.method == "llm" or not use_llm):
             return cached

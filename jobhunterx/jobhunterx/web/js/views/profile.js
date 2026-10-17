@@ -27,11 +27,12 @@ function Reading() {
     <p class="muted small">${uploadStageLabel(up.stage)}… · <${Elapsed} since=${up.startedAt} /></p></div>`;
 }
 
-function Understanding({ snap }) {
+function Understanding({ snap, pending }) {
   if (!snap) return html`<div class="understanding"><h2>How JobHunterX understands you</h2><${Skeleton} lines=${6} /></div>`;
   return html`<div class="understanding" aria-label="How JobHunterX understands you">
     <div class="dna-head"><div><h2>How JobHunterX understands you</h2><p class="muted small">Derived from your profile. Every skill is checked against what you actually wrote.</p></div>
-      <${Badge} tone=${snap.method === 'llm' ? 'success' : 'warning'}>${snap.method === 'llm' ? 'AI analysis' : 'Basic (AI unavailable)'}</${Badge}></div>
+      ${pending ? html`<${Badge} tone="info" title="Your latest changes are being analysed; this view updates by itself">Updating…</${Badge}>`
+        : html`<${Badge} tone=${snap.method === 'llm' ? 'success' : 'warning'}>${snap.method === 'llm' ? 'AI analysis' : 'Basic (AI unavailable)'}</${Badge}>`}</div>
     <div class="stats">
       <${Stat} label="Level" value=${humanize(snap.seniority)} />
       <${Stat} label="Education" value=${humanize(snap.education_level)} />
@@ -151,7 +152,8 @@ function Editor({ profile }) {
     </div>
     <div class="scroll editor-body" key=${tab}>
     ${tab === 'about' ? html`<div class="form-grid">
-      ${[['name', 'Full name'], ['email', 'Email', 'email'], ['phone', 'Phone']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
+      ${[['name', 'Full name (as printed on documents)'], ['first_name', 'First name'], ['middle_name', 'Middle name'], ['last_name', 'Last name (surname)'],
+        ['email', 'Email', 'email'], ['phone', 'Phone']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
       <${Field} label="Current location">${(id) => html`<${CityInput} id=${id} value=${draft.location} country=${p.home_country}
         placeholder="e.g. Hyderabad, Telangana, India" onChange=${(v) => set(['location'], v)} />`}</${Field}>
       ${[['suggested_role', 'Current / target title'],
@@ -224,7 +226,7 @@ export function ProfileView() {
         <div class="scroll pane-pad">
           ${pr.status === 'loading' && !env ? html`<${Skeleton} lines=${8} />` : null}
           ${pr.status === 'error' && !env ? html`<${ErrorBox} message=${pr.error} onRetry=${loadProfile} />` : null}
-          ${env && env.profile ? html`<${Understanding} snap=${env.snapshot} />` : null}
+          ${env && env.profile ? html`<${Understanding} snap=${env.snapshot} pending=${!!env.snapshot_pending} />` : null}
           ${env && !env.profile ? html`<${EmptyState} icon="upload" title="No resume yet">Upload a PDF, or fill in the profile on the right by hand.</${EmptyState}>` : null}
         </div>
       </section>

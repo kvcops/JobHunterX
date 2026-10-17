@@ -107,6 +107,9 @@ function ReviewStep({ draft, set }) {
       <div class="stack">
         <div class="form-grid tight">
           <${Field} label="Full name">${(id) => html`<input id=${id} class="input" autocomplete="name" value=${draft.name} onInput=${(e) => set(['name'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="First name">${(id) => html`<input id=${id} class="input" autocomplete="given-name" value=${draft.first_name} onInput=${(e) => set(['first_name'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="Middle name">${(id) => html`<input id=${id} class="input" autocomplete="additional-name" value=${draft.middle_name} onInput=${(e) => set(['middle_name'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="Last name (surname)" hint="Application forms use these exactly as written.">${(id) => html`<input id=${id} class="input" autocomplete="family-name" value=${draft.last_name} onInput=${(e) => set(['last_name'], e.currentTarget.value)} />`}</${Field}>
           <${Field} label="Email">${(id) => html`<input id=${id} class="input" type="email" autocomplete="email" value=${draft.email} onInput=${(e) => set(['email'], e.currentTarget.value)} />`}</${Field}>
           <${Field} label="Phone">${(id) => html`<input id=${id} class="input" type="tel" autocomplete="tel" value=${draft.phone} onInput=${(e) => set(['phone'], e.currentTarget.value)} />`}</${Field}>
           <${Field} label="Current location" hint="Start typing a city — pick from the list or keep what you typed.">${(id) => html`<${CityInput} id=${id}

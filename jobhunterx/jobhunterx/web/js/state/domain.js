@@ -92,7 +92,7 @@ export function genKey(jobId, kind) { return `${jobId || 'cv'}:${kind}`; }
 
 export function emptyProfile() {
   return {
-    name: '', email: '', phone: '', location: '', present_address: '', permanent_address: '',
+    name: '', first_name: '', middle_name: '', last_name: '', email: '', phone: '', location: '', present_address: '', permanent_address: '',
     linkedin: '', github: '', portfolio: '', summary: '', suggested_role: '', relevant_experience: '',
     languages: [], skills: [], certifications: [], competitions: [], achievements: [],
     experience: [], education: [], projects: [],

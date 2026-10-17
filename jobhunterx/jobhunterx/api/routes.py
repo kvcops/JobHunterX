@@ -196,15 +196,48 @@ async def test_key(body: KeyTest):
 
 @router.get("/profile")
 async def get_profile():
-    return await profile_svc.envelope(await profile_svc.get_profile())
+    return await _envelope_now(await profile_svc.get_profile())
 
 
 @router.put("/profile")
 @router.post("/profile")
 async def put_profile(profile: CandidateProfile):
+    """Save at once. The AI understanding of a changed profile can take a while on free models, so the answer carries
+    the previous one (snapshot_pending) and the new one follows as a profile.updated event."""
+    old = await profile_svc.get_profile()
     await profile_svc.save_profile(profile)
-    env = await profile_svc.envelope(profile)
+    env = await _envelope_now(profile, old)
     await emit({"type": "profile.updated", "data": env})
+    return env
+
+
+_building: set[str] = set()      # profile versions whose AI understanding is being built in the background
+
+
+async def _envelope_now(profile: Optional[CandidateProfile], previous: Optional[CandidateProfile] = None) -> dict:
+    """The profile with the best understanding available right now; when it is missing or from an older release, the
+    previous one is shown (snapshot_pending) and the new one is built in the background, then sent as profile.updated."""
+    env = await profile_svc.envelope(profile, build=False)
+    if profile is None or profile.is_empty():
+        return env
+    cached = await storage.get_snapshot(profile.content_hash())
+    if cached and not profile_svc._outdated(cached, True):
+        return env
+    prev = cached or (await storage.get_snapshot(previous.content_hash()) if previous else None)
+    env["snapshot"] = prev.model_dump(mode="json") if prev else None
+    env["snapshot_pending"] = True
+    h = profile.content_hash()
+    if h not in _building:
+        _building.add(h)
+
+        async def _understand() -> None:
+            try:
+                await emit({"type": "profile.updated", "data": await profile_svc.envelope(profile)})
+            except Exception as exc:
+                log.warning("snapshot_build_failed", error=str(exc)[:200])
+            finally:
+                _building.discard(h)
+        asyncio.create_task(_understand())
     return env
 
 
@@ -229,7 +262,7 @@ async def _process_upload(up: dict, data: bytes) -> dict:
             profile.qa_memory = existing.qa_memory
         await profile_svc.save_profile(profile)
         await stage("understanding")
-        env = await profile_svc.envelope(profile)
+        env = await _envelope_now(profile, existing)        # the review opens now; the AI analysis follows as an event
         await emit({"type": "profile.updated", "data": env})
         up["result"] = {**env, "extraction": info}
         await stage("done", status="done", finished_at=datetime.now(timezone.utc).isoformat())

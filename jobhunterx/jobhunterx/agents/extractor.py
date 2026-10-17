@@ -22,7 +22,7 @@ from jobhunterx.intelligence.llm_structured import call_structured, fence
 
 log = get_logger("extractor")
 
-VERSION = "profile-extract-v3"   # v3: college vs affiliating university
+VERSION = "profile-extract-v4"   # v4: name split into first / middle / last (v3: college vs affiliating university)
 
 _SYSTEM = """You convert a resume into a structured candidate profile.
 Extract ONLY what is written in the resume. Never invent or infer employers, dates, skills, metrics or links.
@@ -42,6 +42,9 @@ Extract ONLY what is written in the resume. Never invent or infer employers, dat
   which project or entry a link belongs to. Skip email (mailto:) and phone (tel:) links. Never invent a URL.
 - skills: every technology, tool, language, framework and method named anywhere in the resume, as written.
 - certifications, achievements, competitions, languages (spoken languages) as lists.
+- name: the full name exactly as the resume prints it. first_name / middle_name / last_name: the same name split into
+  given name, middle name(s) and family name (surname), in normal capitalisation. Many resumes print the surname first
+  or use an initial for it; split by what the parts are, not by their order. Leave a part empty when it is not clear.
 - suggested_role: the single job title that best describes the candidate today.
 - relevant_experience: a short phrase describing their experience as stated (e.g. "1.5 years in ML engineering").
 - Leave qa_memory and preferences empty."""

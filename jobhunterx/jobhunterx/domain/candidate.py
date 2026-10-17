@@ -239,7 +239,12 @@ class CandidatePreferences(_Lenient):
 class CandidateProfile(_Lenient):
     """Ground truth from resume extraction + the user's own edits."""
 
-    name: str = ""
+    name: str = ""                                          # full name as printed on resumes and letters
+    # The name in parts, for application forms ("First name", "Last name"…). Many resumes put the surname first, so the
+    # parts are stored as the person confirms them — never guessed from word order.
+    first_name: str = Field("", description="given name")
+    middle_name: str = Field("", description="middle name(s), if any")
+    last_name: str = Field("", description="family name / surname")
     email: str = ""
     phone: str = ""
     location: str = ""
@@ -265,7 +270,7 @@ class CandidateProfile(_Lenient):
     preferences: CandidatePreferences = Field(default_factory=CandidatePreferences)
 
     _s = field_validator(
-        "name", "email", "phone", "location", "present_address", "permanent_address",
+        "name", "first_name", "middle_name", "last_name", "email", "phone", "location", "present_address", "permanent_address",
         "linkedin", "github", "portfolio", "summary", "suggested_role", "relevant_experience",
         mode="before",
     )(_coerce_str)
@@ -297,7 +302,7 @@ class CandidateProfile(_Lenient):
         and stale generated documents."""
         data = self.model_dump(mode="json")
         # Fields added later are left out while empty, so older profiles keep their hash (documents stay "current").
-        for key in ("links", "item_links"):
+        for key in ("links", "item_links", "first_name", "middle_name", "last_name"):
             if not data.get(key):
                 data.pop(key, None)
         for proj in data.get("projects", []):
@@ -375,6 +380,7 @@ class CandidateSnapshot(BaseModel):
     excluded_companies: list[str] = Field(default_factory=list)
     career_direction: str = ""
     method: str = "fallback"                    # llm | fallback
+    understanding_version: str = ""             # which version of the AI understanding built it (older ones are rebuilt)
     llm_model: str = ""
     notes: list[str] = Field(default_factory=list)
 
