@@ -815,14 +815,9 @@ async def create_cv(body: CvRequest):
 async def list_documents(job_id: str = "", kind: str = ""):
     docs = await storage.list_documents(job_id or None, kind or None)
     current = await _current_hash()
-    out = []
-    for d in docs:
-        job = None
-        if d.job_id:
-            row = await storage.get_row(d.job_id)
-            job = storage.row_to_objects(row)[0] if row else None
-        out.append(jobs_svc.document_summary(d, current, job))
-    return {"documents": out}
+    rows = await storage.get_rows([d.job_id for d in docs if d.job_id])      # one query, not one per document
+    jobs = {jid: storage.row_to_objects(r)[0] for jid, r in rows.items()}
+    return {"documents": [jobs_svc.document_summary(d, current, jobs.get(d.job_id)) for d in docs]}
 
 
 @router.get("/documents/{doc_id}")
@@ -1173,8 +1168,11 @@ async def usage():
 @router.get("/status")
 async def status():
     run = search_manager.current
-    return {"search": run["status"] if run else "idle", "jobs": await storage.count(),
-            "token_usage": await db.get_token_usage_summary()}
+    out = {"search": run["status"] if run else "idle", "jobs": await storage.count()}
+    user = auth_ctx.current()
+    if user is None or user.is_admin:          # server-wide AI usage: the admin's business only
+        out["token_usage"] = await db.get_token_usage_summary()
+    return out
 
 
 # ---------------------------------------------------------------------------

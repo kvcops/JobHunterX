@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from contextvars import ContextVar
+
 import aiosqlite
 
 from jobhunterx.config import app_state
@@ -71,7 +73,7 @@ def _now() -> str:
 
 
 def _conn():
-    return aiosqlite.connect(legacy.get_db_path())
+    return legacy.pooled()
 
 
 async def migrate() -> None:
@@ -122,7 +124,20 @@ async def migrate() -> None:
 # People (the profiles you can switch between)
 # ---------------------------------------------------------------------------
 
+# The profile a request (and every task it starts) works for, fixed when the request begins. A resume still being
+# read, a document still being written or an application still being prepared keeps saving into the profile it
+# started for, even if the person switches to another profile meanwhile. Set by PinPerson (api/main.py).
+_pinned: ContextVar[Optional[str]] = ContextVar("jhx_pinned_person", default=None)
+
+
+def pin_person(pid: Optional[str]):
+    return _pinned.set(pid)
+
+
 def active_person() -> Optional[str]:
+    pinned = _pinned.get()
+    if pinned:
+        return pinned
     user = auth_ctx.current()
     if user is not None:            # prod mode: every signed-in user has their own open profile
         return user.active_person
@@ -228,6 +243,7 @@ async def rename_person(pid: str, name: str) -> bool:
 
 
 async def activate_person(pid: Optional[str]) -> None:
+    _pinned.set(pid)                # the rest of this request works for the newly opened profile
     if pid:
         async with _conn() as db:
             await db.execute("UPDATE people SET last_used_at = ? WHERE id = ?", (_now(), pid))
@@ -401,6 +417,18 @@ def row_to_objects(row: dict) -> tuple[Optional[JobPosting], Optional[MatchAsses
         except ValueError:
             match = None
     return posting, match
+
+
+async def get_rows(job_ids: list[str]) -> dict[str, dict]:
+    """Several jobs in one query (id -> row), e.g. the job behind each document in a list."""
+    ids = list(dict.fromkeys(i for i in job_ids if i))
+    if not ids:
+        return {}
+    async with _conn() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(f"SELECT id, company, role, location, apply_url, posting_json, career_page_url, jd_text "
+                               f"FROM jobs WHERE id IN ({','.join('?' for _ in ids)})", ids)
+        return {r["id"]: dict(r) for r in await cur.fetchall()}
 
 
 async def get_row(job_id: str) -> Optional[dict]:

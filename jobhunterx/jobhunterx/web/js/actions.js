@@ -1030,7 +1030,7 @@ export function connectSocket() {
     onMessage,
     onStatus: (conn) => setState((s) => ({ ...s, conn })),
     onOpen: (isReconnect) => {
-      if (isReconnect) { loadCurrentRun(); loadList(); if (getState().route.page === 'browser') loadApplySession(); }
+      if (isReconnect) resyncAfterReconnect();
     },
   });
   socket.connect();
@@ -1321,4 +1321,24 @@ export async function adminChoose(choice) {
 
 export function refreshMeta() {
   return api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {});
+}
+
+/** The live connection came back (server restart, sleep, network): events sent meanwhile were missed, so catch up —
+ *  including a profile switch made in another tab, which would otherwise leave this tab on the old profile. */
+async function resyncAfterReconnect() {
+  const s = getState();
+  refreshMeta();
+  if (s.app.phase !== 'ready') return;
+  try {
+    const { active } = await loadPeople();
+    if (active && active !== s.people.active) { choosePerson(active); return; }
+  } catch { return; }            // 401 is handled globally (goes to the login page)
+  loadProfile();
+  loadCurrentRun();
+  loadList();
+  loadInterventions();
+  const page = getState().route.page;
+  if (page === 'browser') loadApplySession();
+  if (page === 'documents') loadDocuments();
+  if (page === 'tracker') loadTracker();
 }

@@ -120,6 +120,11 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(stop_all_active_browsers(), timeout=10)
         except (asyncio.TimeoutError, Exception):
             pass
+        from jobhunterx.config.database import close_pool
+        try:
+            await close_pool()
+        except Exception:
+            pass
         log.info("shutting_down")
 
 
@@ -163,6 +168,24 @@ def _cors_options() -> dict:
 
 # Responses over 1 KB are gzipped (the 3D office's three.js shrinks from ~690 KB to ~170 KB on the wire).
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+class PinPerson:
+    """Fix the open profile for each request (after the login gate knows who it is) — see storage.pin_person."""
+
+    def __init__(self, app_):
+        self.app = app_
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not (scope.get("path") or "").startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+        token = storage.pin_person(storage.active_person())
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            storage._pinned.reset(token)
+
+
+app.add_middleware(PinPerson)
 # The login gate runs inside CORS (so preflight requests are answered) and before everything else.
 app.add_middleware(auth.AuthGate)
 app.add_middleware(CORSMiddleware, **_cors_options())

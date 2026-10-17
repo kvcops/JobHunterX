@@ -198,9 +198,8 @@ class SceneBatch(BaseModel):
 
 
 def _db():
-    import aiosqlite
-    from jobhunterx.config.database import get_db_path
-    return aiosqlite.connect(get_db_path())
+    from jobhunterx.config.database import pooled
+    return pooled()
 
 
 async def _ensure_table(db) -> None:

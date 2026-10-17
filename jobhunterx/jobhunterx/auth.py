@@ -67,7 +67,7 @@ def _now() -> str:
 
 
 def _conn():
-    return aiosqlite.connect(legacy.get_db_path())
+    return legacy.pooled()
 
 
 # ---------------------------------------------------------------------------- passwords (scrypt, stdlib only)
@@ -687,6 +687,21 @@ async def _user_rows() -> list[dict]:
     return rows
 
 
+async def _stop_work(user_id: str) -> None:
+    """A blocked or deleted user's searches stop and their browsers close (a cloud browser bills their key)."""
+    from jobhunterx import storage
+    from jobhunterx.agents import browser_agent as ba
+    from jobhunterx.services.search import manager as search_manager
+    for pid in await storage.people_of_user(user_id):
+        await search_manager.cancel_person(pid)
+    for jid, sess in list(ba._sessions.items()):
+        if sess.data.get("user_id") == user_id:
+            try:
+                await ba.close(jid)
+            except Exception as exc:
+                log.warning("stop_user_browser_failed", error=str(exc)[:120])
+
+
 @router.get("/users")
 async def list_users():
     _users_admin()
@@ -731,6 +746,8 @@ async def update_user(user_id: str, body: UserPatch):
         await db.commit()
     if body.password is not None or body.disabled:
         await end_sessions(user_id=user_id)          # new password / disabled: signed out everywhere now
+    if body.disabled:
+        await _stop_work(user_id)
     log.info("user_updated", username=target["username"], password=body.password is not None, disabled=body.disabled)
     return {"users": await _user_rows()}
 
@@ -741,6 +758,7 @@ async def delete_user(user_id: str):
     _users_admin()
     target = await _target(user_id)
     await end_sessions(user_id=user_id)
+    await _stop_work(user_id)
     from jobhunterx import storage
     from jobhunterx.services.search import manager as search_manager
     token = auth_ctx.set_current(CurrentUser(id=user_id, username=target["username"], is_admin=False))
