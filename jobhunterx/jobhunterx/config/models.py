@@ -40,8 +40,18 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Strong MoE (12B active), clean JSON, ~1-3 s. No key."},
     {"id": "kilo/poolside/laguna-s-2.1:free", "name": "Laguna S 2.1 (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
      "note": "Fast, reliable JSON, ~2.7 s. No key."},
-    {"id": "kilo/inclusionai/ling-3.1-flash", "name": "Ling 3.1 Flash (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Flash model, ~3.6 s. No key."},
+    # Added 17 Oct 2026 (live JSON test, thinking off): Nemotron 3.5 Super VL 1.2-2.6 s (first call can be a slow cold
+    # start), Dots 3 Note 2-4 s, North Mini Code 2-5 s, Xing 4.0 5-9 s. Ling 3.1 Flash was removed by Kilo. Tried and left
+    # out: Nemotron 3 Ultra (empty answers), Inkling Small (tiny daily limit), Laguna XS (thinks, rate-limited),
+    # Nemotron 3.5 Lightning (70-90 s), LFM 2.5 (400), openrouter/free (unreliable JSON).
+    {"id": "kilo/nvidia/nemotron-3.5-super-vl:free", "name": "Nemotron 3.5 Super VL (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Newest Nemotron, clean JSON, ~1-3 s. No key."},
+    {"id": "kilo/dots-studio/dots-3-note-preview:free", "name": "Dots 3 Note (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Preview model, clean JSON, ~2-4 s. No key."},
+    {"id": "kilo/cohere/north-mini-code:free", "name": "North Mini Code (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Small and quick, clean JSON, ~2-5 s. No key."},
+    {"id": "kilo/xingchen-agi/xing4.0-29b-a4b:free", "name": "Xing 4.0 29B (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Small MoE (4B active), ~5-9 s. No key."},
     {"id": "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "name": "Nemotron 3 Nano Omni (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
      "note": "Small MoE (3B active), ~3.4 s. No key."},
     # LLM7.io free tier — no API key, no account. Limits are not published: one request at a time per client, short
@@ -95,9 +105,11 @@ BY_ID = {m["id"]: m for m in CATALOG}
 # then Groq and Mistral.
 # Order: Gemini Flash Lite (fastest, if you have a key) -> Kilo free pool (no key) -> NVIDIA NIM -> Gemma -> Groq -> Mistral.
 # Kilo models are spread across chains so their 200 req/hour per-model budgets add up.
-_KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/poolside/laguna-s-2.1:free"]
-_KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "kilo/inclusionai/ling-3.1-flash",
-               "kilo/poolside/laguna-s-2.1:free", "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
+_KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
+              "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
+_KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemotron-3.5-super-vl:free", "kilo/kilo-auto/free",
+               "kilo/dots-studio/dots-3-note-preview:free", "kilo/poolside/laguna-s-2.1:free", "kilo/xingchen-agi/xing4.0-29b-a4b:free",
+               "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
 # No-key backup after Kilo: LLM7 (one call at a time, small daily quota).
 _LLM7 = ["llm7/GLM-5.3-Flash", "llm7/DeepSeek-V4-Flash-0731"]
 CHAINS: dict[str, list[str]] = {

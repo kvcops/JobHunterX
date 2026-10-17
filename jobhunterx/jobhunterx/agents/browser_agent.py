@@ -491,7 +491,7 @@ def _actions_of(model_output: Any, state: Any) -> list[str]:
 
 # Kilo free models that drive the browser well. Measured Oct 2026 with browser-use's output format: all four answer in
 # 1-4 s. Nemotron 3 Nano Omni is left out: it returns no choices for agent-style prompts.
-_KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "poolside/laguna-s-2.1:free", "inclusionai/ling-3.1-flash"]
+_KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "nvidia/nemotron-3.5-super-vl:free", "poolside/laguna-s-2.1:free"]
 # LLM7 free model (no key): last resort only — measured 17 Oct 2026 at 10-60 s per answer.
 _LLM7_BROWSER = ["GLM-5.3-Flash"]
 
