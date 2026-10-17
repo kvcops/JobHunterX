@@ -112,6 +112,22 @@ function Sidebar() {
   </aside>`;
 }
 
+/** Phones: the sidebar footer (profile switcher, theme, log out) is not in the bottom bar, so it lives up here. */
+function MobileTop() {
+  const theme = useStore((s) => s.theme);
+  const auth = useStore((s) => s.auth);
+  return html`<header class="mobile-top">
+    <a class="brand" href="#/discover" aria-label="JobHunterX home"><span class="brand-mark"><img src="/assets/logo.svg" alt="" width="28" height="28" /></span>
+      <span class="brand-name">JobHunter<span class="serif">X</span></span></a>
+    <div class="mt-actions">
+      <${ProfileSwitcher} />
+      <button type="button" class="icon-btn" aria-label=${`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick=${() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+        <${Icon} name=${theme === 'dark' ? 'sun' : 'moon'} size=${17} /></button>
+      ${auth.enabled && auth.user ? html`<button type="button" class="icon-btn" aria-label=${`Log out ${auth.user.username}`} onClick=${logout}><${Icon} name="logout" size=${17} /></button>` : null}
+    </div>
+  </header>`;
+}
+
 function AppShell() {
   const route = useStore((s) => s.route);
   const activity = useStore((s) => s.activity[0]);
@@ -122,6 +138,7 @@ function AppShell() {
     <a class="skip-link" href="#main">Skip to content</a>
     <${Sidebar} />
     <main id="main" class="main" tabindex="-1">
+      <${MobileTop} />
       <${View} key=${page} />
     </main>
     ${activity ? html`<div class="activity-line" aria-live="polite" key=${activity.id}>${activity.message}</div>` : null}

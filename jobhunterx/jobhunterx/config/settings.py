@@ -42,9 +42,12 @@ class Settings(BaseSettings):
     mistral_api_key: Optional[str] = None
     nvidia_api_key: Optional[str] = None          # NVIDIA NIM (build.nvidia.com), free key, 40 requests/minute
     kilo_api_key: Optional[str] = None            # optional: Kilo's free pool works without any key
+    # Browser Use cloud browsers (cloud.browser-use.com): with a key, auto-apply runs in a cloud browser instead of a
+    # Chrome on this server — no server memory, and several people can apply at once
+    browser_use_api_key: Optional[str] = None
 
     @field_validator("google_api_key", "groq_api_key", "mistral_api_key", "nvidia_api_key", "kilo_api_key", "tinyfish_api_key", "tavily_api_key",
-                     "exa_api_key", "brave_api_key", mode="before")
+                     "exa_api_key", "brave_api_key", "browser_use_api_key", mode="before")
     @classmethod
     def _drop_placeholder_keys(cls, v):
         # A placeholder must count as "no key": otherwise every AI call fails and retries, and the UI waits forever.
@@ -69,6 +72,7 @@ class Settings(BaseSettings):
     secret_key: str = ""                # encrypts users' saved API keys; empty = a random one kept in data/.secret_key
     session_hours: float = 12.0         # a login lasts this long, then the user signs in again
     cookie_samesite: str = "strict"     # strict | lax | none (none only when the UI is served from another site)
+    allow_signup: bool = True           # prod mode: people can create their own account on /signup (they bring all keys)
     cookie_secure: str = "auto"         # auto = Secure on https (also behind a proxy that says so) | true | false
     # CORS: empty = only this app's own address may call the API (same as before)
     cors_origins: str = ""              # comma separated, e.g. https://jobs.example.com,https://www.example.com

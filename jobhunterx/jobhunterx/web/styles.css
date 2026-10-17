@@ -1725,3 +1725,45 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .admin-card:hover, .admin-card:focus-visible { transform: translateY(-2px); border-color: var(--accent); }
 .admin-card-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 16px; background: var(--accent-soft); color: var(--accent); }
 .admin-users .view { min-height: 0; }
+
+/* -------------------------------------------------------------------------- phones and small tablets */
+.mobile-top { display: none; }
+.page-actions { flex-wrap: wrap; }
+.set-section table { display: block; max-width: 100%; overflow-x: auto; }
+.bw-note { display: flex; align-items: center; gap: 6px; margin: 0 4px 8px; }
+@media (max-width: 900px) {
+  /* the sidebar footer (profile, theme, log out) is hidden in the bottom bar: a small top bar carries it */
+  .mobile-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding: 8px 10px;
+    border-radius: 18px; background: var(--card); border: 1px solid var(--line); }
+  .mobile-top .brand { display: flex; align-items: center; gap: 8px; padding: 0; }
+  .mobile-top .brand-name { display: inline; font-size: 1rem; }
+  .mobile-top .mt-actions { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .mobile-top .me-text { display: flex; }
+  /* every page fits the bottom bar: it scrolls sideways instead of squeezing icons */
+  .nav-groups { overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }
+  .nav-groups::-webkit-scrollbar { display: none; }
+  .nav a { flex: none; }
+  .nav-ind { display: none; }
+  /* settings: sections become a sideways strip */
+  .card.set-nav { flex-direction: row; overflow-x: auto; padding: 6px; scrollbar-width: none; }
+  .set-link { flex: none; white-space: nowrap; padding: 8px 12px; }
+  .set-overview { display: none; }
+  .page-head { align-items: flex-start; }
+  .page-actions { width: 100%; }
+  .admin-start-head { flex-wrap: wrap; }
+  .prov-head .row.gap.wrap { width: 100%; }
+  /* iPhones zoom into inputs smaller than 16px */
+  .input, select, textarea, .chips-input input { font-size: 16px; }
+}
+@media (max-width: 520px) {
+  .shell { padding: 8px 8px 92px; }
+  .card.pad, .pane-pad { padding: 14px; }
+  .page-head h1 { font-size: 1.45rem; }
+  .page-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .key-row.editing .input { min-width: 0; width: 100%; }
+  .admin-start-cards { grid-template-columns: 1fr; }
+  .login { padding: 24px 18px; }
+  .mobile-top .me-text strong { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+/* the narrow-sidebar rule hides .brand-name; outside the sidebar the name always shows */
+.admin-start-head .brand-name, .mobile-top .brand-name, .login .brand-name { display: inline; }

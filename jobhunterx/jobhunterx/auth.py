@@ -186,6 +186,9 @@ async def init() -> None:
                            "(at least 8 characters) in the .env file.")
     async with _conn() as db:
         await db.executescript(_SCHEMA)
+        cur = await db.execute("PRAGMA table_info(users)")
+        if "signup" not in {r[1] for r in await cur.fetchall()}:     # 1 = made their own account on /signup
+            await db.execute("ALTER TABLE users ADD COLUMN signup INTEGER NOT NULL DEFAULT 0")
         await db.execute("DELETE FROM auth_sessions WHERE expires_at < ?", (time.time(),))
         row = await (await db.execute("SELECT id, password_hash FROM users WHERE is_admin = 1 ORDER BY created_at LIMIT 1")).fetchone()
         same = await (await db.execute("SELECT id, is_admin FROM users WHERE username = ?", (username,))).fetchone()
@@ -241,7 +244,7 @@ async def _session_row(th: str) -> Optional[dict]:
     async with _conn() as db:
         db.row_factory = aiosqlite.Row
         row = await (await db.execute(
-            "SELECT u.id, u.username, u.is_admin, u.active_person, u.keys_enc, s.expires_at, p.id AS person_ok "
+            "SELECT u.id, u.username, u.is_admin, u.signup, u.active_person, u.keys_enc, s.expires_at, p.id AS person_ok "
             "FROM auth_sessions s JOIN users u ON u.id = s.user_id "
             "LEFT JOIN people p ON p.id = u.active_person AND p.user_id = u.id "
             "WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled = 0", (th, now))).fetchone()
@@ -261,7 +264,7 @@ async def user_for_token(token: Optional[str]) -> tuple[Optional[CurrentUser], O
     if not row:
         return None, None, 0.0
     user = CurrentUser(id=row["id"], username=row["username"], is_admin=bool(row["is_admin"]),
-                       active_person=row["person_ok"], keys={} if row["is_admin"] else _decrypt_keys(row["keys_enc"]))
+                       self_signup=bool(row["signup"]) and not row["is_admin"], active_person=row["person_ok"], keys={} if row["is_admin"] else _decrypt_keys(row["keys_enc"]))
     if user.active_person is None:   # never opened one, or it was deleted: open their most recent profile
         from jobhunterx import storage
         mine = await storage.people_of_user(user.id)
@@ -350,8 +353,8 @@ def _failed(keys: list[str]) -> None:
 
 # ---------------------------------------------------------------------------- the gate (ASGI middleware)
 
-_PUBLIC = {"/login", "/login.html", "/js/login.js", "/styles.css", "/favicon.ico", "/healthz", "/api/auth/login",
-           "/api/auth/me", "/sw.js", "/service-worker.js"}
+_PUBLIC = {"/login", "/login.html", "/js/login.js", "/signup", "/signup.html", "/js/signup.js", "/styles.css", "/favicon.ico",
+           "/healthz", "/api/auth/login", "/api/auth/signup", "/api/auth/me", "/sw.js", "/service-worker.js"}
 _PUBLIC_PREFIX = ("/assets/", "/vendor/fonts/")
 _SECURITY_HEADERS = [(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"),
                      (b"referrer-policy", b"same-origin"), (b"cross-origin-opener-policy", b"same-origin"),
@@ -462,7 +465,7 @@ class AuthGate:
         if user is None and not public:
             await self._deny(scope, receive, send, path)
             return
-        if user is not None and path in ("/login", "/login.html"):
+        if user is not None and path in ("/login", "/login.html", "/signup", "/signup.html"):
             await self._redirect(send, "/")
             return
         api_or_page = path.startswith("/api/") or not path.rsplit("/", 1)[-1].count(".") or path.endswith(".html")
@@ -520,13 +523,26 @@ router = APIRouter(prefix="/api/auth")
 
 
 def _public(user: CurrentUser) -> dict:
-    return {"id": user.id, "username": user.username, "is_admin": user.is_admin}
+    return {"id": user.id, "username": user.username, "is_admin": user.is_admin, "self_signup": user.self_signup}
+
+
+def signup_open() -> bool:
+    return enabled() and server_settings().allow_signup
 
 
 @router.get("/me")
 async def me():
     user = auth_ctx.current()
-    return {"enabled": enabled(), "user": _public(user) if user else None}
+    return {"enabled": enabled(), "signup": signup_open(), "user": _public(user) if user else None}
+
+
+def _signed_in(row_id: str, username: str, is_admin: bool, token: str, expires: float, request: Request, status: int = 200,
+               self_signup: bool = False) -> JSONResponse:
+    resp = JSONResponse({"user": {"id": row_id, "username": username, "is_admin": is_admin, "self_signup": self_signup}},
+                        status_code=status, headers={"Cache-Control": "no-store"})
+    resp.set_cookie(COOKIE, token, max_age=int(expires - time.time()), httponly=True, samesite=_samesite(),
+                    secure=_cookie_secure(request.scope) or _samesite() == "none", path="/")
+    return resp
 
 
 class LoginIn(BaseModel):
@@ -554,11 +570,42 @@ async def login(body: LoginIn, request: Request):
     _fails.pop(keys[1], None)
     token, expires = await _new_session(row[0], request)
     log.info("login", username=row[1])
-    resp = JSONResponse({"user": {"id": row[0], "username": row[1], "is_admin": bool(row[3])}},
-                        headers={"Cache-Control": "no-store"})
-    resp.set_cookie(COOKIE, token, max_age=int(expires - time.time()), httponly=True, samesite=_samesite(),
-                    secure=_cookie_secure(request.scope) or _samesite() == "none", path="/")
-    return resp
+    return _signed_in(row[0], row[1], bool(row[3]), token, expires, request)
+
+
+_signups: dict[str, list[float]] = {}
+_SIGNUPS_PER_HOUR = 5
+
+
+@router.post("/signup", status_code=201)
+async def signup(body: LoginIn, request: Request):
+    """Anyone can make an account (ALLOW_SIGNUP). They bring their own AI keys, and auto-apply runs only in their own
+    Browser Use cloud browser — never on this server's memory."""
+    if not signup_open():
+        raise HTTPException(404, "Sign-up is closed on this server. Ask the admin for an account.")
+    username = body.username.strip()
+    if not _USERNAME_RE.fullmatch(username):
+        raise HTTPException(422, "Username: 3-40 letters, digits or _ . @ -")
+    if len(body.password) < 8:
+        raise HTTPException(422, "Password: at least 8 characters.")
+    ip = _client_ip(request)
+    now = time.time()
+    recent = [t for t in _signups.get(ip, []) if now - t < 3600]
+    if len(recent) >= _SIGNUPS_PER_HOUR:
+        raise HTTPException(429, "Too many new accounts from this address. Try again in an hour.")
+    async with _conn() as db:
+        if await (await db.execute("SELECT 1 FROM users WHERE username = ?", (username,))).fetchone():
+            raise HTTPException(409, "That username is taken. Pick another one.")
+        uid = str(uuid.uuid4())
+        await db.execute("INSERT INTO users (id, username, password_hash, is_admin, signup, created_at) VALUES (?, ?, ?, 0, 1, ?)",
+                         (uid, username, await hash_password(body.password), _now()))
+        await db.commit()
+    if len(_signups) > 5000:
+        _signups.clear()
+    _signups[ip] = recent + [now]
+    token, expires = await _new_session(uid, request)
+    log.info("user_signed_up", username=username)
+    return _signed_in(uid, username, False, token, expires, request, status=201, self_signup=True)
 
 
 @router.post("/logout")
@@ -620,13 +667,13 @@ async def _user_rows() -> list[dict]:
     async with _conn() as db:
         db.row_factory = aiosqlite.Row
         rows = [dict(r) for r in await (await db.execute(
-            "SELECT u.id, u.username, u.is_admin, u.disabled, u.created_at, u.last_login, u.keys_enc, "
+            "SELECT u.id, u.username, u.is_admin, u.disabled, u.signup, u.created_at, u.last_login, u.keys_enc, "
             "(SELECT COUNT(*) FROM people p WHERE p.user_id = u.id) AS profiles, "
             "(SELECT COUNT(*) FROM auth_sessions s WHERE s.user_id = u.id AND s.expires_at > ?) AS signed_in "
             "FROM users u ORDER BY u.is_admin DESC, u.created_at", (time.time(),))).fetchall()]
     for r in rows:   # which providers have a key — never the keys themselves
         r["keys"] = sorted(_decrypt_keys(r.pop("keys_enc")))
-        r["is_admin"], r["disabled"] = bool(r["is_admin"]), bool(r["disabled"])
+        r["is_admin"], r["disabled"], r["signup"] = bool(r["is_admin"]), bool(r["disabled"]), bool(r["signup"])
     return rows
 
 

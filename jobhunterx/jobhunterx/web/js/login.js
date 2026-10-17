@@ -12,6 +12,10 @@ const err = document.getElementById('login-error');
 const btn = document.getElementById('login-btn');
 const toggle = document.getElementById('pw-toggle');
 
+// "Create an account" only when this server lets people sign up
+fetch('/api/auth/me', { credentials: 'same-origin', cache: 'no-store' }).then((r) => r.json())
+  .then((m) => { if (m && m.signup) document.getElementById('signup-link').hidden = false; }).catch(() => {});
+
 toggle.addEventListener('click', () => {
   const show = pass.type === 'password';
   pass.type = show ? 'text' : 'password';

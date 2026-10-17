@@ -176,6 +176,9 @@ async def start(job_id: str, emit: Emit, continuing: bool = False) -> dict:
     existing = ba.get_session(job_id)
     if existing and existing.data["status"] in ("launching", "running", "paused", "stopping"):
         raise ApplyError("The agent is already working on this job.")
+    if ba.cloud_required() and not ba.browser_use_key():
+        raise ApplyError("Auto-apply needs your own Browser Use API key (it runs the browser in your Browser Use cloud, "
+                         "not on this server). Add it in Settings → Web search & browser.")
     if ba.busy_for(_user_id()):
         raise ApplyError(ba.busy_message())       # prod mode: one browser, and another user has it open
 

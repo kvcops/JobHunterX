@@ -10,6 +10,7 @@ export function parseHash(hash = window.location.hash) {
   const route = { page, jobId: null, docId: null };
   if ((page === 'discover' || page === 'tracker') && parts[1] === 'job' && parts[2]) route.jobId = parts[2];
   if (page === 'documents' && parts[1]) route.docId = parts[1];
+  if (page === 'settings' && parts[1]) route.section = parts[1];
   return route;
 }
 

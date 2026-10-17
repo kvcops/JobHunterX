@@ -19,6 +19,7 @@ const MORE = [
   { id: 'tavily', field: 'tavily_api_key', name: 'Tavily', url: 'https://app.tavily.com' },
   { id: 'exa', field: 'exa_api_key', name: 'Exa', url: 'https://dashboard.exa.ai/api-keys' },
   { id: 'brave', field: 'brave_api_key', name: 'Brave', url: 'https://api-dashboard.search.brave.com/app/keys' },
+  { id: 'browser_use', field: 'browser_use_api_key', name: 'Browser Use', url: 'https://cloud.browser-use.com/settings?tab=api-keys&new=1' },
 ];
 
 function TestResult({ test }) {
@@ -92,7 +93,7 @@ export function SetupView() {
         </div>
         <div class="setup-search">
           <button type="button" class="link-btn small" aria-expanded=${more ? 'true' : 'false'} onClick=${() => setMore(!more)}>
-            <${Icon} name=${more ? 'x' : 'plus'} size=${13} /> ${more ? 'Hide' : 'Optional:'} Mistral and web search keys (free Deep Search works without one)</button>
+            <${Icon} name=${more ? 'x' : 'plus'} size=${13} /> ${more ? 'Hide' : 'Optional:'} Mistral, web search and Browser Use (auto-apply) keys</button>
           ${more ? html`<div class="setup-search-grid">
             ${MORE.map((p) => html`<label class="setup-mini" key=${p.id}>
               <span class="row gap"><strong class="small">${p.name}</strong>${keys[p.id] ? html`<${Badge} tone="info">Saved</${Badge}>` : null}

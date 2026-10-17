@@ -54,6 +54,7 @@ function UserRow({ u }) {
       <span class="avatar sm">${(u.username[0] || '?').toUpperCase()}</span>
       <div class="grow"><strong>${u.username}</strong>
         ${u.is_admin ? html` <${Badge} tone="info">Admin</${Badge}>` : null}
+        ${u.signup ? html` <${Badge} tone="neutral" title="Made their own account; auto-apply needs their own Browser Use key">Signed up</${Badge}>` : null}
         ${u.disabled ? html` <${Badge} tone="danger">Can't sign in</${Badge}>` : u.signed_in ? html` <${Badge} tone="success">Signed in</${Badge}>` : null}
         <div class="muted small">${u.profiles} profile${u.profiles === 1 ? '' : 's'}
           · ${u.is_admin ? 'uses the server keys' : u.keys.length ? `own keys: ${u.keys.join(', ')}` : 'no AI key yet'}

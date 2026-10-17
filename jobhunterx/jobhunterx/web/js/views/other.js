@@ -262,6 +262,7 @@ function useLiveFrames(canvas) {
 
 export function BrowserView() {
   const b = useStore((s) => s.browser);
+  const br = useStore((s) => (s.meta.data || {}).browser);
   const waiting = useStore((s) => s.interventions.items.length);
   const sess = b.session;
   const canvas = useRef();
@@ -302,6 +303,9 @@ export function BrowserView() {
 
   return html`<div class="view view-browser">
     <h1 class="sr-only">Auto-apply agent</h1>
+    ${br && !br.ready ? html`<${Notice} tone="warning">Auto-apply needs your own <strong>Browser Use</strong> key on this server — the browser runs
+      in your Browser Use cloud, not here. <a href="#/settings/search">Add it in Settings</a> (new Browser Use accounts get free browser time).</${Notice}>`
+      : br && br.cloud ? html`<p class="muted small bw-note"><${Icon} name="globe" size=${13} /> Runs in your Browser Use cloud browser.</p>` : null}
     <div class="split split-browser">
       <section class=${`pane browser-window ${youDrive ? 'takeover' : ''} ${showFrame && working ? 'is-live' : ''}`} aria-label="Live browser">
         <div class="bw-chrome">
@@ -483,21 +487,37 @@ function ModelChains({ md, models }) {
       : models.status === 'error' ? html`<${ErrorBox} message=${models.error} />` : html`<${Skeleton} lines=${3} />`}`;
 }
 
+/** Browser Use key: auto-apply runs in the user's own cloud browser instead of on this server. */
+function BrowserKeyCard({ d }) {
+  const b = d.browser || {};
+  return html`<section class="set-section"><h2>Auto-apply browser</h2>
+    <p class="muted small">With a <strong>Browser Use</strong> key, auto-apply opens your application in a cloud browser at Browser Use —
+      nothing runs on this server, and it starts right away even when others are applying. New Browser Use accounts get free browser time.</p>
+    ${b.cloud_required && !b.cloud ? html`<${Notice} tone="warning">Auto-apply on this server needs your own Browser Use key. Add it below to use the browser agent.</${Notice}>` : null}
+    ${b.cloud ? html`<${Notice} tone="success">Auto-apply runs in your Browser Use cloud browser.</${Notice}>`
+      : !b.cloud_required ? html`<p class="muted small">No key: the browser runs on this server (one person at a time).</p>` : null}
+    <div class="prov-card"><div class="prov-head"><div class="grow"><strong>Browser Use</strong>
+      <div class="muted small">Cloud browsers for the agent · <a href=${b.key_url || 'https://cloud.browser-use.com'} target="_blank" rel="noopener noreferrer">get a key <${Icon} name="external" size=${12} /></a></div></div></div>
+      <${KeyField} field="browser_use_api_key" label="Browser Use" configured=${d.browser_use_configured} masked=${d.browser_use_key_masked} source=${d.browser_use_source} /></div>
+  </section>`;
+}
+
 function SearchSection({ d }) {
-  if (d.restricted) return html`<section class="set-section"><h2>Web search</h2>
+  if (d.restricted) return html`<${BrowserKeyCard} d=${d} /><section class="set-section"><h2>Web search</h2>
     <p class="muted small">Optional. Without a key, the free Deep Search finds jobs for you. Your keys are saved encrypted in your account.</p>
     <div class="prov-list">${Object.entries(SEARCH_META).filter(([, m]) => m.field).map(([k, m]) => html`<div class="prov-card" key=${k}>
       <div class="prov-head"><div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint}</div></div></div>
       <${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />
     </div>`)}</div></section>`;
   const order = d.providers.search_order;
+  const browserCard = html`<${BrowserKeyCard} d=${d} />`;
   const move = (p, dir) => {
     const i = order.indexOf(p); const j = i + dir;
     if (j < 0 || j >= order.length) return;
     const next = order.slice(); [next[i], next[j]] = [next[j], next[i]];
     setProviders({ search_order: next });
   };
-  return html`<section class="set-section"><h2>Web search</h2>
+  return html`${browserCard}<section class="set-section"><h2>Web search</h2>
     <p class="muted small">Providers are asked in this order. Turn any off; Deep Search and DuckDuckGo need no key and are the safety net.</p>
     <div class="field" style=${{ margin: '12px 0 16px' }}><span class="field-label">Strategy</span>
       <${Seg} label="Search strategy" options=${STRATEGIES.map(([k, l]) => [k, l])} value=${d.providers.search_strategy} onChange=${(v) => setProviders({ search_strategy: v })} />
@@ -664,7 +684,7 @@ function DataSection() {
 }
 
 const SETTINGS_SECTIONS = [
-  { key: 'ai', label: 'AI providers', icon: 'spark' }, { key: 'search', label: 'Web search', icon: 'search' },
+  { key: 'ai', label: 'AI providers', icon: 'spark' }, { key: 'search', label: 'Web search & browser', icon: 'search' },
   { key: 'tuning', label: 'Search tuning', icon: 'sliders' }, { key: 'usage', label: 'Usage', icon: 'chart' },
   { key: 'profiles', label: 'Profiles', icon: 'user' }, { key: 'agent', label: 'Auto-apply', icon: 'globe' },
   { key: 'office', label: 'Agents office', icon: 'users' }, { key: 'account', label: 'Account', icon: 'key' },
@@ -680,7 +700,9 @@ export function SettingsView() {
   const mode = useStore((s) => s.pipelineMode);
   const theme = useStore((s) => s.theme);
   const motion = useStore((s) => s.motion);
-  const [sec, setSec] = useState('ai');
+  const route = useStore((s) => s.route);
+  const [sec, setSec] = useState(route.section || 'ai');
+  useEffect(() => { if (route.section) setSec(route.section); }, [route.section]);
   const d = st.data;
   const restricted = !!(auth.enabled && auth.user && !auth.user.is_admin);
   // prod mode: a normal user gets only their own things; the admin and the local app get everything

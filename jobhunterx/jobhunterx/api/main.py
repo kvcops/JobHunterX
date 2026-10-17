@@ -23,6 +23,7 @@ if sys.platform == "win32":
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -160,6 +161,8 @@ def _cors_options() -> dict:
             "allow_headers": _csv(st.cors_headers) or ["Content-Type"]}
 
 
+# Responses over 1 KB are gzipped (the 3D office's three.js shrinks from ~690 KB to ~170 KB on the wire).
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 # The login gate runs inside CORS (so preflight requests are answered) and before everything else.
 app.add_middleware(auth.AuthGate)
 app.add_middleware(CORSMiddleware, **_cors_options())
@@ -212,6 +215,13 @@ app.include_router(router)
 async def healthz():
     """Liveness for start scripts and hosting health checks (no login needed, no data)."""
     return {"ok": True}
+
+
+@app.get("/signup", include_in_schema=False)
+async def signup_page():
+    if not auth.signup_open():
+        return RedirectResponse("/login" if auth.enabled() else "/", status_code=303)
+    return FileResponse(str(_web_dir / "signup.html"), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/login", include_in_schema=False)
@@ -270,8 +280,8 @@ async def browser_websocket(websocket: WebSocket):
                 msg = json.loads(await websocket.receive_text())
             except ValueError:
                 continue
-            if not isinstance(msg, dict) or not live_view.may_control(websocket):
-                continue                                    # prod mode: only the owner drives their browser
+            if not isinstance(msg, dict):
+                continue                     # input goes only to this user's own browser (ba.current_session is per user)
             if msg.get("type") in ("mouse", "wheel", "keyboard", "paste"):
                 await ba.forward_input(msg)
             elif msg.get("type") == "viewport":
@@ -324,7 +334,10 @@ class _FreshStatic(StaticFiles):
 
     async def get_response(self, path, scope):
         resp = await super().get_response(path, scope)
-        if path == "" or path.endswith((".js", ".css", ".html")) or path in (".", "index.html"):
+        if path.replace("\\", "/").startswith(("vendor/", "assets/")):     # Windows paths use backslashes
+            # third-party libraries, fonts, the robot model and icons change only with a release: a week in the cache
+            resp.headers["Cache-Control"] = "public, max-age=604800"
+        elif path == "" or path.endswith((".js", ".css", ".html")) or path in (".", "index.html"):
             resp.headers["Cache-Control"] = "no-cache"
         return resp
 

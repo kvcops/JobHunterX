@@ -130,7 +130,7 @@ def _detect_page_type(page_text: str) -> str:
 # Stealth browser profile builder (Cloudflare / bot-detection mitigation)
 # ---------------------------------------------------------------------------
 
-async def _build_stealth_profile(settings: Settings) -> Any:
+async def _build_stealth_profile(settings: Settings, sess: Optional["ApplySession"] = None) -> Any:
     """Build a BrowserProfile that bot checks (Cloudflare, reCAPTCHA v3, hCaptcha) score as a normal person.
 
     What actually gets agents flagged, and what is done about each:
@@ -146,18 +146,25 @@ async def _build_stealth_profile(settings: Settings) -> Any:
     Tiers: BROWSER_CDP_URL (any Chrome you started, or a hosted browser) → browser-use cloud → local real Chrome.
     """
     from browser_use import BrowserProfile
+    from jobhunterx.config import auth_ctx
 
-    cdp_url = (getattr(settings, "browser_cdp_url", "") or os.getenv("BROWSER_CDP_URL") or "").strip()
+    key = browser_use_key()
+    if key:                                 # a Browser Use cloud browser: runs on their machines, not on our memory
+        cloud = await _create_cloud_browser(key)
+        if sess is not None:
+            sess.cloud = {"id": cloud["id"], "key": key, "liveUrl": cloud.get("liveUrl")}
+        log.info("browser_profile_browser_use_cloud", session=str(cloud["id"])[:12])
+        return BrowserProfile(cdp_url=cloud["cdpUrl"], keep_alive=True,
+                              viewport=dict(zip(("width", "height"), live_view.viewport_size())))
+    if cloud_required():
+        raise RuntimeError("Add your Browser Use API key in Settings to use auto-apply.")
+
+    # the server's own Chrome (BROWSER_CDP_URL) has the admin's logins: only the admin / local app may use it
+    cdp_url = "" if auth_ctx.restricted() else (getattr(settings, "browser_cdp_url", "") or os.getenv("BROWSER_CDP_URL") or "").strip()
     if cdp_url:
         log.info("browser_profile_cdp", url=cdp_url.split("?")[0][:60])
         return BrowserProfile(cdp_url=cdp_url, keep_alive=True,
                               viewport=dict(zip(("width", "height"), live_view.viewport_size())))
-
-    use_cloud = bool(os.getenv("BROWSER_USE_API_KEY")) and bool(getattr(settings, "browser_use_cloud", False))
-
-    if use_cloud:
-        log.info("browser_profile_cloud", reason="BROWSER_USE_API_KEY present + cloud enabled")
-        return BrowserProfile(use_cloud=True, captcha_solver=True)
 
     # Local stealth profile
     resolved_dir = str(_STEALTH_USER_DATA_DIR.resolve())
@@ -322,7 +329,7 @@ from jobhunterx.agents import browser_worker, live_view
 ACTIVE = {"preparing", "launching", "running", "paused", "stopping"}
 
 _sessions: dict[str, "ApplySession"] = {}
-_current: Optional[str] = None
+_current: dict[str, str] = {}          # login user id ("" without login) -> job id of their latest application
 
 
 def _now() -> str:
@@ -337,6 +344,7 @@ class ApplySession:
         self.agent: Any = None
         self.browser_session: Any = None
         self.screencast: Optional[live_view.Screencast] = None
+        self.cloud: Optional[dict] = None     # a Browser Use cloud browser: {id, key, liveUrl}
         self.task: Optional[asyncio.Task] = None
         self.files: dict[str, str] = {}
         self.profile: dict = {}
@@ -369,17 +377,82 @@ def get_session(job_id: str) -> Optional[ApplySession]:
     return _sessions.get(job_id)
 
 
+def _uid() -> str:
+    from jobhunterx.config import auth_ctx
+    user = auth_ctx.current()
+    return user.id if user else ""
+
+
 def current_session() -> Optional[ApplySession]:
-    return _sessions.get(_current) if _current else None
+    """The signed-in user's latest application (the only one in the local single-user app)."""
+    jid = _current.get(_uid())
+    return _sessions.get(jid) if jid else None
 
 
 def busy_for(user_id: Optional[str]) -> bool:
-    """True when the one auto-apply browser is in use by another login user (prod mode)."""
-    return any(_alive(s) and s.data.get("user_id") != user_id for s in _sessions.values())
+    """True when this user would need the server's one local browser and another user has it open (prod mode).
+    A Browser Use cloud browser runs elsewhere and never waits for anyone."""
+    if browser_use_key():
+        return False
+    return any(_alive(s) and not s.cloud and s.data.get("user_id") != user_id for s in _sessions.values())
 
 
 def busy_message() -> str:
-    return "The auto-apply browser is busy with another user's application. Try again in a few minutes."
+    return ("The server's browser is busy with another user's application. Try again in a few minutes — "
+            "or add your own Browser Use key in Settings to apply in your own cloud browser right away.")
+
+
+# ---------------------------------------------------------------------------- Browser Use cloud browsers (own key)
+
+BU_API = "https://api.browser-use.com/api/v2/browsers"
+BU_KEY_URL = "https://cloud.browser-use.com/settings?tab=api-keys&new=1"
+
+
+def browser_use_key() -> Optional[str]:
+    """The Browser Use key for this run: the signed-in user's own (prod mode) or the server's BROWSER_USE_API_KEY."""
+    return (getattr(get_settings(), "browser_use_api_key", None) or "").strip() or None
+
+
+def cloud_required() -> bool:
+    """Users who signed themselves up apply only in their own cloud browser, never on the server's memory."""
+    from jobhunterx.config import auth_ctx
+    user = auth_ctx.current()
+    return bool(user and user.self_signup)
+
+
+async def _create_cloud_browser(key: str) -> dict:
+    """Start a Browser Use cloud browser with this key. Returns {id, cdpUrl, liveUrl}."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(BU_API, headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"}, json={})
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Could not reach Browser Use ({type(exc).__name__}). Try again in a minute.") from exc
+    if r.status_code == 401:
+        raise RuntimeError("Browser Use rejected your API key. Paste a new one in Settings → Web search & browser.")
+    if r.status_code in (402, 403):
+        raise RuntimeError("Browser Use says this key has no credit or plan for cloud browsers. Check your Browser Use account.")
+    if r.status_code == 429:
+        raise RuntimeError("Browser Use is limiting this key right now (too many browsers at once). Try again shortly.")
+    if r.status_code >= 400:
+        raise RuntimeError(f"Browser Use could not start a browser (HTTP {r.status_code}). Try again in a minute.")
+    data = r.json()
+    if not data.get("cdpUrl"):
+        raise RuntimeError("Browser Use did not return a browser address. Try again in a minute.")
+    return {"id": data.get("id"), "cdpUrl": data["cdpUrl"], "liveUrl": data.get("liveUrl")}
+
+
+async def _stop_cloud_browser(cloud: dict) -> None:
+    """Stop the cloud browser so the user's Browser Use credit is not spent on an idle browser."""
+    import httpx
+    if not cloud or not cloud.get("id") or not cloud.get("key"):
+        return
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.patch(f"{BU_API}/{cloud['id']}", headers={"X-Browser-Use-API-Key": cloud["key"]},
+                               json={"action": "stop"})
+    except Exception as exc:
+        log.debug("cloud_browser_stop_failed", error=str(exc)[:120])
 
 
 def _alive(sess: ApplySession) -> bool:
@@ -1738,7 +1811,7 @@ async def _attach_live_view(sess: ApplySession, agent: Any) -> None:
             if sess.screencast is None or sess.screencast.session is not bs:
                 if sess.screencast:
                     await sess.screencast.stop()
-                sess.screencast = live_view.Screencast(bs)
+                sess.screencast = live_view.Screencast(bs, owner=sess.data.get("user_id"))
             sess.screencast.start()
             if sess.data["status"] == "launching":
                 sess.update(status="running", live=True, message="Filling in the application…")
@@ -1825,7 +1898,11 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
     if reuse:
         kwargs["browser_session"] = sess.browser_session
     else:
-        kwargs["browser_profile"] = await _build_stealth_profile(settings)
+        try:
+            kwargs["browser_profile"] = await _build_stealth_profile(settings, sess)
+        except RuntimeError as exc:          # e.g. the user's Browser Use key was rejected
+            sess.update(status="failed", message="Could not open a browser", notice=str(exc)[:300])
+            return
     agent = Agent(**kwargs)
     sess.agent = agent
     attach = asyncio.ensure_future(_attach_live_view(sess, agent))
@@ -1875,25 +1952,24 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
 # ---------------------------------------------------------------------------- public API (call from the server loop)
 
 def new_session(job: dict) -> ApplySession:
-    global _current
     sess = ApplySession(job)
     _sessions[job["id"]] = sess
-    _current = job["id"]
+    _current[job.get("user_id") or ""] = job["id"]
     sess.publish()
     return sess
 
 
 async def launch(sess: ApplySession, profile: dict, files: dict[str, str], continuing: bool = False) -> None:
     """Hand the session to the browser worker (returns immediately)."""
-    global _current
     owner = sess.data.get("user_id")
     for other_id, other in list(_sessions.items()):
-        if other is not sess and _alive(other):
-            if other.data.get("user_id") != owner:      # prod mode: never close another user's application
-                raise RuntimeError(busy_message())
-            await close(other_id)               # one browser at a time
-    _current = sess.data["job_id"]
-    live_view.set_owner("apply", owner)
+        if other is sess or not _alive(other):
+            continue
+        if other.data.get("user_id") == owner:
+            await close(other_id)               # one browser per person
+        elif not other.cloud and not browser_use_key():
+            raise RuntimeError(busy_message())  # prod mode: another user has the server's one local browser
+    _current[owner or ""] = sess.data["job_id"]
     sess.profile = profile
     sess.files = files
 
@@ -2003,11 +2079,15 @@ async def close(job_id: str) -> Optional[dict]:
                 await asyncio.wait_for(sess.browser_session.kill(), timeout=15)
             except Exception as exc:
                 log.warning("browser_close_failed", error=str(exc)[:160])
-        await _stop_own_chrome()             # a Chrome we started ourselves outlives browser-use's disconnect
+        if sess.cloud:
+            await _stop_cloud_browser(sess.cloud)      # stops the user's Browser Use billing for it
+            sess.cloud = None
+        elif not any(o is not sess and _alive(o) and not o.cloud for o in _sessions.values()):
+            await _stop_own_chrome()         # a Chrome we started ourselves outlives browser-use's disconnect
         sess.browser_session = None
         sess.agent = None
     await browser_worker.run(_do())
-    live_view.clear_frame()
+    live_view.clear_frame(owner=sess.data.get("user_id"))
     status = sess.data["status"]
     sess.update(live=False, control="agent", status="closed" if status in ACTIVE else status,
                 message="Browser closed" if status in ACTIVE or status in ("stopped", "needs_you") else sess.data["message"])

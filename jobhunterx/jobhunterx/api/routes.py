@@ -87,8 +87,17 @@ async def meta():
     user = auth_ctx.current()
     return {"tracking_statuses": storage.TRACKING_STATUSES, "setup": _setup_status(),
             "office_ai": app_state.office_ai_enabled(),
-            "auth": {"enabled": auth.enabled(), "user": {"id": user.id, "username": user.username, "is_admin": user.is_admin}
-                     if user else None}}
+            "auth": {"enabled": auth.enabled(), "user": {"id": user.id, "username": user.username, "is_admin": user.is_admin,
+                                                          "self_signup": user.self_signup} if user else None},
+            "browser": _browser_status()}
+
+
+def _browser_status() -> dict:
+    """How auto-apply will open its browser for this user (shown before they start, with a warning when blocked)."""
+    from jobhunterx.agents import browser_agent as ba
+    has_key = bool(ba.browser_use_key())
+    required = ba.cloud_required()
+    return {"cloud": has_key, "cloud_required": required, "ready": has_key or not required, "key_url": ba.BU_KEY_URL}
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +142,7 @@ async def setup_free():
 
 
 class KeyTest(BaseModel):
-    provider: Literal["google", "nvidia", "groq", "mistral", "tavily", "exa", "tinyfish", "brave"]
+    provider: Literal["google", "nvidia", "groq", "mistral", "tavily", "exa", "tinyfish", "brave", "browser_use"]
     key: str = Field(..., max_length=256)
 
 
@@ -146,6 +155,8 @@ async def test_key(body: KeyTest):
     if not is_real_key(key) or not re.fullmatch(r"[A-Za-z0-9_\-.:]{12,256}", key):
         return {"ok": False, "message": "That doesn't look like an API key — copy the whole key again."}
     checks = {
+        # Browser Use: listing your cloud browsers is free and answers 401 for a wrong key
+        "browser_use": ("https://api.browser-use.com/api/v2/browsers", {"X-Browser-Use-API-Key": key}),
         "google": ("https://generativelanguage.googleapis.com/v1beta/models", {"x-goog-api-key": key}),
         "groq": ("https://api.groq.com/openai/v1/models", {"Authorization": f"Bearer {key}"}),
         "mistral": ("https://api.mistral.ai/v1/models", {"Authorization": f"Bearer {key}"}),
@@ -887,6 +898,7 @@ _KEY_FIELDS = {  # payload key → (settings attr, env var names)
     "mistral_api_key": ("mistral_api_key", ["MISTRAL_API_KEY"]),
     "nvidia_api_key": ("nvidia_api_key", ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"]),
     "kilo_api_key": ("kilo_api_key", ["KILO_API_KEY"]),
+    "browser_use_api_key": ("browser_use_api_key", ["BROWSER_USE_API_KEY"]),
 }
 _BOOL_FIELDS = {"enable_web_search_apis": "ENABLE_WEB_SEARCH_APIS", "brave_enabled": "BRAVE_ENABLED",
                 "strict_zero_spend_protection": "STRICT_ZERO_SPEND_PROTECTION"}
@@ -940,7 +952,8 @@ async def get_settings_masked():
     out["primary_search_provider"] = s.primary_search_provider
     out["search_providers"] = list(_SEARCH_PROVIDERS)
     names = {"google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"], "groq": ["GROQ_API_KEY"], "mistral": ["MISTRAL_API_KEY"],
-             "nvidia": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"], "kilo": ["KILO_API_KEY"], "tinyfish": ["TINYFISH_API_KEY"], "tavily": ["TAVILY_API_KEY"], "exa": ["EXA_API_KEY"], "brave": ["BRAVE_API_KEY"]}
+             "nvidia": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"], "kilo": ["KILO_API_KEY"], "tinyfish": ["TINYFISH_API_KEY"], "tavily": ["TAVILY_API_KEY"], "exa": ["EXA_API_KEY"], "brave": ["BRAVE_API_KEY"],
+             "browser_use": ["BROWSER_USE_API_KEY"]}
     for name, env_names in names.items():
         val = getattr(s, f"{name}_api_key")
         out[f"{name}_configured"] = bool(val)
@@ -952,6 +965,7 @@ async def get_settings_masked():
     out["providers"] = {"llm": app_state.get("llm.providers"), "search": app_state.get("search.providers"),
                         "search_order": app_state.get("search.order"), "search_strategy": app_state.get("search.strategy")}
     out["office_ai_enabled"] = app_state.office_ai_enabled()
+    out["browser"] = _browser_status()
     out["restricted"] = user is not None        # prod mode, not the admin: own keys only, server settings read-only
     out["auth"] = auth.enabled()
     if user is not None:

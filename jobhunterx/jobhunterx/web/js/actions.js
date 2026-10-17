@@ -482,6 +482,15 @@ export async function autoApply(jobId) {
     navigate('#/browser');
     return;
   }
+  const br = (getState().meta.data || {}).browser;
+  if (br && !br.ready) {                 // signed up themselves and no Browser Use key yet: explain instead of failing
+    if (await confirmAction({
+      title: 'Add your Browser Use key first',
+      body: 'On this server, auto-apply runs in your own Browser Use cloud browser (not on the server). Get a free key at cloud.browser-use.com — new accounts get free browser time — then paste it in Settings → Web search & browser.',
+      confirm: 'Open Settings',
+    })) navigate('#/settings/search');
+    return;
+  }
   if (!(await confirmAction({
     title: 'Apply with the browser agent?',
     body: 'First we check your resume, cover letter and CV for this job and write any that are missing (resume on one page). Then the agent opens the application right inside the Auto-apply tab — you can watch, stop, or take over any time.',
@@ -769,6 +778,7 @@ export async function saveSettings(body) {
     const data = await api.postSettings(body);
     setSlice('settings', { status: 'ready', data });
     toast('Settings saved.', 'success');
+    if ('browser_use_api_key' in body) refreshMeta();      // auto-apply's browser choice depends on it
     // a new key triggers a server-side model check; pick up the result shortly after
     if (Object.keys(body).some((k) => k.endsWith('_api_key'))) setTimeout(loadModels, 3000);
     return true;
@@ -1301,4 +1311,8 @@ export async function adminChoose(choice) {
   try { sessionStorage.setItem(ADMIN_GO, 'profile'); } catch { /* storage off: asked again after a reload */ }
   setSlice('app', { phase: 'booting', error: null });
   await startSession();
+}
+
+export function refreshMeta() {
+  return api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {});
 }
