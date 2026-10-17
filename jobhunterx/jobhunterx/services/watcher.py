@@ -36,8 +36,17 @@ def _now() -> datetime:
 class Watcher:
     def __init__(self):
         self._task: Optional[asyncio.Task] = None
-        self._lock = asyncio.Lock()
-        self.checking = False
+        # one check at a time per profile (person); people never wait for each other's checks
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._checking: set[str] = set()
+
+    @staticmethod
+    def _key() -> str:
+        return storage.active_person() or ""
+
+    @property
+    def checking(self) -> bool:
+        return self._key() in self._checking
 
     def start(self, emit: Emit) -> None:
         if not self._task or self._task.done():
@@ -81,24 +90,33 @@ class Watcher:
             await asyncio.sleep(TICK_S)
 
     async def check_now(self, emit: Emit) -> dict:
-        """Run one watchlist check. Skips (never interrupts) a search the user started."""
-        if self._lock.locked():
-            return {"status": "already_checking"}
+        """Run one watchlist check. Skips (never interrupts) a search the user started. Every outcome is announced
+        with watch.done, so the page's "Checking…" never waits for an event that is not coming."""
+        key = self._key()
+        lock = self._locks.setdefault(key, asyncio.Lock())
+
+        async def skipped(status: str) -> dict:
+            await emit({"type": "watch.done", "data": {"status": status, "status_info": self.status()}})
+            return {"status": status}
+
+        if lock.locked():
+            return await skipped("already_checking")
         cur = search_manager.current
         if cur and cur.get("status") in ("queued", "running"):
-            return {"status": "busy"}
-        async with self._lock:
+            return await skipped("busy")
+        async with lock:
             profile = await profile_svc.get_profile()
             if profile is None or profile.is_empty():
-                return {"status": "no_profile"}
+                return await skipped("no_profile")
             snap = await profile_svc.get_snapshot(profile)
             companies = watchlist.for_candidate(snap)
             from jobhunterx.services import monitors
             if not watchlist.board_refs(companies) and not await monitors.ready():
                 result = {"status": "no_watchlist", "at": _now().isoformat(), "cities": watchlist.cities_for(snap)}
                 await self._record(result)
+                await emit({"type": "watch.done", "data": {**result, "status_info": self.status()}})
                 return result
-            self.checking = True
+            self._checking.add(key)
             await emit({"type": "watch.status", "data": self.status()})
             try:
                 run = await search_manager.start(profile, {"mode": "watch"}, emit)
@@ -109,7 +127,7 @@ class Watcher:
                           "new_fits": counts.get("recommended", 0), "new_jobs": counts.get("scored", 0),
                           "companies": len(companies)}
             finally:
-                self.checking = False
+                self._checking.discard(key)
             await self._record(result)
             await emit({"type": "watch.done", "data": {**result, "status_info": self.status()}})
             log.info("watch_check_done", **{k: v for k, v in result.items() if k != "at"})

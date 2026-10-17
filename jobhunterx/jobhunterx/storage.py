@@ -238,6 +238,8 @@ async def activate_person(pid: Optional[str]) -> None:
         async with _conn() as db:
             await db.execute("UPDATE users SET active_person = ? WHERE id = ?", (pid, user.id))
             await db.commit()
+        from jobhunterx import auth
+        auth.forget_user(user.id)       # the login cache must not hand out the previous profile for a few seconds
         return
     await app_state.set("people.active", pid)
 

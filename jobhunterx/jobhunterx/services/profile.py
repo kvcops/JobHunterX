@@ -53,7 +53,9 @@ async def get_snapshot(profile: CandidateProfile, *, use_llm: bool = True) -> Ca
             return cached
         snap = await build_snapshot(profile, use_llm=use_llm)
         await storage.put_snapshot(snap)
-        return snap
+    if not lock.locked():
+        _locks.pop(h, None)          # one lock per profile version: don't keep them for every edit ever made
+    return snap
 
 
 async def envelope(profile: Optional[CandidateProfile], *, build: bool = True) -> dict:

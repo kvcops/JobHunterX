@@ -173,3 +173,12 @@ def release_memory() -> None:
             lib.malloc_trim(0)
         except Exception:
             pass
+
+
+def disk_cache(path, size_limit_mb: int = 256):
+    """A diskcache.Cache with small memory settings. By default each cache may use 32 MB of SQLite page cache plus
+    64 MB of memory-mapped file; the app opens five of them. The data itself stays on disk either way."""
+    from diskcache import Cache
+    return Cache(str(path), size_limit=size_limit_mb * 1024 * 1024,
+                 sqlite_cache_size=512,            # pages (~2 MB)
+                 sqlite_mmap_size=4 * 1024 * 1024)

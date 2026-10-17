@@ -108,8 +108,8 @@ _hist = None
 def _history():
     global _hist
     if _hist is None:
-        from diskcache import Cache
-        _hist = Cache(str(get_settings().cache_full_path / "query_history"))
+        from jobhunterx.config import capacity
+        _hist = capacity.disk_cache(get_settings().cache_full_path / "query_history", 16)
     return _hist
 
 

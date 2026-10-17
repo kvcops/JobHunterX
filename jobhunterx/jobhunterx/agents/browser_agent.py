@@ -1951,7 +1951,19 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
 
 # ---------------------------------------------------------------------------- public API (call from the server loop)
 
+_KEEP_SESSIONS = 30
+
+
+def _prune_sessions() -> None:
+    """Finished applications whose browser is gone are kept on disk (apply_sessions) — not in memory forever."""
+    done = [jid for jid, s in _sessions.items() if not _alive(s) and s.data.get("status") not in ACTIVE
+            and jid not in _current.values() and (s.task is None or s.task.done())]
+    for jid in done[:max(0, len(_sessions) - _KEEP_SESSIONS)]:
+        _sessions.pop(jid, None)
+
+
 def new_session(job: dict) -> ApplySession:
+    _prune_sessions()
     sess = ApplySession(job)
     _sessions[job["id"]] = sess
     _current[job.get("user_id") or ""] = job["id"]

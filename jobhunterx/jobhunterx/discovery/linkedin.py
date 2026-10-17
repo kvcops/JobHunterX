@@ -245,9 +245,9 @@ def _rotation(key: str) -> int:
     """How many times this title × place was searched before — picks the next slice of the week's postings."""
     global _rot_store
     if _rot_store is None:
-        from diskcache import Cache
+        from jobhunterx.config import capacity
         from jobhunterx.config.settings import get_settings
-        _rot_store = Cache(str(get_settings().cache_full_path / "linkedin_rotation"))
+        _rot_store = capacity.disk_cache(get_settings().cache_full_path / "linkedin_rotation", 8)
     n = _rot_store.get(key, 0)
     _rot_store.set(key, n + 1, expire=14 * 86400)
     return n

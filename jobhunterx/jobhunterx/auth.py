@@ -236,6 +236,13 @@ _row_cache: dict[str, tuple[float, Optional[dict]]] = {}     # token hash -> (ca
 _ROW_TTL_S = 5.0
 
 
+def forget_user(user_id: str) -> None:
+    """Drop this user's cached login rows (after they switch profile, so every tab and request sees the new one)."""
+    for th, (_, row) in list(_row_cache.items()):
+        if row and row.get("id") == user_id:
+            _row_cache.pop(th, None)
+
+
 async def _session_row(th: str) -> Optional[dict]:
     hit = _row_cache.get(th)
     now = time.time()
@@ -438,6 +445,9 @@ class AuthGate:
             await self.app(scope, receive, send)
             return
         path = scope.get("path") or "/"
+        if scope["type"] == "http" and path.startswith(_PUBLIC_PREFIX) and not _must_upgrade(scope):
+            await self.app(scope, receive, send)     # logo, fonts, icons: no login lookup needed
+            return
         if scope["type"] == "http" and _must_upgrade(scope):
             host = dict(scope.get("headers") or []).get(b"host", b"").decode()
             qs = scope.get("query_string", b"").decode()

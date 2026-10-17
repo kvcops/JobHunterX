@@ -70,6 +70,11 @@ class ConnectionManager:
                     "data": data, "ts": datetime.now(timezone.utc).isoformat()}
         user = auth_ctx.current()
         owner = user.id if user else None
+        if "person_id" not in data and data.get("type") not in ("people.changed", "log"):
+            from jobhunterx import storage
+            pid = storage.active_person()      # the profile this event belongs to: other open profiles ignore it
+            if pid:
+                data = {**data, "person_id": pid}
         message = json.dumps(data, default=str)
         disconnected = []
         for connection in list(self.active_connections):

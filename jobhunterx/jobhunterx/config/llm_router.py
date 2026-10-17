@@ -279,10 +279,10 @@ def _get_cache():
     """Lazy-initialise disk cache."""
     global _cache
     if _cache is None:
-        from diskcache import Cache
+        from jobhunterx.config import capacity
 
         settings = get_settings()
-        _cache = Cache(str(settings.cache_full_path / "llm_cache"))
+        _cache = capacity.disk_cache(settings.cache_full_path / "llm_cache", 256)
     return _cache
 
 

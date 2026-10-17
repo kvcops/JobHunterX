@@ -658,7 +658,10 @@ function onWatchDone(d) {
   setSlice('watch', (w) => ({ ...w, checking: false, run: w.run ? { ...w.run, status: d.status || 'completed' } : null,
     data: w.data ? { ...w.data, status: d.status_info || w.data.status } : w.data }));
   if (d.status === 'completed') setSlice('watch', { stale: true });   // the Companies list updates when you press Refresh
-  if (d.status === 'busy' || d.status === 'already_checking') return;
+  if (d.status === 'busy') { toast('A search is running for this profile — check again when it finishes.', 'info'); return; }
+  if (d.status === 'already_checking') return;
+  if (d.status === 'no_profile') { toast('Add your profile first — the watchlist is matched to it.', 'warning'); return; }
+  if (d.status === 'no_watchlist') { toast('No watched companies in your cities yet. Add a company above, or add a covered city to your preferences.', 'info', 7000); return; }
   if (d.new_fits > 0) {
     toast(`${d.new_fits} new role${d.new_fits === 1 ? '' : 's'} at watchlist companies fit you — see the "New" tab. Apply early.`, 'success', 12000);
   } else if (d.status === 'completed') {
@@ -918,6 +921,8 @@ function handleBrowserEvent(ev) {
 let socket = null;
 function onMessage(msg) {
   const s = getState();
+  // events carry the profile they belong to: never mix another profile's jobs or runs into the open one
+  if (msg.person_id && s.people.active && msg.person_id !== s.people.active && msg.type !== 'people.changed') return;
   switch (msg.type) {
     case 'search.run': {
       const run = msg.data && msg.data.run;
@@ -1063,6 +1068,7 @@ function resetPersonState() {
     profile: fresh.profile, search: fresh.search, jobs: fresh.jobs, details: fresh.details, list: fresh.list,
     pending: fresh.pending, gen: fresh.gen, docs: fresh.docs, docDetails: fresh.docDetails, tracker: fresh.tracker,
     watch: fresh.watch, monitors: fresh.monitors,   // the Companies page loads again for the new profile
+    browser: fresh.browser, interventions: fresh.interventions,   // the previous profile's application is not this one's
   }));
 }
 

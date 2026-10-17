@@ -264,6 +264,7 @@ async def upload_resume(file: UploadFile = File(...), background: bool = Query(F
     if len(_uploads) > 200:
         for old in list(_uploads)[:100]:
             _uploads.pop(old, None)
+            _upload_owner.pop(old, None)
     _upload_owner[up["id"]] = _uid()
     _uploads[up["id"]] = up
     if not background:
