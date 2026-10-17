@@ -135,8 +135,8 @@ _NUMBER_WORDS = re.compile(r"(?i)\b(two|three|four|five|six|seven|eight|nine|ten
                            r"seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|dozen)s?\b")
 
 
-_PROGRESS = re.compile(r"(?i)(jobs?|postings?|posts|results?|matches|fits?|roles?|applications?|boards?|searches|scored|analy[sz]ed|"
-                       r"merged|duplicates|found|read|checked|binned|rejected|companies)")
+_PROGRESS = re.compile(r"(?i)\b(jobs?|postings?|posts|results?|matches|fits?|roles?|applications?|boards?|searches|scored|analy[sz]ed|"
+                       r"merged|duplicates|found|read|checked|binned|rejected|companies)\b")
 
 
 def _numbers_ok(text: str, allowed: str, loose: bool = False) -> bool:

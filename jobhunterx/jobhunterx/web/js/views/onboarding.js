@@ -9,6 +9,7 @@ import {
 import { ExperienceSummary } from '../components/experience.js';
 import { normalizeProfile, setIn, defaultSearchRequest } from '../state/domain.js';
 import { api } from '../lib/api.js';
+import { CountryInput, CityInput, CityChips, WorkAuthInput } from '../components/places.js';
 import { WORK_MODES, WORK_MODE_LABEL, humanize, safeUrl } from '../lib/format.js';
 
 const STEPS = [
@@ -108,9 +109,9 @@ function ReviewStep({ draft, set }) {
           <${Field} label="Full name">${(id) => html`<input id=${id} class="input" autocomplete="name" value=${draft.name} onInput=${(e) => set(['name'], e.currentTarget.value)} />`}</${Field}>
           <${Field} label="Email">${(id) => html`<input id=${id} class="input" type="email" autocomplete="email" value=${draft.email} onInput=${(e) => set(['email'], e.currentTarget.value)} />`}</${Field}>
           <${Field} label="Phone">${(id) => html`<input id=${id} class="input" type="tel" autocomplete="tel" value=${draft.phone} onInput=${(e) => set(['phone'], e.currentTarget.value)} />`}</${Field}>
-          <${Field} label="Current location" hint="City, state, country">${(id) => html`<input id=${id} class="input" list="ob-loc" autocomplete="address-level2" value=${draft.location}
-            placeholder="e.g. Hyderabad, Telangana, India" onInput=${(e) => set(['location'], e.currentTarget.value)} />
-            <datalist id="ob-loc">${locSugg.map((l) => html`<option value=${l} />`)}</datalist>`}</${Field}>
+          <${Field} label="Current location" hint="Start typing a city — pick from the list or keep what you typed.">${(id) => html`<${CityInput} id=${id}
+            value=${draft.location} country=${draft.preferences.home_country} placeholder="e.g. Hyderabad, Telangana, India" extra=${locSugg}
+            onChange=${(v) => set(['location'], v)} />`}</${Field}>
         </div>
         ${links.length ? html`<div class="ob-links"><span class="field-label"><${Icon} name="external" size=${13} /> Links we found · ${links.length}</span>
           <div class="chip-row">${links.map((l, i) => { const u = safeUrl(l.url); return u ? html`<a key=${i} class="chip link-chip" href=${u} target="_blank" rel="noopener noreferrer" title=${l.url}>
@@ -143,8 +144,8 @@ function PrefsStep({ draft, set }) {
     </div>
     <div class="stack">
       <${Field} label="Cities you can work in" hint="Add every city you'd move to or commute to.">
-        <${ChipsInput} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)}
-          placeholder="Type a city and press Enter" suggestions=${locSugg} /></${Field}>
+        <${CityChips} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)}
+          placeholder="Type a city and press Enter" country=${p.home_country} extra=${locSugg} /></${Field}>
       <div class="field"><span class="field-label">Work modes you accept</span>
         <${Seg} multi label="Work modes" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${p.work_modes} onChange=${(v) => set(['preferences', 'work_modes'], v)} /></div>
       <div class="field toggles option-cards">
@@ -156,8 +157,8 @@ function PrefsStep({ draft, set }) {
         <label class=${`opt-card ${p.open_to_international ? 'on' : ''}`}><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} />
           <span class="switch-ui"></span><span><strong>Roles abroad</strong><small>Remote for foreign companies or relocation</small></span></label>
       </div>
-      <${Field} label="Home country">${(id) => html`<input id=${id} class="input" autocomplete="country-name" value=${p.home_country || ''} placeholder=${(snap && snap.home_country) || 'e.g. India'}
-        onInput=${(e) => set(['preferences', 'home_country'], e.currentTarget.value)} />`}</${Field}>
+      <${Field} label="Home country" hint="Pick from the list or type it.">${(id) => html`<${CountryInput} id=${id} value=${p.home_country}
+        onChange=${(v) => set(['preferences', 'home_country'], v)} />`}</${Field}>
     </div>
   </div>`;
 }
@@ -177,8 +178,8 @@ function PayStep({ draft, set }) {
     <${Field} label="Notice period (days)" hint="0 if you can join immediately.">${(id) => html`<input id=${id} class="input" type="number" min="0" max="365"
       value=${p.notice_period_days ?? ''} onInput=${(e) => { const v = e.currentTarget.value === '' ? null : Number(e.currentTarget.value);
         set(['preferences', 'notice_period_days'], v); set(['qa_memory', 'notice_period'], v == null ? '' : `${v} days`); }} />`}</${Field}>
-    <${Field} label="Work authorization">${(id) => html`<input id=${id} class="input" value=${q.work_authorization || ''}
-      onInput=${(e) => set(['qa_memory', 'work_authorization'], e.currentTarget.value)} placeholder="e.g. Indian citizen" />`}</${Field}>
+    <${Field} label="Work authorization" hint="Pick from the list or type your own.">${(id) => html`<${WorkAuthInput} id=${id} value=${q.work_authorization}
+      country=${p.home_country} onChange=${(v) => set(['qa_memory', 'work_authorization'], v)} />`}</${Field}>
     <${Field} label="Need visa sponsorship?">${(id) => html`<${Seg} label="Sponsorship" options=${[['No', 'No'], ['Yes', 'Yes']]}
       value=${q.requires_sponsorship || 'No'} onChange=${(v) => set(['qa_memory', 'requires_sponsorship'], v)} />`}</${Field}>
   </div>`;

@@ -492,8 +492,8 @@ def _actions_of(model_output: Any, state: Any) -> list[str]:
 # Kilo free models that drive the browser well. Measured Oct 2026 with browser-use's output format: all four answer in
 # 1-4 s. Nemotron 3 Nano Omni is left out: it returns no choices for agent-style prompts.
 _KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "poolside/laguna-s-2.1:free", "inclusionai/ling-3.1-flash"]
-# LLM7 free models (no key) after Kilo: a quick backup (small daily quota), the next model answers when it says no.
-_LLM7_BROWSER = ["deepseek-v4-pro", "minimax-m3"]
+# LLM7 free model (no key): last resort only — measured 17 Oct 2026 at 10-60 s per answer.
+_LLM7_BROWSER = ["GLM-5.3-Flash"]
 
 
 def _json_only(text: str) -> str:
@@ -523,8 +523,7 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
             create = client.chat.completions.create
 
             async def create_free(*, messages: list, **kw: Any) -> Any:
-                if provider == "kilo":
-                    kw["extra_body"] = oc.KILO_EXTRA
+                kw["extra_body"] = oc.KILO_EXTRA if provider == "kilo" else oc.LLM7_EXTRA   # thinking off
                 resp = await create(messages=[text_only(m) for m in messages], **kw)
                 for choice in resp.choices or []:
                     if choice.message.content:
@@ -611,11 +610,10 @@ def _build_llms() -> tuple[Any, Any]:
         # 429 / RESOURCE_EXHAUSTED is not retried here: the next model in the chain answers at once instead
         links.append(("gemini/gemini-3.5-flash-lite", ChatGoogle(
             model="gemini-3.5-flash-lite", api_key=google_key, temperature=0.2, max_retries=3,
+            config={"thinking_config": {"thinking_level": "MINIMAL"}},   # browser-use only knows Gemini 3 / 3.1 by name
             retry_base_delay=2.0, retry_max_delay=10.0, retryable_status_codes=[500, 502, 503, 504])))
     if kilo_key:
         links += [(f"kilo/{m}", _free_llm("kilo", m, kilo_key)) for m in _KILO_BROWSER]
-    if llm7_on:
-        links += [(f"llm7/{m}", _free_llm("llm7", m, M.KILO_FREE)) for m in _LLM7_BROWSER]
     if groq_key and ChatGroq is not None:
         links.append(("groq/openai/gpt-oss-120b", ChatGroq(model="openai/gpt-oss-120b", api_key=groq_key, temperature=0.2, max_retries=1)))
     if mistral_key and ChatMistral is not None:
@@ -623,7 +621,10 @@ def _build_llms() -> tuple[Any, Any]:
     if google_key:
         # last resort only: free Gemma is slow and often overloaded, so don't sit in long retry loops on it
         links.append(("gemini/gemma-4-31b-it", ChatGoogle(model="gemma-4-31b-it", api_key=google_key, temperature=0.2, max_retries=1,
-                                                          retry_base_delay=2.0, retry_max_delay=5.0)))
+                                                          retry_base_delay=2.0, retry_max_delay=5.0,
+                                                          config={"thinking_config": {"thinking_level": "MINIMAL"}})))
+    if llm7_on:                          # slowest of all (10-60 s an answer): only when everything else said no
+        links += [(f"llm7/{m}", _free_llm("llm7", m, M.KILO_FREE)) for m in _LLM7_BROWSER]
     if not links:
         raise RuntimeError("No AI provider is available for the browser agent. Add a key or turn a provider on in Settings.")
     return _LLMChain(links), None        # the chain does the falling back; browser-use's one-time fallback is not needed

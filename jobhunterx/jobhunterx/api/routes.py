@@ -230,6 +230,9 @@ async def _process_upload(up: dict, data: bytes) -> dict:
         log.error("resume_upload_failed", error=str(exc)[:300])
         await stage("failed", status="failed", error="Could not read the resume. The AI provider may be busy — please try again.")
         raise HTTPException(502, up["error"])
+    finally:
+        from jobhunterx.config import capacity
+        capacity.release_memory()            # the PDF reader's pages and the long AI answer are no longer needed
 
 
 @router.post("/profile/upload")
@@ -270,6 +273,47 @@ async def upload_status(upload_id: str):
     if not up or _upload_owner.get(upload_id) != _uid():
         raise HTTPException(404, "Upload not found")
     return {"upload": {k: v for k, v in up.items() if k != "result"}, "result": up.get("result")}
+
+
+# ---------------------------------------------------------------------------
+# Place suggestions (cities while typing) — Open-Meteo's free geocoder, called from here so the page only ever
+# talks to this server
+# ---------------------------------------------------------------------------
+
+_places_cache: dict[tuple[str, str], list[dict]] = {}
+
+
+@router.get("/places")
+async def places(q: str = Query("", max_length=60), country: str = Query("", max_length=2)):
+    import httpx
+    q, country = q.strip(), country.strip().upper()
+    if len(q) < 2:
+        return {"places": []}
+    key = (q.lower(), country)
+    if key in _places_cache:
+        return {"places": _places_cache[key]}
+    params = {"name": q, "count": 10, "language": "en", "format": "json"}
+    if re.fullmatch(r"[A-Z]{2}", country):
+        params["countryCode"] = country
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            r = await client.get("https://geocoding-api.open-meteo.com/v1/search", params=params)
+            r.raise_for_status()
+            rows = r.json().get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return {"places": []}                # suggestions are a nicety: typing still works without them
+    out, seen = [], set()
+    for x in sorted(rows, key=lambda x: -(x.get("population") or 0)):
+        if not str(x.get("feature_code", "")).startswith("PPL"):
+            continue                         # towns and cities only (no rivers, districts, airports)
+        label = ", ".join(p for p in (x.get("name"), x.get("admin1"), x.get("country")) if p)
+        if label not in seen:
+            seen.add(label)
+            out.append({"name": x.get("name"), "label": label, "country": x.get("country"), "country_code": x.get("country_code")})
+    if len(_places_cache) > 500:
+        _places_cache.clear()
+    _places_cache[key] = out[:8]
+    return {"places": out[:8]}
 
 
 # ---------------------------------------------------------------------------

@@ -1712,3 +1712,16 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .scout-steps li.is-now { color: var(--ink); font-weight: 500; }
 @media (max-width: 760px) { .scout-window, .scout-window.is-big, .scout-window.is-min { right: 16px; left: 16px; width: auto; min-width: 0; bottom: 16px; }
   .scout-bar { cursor: default; } }
+
+/* Admin start screen (prod mode) */
+.admin-start, .admin-users { max-width: 980px; margin: 0 auto; padding: 28px 16px 40px; }
+.admin-start { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; }
+.admin-start-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-bottom: 18px; }
+.admin-start-head .brand { display: flex; align-items: center; gap: 10px; }
+.admin-start h1 { margin: 6px 0 0; }
+.admin-start-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; width: 100%; max-width: 640px; margin-top: 18px; }
+.admin-card { display: grid; justify-items: center; gap: 8px; padding: 26px 20px; cursor: pointer; text-align: center; color: inherit; font: inherit;
+  border: 1px solid var(--line, transparent); transition: transform .18s ease, border-color .18s ease; }
+.admin-card:hover, .admin-card:focus-visible { transform: translateY(-2px); border-color: var(--accent); }
+.admin-card-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 16px; background: var(--accent-soft); color: var(--accent); }
+.admin-users .view { min-height: 0; }

@@ -44,15 +44,14 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Flash model, ~3.6 s. No key."},
     {"id": "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "name": "Nemotron 3 Nano Omni (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
      "note": "Small MoE (3B active), ~3.4 s. No key."},
-    # LLM7.io free tier — no API key, no account. Limits are not published; measured Oct 2026: one request at a time
-    # per client, short per-minute caps (429 "retry after 1-13 s") and a small daily token quota per client (about ten
-    # short calls used it up): a quick backup after Kilo, not a main model. "Pro" models need payment and are not listed.
-    {"id": "llm7/deepseek-v4-pro", "name": "DeepSeek V4 Pro (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Strong all-rounder, ~1.6 s. No key."},
-    {"id": "llm7/minimax-m3", "name": "MiniMax M3 (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Fast, ~1.4 s. No key."},
+    # LLM7.io free tier — no API key, no account. Limits are not published: one request at a time per client, short
+    # per-minute caps and a small daily token quota per client. Re-measured 17 Oct 2026: DeepSeek V4 Pro and MiniMax M3
+    # became paid-only ("Missing API key"); the free ones answer in 10-60 s and sometimes wrongly — so LLM7 is the very
+    # last resort in every chain. Paid-only models are dropped automatically from LLM7's own list (usage_based_only).
     {"id": "llm7/GLM-5.3-Flash", "name": "GLM 5.3 Flash (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Good structured output, ~8 s. No key."},
+     "note": "Last-resort backup, ~10 s. No key."},
+    {"id": "llm7/DeepSeek-V4-Flash-0731", "name": "DeepSeek V4 Flash (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Last-resort backup, slow (30-60 s). No key."},
     # NVIDIA NIM (build.nvidia.com) — free key, 40 requests/minute per ACCOUNT across all models (no official increase on
     # the free tier). Chosen for speed: small MoE / "flash" models; big dense models are slow on the shared free endpoint.
     {"id": "nim/nvidia/nemotron-nano-3-30b-a3b", "name": "Nemotron Nano 3 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
@@ -75,10 +74,8 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Strong writing and instruction following."},
     {"id": "groq/moonshotai/kimi-k2-instruct", "name": "Kimi K2", "provider": "groq", "rpm": 60, "rpd": 1000, "tpm": 10_000, "tpd": 300_000,
      "note": "Used if the 0905 build is not on your account."},
-    {"id": "groq/qwen/qwen3.6-27b", "name": "Qwen3.6 27B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200_000,
-     "note": "Newest Qwen on Groq; strong structured output."},
-    {"id": "groq/qwen/qwen3-32b", "name": "Qwen3 32B", "provider": "groq", "rpm": 60, "rpd": 1000, "tpm": 6000, "tpd": 500_000,
-     "note": "Used if Qwen3.6 is not on your account; large daily token budget."},
+    {"id": "groq/qwen/qwen3.8-27b", "name": "Qwen3.8 27B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": None, "tpd": None,
+     "note": "Newest Qwen on Groq (replaced Qwen3.6 / Qwen3 32B). Measured 17 Oct 2026: ~0.2 s, clean JSON, no thinking."},
     {"id": "groq/openai/gpt-oss-20b", "name": "GPT-OSS 20B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200_000,
      "note": "Fast and light."},
     # Mistral — free-plan limits are per model and per account (Admin console → Limits); these match the
@@ -102,24 +99,23 @@ _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:fre
 _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "kilo/inclusionai/ling-3.1-flash",
                "kilo/poolside/laguna-s-2.1:free", "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
 # No-key backup after Kilo: LLM7 (one call at a time, small daily quota).
-_LLM7 = ["llm7/deepseek-v4-pro", "llm7/minimax-m3", "llm7/GLM-5.3-Flash"]
+_LLM7 = ["llm7/GLM-5.3-Flash", "llm7/DeepSeek-V4-Flash-0731"]
 CHAINS: dict[str, list[str]] = {
-    # quick tasks want speed: Gemma (often 12-120 s on the free tier) only after the fast Groq models
-    "fast": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST, "llm7/minimax-m3", "llm7/deepseek-v4-pro", "nim/nvidia/nemotron-nano-3-30b-a3b",
-             "nim/openai/gpt-oss-20b", "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b", "gemini/gemma-4-31b-it",
-             "mistral/mistral-small-latest"],
-    "reasoning": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, *_LLM7, "nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash",
-                  "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
-                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest"],
+    # quick tasks want speed: Gemma (often 12-120 s on the free tier) only after the fast Groq models; LLM7 last (slow)
+    "fast": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST, "groq/qwen/qwen3.8-27b", "nim/nvidia/nemotron-nano-3-30b-a3b",
+             "nim/openai/gpt-oss-20b", "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", "gemini/gemma-4-31b-it", *_LLM7],
+    "reasoning": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "groq/qwen/qwen3.8-27b", "nim/z-ai/glm-5.3-flash",
+                  "nim/deepseek-ai/deepseek-v4.1-flash", "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
+                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", "gemini/gemma-4-31b-it", *_LLM7],
     "tailoring": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free",
-                  "llm7/deepseek-v4-pro", "nim/deepseek-ai/deepseek-v4.1-flash", "nim/z-ai/glm-5.3-flash", "gemini/gemma-4-31b-it",
+                  "nim/deepseek-ai/deepseek-v4.1-flash", "nim/z-ai/glm-5.3-flash", "groq/qwen/qwen3.8-27b",
                   "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b",
-                  "mistral/mistral-medium-latest"],
-    "extraction": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, *_LLM7, "nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash",
-                   "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b",
-                   "mistral/mistral-medium-latest"],
-    "browser": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "llm7/deepseek-v4-pro",
-                "groq/openai/gpt-oss-120b", "mistral/mistral-small-latest"],
+                  "mistral/mistral-medium-latest", "gemini/gemma-4-31b-it", *_LLM7],
+    "extraction": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "groq/qwen/qwen3.8-27b", "nim/z-ai/glm-5.3-flash",
+                   "nim/deepseek-ai/deepseek-v4.1-flash", "mistral/mistral-medium-latest", "groq/openai/gpt-oss-120b",
+                   "gemini/gemma-4-31b-it", *_LLM7],
+    "browser": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
+                "mistral/mistral-small-latest", "llm7/GLM-5.3-Flash"],
 }
 CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tailoring": "Resume & letter writing",
                 "extraction": "Resume reading", "browser": "Browser agent"}
@@ -189,18 +185,30 @@ _refresh_lock: Optional[asyncio.Lock] = None
 
 async def _list_provider(provider: str, key: str) -> list[str]:
     if provider == "google":
-        from google import genai
-
-        def _sync() -> list[str]:
-            client = genai.Client(api_key=key)
-            return [m.name.split("/", 1)[-1] for m in client.models.list()]
-        return [f"gemini/{n}" for n in await asyncio.to_thread(_sync)]
+        # plain REST: listing models must not load the whole Google SDK (tens of MB) at startup
+        import httpx
+        names: list[str] = []
+        token = ""
+        async with httpx.AsyncClient(timeout=20) as client:
+            for _ in range(10):
+                r = await client.get("https://generativelanguage.googleapis.com/v1beta/models",
+                                     params={"pageSize": 1000, **({"pageToken": token} if token else {})},
+                                     headers={"x-goog-api-key": key})
+                r.raise_for_status()
+                data = r.json()
+                names += [m["name"].split("/", 1)[-1] for m in data.get("models", []) if m.get("name")]
+                token = data.get("nextPageToken") or ""
+                if not token:
+                    break
+        return [f"gemini/{n}" for n in names]
     if provider in ("kilo", "nvidia", "llm7"):
         from jobhunterx.config import openai_compat as oc
         base, prefix = {"kilo": (oc.KILO_BASE, "kilo"), "nvidia": (oc.NIM_BASE, "nim"),
                         "llm7": (oc.LLM7_BASE, "llm7")}[provider]
         data = await oc.list_models(base, None if key == KILO_FREE else key)
-        return [f"{prefix}/{m['id']}" for m in data if isinstance(m, dict) and m.get("id")]
+        # LLM7 marks paid models (usage_based_only): without a key they answer 401, so they are never "available"
+        return [f"{prefix}/{m['id']}" for m in data if isinstance(m, dict) and m.get("id")
+                and not (provider == "llm7" and m.get("usage_based_only"))]
     import httpx
     url = {"groq": "https://api.groq.com/openai/v1/models", "mistral": "https://api.mistral.ai/v1/models"}[provider]
     async with httpx.AsyncClient(timeout=15) as client:
@@ -411,6 +419,11 @@ def mark_success(model: str) -> None:
 def mark_failure(model: str, error: str) -> Optional[float]:
     """Record a failed call. Returns the rest period in seconds (None if the error is not the model's fault)."""
     e = (error or "").lower()
+    if any(k in e for k in _AUTH_ERR) and not any(k in e for k in _RATE_ERR) and provider_key(provider_of(model)) == KILO_FREE:
+        # a no-key pool (LLM7) answers 401 for a model that became paid: rest that model, not the whole provider
+        _health[model] = {"trips": 1, "until": time.monotonic() + 6 * 3600, "why": "now needs a paid key"}
+        log.warning("model_needs_key", model=model)
+        return 6 * 3600.0
     if any(k in e for k in _AUTH_ERR) and not any(k in e for k in _RATE_ERR):
         provider = provider_of(model)
         _bad_keys[provider + _scope()] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)

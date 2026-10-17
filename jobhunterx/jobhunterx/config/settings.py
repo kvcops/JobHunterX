@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     cors_headers: str = ""              # empty = Content-Type
     cors_allow_credentials: Optional[bool] = None   # empty = on when CORS_ORIGINS is set and APP_ENV=prod
     forwarded_allow_ips: str = ""       # trusted proxies for X-Forwarded-*; empty = * in prod, 127.0.0.1 otherwise
+    # HTTPS (prod mode). auto = when a proxy says the visit came over plain http, send it to https (Render, Fly, nginx…)
+    force_https: str = "auto"           # auto | true | false
+    hsts_seconds: int = 31536000        # browsers remember "https only" for this long once they saw it over https; 0 = off
+    ssl_certfile: str = ""              # serve TLS directly (no proxy in front): paths to the certificate and its key
+    ssl_keyfile: str = ""
     # The agents office writes its break-time chats and answers with AI; false = built-in lines only, no AI calls
     office_ai_enabled: bool = True
 

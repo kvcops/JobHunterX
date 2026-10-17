@@ -7,6 +7,7 @@ import {
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
 import { ExperienceSummary } from '../components/experience.js';
 import { WORK_MODES, WORK_MODE_LABEL, SENIORITIES, YEARS_SOURCE_LABEL, humanize } from '../lib/format.js';
+import { CountryInput, CityInput, CityChips, WorkAuthInput } from '../components/places.js';
 
 function UploadButton() {
   const up = useStore((s) => s.profile.upload);
@@ -150,7 +151,10 @@ function Editor({ profile }) {
     </div>
     <div class="scroll editor-body" key=${tab}>
     ${tab === 'about' ? html`<div class="form-grid">
-      ${[['name', 'Full name'], ['email', 'Email', 'email'], ['phone', 'Phone'], ['location', 'Current location'], ['suggested_role', 'Current / target title'],
+      ${[['name', 'Full name'], ['email', 'Email', 'email'], ['phone', 'Phone']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
+      <${Field} label="Current location">${(id) => html`<${CityInput} id=${id} value=${draft.location} country=${p.home_country}
+        placeholder="e.g. Hyderabad, Telangana, India" onChange=${(v) => set(['location'], v)} />`}</${Field}>
+      ${[['suggested_role', 'Current / target title'],
         ['linkedin', 'LinkedIn URL', 'url'], ['github', 'GitHub URL', 'url'], ['portfolio', 'Portfolio URL', 'url']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
       <${Field} label="Other links" hint="Blog, Kaggle, Scholar, personal site… shown in your resume header." wide><${LinksEditor} value=${draft.links} labelHint="Blog, Kaggle…" onChange=${(v) => set(['links'], v)} /></${Field}>
       <${TextField} draft=${draft} path=${['summary']} label="Summary" set=${set} textarea wide />
@@ -158,10 +162,11 @@ function Editor({ profile }) {
     </div>` : null}
     ${tab === 'prefs' ? html`<div class="form-grid">
       <${Field} label="Target roles" hint="Titles you want. Used first in every search." wide><${ChipsInput} label="Target roles" value=${p.target_roles} onChange=${(v) => set(['preferences', 'target_roles'], v)} /></${Field}>
-      <${Field} label="Acceptable locations" hint="Cities you can work in." wide><${ChipsInput} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)} /></${Field}>
+      <${Field} label="Acceptable locations" hint="Cities you can work in — start typing for suggestions." wide><${CityChips} label="Locations" value=${p.locations}
+        country=${p.home_country} placeholder="Type a city and press Enter" onChange=${(v) => set(['preferences', 'locations'], v)} /></${Field}>
       <div class="field field-wide"><span class="field-label">Work modes you accept</span>
         <${Seg} multi label="Work modes" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${p.work_modes} onChange=${(v) => set(['preferences', 'work_modes'], v)} /></div>
-      <${TextField} draft=${draft} path=${['preferences', 'home_country']} label="Home country" set=${set} />
+      <${Field} label="Home country">${(id) => html`<${CountryInput} id=${id} value=${p.home_country} onChange=${(v) => set(['preferences', 'home_country'], v)} />`}</${Field}>
       <div class="field"><span class="field-label">Flexibility</span>
         <label class="switch"><input type="checkbox" checked=${p.willing_to_relocate} onChange=${(e) => set(['preferences', 'willing_to_relocate'], e.currentTarget.checked)} /><span class="switch-ui"></span> Willing to relocate within my country</label>
         <label class="switch"><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} /><span class="switch-ui"></span> Open to roles abroad</label></div>
@@ -195,7 +200,10 @@ function Editor({ profile }) {
     ${tab === 'qa' ? html`<div class="form-grid">
       <p class="muted small field-wide">Used only by the browser agent to answer application-form questions.</p>
       ${['current_ctc', 'expected_ctc', 'expected_salary', 'notice_period', 'work_authorization', 'requires_sponsorship', 'preferred_work_mode', 'willing_to_relocate', 'years_of_experience'].map((k) =>
-        html`<${TextField} draft=${draft} path=${['qa_memory', k]} label=${humanize(k)} set=${set} />`)}
+        (k === 'work_authorization'
+          ? html`<${Field} label="Work authorization">${(id) => html`<${WorkAuthInput} id=${id} value=${draft.qa_memory.work_authorization}
+              country=${p.home_country} onChange=${(v) => set(['qa_memory', 'work_authorization'], v)} />`}</${Field}>`
+          : html`<${TextField} draft=${draft} path=${['qa_memory', k]} label=${humanize(k)} set=${set} />`))}
     </div>` : null}
     </div>
   </div>`;

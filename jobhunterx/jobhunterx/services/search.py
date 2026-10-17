@@ -846,6 +846,7 @@ class SearchManager:
             finally:
                 if admitted:
                     self.running -= 1
+                capacity.release_memory()        # pages read and parsed by this search: give the memory back
 
         self._runs[key] = (run, asyncio.create_task(_go()))
         return run.data

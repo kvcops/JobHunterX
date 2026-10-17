@@ -342,7 +342,10 @@ def main():
     import uvicorn
 
     settings = get_settings()
+    from jobhunterx.config import capacity
+    capacity.limit_malloc_arenas()       # Linux: fewer memory pools per thread, so RSS stays low
     is_reload = "--reload" in sys.argv
+    tls = {"ssl_certfile": settings.ssl_certfile, "ssl_keyfile": settings.ssl_keyfile} if settings.ssl_certfile else {}
     reload = is_reload or (not settings.prod and sys.platform != "win32")   # never auto-reload a production server
     try:
         uvicorn.run(
@@ -356,6 +359,11 @@ def main():
             proxy_headers=True,
             forwarded_allow_ips=settings.forwarded_allow_ips or ("*" if settings.prod else "127.0.0.1"),
             server_header=not settings.prod,
+            timeout_keep_alive=15,           # idle keep-alive connections are closed after 15 s (memory, slow clients)
+            timeout_graceful_shutdown=10,
+            ws_max_size=1 << 20,             # the app's own WebSocket messages are tiny: refuse anything over 1 MB
+            h11_max_incomplete_event_size=64 * 1024,   # cap on request headers held in memory
+            **tls,                           # TLS directly from uvicorn when SSL_CERTFILE / SSL_KEYFILE are set
         )
     except (KeyboardInterrupt, SystemExit):
         pass

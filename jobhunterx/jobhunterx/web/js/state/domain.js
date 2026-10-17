@@ -108,7 +108,7 @@ export function emptyProfile() {
 export function emptyPreferences() {
   return {
     target_roles: [], locations: [], work_modes: [], willing_to_relocate: false, open_to_international: false,
-    home_country: '', min_annual_salary: null, salary_currency: 'INR', notice_period_days: null,
+    home_country: 'India', min_annual_salary: null, salary_currency: 'INR', notice_period_days: null,
     employment_types: [], excluded_companies: [], career_direction: '',
     years_experience_override: null, seniority_override: null,
   };

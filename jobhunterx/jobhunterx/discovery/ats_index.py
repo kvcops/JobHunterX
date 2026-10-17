@@ -21,8 +21,9 @@ import asyncio
 import gzip
 import json
 import re
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -34,14 +35,14 @@ log = get_logger("ats_index")
 
 SOURCE = "https://raw.githubusercontent.com/Feashliaa/job-board-data/main/data"
 REFRESH_S = 20 * 3600               # a copy younger than this is used as is
-CHUNK_CONCURRENCY = 3                # each chunk is ~25k rows; three at a time keeps memory small
+CHUNK_CONCURRENCY = 3                # each chunk is ~25k rows (~60 MB while parsed); fewer on a small server, see _chunk_slots
 INDIA = re.compile(r"(?i)\bindia\b|\b(bengaluru|bangalore|hyderabad|secunderabad|chennai|pune|mumbai|navi mumbai|gurugram|gurgaon|"
                    r"noida|new delhi|delhi|kolkata|kochi|cochin|coimbatore|trivandrum|thiruvananthapuram|ahmedabad|jaipur|"
                    r"chandigarh|indore|visakhapatnam|vizag|mysore|mysuru|mangalore|madurai|nagpur|bhubaneswar|vadodara)\b")
 LEVELS = {"intern": 0, "entry": 1, "junior": 1, "mid": 2, "senior": 3, "staff": 4, "principal": 4, "lead": 3, "manager": 3, "director": 5}
 
 
-@dataclass
+@dataclass(slots=True)                  # tens of thousands of rows: no per-row __dict__
 class Row:
     url: str
     company: str
@@ -71,7 +72,8 @@ def _load() -> list[Row]:
             with gzip.open(_dir() / "india.json.gz", "rt", encoding="utf-8") as f:
                 data = json.load(f)
             _meta = data.get("meta", {})
-            _rows = [Row(**r) for r in data.get("rows", [])]
+            _rows = [_row(r) for r in data.get("rows", [])]
+            del data
         except (OSError, ValueError, TypeError):
             _rows, _meta = [], {}
     return _rows
@@ -122,7 +124,7 @@ async def sync(force: bool = False) -> dict:
             return status()
         total = int(meta.get("total_jobs") or 0)
         n_chunks = max(1, -(-total // 25000)) if total else 80
-        sem = asyncio.Semaphore(CHUNK_CONCURRENCY)
+        sem = asyncio.Semaphore(_chunk_slots())
         kept: dict[str, Row] = {}
         misses = 0
 
@@ -146,8 +148,28 @@ async def sync(force: bool = False) -> dict:
     _meta = {"source_updated": meta.get("last_updated"), "synced_at": time.time(), "boards": boards, "source_jobs": total}
     _rows = rows
     _save(rows, _meta)
+    del kept
+    from jobhunterx.config import capacity
+    capacity.release_memory()            # the downloaded chunks are gone: give their memory back
     log.info("ats_index_synced", india=len(rows), boards=boards, source_jobs=total, ms=int((time.monotonic() - t0) * 1000))
     return status()
+
+
+def _chunk_slots() -> int:
+    """Chunks parsed at once: one on a small server (each is ~60 MB while parsed), up to three with room to spare."""
+    from jobhunterx.config import capacity
+    free = capacity.plan().get("memory_available_mb") or 0
+    return 1 if free < 900 else 2 if free < 1500 else CHUNK_CONCURRENCY
+
+
+_intern = sys.intern
+
+
+def _row(r: dict) -> Row:
+    # company, place, level and ATS repeat across thousands of rows: one shared copy of each string
+    return Row(url=r["url"], company=_intern(r.get("company") or ""), title=r.get("title") or "",
+               location=_intern(r.get("location") or ""), level=_intern(r.get("level") or ""),
+               first_seen=r.get("first_seen") or "", ats=_intern(r.get("ats") or ""))
 
 
 def _india_rows(body: bytes) -> list[Row]:
@@ -156,9 +178,9 @@ def _india_rows(body: bytes) -> list[Row]:
         loc = r.get("location") or ""
         if not r.get("url") or not INDIA.search(loc) or r.get("is_recruiter"):
             continue
-        out.append(Row(url=r["url"], company=(r.get("company") or "").strip(), title=(r.get("title") or "").strip(),
-                       location=loc.strip(), level=(r.get("skill_level") or "").lower(),
-                       first_seen=r.get("first_seen") or r.get("scraped_at") or "", ats=(r.get("ats") or "").lower()))
+        out.append(_row({"url": r["url"], "company": (r.get("company") or "").strip(), "title": (r.get("title") or "").strip(),
+                         "location": loc.strip(), "level": (r.get("skill_level") or "").lower(),
+                         "first_seen": r.get("first_seen") or r.get("scraped_at") or "", "ats": (r.get("ats") or "").lower()}))
     return out
 
 
@@ -166,7 +188,7 @@ def _save(rows: list[Row], meta: dict) -> None:
     path = _dir() / "india.json.gz"
     tmp = path.with_suffix(".tmp")
     with gzip.open(tmp, "wt", encoding="utf-8") as f:
-        json.dump({"meta": meta, "rows": [r.__dict__ for r in rows]}, f)
+        json.dump({"meta": meta, "rows": [asdict(r) for r in rows]}, f)
     tmp.replace(path)
 
 

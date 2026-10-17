@@ -13,6 +13,7 @@ import { SetupView } from './views/setup.js';
 import { PeoplePicker, ProfileSwitcher } from './views/people.js';
 import { TrackerView, BrowserView, InterventionsView, SettingsView } from './views/other.js';
 import { UsersView } from './views/users.js';
+import { AdminStart, AdminUsers } from './views/adminstart.js';
 
 // Ordered the way the work flows: who you are → what fits → what you send → where it stands.
 const NAV_GROUPS = [
@@ -134,7 +135,7 @@ function Root() {
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => { document.documentElement.dataset.motion = motion; }, [motion]);
   return html`<${Ambient} />
-    ${phase === 'booting' ? html`<${Splash} />` : phase === 'error' ? html`<${BootError} />` : phase === 'setup' ? html`<${SetupView} />` : phase === 'pick' ? html`<${PeoplePicker} />` : phase === 'onboarding' ? html`<${OnboardingView} />` : html`<${AppShell} />`}
+    ${phase === 'booting' ? html`<${Splash} />` : phase === 'error' ? html`<${BootError} />` : phase === 'setup' ? html`<${SetupView} />` : phase === 'pick' ? html`<${PeoplePicker} />` : phase === 'admin' ? html`<${AdminStart} />` : phase === 'admin-users' ? html`<${AdminUsers} />` : phase === 'onboarding' ? html`<${OnboardingView} />` : html`<${AppShell} />`}
     <${ConfirmDialog} /><${Toasts} />`;
 }
 

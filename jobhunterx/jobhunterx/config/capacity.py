@@ -128,3 +128,48 @@ def apply_thread_pool() -> None:
         anyio.to_thread.current_default_thread_limiter().total_tokens = n
     except Exception as exc:
         log.debug("thread_pool_size_skipped", error=str(exc)[:120])
+
+
+# ---------------------------------------------------------------------------- giving memory back
+
+_libc = None
+
+
+def _glibc():
+    """glibc on Linux (Render, Docker); None elsewhere (Windows / macOS manage this themselves)."""
+    global _libc
+    if _libc is None:
+        _libc = False
+        if os.name == "posix":
+            try:
+                import ctypes
+                lib = ctypes.CDLL("libc.so.6")
+                lib.malloc_trim  # noqa: B018 — only glibc has it
+                _libc = lib
+            except (OSError, AttributeError):
+                _libc = False
+    return _libc or None
+
+
+def limit_malloc_arenas(n: int = 2) -> None:
+    """glibc keeps one memory pool per thread (up to 8 per CPU); with a thread pool that grows RSS by tens of MB that
+    is never given back. Two pools are plenty for this app. Call once at startup, before the thread pools fill."""
+    lib = _glibc()
+    if lib is not None:
+        try:
+            lib.mallopt(-8, n)              # M_ARENA_MAX
+        except Exception:
+            pass
+
+
+def release_memory() -> None:
+    """After heavy work (index download, a search, reading a resume): collect garbage and hand freed memory back to
+    the system, so the server's RSS goes down again instead of staying at its peak."""
+    import gc
+    gc.collect()
+    lib = _glibc()
+    if lib is not None:
+        try:
+            lib.malloc_trim(0)
+        except Exception:
+            pass

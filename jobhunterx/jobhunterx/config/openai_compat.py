@@ -37,6 +37,10 @@ class EmptyAnswer(ChatError):
 # Kilo's free models are reasoning models; with thinking on, a short budget often ends before any answer.
 # Measured Oct 2026: {"reasoning": {"enabled": false}} gives a real answer on every chosen Kilo model, and faster.
 KILO_EXTRA = {"reasoning": {"enabled": False}}
+# NVIDIA NIM: thinking models (Nemotron, GLM, DeepSeek) read these chat-template switches.
+NIM_EXTRA = {"chat_template_kwargs": {"enable_thinking": False, "thinking": False}}
+# LLM7 (measured 17 Oct 2026): reasoning_effort "none" gives shorter, faster answers.
+LLM7_EXTRA = {"reasoning_effort": "none"}
 
 
 _pool: Optional[tuple[Any, httpx.AsyncClient]] = None
@@ -68,6 +72,10 @@ async def chat(base: str, model: str, messages: list[dict], *, key: Optional[str
     r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
     if r.status_code == 400 and json_mode:          # a model without JSON mode: retry plainly (prompts ask for JSON anyway)
         body.pop("response_format", None)
+        r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
+    if r.status_code in (400, 422) and extra:       # a model that rejects the thinking switch: ask without it
+        for k in extra:
+            body.pop(k, None)
         r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
     if r.status_code >= 400:
         raise ChatError(r.status_code, r.text[:300])

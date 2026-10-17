@@ -354,7 +354,61 @@ _PUBLIC = {"/login", "/login.html", "/js/login.js", "/styles.css", "/favicon.ico
            "/api/auth/me", "/sw.js", "/service-worker.js"}
 _PUBLIC_PREFIX = ("/assets/", "/vendor/fonts/")
 _SECURITY_HEADERS = [(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"),
-                     (b"referrer-policy", b"same-origin")]
+                     (b"referrer-policy", b"same-origin"), (b"cross-origin-opener-policy", b"same-origin"),
+                     (b"cross-origin-resource-policy", b"same-origin"),
+                     (b"permissions-policy", b"camera=(), microphone=(), geolocation=(), payment=(), usb=()")]
+
+
+def _inline_script_hashes() -> str:
+    """CSP hashes of the small inline scripts in our own pages (read from the files, so an edit can't break them)."""
+    web = Path(__file__).resolve().parent / "web"
+    out = []
+    for name in ("index.html", "login.html"):
+        try:
+            html_text = (web / name).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for attrs, body in re.findall(r"<script\b([^>]*)>(.*?)</script>", html_text, re.S):
+            if "src=" in attrs or not body.strip():
+                continue
+            out.append("'sha256-" + base64.b64encode(hashlib.sha256(body.encode()).digest()).decode() + "'")
+    return " ".join(dict.fromkeys(out))
+
+
+_SCRIPT_HASHES = _inline_script_hashes()
+
+
+def _csp(host: str, https: bool) -> bytes:
+    """Only this site's own code runs; pages talk only to this server (also over WebSockets); no framing, no plugins."""
+    ws = f"wss://{host}" + ("" if https else f" ws://{host}")
+    parts = [
+        "default-src 'self'", f"script-src 'self' {_SCRIPT_HASHES}".strip(),
+        "style-src 'self' 'unsafe-inline'",              # Preact style attributes
+        "img-src 'self' data: blob:", "font-src 'self'", f"connect-src 'self' {ws}", "worker-src 'self' blob:",
+        "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
+    ]
+    if https:
+        parts.append("upgrade-insecure-requests")
+    return "; ".join(parts).encode()
+
+
+def _is_https(scope: dict) -> bool:
+    if scope.get("scheme") in ("https", "wss"):
+        return True
+    headers = dict(scope.get("headers") or [])
+    return headers.get(b"x-forwarded-proto", b"").decode().split(",")[0].strip() == "https"
+
+
+def _must_upgrade(scope: dict) -> bool:
+    """Plain http that should be https (FORCE_HTTPS). auto: only when a proxy in front reports the visit was http —
+    then https exists for this address; without a proxy or TLS nothing could answer on https."""
+    mode = server_settings().force_https.strip().lower()
+    if mode in ("false", "0", "no") or _is_https(scope) or scope.get("path") == "/healthz":
+        return False
+    if mode in ("true", "1", "yes"):
+        return True
+    headers = dict(scope.get("headers") or [])
+    return headers.get(b"x-forwarded-proto", b"").decode().split(",")[0].strip() == "http"
 
 
 def _cookie_token(scope: dict) -> Optional[str]:
@@ -381,6 +435,13 @@ class AuthGate:
             await self.app(scope, receive, send)
             return
         path = scope.get("path") or "/"
+        if scope["type"] == "http" and _must_upgrade(scope):
+            host = dict(scope.get("headers") or []).get(b"host", b"").decode()
+            qs = scope.get("query_string", b"").decode()
+            await send({"type": "http.response.start", "status": 308,
+                        "headers": [(b"location", f"https://{host}{path}{'?' + qs if qs else ''}".encode()), *_SECURITY_HEADERS]})
+            await send({"type": "http.response.body", "body": b""})
+            return
         user, th, exp = await user_for_token(_cookie_token(scope))
         if scope["type"] == "websocket":
             if user is None:
@@ -405,11 +466,16 @@ class AuthGate:
             await self._redirect(send, "/")
             return
         api_or_page = path.startswith("/api/") or not path.rsplit("/", 1)[-1].count(".") or path.endswith(".html")
+        https = _is_https(scope)
+        extra = [(b"content-security-policy", _csp(dict(scope.get("headers") or []).get(b"host", b"").decode(), https))]
+        hsts = server_settings().hsts_seconds
+        if https and hsts > 0:          # browsers only honour HSTS received over https
+            extra.append((b"strict-transport-security", f"max-age={hsts}; includeSubDomains".encode()))
 
         async def send_wrapped(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers") or [])
-                headers += _SECURITY_HEADERS
+                headers += _SECURITY_HEADERS + extra
                 if api_or_page:     # data and pages are never kept by the browser (nothing left after logout)
                     headers = [h for h in headers if h[0].lower() not in (b"cache-control", b"etag", b"last-modified")]
                     headers += [(b"cache-control", b"no-store, max-age=0"), (b"pragma", b"no-cache")]

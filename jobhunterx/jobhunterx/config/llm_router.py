@@ -42,10 +42,11 @@ import re as _re
 from jobhunterx.config import app_state
 from jobhunterx.config import models as M
 
-# Groq GPT-OSS models take a reasoning_effort parameter; keep it low for free-tier latency.
+# Thinking is kept as small as each model allows: it costs tokens and seconds and these tasks don't need it.
+# Groq GPT-OSS can't turn it off; "low" is its minimum (measured: 61 -> 10 reasoning tokens).
 REASONING_EFFORT_MODELS = {"groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"}
-# Qwen3 on Groq: hide the reasoning trace so callers only see the answer.
-HIDDEN_REASONING_MODELS = {"groq/qwen/qwen3-32b", "groq/qwen/qwen3.6-27b"}
+# Qwen on Groq: thinking off entirely (reasoning_effort "none").
+HIDDEN_REASONING_MODELS = {"groq/qwen/qwen3.8-27b"}
 THINKING_MODELS = REASONING_EFFORT_MODELS | HIDDEN_REASONING_MODELS
 THINKING_PARAM_MODELS: set[str] = set()
 
@@ -324,7 +325,7 @@ def get_llm_params(model_name: str) -> Dict[str, Any]:
     if model_name in REASONING_EFFORT_MODELS:
         params["reasoning_effort"] = "low"  # Keep fast for free tier
     elif model_name in HIDDEN_REASONING_MODELS:
-        params["reasoning_format"] = "hidden"
+        params["reasoning_effort"] = "none"
     elif model_name in THINKING_PARAM_MODELS:
         params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
 
@@ -404,7 +405,8 @@ async def _call_google_genai(
     contents.append(f"USER:\n{user_content}")
     prompt_str = "\n\n".join(contents)
 
-    cfg: Dict[str, Any] = {"automatic_function_calling": {"disable": True}}   # no tools; also stops the "AFC is enabled" log
+    cfg: Dict[str, Any] = {"automatic_function_calling": {"disable": True},   # no tools; also stops the "AFC is enabled" log
+                           "thinking_config": {"thinking_level": "minimal"}}    # Gemini 3 Flash thinks by default: keep it minimal
     max_tokens = kwargs.get("max_tokens") or kwargs.get("max_output_tokens")
     if max_tokens:
         cfg["max_output_tokens"] = max_tokens
@@ -418,7 +420,13 @@ async def _call_google_genai(
             config=cfg,
         )
 
-    response = await asyncio.to_thread(_sync_generate)
+    try:
+        response = await asyncio.to_thread(_sync_generate)
+    except Exception as exc:
+        if "think" not in str(exc).lower():
+            raise
+        cfg.pop("thinking_config", None)        # a model that takes no thinking level: ask again without it
+        response = await asyncio.to_thread(_sync_generate)
     latency_ms = (time.monotonic() - t0) * 1000
 
     content = getattr(response, "text", "") or ""
@@ -496,6 +504,7 @@ async def call_llm(
         provider = M.provider_of(model)
         key = M.provider_key(provider)
         base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE}[provider]
+        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.NIM_EXTRA, "llm7": oc.LLM7_EXTRA}[provider]
         json_mode = any("JSON object" in (m.get("content") or "") for m in messages if m.get("role") == "system")
         est = sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024)
         shared = M.account_limiter(model)
@@ -512,7 +521,7 @@ async def call_llm(
                 try:
                     out = await oc.chat(base, model.split("/", 1)[1], messages, key=None if key == M.KILO_FREE else key,
                                         max_tokens=budget_out, temperature=kwargs.get("temperature"), json_mode=json_mode,
-                                        timeout=75, extra=oc.KILO_EXTRA if provider == "kilo" else None)
+                                        timeout=75, extra=no_think)
                     break
                 except oc.EmptyAnswer:
                     if attempt:

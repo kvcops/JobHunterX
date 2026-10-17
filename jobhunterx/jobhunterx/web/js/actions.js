@@ -1102,6 +1102,8 @@ export async function startFree(keys = {}) {
 }
 
 async function startSession() {
+  // prod mode: the admin first chooses between managing users and their own profile (once per browser tab)
+  if (isAdminLogin() && readAdminGo() !== 'profile') { setSlice('app', { phase: 'admin', error: null }); return; }
   try {
     const setup = await loadSetup();
     if (!setup.llm_ready) { setSlice('app', { phase: 'setup', error: null }); return; }
@@ -1270,4 +1272,21 @@ export async function setOfficeAI(on) {
   if (await saveSettings({ office_ai_enabled: on })) {
     setSlice('meta', (m) => ({ ...m, data: m.data ? { ...m.data, office_ai: on } : m.data }));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Admin start screen (prod mode): manage users, or open my own profile
+// ---------------------------------------------------------------------------
+const ADMIN_GO = 'jhx-admin-go';
+function readAdminGo() { try { return sessionStorage.getItem(ADMIN_GO); } catch { return null; } }
+const isAdminLogin = () => { const a = getState().auth; return !!(a.enabled && a.user && a.user.is_admin); };
+export async function adminChoose(choice) {
+  if (choice === 'users') {
+    setSlice('app', { phase: 'admin-users', error: null });
+    loadUsers();
+    return;
+  }
+  try { sessionStorage.setItem(ADMIN_GO, 'profile'); } catch { /* storage off: asked again after a reload */ }
+  setSlice('app', { phase: 'booting', error: null });
+  await startSession();
 }

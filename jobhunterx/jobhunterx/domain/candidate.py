@@ -174,7 +174,7 @@ class CandidatePreferences(_Lenient):
     )
     willing_to_relocate: bool = False
     open_to_international: bool = False                         # roles outside home country
-    home_country: str = ""
+    home_country: str = "India"                                  # editable; India is the default (empty counts as India)
     min_annual_salary: Optional[float] = None                   # in salary_currency, per year
     salary_currency: str = "INR"
     notice_period_days: Optional[int] = None
@@ -186,6 +186,11 @@ class CandidatePreferences(_Lenient):
 
     _l = field_validator("target_roles", "locations", "employment_types", "excluded_companies", mode="before")(_coerce_str_list)
     _s = field_validator("career_direction", "home_country", "salary_currency", mode="before")(_coerce_str)
+
+    @field_validator("home_country")
+    @classmethod
+    def _home_default(cls, v: str) -> str:
+        return v.strip() or "India"
 
     @field_validator("work_modes", mode="before")
     @classmethod

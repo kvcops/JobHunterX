@@ -144,6 +144,9 @@ export const api = {
   },
   uploadStatus: (id, o) => request(`/profile/upload/${enc(id)}`, o),
 
+  // city suggestions while typing (country = ISO code, optional)
+  places: (q, country, o) => request('/places', { query: { q, country }, timeout: 8_000, ...o }),
+
   // people (switchable profiles)
   people: (o) => request('/people', o),
   createPerson: (name, o) => request('/people', { method: 'POST', body: { name }, ...o }),

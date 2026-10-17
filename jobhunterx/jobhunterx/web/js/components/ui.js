@@ -203,7 +203,7 @@ export function Monogram({ name, size }) {
  * Free-text chips (no fixed vocabulary). Enter, comma or Tab adds; pasting "Pune, Hyderabad; Remote" adds all;
  * Backspace on an empty field removes the last. `suggestions` are one-click additions shown underneath.
  */
-export function ChipsInput({ value = [], onChange, placeholder, label, suggestions = [], max = 30 }) {
+export function ChipsInput({ value = [], onChange, placeholder, label, suggestions = [], max = 30, onQuery }) {
   const [draft, setDraft] = useState('');
   const inputRef = useRef();
   const has = (x) => value.some((v) => v.toLowerCase() === x.toLowerCase());
@@ -213,6 +213,7 @@ export function ChipsInput({ value = [], onChange, placeholder, label, suggestio
     parts.forEach((p) => { if (next.length < max && !next.some((v) => v.toLowerCase() === p.toLowerCase())) next.push(p); });
     if (next.length !== value.length) onChange(next);
     setDraft('');
+    if (onQuery) onQuery('');
   };
   const sugg = [...new Map(suggestions.filter((x) => x && String(x).trim()).map((x) => [String(x).trim().toLowerCase(), String(x).trim()])).values()]
     .filter((x) => !has(x)).slice(0, 8);
@@ -221,7 +222,7 @@ export function ChipsInput({ value = [], onChange, placeholder, label, suggestio
       ${value.map((v, i) => html`<span class="chip chip-pop" key=${v}>${v}
         <button type="button" class="chip-x" aria-label=${`Remove ${v}`} onClick=${() => onChange(value.filter((_, j) => j !== i))}><${Icon} name="x" size=${12} /></button></span>`)}
       <input ref=${inputRef} aria-label=${label || placeholder} value=${draft} placeholder=${value.length ? 'Add another…' : placeholder}
-        onInput=${(e) => { const v = e.currentTarget.value; if (/[,;]/.test(v)) add(v); else setDraft(v); }}
+        onInput=${(e) => { const v = e.currentTarget.value; if (/[,;]/.test(v)) add(v); else { setDraft(v); if (onQuery) onQuery(v); } }}
         onPaste=${(e) => { const t = (e.clipboardData || window.clipboardData).getData('text'); if (/[,;\n]/.test(t)) { e.preventDefault(); add(t); } }}
         onKeyDown=${(e) => {
           if ((e.key === 'Enter' || (e.key === 'Tab' && draft.trim())) && draft.trim()) { e.preventDefault(); add(draft); }
