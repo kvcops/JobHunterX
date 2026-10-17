@@ -53,7 +53,8 @@ export function initialState() {
       feed: { runId: null, items: [] },   // plain-language live activity of the active run
     },
     jobs: { byId: {} },
-    watch: { status: 'idle', data: null, error: null, checking: false, run: null, feed: [] },   // run = live background check
+    // run = live background check; stale = a check finished since the list was loaded (refresh is manual)
+    watch: { status: 'idle', data: null, error: null, checking: false, run: null, feed: [], stale: false },
     monitors: { status: 'idle', items: [], error: null, busy: {} },   // companies you watch (Company Scout recipes)
     setup: { data: null, error: null, saving: false, tests: {} },   // API keys; checked before anything else
     details: {},            // jobId -> { status, job, error }

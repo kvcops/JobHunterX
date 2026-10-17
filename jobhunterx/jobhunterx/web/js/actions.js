@@ -607,11 +607,22 @@ export async function loadWatchlist(scope = 'mine') {
   try {
     const data = await api.watchlist(scope);
     if (seq !== watchSeq) return;
-    setSlice('watch', { status: 'ready', data, scope, checking: !!(data.status && data.status.checking) });
+    setSlice('watch', { status: 'ready', data, scope, stale: false, checking: !!(data.status && data.status.checking) });
   } catch (err) {
     if (seq !== watchSeq) return;
     setSlice('watch', { status: 'error', error: errorText(err) });
   }
+}
+/** Companies page: load once; after that only the Refresh button reloads (no automatic reloads). */
+export function ensureWatchlist(scope = 'mine') {
+  const w = getState().watch;
+  if (!w.data || w.scope !== scope || w.status === 'error') loadWatchlist(scope);
+}
+export function ensureMonitors() {
+  if (getState().monitors.status === 'idle') loadMonitors();
+}
+export async function refreshCompanies(scope = 'mine') {
+  await Promise.all([loadWatchlist(scope), loadMonitors()]);
 }
 export async function checkWatchlistNow() {
   setSlice('watch', { checking: true });
@@ -637,7 +648,7 @@ function isWatchEvent(msg) {
 function onWatchDone(d) {
   setSlice('watch', (w) => ({ ...w, checking: false, run: w.run ? { ...w.run, status: d.status || 'completed' } : null,
     data: w.data ? { ...w.data, status: d.status_info || w.data.status } : w.data }));
-  if (getState().route.page === 'companies') loadWatchlist(getState().watch.scope || 'mine');
+  if (d.status === 'completed') setSlice('watch', { stale: true });   // the Companies list updates when you press Refresh
   if (d.status === 'busy' || d.status === 'already_checking') return;
   if (d.new_fits > 0) {
     toast(`${d.new_fits} new role${d.new_fits === 1 ? '' : 's'} at watchlist companies fit you — see the "New" tab. Apply early.`, 'success', 12000);
@@ -1041,6 +1052,7 @@ function resetPersonState() {
     ...s,
     profile: fresh.profile, search: fresh.search, jobs: fresh.jobs, details: fresh.details, list: fresh.list,
     pending: fresh.pending, gen: fresh.gen, docs: fresh.docs, docDetails: fresh.docDetails, tracker: fresh.tracker,
+    watch: fresh.watch, monitors: fresh.monitors,   // the Companies page loads again for the new profile
   }));
 }
 
