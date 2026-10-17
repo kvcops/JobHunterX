@@ -1,6 +1,6 @@
 import { html, useState, useEffect } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
-import { generateCv, loadDocuments, loadDocument, deleteDocument } from '../actions.js';
+import { generateCv, loadDocuments, loadDocument, updateDocument, deleteDocument } from '../actions.js';
 import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Tabs } from '../components/ui.js';
 import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
 import { api } from '../lib/api.js';
@@ -32,6 +32,119 @@ function LetterPreview({ c }) {
   return html`<article class="paper"><p>${c.greeting}</p>${c.paragraphs.map((p) => html`<p>${p}</p>`)}<p>${c.closing}<br />${c.signature}</p></article>`;
 }
 
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const lines = (value) => (value || []).join('\n');
+const fromLines = (value) => value.split('\n').map((x) => x.trim()).filter(Boolean);
+
+function JsonField({ label, value, onChange }) {
+  const [text, setText] = useState(() => JSON.stringify(value || [], null, 2));
+  const [error, setError] = useState('');
+  return html`<label class="field"><span class="field-label">${label}</span>
+    <textarea class="input" rows="7" value=${text} onInput=${(e) => {
+      setText(e.currentTarget.value);
+      try { onChange(JSON.parse(e.currentTarget.value)); setError(''); } catch { setError('Use valid JSON for this section.'); }
+    }}></textarea>
+    ${error ? html`<span class="error-text small">${error}</span>` : null}</label>`;
+}
+
+function LinkEditor({ links = [], onChange }) {
+  const update = (index, key, next) => {
+    const nextLinks = links.map((link, i) => {
+      if (i !== index) return link;
+      return key === 'url' ? { ...link, url: next } : { ...link, label: next, text: next };
+    });
+    onChange(nextLinks);
+  };
+  const remove = (index) => onChange(links.filter((_, i) => i !== index));
+  return html`<div class="field">
+    <span class="field-label">Links</span>
+    <div class="stack">
+      ${links.map((link, i) => html`<div class="link-row" key=${i}>
+        <input class="input link-label" aria-label=${`Link ${i + 1} label`} placeholder="Label" value=${link.label || ''}
+          onInput=${(e) => update(i, 'label', e.currentTarget.value)} />
+        <input class="input" aria-label=${`Link ${i + 1} URL`} placeholder="https://…" value=${link.url || ''}
+          onInput=${(e) => update(i, 'url', e.currentTarget.value)} />
+        <button type="button" class="icon-btn" aria-label=${`Remove link ${i + 1}`} onClick=${() => remove(i)}>
+          <${Icon} name="trash" size=${15} />
+        </button>
+      </div>`)}
+      <button type="button" class="btn btn-secondary btn-sm" onClick=${() => onChange([...links, { label: '', url: '', text: '' }])}>
+        Add link
+      </button>
+    </div>
+    <span class="muted small">Edit the label and destination shown in the resume.</span>
+  </div>`;
+}
+
+function LinkedItemsEditor({ label, items = [], itemLinks = {}, onChange }) {
+  const updateItem = (index, nextText) => {
+    const previous = items[index] || '';
+    const nextItems = items.map((item, i) => i === index ? nextText : item);
+    const nextLinks = { ...itemLinks };
+    if (previous !== nextText && Object.prototype.hasOwnProperty.call(nextLinks, previous)) {
+      nextLinks[nextText] = nextLinks[previous];
+      delete nextLinks[previous];
+    }
+    onChange(nextItems, nextLinks);
+  };
+  const updateLinks = (item, links) => onChange(items, { ...itemLinks, [item]: links });
+  const removeItem = (index) => {
+    const item = items[index];
+    const nextLinks = { ...itemLinks };
+    delete nextLinks[item];
+    onChange(items.filter((_, i) => i !== index), nextLinks);
+  };
+  return html`<div class="field">
+    <span class="field-label">${label}</span>
+    <div class="stack">
+      ${items.map((item, i) => html`<div class="linked-item" key=${`${item}-${i}`}>
+        <div class="row gap">
+          <input class="input" value=${item} aria-label=${`${label} ${i + 1}`}
+            onInput=${(e) => updateItem(i, e.currentTarget.value)} />
+          <button type="button" class="icon-btn" aria-label=${`Remove ${label.toLowerCase()} ${i + 1}`} onClick=${() => removeItem(i)}>
+            <${Icon} name="trash" size=${15} />
+          </button>
+        </div>
+        <${LinkEditor} links=${itemLinks[item] || []} onChange=${(links) => updateLinks(item, links)} />
+      </div>`)}
+      <button type="button" class="btn btn-secondary btn-sm" onClick=${() => onChange([...items, ''], itemLinks)}>
+        Add ${label.toLowerCase().replace(/s$/, '')}
+      </button>
+    </div>
+    <span class="muted small">Attach credential or evidence links to each item.</span>
+  </div>`;
+}
+
+function DocumentEditor({ doc, value, onChange }) {
+  const set = (key, next) => onChange({ ...value, [key]: next });
+  const setHeader = (key, next) => set('header', { ...value.header, [key]: next });
+  if (doc.kind === 'cover_letter') return html`<div class="editor-form">
+    ${[['greeting', 'Greeting'], ['closing', 'Closing'], ['signature', 'Signature']].map(([k, label]) => html`
+      <label class="field"><span class="field-label">${label}</span><input class="input" value=${value[k] || ''} onInput=${(e) => set(k, e.currentTarget.value)} /></label>`)}
+    <label class="field"><span class="field-label">Paragraphs</span><textarea class="input" rows="12" value=${lines(value.paragraphs)} onInput=${(e) => set('paragraphs', fromLines(e.currentTarget.value))}></textarea><span class="muted small">One paragraph per line.</span></label>
+  </div>`;
+  return html`<div class="editor-form">
+    <div class="editor-grid">${[['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location']].map(([k, label]) => html`
+      <label class="field"><span class="field-label">${label}</span><input class="input" value=${value.header?.[k] || ''} onInput=${(e) => setHeader(k, e.currentTarget.value)} /></label>`)}</div>
+    <label class="field"><span class="field-label">Headline</span><input class="input" value=${value.headline || ''} onInput=${(e) => set('headline', e.currentTarget.value)} /></label>
+    <${LinkEditor} links=${value.header?.links || []} onChange=${(next) => setHeader('links', next)} />
+
+    <label class="field"><span class="field-label">Summary</span><textarea class="input" rows="6" value=${value.summary || ''} onInput=${(e) => set('summary', e.currentTarget.value)}></textarea></label>
+    <${LinkedItemsEditor} label="Certifications" items=${value.certifications} itemLinks=${value.item_links || {}}
+      onChange=${(items, itemLinks) => onChange({ ...value, certifications: items, item_links: itemLinks })} />
+    <${LinkedItemsEditor} label="Achievements" items=${value.achievements} itemLinks=${value.item_links || {}}
+      onChange=${(items, itemLinks) => onChange({ ...value, achievements: items, item_links: itemLinks })} />
+    <${LinkedItemsEditor} label="Competitions" items=${value.competitions} itemLinks=${value.item_links || {}}
+      onChange=${(items, itemLinks) => onChange({ ...value, competitions: items, item_links: itemLinks })} />
+    <${LinkedItemsEditor} label="Languages" items=${value.languages} itemLinks=${value.item_links || {}}
+      onChange=${(items, itemLinks) => onChange({ ...value, languages: items, item_links: itemLinks })} />
+    <${JsonField} label="Skills (JSON)" value=${value.skills} onChange=${(v) => set('skills', v)} />
+    <${JsonField} label="Experience (JSON)" value=${value.experience} onChange=${(v) => set('experience', v)} />
+    <${JsonField} label="Projects (JSON)" value=${value.projects} onChange=${(v) => set('projects', v)} />
+    <${JsonField} label="Education (JSON)" value=${value.education} onChange=${(v) => set('education', v)} />
+  </div>`;
+}
+
 function Provenance({ doc }) {
   const p = doc.provenance;
   const [all, setAll] = useState(false);
@@ -52,10 +165,21 @@ function Provenance({ doc }) {
 function DocumentDetail({ docId }) {
   const entry = useStore((s) => s.docDetails[docId]);
   const [tab, setTab] = useState('preview');
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => { loadDocument(docId); }, [docId]);
+  useEffect(() => { if (entry?.doc) setDraft(clone(entry.doc.content)); }, [entry?.doc]);
   if (!entry || entry.status === 'loading') return html`<div class="pane-pad"><${Skeleton} lines=${10} /></div>`;
   if (entry.status === 'error') return html`<div class="pane-pad"><${ErrorBox} message=${entry.error} onRetry=${() => loadDocument(docId)} /></div>`;
   const d = entry.doc;
+  const editing = tab === 'edit';
+  const dirty = draft && JSON.stringify(draft) !== JSON.stringify(d.content);
+  const save = async () => {
+    setSaving(true);
+    const updated = await updateDocument(docId, draft);
+    setSaving(false);
+    if (updated) { setDraft(clone(updated.content)); setTab('preview'); }
+  };
   return html`<div class="detail">
     <header class="detail-top doc-top">
       <div class="row space wrap">
@@ -63,14 +187,17 @@ function DocumentDetail({ docId }) {
           <div class="muted small">${relTime(d.created_at)} · ${d.page_count} page(s)
             ${d.job ? html` · for <a href=${`#/discover/job/${d.job_id}`}>${d.job.title} @ ${d.job.company}</a>` : ''}</div></div>
         <div class="row gap">${d.has_pdf ? html`<a class="btn btn-primary btn-sm" href=${api.documentPdfUrl(d.id)} download><${Icon} name="download" size=${15} /><span>Download PDF</span></a>` : null}
+          <button type="button" class="btn btn-secondary btn-sm" onClick=${() => { setDraft(clone(d.content)); setTab(editing ? 'preview' : 'edit'); }}>${editing ? 'Cancel' : 'Edit'}</button>
+          ${editing ? html`<button type="button" class="btn btn-primary btn-sm" disabled=${!dirty || saving} onClick=${save}>${saving ? 'Saving…' : 'Save changes'}</button>` : null}
           <button type="button" class="icon-btn" aria-label="Delete document" onClick=${() => deleteDocument(d.id)}><${Icon} name="trash" size=${16} /></button></div>
       </div>
+      ${d.manually_edited ? html`<${Notice} tone="info">Manually edited · saved ${relTime(d.updated_at)}</${Notice}>` : null}
       ${d.stale ? html`<${Notice} tone="warning">Your profile changed after this was generated. Regenerate it to include the latest information.</${Notice}>` : null}
       <${Tabs} size="sm" label="Document sections" value=${tab} onChange=${setTab}
-        tabs=${[{ key: 'preview', label: 'Preview' }, { key: 'prov', label: 'What changed', count: d.provenance.rewrites.length }]} />
+        tabs=${[{ key: 'preview', label: 'Preview' }, { key: 'edit', label: 'Edit' }, { key: 'prov', label: 'What changed', count: d.provenance.rewrites.length }]} />
     </header>
     <div class="detail-body scroll paper-stage" key=${tab}>
-      ${tab === 'preview' ? (d.kind === 'cover_letter' ? html`<${LetterPreview} c=${d.content} />` : html`<${ResumePreview} c=${d.content} />`) : html`<${Provenance} doc=${d} />`}
+      ${tab === 'preview' ? (d.kind === 'cover_letter' ? html`<${LetterPreview} c=${d.content} />` : html`<${ResumePreview} c=${d.content} />`) : tab === 'edit' ? html`<${DocumentEditor} key=${`${d.id}:${d.updated_at}`} doc=${d} value=${draft || d.content} onChange=${setDraft} />` : html`<${Provenance} doc=${d} />`}
     </div>
   </div>`;
 }

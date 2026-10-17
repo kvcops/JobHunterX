@@ -89,10 +89,25 @@ def test_full_flow_search_save_track_generate(client):
 
     doc = client.post(f"/api/jobs/{job['id']}/documents", json={"kind": "resume"}).json()["document"]
     assert doc["kind"] == "resume" and doc["job_id"] == job["id"] and doc["has_pdf"]
+    edited = {**doc["content"], "summary": "A user-authored summary for this application.",
+              "item_links": {"Java - HackerRank": [{"label": "Credential", "url": "https://example.com/java", "text": "Credential"}]},
+              "header": {**doc["content"]["header"], "links": [{"label": "Portfolio", "url": "https://example.com/portfolio", "text": "example.com/portfolio"}]}}
+    saved = client.patch(f"/api/documents/{doc['id']}", json={"content": edited})
+    assert saved.status_code == 200
+    saved_doc = saved.json()["document"]
+    assert saved_doc["content"]["summary"] == edited["summary"]
+    assert saved_doc["content"]["header"]["links"][0]["url"] == "https://example.com/portfolio"
+    assert saved_doc["content"]["item_links"]["Java - HackerRank"][0]["url"] == "https://example.com/java"
+    assert saved_doc["manually_edited"] and saved_doc["updated_at"] >= saved_doc["created_at"]
+    assert client.get(f"/api/documents/{doc['id']}").json()["document"]["content"]["summary"] == edited["summary"]
     pdf = client.get(f"/api/documents/{doc['id']}/pdf")
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+    invalid = client.patch(f"/api/documents/{doc['id']}", json={"content": {"summary": 42}})
+    assert invalid.status_code == 422
     cv = client.post("/api/documents/cv", json={}).json()["document"]
     assert cv["kind"] == "cv" and cv["job_id"] is None
+    cv_edit = client.patch(f"/api/documents/{cv['id']}", json={"content": {**cv["content"], "headline": "Edited career profile"}})
+    assert cv_edit.status_code == 200 and cv_edit.json()["document"]["manually_edited"]
     kinds = {d["kind"] for d in client.get("/api/documents").json()["documents"]}
     assert kinds == {"resume", "cv"}
 

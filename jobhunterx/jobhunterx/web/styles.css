@@ -284,6 +284,9 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 .field-label { font-size: .77rem; font-weight: 500; color: var(--text-2); }
 .field-hint { font-size: .72rem; color: var(--text-3); }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+.editor-form { display: flex; flex-direction: column; gap: 16px; max-width: 920px; margin: 0 auto; padding: 4px 0 28px; }
+.editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 700px) { .editor-grid { grid-template-columns: 1fr; } }
 .form-grid.tight { margin: 4px 0 0; }
 .check { display: flex; align-items: center; gap: 9px; font-size: .86rem; margin-top: 8px; color: var(--text-2); cursor: pointer; }
 .check input { accent-color: var(--accent); width: 16px; height: 16px; }

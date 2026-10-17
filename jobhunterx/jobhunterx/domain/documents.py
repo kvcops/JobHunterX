@@ -52,3 +52,5 @@ class GeneratedDocument(BaseModel):
     page_count: int = 0
     has_pdf: bool = False
     created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    manually_edited: bool = False

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable, Optional
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Optional
 
 from jobhunterx import storage
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
@@ -13,6 +14,7 @@ from jobhunterx.generation.content import header_for
 from jobhunterx.generation.cover_letter import generate_cover_letter
 from jobhunterx.generation.cv import generate_cv
 from jobhunterx.generation.resume import generate_resume
+from jobhunterx.generation.content import CoverLetterContent, ResumeContent
 
 Emit = Callable[[dict], Awaitable[None]]
 
@@ -78,3 +80,27 @@ async def generate_cv_doc(profile: CandidateProfile, snapshot: CandidateSnapshot
         return await _store(doc, pdf, pages)
 
     return await _with_guard(("profile", "cv"), emit, None, "cv", work)
+
+
+async def update_document(doc: GeneratedDocument, content: dict[str, Any], profile: CandidateProfile) -> GeneratedDocument:
+    """Validate user-authored structured content, render it, and replace the saved artifact."""
+    if doc.kind in ("resume", "cv"):
+        validated = ResumeContent.model_validate(content)
+        normalized = validated.model_dump(mode="json")
+        pdf, pages = await asyncio.to_thread(
+            render.render_resume if doc.kind == "resume" else render.render_cv, normalized)
+    elif doc.kind == "cover_letter":
+        validated = CoverLetterContent.model_validate(content)
+        normalized = validated.model_dump(mode="json")
+        pdf, pages = await asyncio.to_thread(
+            render.render_cover_letter, normalized, header_for(profile).model_dump(mode="json"))
+    else:
+        raise ValueError(f"Unsupported document kind: {doc.kind}")
+    doc.content = normalized
+    doc.page_count = pages
+    doc.has_pdf = bool(pdf)
+    doc.updated_at = datetime.now(timezone.utc)
+    doc.manually_edited = True
+    if not await storage.update_document(doc, pdf):
+        raise LookupError(doc.id)
+    return doc
