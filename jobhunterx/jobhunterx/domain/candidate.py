@@ -146,12 +146,12 @@ class Project(_Lenient):
 
 def parse_lpa(text: Any) -> Optional[float]:
     """An annual pay amount in lakhs (LPA) from how people write it: "8", "8 LPA", "8 lakhs", "8L", "800000",
-    "8,00,000", "1.2 Cr", "66k per month". A bare small number is lakhs; a large one is rupees."""
+    "8,00,000", "1.2 Cr", "66k per month", "7.5", "50k". A bare small number is lakhs; a large one is rupees."""
     if isinstance(text, (int, float)):
         n = float(text)
         return round(n / 100000 if n >= 1000 else n, 2) if n > 0 else None
     t = str(text or "").lower().replace(",", "").strip()
-    m = re.search(r"\d+(?:\.\d+)?", t)
+    m = re.search(r"\d+(?:\.\d+)?|\.\d+", t)
     if not m:
         return None
     n = float(m.group())
