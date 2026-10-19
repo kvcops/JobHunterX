@@ -61,7 +61,23 @@ def _real_chrome() -> Optional[str]:
         p = os.path.expandvars(p)
         if Path(p).exists():
             return p
-    return None
+    return _playwright_chromium()
+
+
+def _playwright_chromium() -> Optional[str]:
+    """No Chrome installed (a bare server): the Chromium that `playwright install chromium` downloaded. Started by us
+    as well, so it gets the flags a server needs (no sandbox as root) and keeps its logins in one profile."""
+    base = Path(os.getenv("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache" / "ms-playwright")
+    names = {"win32": "chrome.exe", "darwin": "Chromium"}
+    exe = names.get(sys.platform, "chrome")
+    found = sorted(base.glob(f"chromium-*/chrome-*/{exe}"), reverse=True) if base.exists() else []
+    if sys.platform == "darwin":
+        found = sorted(base.glob("chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium"), reverse=True)
+    return str(found[0]) if found else None
+
+
+def _as_root() -> bool:
+    return sys.platform.startswith("linux") and hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 def _chrome_major(path: str) -> Optional[str]:
@@ -212,6 +228,7 @@ async def _build_stealth_profile(settings: Settings, sess: Optional["ApplySessio
         disable_security=False,
         captcha_solver=False,  # DISABLED: cloud-only feature that adds startup overhead locally
         keep_alive=True,  # keep the browser after the agent stops: the user can take over, continue or close it
+        chromium_sandbox=not _as_root(),   # as root Chrome only starts without its sandbox
         args=["--disable-blink-features=AutomationControlled", "--disable-popup-blocking", "--no-first-run",
               "--no-default-browser-check"],
     )
@@ -243,13 +260,15 @@ async def _launch_chrome(exe: str, user_data_dir: str, mode: str, w: int, h: int
         ua = _user_agent(major)
         if ua:
             args.append(f"--user-agent={ua}")
-        if sys.platform.startswith("linux"):
-            args += ["--disable-dev-shm-usage", *(["--no-sandbox"] if hasattr(os, "geteuid") and os.geteuid() == 0 else [])]
     else:
         args.append(f"--window-size={w + 16},{h + 140}")
         if mode == "offscreen":
             # a real, GPU-rendered window parked where nobody sees it — the live view streams it into the app
             args.append("--window-position=-2400,-2400")
+    if sys.platform.startswith("linux"):
+        # Chrome refuses to start as root with its sandbox on ("Running as root without --no-sandbox is not supported")
+        # and waits forever: the agent then fails with "Browser did not start within 30 seconds".
+        args += ["--disable-dev-shm-usage", *(["--no-sandbox"] if _as_root() else [])]
     args.append("about:blank")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
