@@ -252,19 +252,14 @@ def search(labels: list[str], places: list[str], *, level: Optional[str] = None,
     want = [w for w in want if w]
     if not want:
         return []
-    forms = {p.lower() for p in places if p}
-    if forms & {"bengaluru", "bangalore"}:
-        forms |= {"bengaluru", "bangalore"}
-    if forms & {"hyderabad", "secunderabad"}:
-        forms |= {"hyderabad", "secunderabad"}
+    local_place = _local(places)
     me = LEVELS.get((level or "").lower())
     common = _common()
     want_pairs = [(w, w - common) for w in want]
     out = []
     for r in rows:
-        loc = r.location.lower()
-        local = any(f in loc for f in forms) if forms else True
-        remote = include_remote and "remote" in loc
+        local = local_place(r.location)
+        remote = include_remote and "remote" in r.location.lower()
         if not (local or remote):
             continue
         age = _age_days(r)

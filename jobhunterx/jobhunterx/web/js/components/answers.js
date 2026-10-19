@@ -91,7 +91,7 @@ export function AnswerFields({ draft, set }) {
   const modeOpts = [...WORK_MODES.map((m) => [WORK_MODE_LABEL[m], WORK_MODE_LABEL[m]]), [ANY, 'Any']];
   const modeNow = q.preferred_work_mode || (p.work_modes.length === 1 ? WORK_MODE_LABEL[p.work_modes[0]] : p.work_modes.length ? ANY : '');
   const relocate = q.willing_to_relocate || (p.willing_to_relocate ? 'Yes' : 'No');
-  const sponsorship = q.requires_sponsorship || (/^(citizen|permanent resident) of/i.test(q.work_authorization || '') ? 'No' : '');
+  const sponsorship = q.requires_sponsorship || '';
   const years = q.years_of_experience !== '' && q.years_of_experience != null ? q.years_of_experience
     : snap ? String(Math.round(snap.professional_years * 10) / 10) : '';
   return html`<div class="form-grid tight">

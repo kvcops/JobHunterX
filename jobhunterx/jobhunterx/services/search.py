@@ -227,25 +227,28 @@ _TRIAGE_SYS = """You shortlist job postings for one candidate before a detailed 
 Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager".
 A posting may show what it says about experience ("asks: …"). Read it against the candidate's years: asking for clearly
 more years than the candidate has (e.g. 4+ years for someone with 0-2) is out of reach → 0; asking a little more → at most 2.
-For an early-career candidate, entry-level, graduate, trainee and junior openings in their field are the best finds → 3.
+For an early-career candidate, openings meant for people at their level, in their field, are the best finds → 3.
 Score every index."""
 TRIAGE_MAX = 140
 COMPANY_CAP = 3          # jobs from one employer per search, so one big board never fills the whole list
 
 
 def _experience_lines(p: JobPosting, limit: int = 2) -> str:
-    """The posting's own sentences about experience ("3+ years of …", "freshers welcome"), cut short — the AI shortlist
-    reads them, so a role asking for 5 years is ruled out before the slow detailed read."""
+    """The posting's own words around each "N years" it mentions ("3+ years of Python experience"), cut short — the AI
+    shortlist reads them, so a role asking for 5 years is ruled out before the slow detailed read. Uses the same
+    years pattern as the no-AI requirements reader; the AI, not this code, decides what the words mean."""
     text = re.sub(r"\s+", " ", p.description or "")
-    if not text:
-        return ""
-    out = []
-    for m in re.finditer(r"[^.;•\n]{0,70}\b(year|yr|experience|fresher|graduate|entry)[^.;•\n]{0,50}", text, re.I):
-        bit = m.group(0).strip()
-        if re.search(r"\d|fresher|graduate|entry", bit, re.I):
-            out.append(bit[:120])
-        if len(out) >= limit:
-            break
+    out, end = [], -1
+    for m in job_ai.YEARS_RE.finditer(text):
+        a, b = max(0, m.start() - 50), m.end() + 40
+        if a < end:                       # overlaps the previous piece: grow it instead of repeating the words
+            out[-1] = text[out_start: b].strip()
+        else:
+            if len(out) >= limit:
+                break
+            out.append(text[a:b].strip())
+            out_start = a
+        end = b
     return " / ".join(out)
 
 

@@ -199,7 +199,7 @@ def apply_understanding(job: JobPosting, u: JobUnderstanding, model: str) -> Non
         job.validation.status = "invalid"
 
 
-_YEARS_RE = re.compile(r"(\d{1,2}(?:\.\d)?)\s*(?:\+|plus)?\s*(?:(?:-|–|to)\s*(\d{1,2}(?:\.\d)?)\s*\+?\s*)?(?:years?|yrs?)", re.I)
+YEARS_RE = re.compile(r"(\d{1,2}(?:\.\d)?)\s*(?:\+|plus)?\s*(?:(?:-|–|to)\s*(\d{1,2}(?:\.\d)?)\s*\+?\s*)?(?:years?|yrs?)", re.I)
 
 
 def fallback_requirements(job: JobPosting, snapshot: Optional[CandidateSnapshot]) -> Requirements:
@@ -214,7 +214,7 @@ def fallback_requirements(job: JobPosting, snapshot: Optional[CandidateSnapshot]
     if snapshot:
         req.required_skills = [s.name for s in snapshot.skills if any_term_in_text([s.name, *s.aliases], text)]
     mins = []
-    for m in _YEARS_RE.finditer(job.description or ""):
+    for m in YEARS_RE.finditer(job.description or ""):
         window = (job.description[max(0, m.start() - 60): m.end() + 60]).lower()
         if "experience" in window:
             mins.append((float(m.group(1)), float(m.group(2)) if m.group(2) else None, m.group(0)))

@@ -24,7 +24,7 @@ from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
 from jobhunterx.discovery.ats import ats_site_hints
 from jobhunterx.domain.candidate import CandidateSnapshot
-from jobhunterx.domain.common import WorkMode
+from jobhunterx.domain.common import Seniority, WorkMode
 from jobhunterx.intelligence.llm_structured import call_structured
 from jobhunterx.intelligence.text import tokens
 from jobhunterx.tools.search_router import SearchRouter
@@ -52,7 +52,7 @@ class _Plan(BaseModel):
 
 def early_career(snap: CandidateSnapshot) -> bool:
     """A fresher or someone in their first jobs: most postings for a plain title want far more years than they have."""
-    return snap.professional_years < 3 or snap.seniority.value in ("intern", "entry", "junior")
+    return snap.professional_years < 3 or Seniority.INTERN.rank <= snap.seniority.rank <= Seniority.JUNIOR.rank
 
 
 _PLAN_SYSTEM = """You design web search queries that surface individual, currently open job postings for one candidate.
