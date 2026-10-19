@@ -98,6 +98,35 @@ def tokens(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z0-9][a-z0-9+#.\-]*[a-z0-9+#]|[a-z0-9]", (text or "").lower()) if len(w) > 1]
 
 
+def common_words(titles: Iterable[str], share: float = 0.2, min_titles: int = 20) -> set[str]:
+    """Words found in a large share of these job titles ("engineer", "senior", "manager"): they say nothing about the
+    work. Measured on the titles at hand, never a fixed word list."""
+    titles = list(titles)
+    if len(titles) < min_titles:
+        return set()
+    df: dict[str, int] = {}
+    for t in titles:
+        for w in set(tokens(t)):
+            df[w] = df.get(w, 0) + 1
+    return {w for w, n in df.items() if n / len(titles) >= share}
+
+
+def title_overlap(title: str, labels: Iterable[str], common: set[str] | frozenset = frozenset()) -> float:
+    """Best word overlap (0..1) of a job title with any of the candidate's titles, ignoring `common` words — so
+    "Platform Engineer" is not related to "AI Engineer" through "Engineer". When the candidate's title is only common
+    words ("Software Engineer"), the whole titles are compared."""
+    full = set(tokens(title))
+    best = 0.0
+    for label in labels:
+        lt_full = set(tokens(label))
+        jt, lt = full - common, lt_full - common
+        if not lt:                    # the candidate's own title is all common words ("Software Engineer")
+            jt, lt = full, lt_full
+        if jt and lt:
+            best = max(best, len(jt & lt) / len(jt | lt))
+    return best
+
+
 # Indian pay notation: "12-18 LPA", "₹12L–18L", "8 to 10 lakhs per annum", "₹1.2 Cr", "₹50,000 per month".
 _INR_UNITS = {"lpa": 1e5, "lakh": 1e5, "lakhs": 1e5, "lac": 1e5, "lacs": 1e5, "l": 1e5,
               "cr": 1e7, "crore": 1e7, "crores": 1e7}

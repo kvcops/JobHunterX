@@ -31,7 +31,7 @@ from jobhunterx.tools.search_router import SearchRouter
 
 log = get_logger("search")
 
-PLAN_VERSION = "plan-v1"
+PLAN_VERSION = "plan-v2"          # v2: level-worded titles, entry-level queries for early-career candidates
 QUERY_CONCURRENCY = 3                   # searches in flight at once (Deep Search fans each out to several engines)
 
 
@@ -44,7 +44,15 @@ class SearchScope:
 
 
 class _Plan(BaseModel):
+    level_titles: list[str] = Field(default_factory=list, description=(
+        "4-8 job titles exactly as employers in the candidate's country title openings for THIS candidate's level "
+        "and field (for a fresher / early-career candidate: the titles of entry-level openings, not of senior ones)"))
     queries: list[str] = Field(default_factory=list, description="8-14 distinct web search queries")
+
+
+def early_career(snap: CandidateSnapshot) -> bool:
+    """A fresher or someone in their first jobs: most postings for a plain title want far more years than they have."""
+    return snap.professional_years < 3 or snap.seniority.value in ("intern", "entry", "junior")
 
 
 _PLAN_SYSTEM = """You design web search queries that surface individual, currently open job postings for one candidate.
@@ -53,7 +61,12 @@ title synonyms employers use, skill-anchored queries for their strongest skills,
 accepted). EVERY query must name one of the candidate's locations (or "remote India" style for remote).
 Prefer queries that land on ONE posting on an employer's own career page or applicant-tracking-system job page (use the
 site: hosts given), not on job-board result lists: never write "jobs in <city>" or "<n> openings" style queries.
-Do not include seniority levels above the candidate's. Keep each query under 120 characters. No duplicates."""
+Do not include seniority levels above the candidate's. Keep each query under 120 characters. No duplicates.
+Match the candidate's level. Most postings found by a bare title ("AI Engineer", "Data Scientist") ask for several years
+of experience. When the candidate is early-career (a fresher or under about 3 years), the queries must find the openings
+meant for people at their level: use the titles and the wording employers in the candidate's country actually use when
+they hire at that level, and a years range that fits the candidate. Never write queries that would mostly surface roles
+needing far more experience than the candidate has. level_titles: the candidate's titles reworded that way."""
 
 # Career platforms common with Indian employers whose job pages are public and readable one by one.
 INDIA_SITE_HINTS = ("keka.com/careers", "darwinbox.in", "zohorecruit.in", "freshteam.com/jobs")
@@ -131,13 +144,15 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
     """Return (queries, method). Queries asked in the last few days go last, so repeated runs find new postings."""
     import time
     used, round_ = _recent(snap.profile_hash)
-    base = deterministic_queries(scope, max_queries * 3, round_)
     recent = [q for q, t in sorted(used.items(), key=lambda kv: -kv[1]) if time.time() - t < HISTORY_FRESH_S][:20]
+    edu = (getattr(snap, "education_level", "") or "").replace("none", "")
     user = (
         f"Target titles: {', '.join(scope.titles)}\n"
         f"Adjacent titles: {', '.join(snap.adjacent_titles[:6])}\n"
         f"Strongest skills: {', '.join(s.name for s in snap.skills[:8])}\n"
-        f"Candidate level: {snap.seniority.value}, ~{snap.professional_years:g} years\n"
+        f"Candidate level: {snap.seniority.value}, ~{snap.professional_years:g} years of full-time work"
+        f"{' — EARLY-CAREER: find the openings meant for their level' if early_career(snap) else ''}"
+        f"{f'; education: {edu}' if edu else ''}\n"
         f"Locations: {', '.join(scope.locations) or scope.country}; remote accepted: {scope.include_remote}; country: {scope.country}\n"
         f"Applicant-tracking-system job hosts you may target with site: {', '.join([*ats_site_hints(), *INDIA_SITE_HINTS])}"
         + ("\nAlready searched in the last few days (their words, sorted) — write DIFFERENT queries: other title "
@@ -145,9 +160,14 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
     )
     plan, _ = await call_structured(
         task="search_plan", version=PLAN_VERSION, model=_Plan, system=_PLAN_SYSTEM, user=user,
-        chain="fast", max_tokens=900, cache_parts=(snap.profile_hash, user, str(round_)),
+        chain="fast", max_tokens=1400, cache_parts=(snap.profile_hash, user, str(round_)),
     )
     method = "llm" if plan else "fallback"
+    # Titles worded for the candidate's level go first wherever this scope is used (ATS queries, LinkedIn, boards).
+    level = [t.strip() for t in (plan.level_titles if plan else []) if 2 < len(t.strip()) <= 80]
+    if level:
+        scope.titles = list(dict.fromkeys([*level, *scope.titles]))[:10]
+    base = deterministic_queries(scope, max_queries * 3, round_)
     seen: set[str] = set()
     queries: list[str] = []
     # Interleave ATS-anchored and LLM queries so both kinds survive the cap.

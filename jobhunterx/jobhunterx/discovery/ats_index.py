@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from jobhunterx.config.logging import get_logger
-from jobhunterx.intelligence.text import tokens
+from jobhunterx.intelligence.text import common_words, tokens
 
 log = get_logger("ats_index")
 
@@ -77,6 +77,18 @@ def _load() -> list[Row]:
         except (OSError, ValueError, TypeError):
             _rows, _meta = [], {}
     return _rows
+
+
+_common_cache: tuple[int, set[str]] = (0, set())
+
+
+def _common() -> set[str]:
+    """Words in many of the index's titles ("engineer", "senior"): ignored when matching titles."""
+    global _common_cache
+    rows = _rows or []
+    if _common_cache[0] != id(rows):
+        _common_cache = (id(rows), common_words((r.title for r in rows), share=0.05))
+    return _common_cache[1]
 
 
 def status() -> dict:
@@ -246,6 +258,8 @@ def search(labels: list[str], places: list[str], *, level: Optional[str] = None,
     if forms & {"hyderabad", "secunderabad"}:
         forms |= {"hyderabad", "secunderabad"}
     me = LEVELS.get((level or "").lower())
+    common = _common()
+    want_pairs = [(w, w - common) for w in want]
     out = []
     for r in rows:
         loc = r.location.lower()
@@ -256,12 +270,20 @@ def search(labels: list[str], places: list[str], *, level: Optional[str] = None,
         age = _age_days(r)
         if age > max_age_days:
             continue
-        jt = set(tokens(r.title))
-        rel = max((len(jt & w) / len(jt | w) for w in want), default=0.0) if jt else 0.0
+        # meaning-bearing words only: "Platform Engineer" is not an "AI Engineer" match through "Engineer"
+        full = set(tokens(r.title))
+        rel = 0.0
+        for w_full, w_core in want_pairs:
+            jt, w = full - common, w_core
+            if not w:                   # the candidate's own title is all common words ("Software Engineer")
+                jt, w = full, w_full
+            if jt and w:
+                rel = max(rel, len(jt & w) / len(jt | w))
         if rel < 0.25:
             continue
         lv = LEVELS.get(r.level)
-        fit = 1.0 if me is None or lv is None else (1.0 if abs(lv - me) <= 1 else 0.35)     # far above or below: sinks
+        # the candidate's own level first, one step away next, far above or below sinks
+        fit = 1.0 if me is None or lv is None else {0: 1.0, 1: 0.8}.get(abs(lv - me), 0.35)
         score = rel * fit * (1.25 if age <= 3 else 1.1 if age <= 7 else 1.0 if age <= 14 else 0.8)
         out.append((r, score))
     out.sort(key=lambda x: -x[1])

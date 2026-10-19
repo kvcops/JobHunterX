@@ -30,7 +30,7 @@ import httpx
 
 from jobhunterx.config.logging import get_logger
 from jobhunterx.domain.job import FieldCheck, JobPosting, SourceRef
-from jobhunterx.intelligence.text import tokens
+from jobhunterx.intelligence.text import common_words, title_overlap, tokens
 
 log = get_logger("linkedin")
 
@@ -132,10 +132,23 @@ def parse_cards(page: str, query: str = "") -> list[Card]:
     return out
 
 
-async def search(keywords: str, place: str, *, hours: int = 168, start: int = 0, remote: bool = False) -> list[Card]:
+# LinkedIn's own "Experience level" filter (f_E): 1 internship, 2 entry level, 3 associate, 4 mid-senior, 5 director.
+_EXPERIENCE_FILTER = {"intern": "1,2", "entry": "1,2,3", "junior": "2,3", "mid": "3,4", "senior": "4", "staff": "4,5",
+                      "principal": "4,5"}
+
+
+def experience_filter(level: str) -> str:
+    """The f_E value for the candidate's level ("" = no filter, e.g. level unknown)."""
+    return _EXPERIENCE_FILTER.get((level or "").lower(), "")
+
+
+async def search(keywords: str, place: str, *, hours: int = 168, start: int = 0, remote: bool = False,
+                 levels: str = "") -> list[Card]:
     params = {"keywords": keywords, "location": _place(place), "f_TPR": f"r{hours * 3600}", "start": start, "sortBy": "DD"}
     if remote:
         params["f_WT"] = "2"
+    if levels:
+        params["f_E"] = levels
     return parse_cards(await _get(SEARCH_URL, params), query=f"{keywords} · {place}")
 
 
@@ -162,14 +175,8 @@ async def details(card: Card) -> Optional[dict]:
             "closed": "No longer accepting applications" in page}
 
 
-def _relevance(title: str, labels: list[str]) -> float:
-    jt = set(tokens(title))
-    best = 0.0
-    for label in labels:
-        lt = set(tokens(label))
-        if jt and lt:
-            best = max(best, len(jt & lt) / len(jt | lt))
-    return best
+def _relevance(title: str, labels: list[str], common: set[str] | frozenset = frozenset()) -> float:
+    return title_overlap(title, labels, common)
 
 
 def _bad_company(name: str) -> bool:
@@ -254,7 +261,7 @@ def _rotation(key: str) -> int:
 
 
 async def discover(titles: list[str], places: list[str], *, labels: list[str], include_remote: bool = False,
-                   max_postings: int = 40, max_applicants: int = 150,
+                   max_postings: int = 40, max_applicants: int = 150, level: str = "",
                    skip: Optional[Callable[[JobPosting], Awaitable[bool]]] = None,
                    on_progress: Optional[Callable[[str], Awaitable[None]]] = None) -> tuple[list[JobPosting], dict]:
     """Fresh postings for titles × places. Returns (postings, stats)."""
@@ -264,15 +271,16 @@ async def discover(titles: list[str], places: list[str], *, labels: list[str], i
     if include_remote:
         combos += [(t, "India", True) for t in titles[:2]]
     sem = asyncio.Semaphore(CONCURRENCY)
+    levels = experience_filter(level)      # a fresher sees entry-level posts, not the "AI Engineer, 8+ years" ones
 
     async def pages(title: str, place: str, remote: bool) -> list[Card]:
         n = _rotation(f"{title.lower()}|{place.lower()}|{remote}")
         start = PAGE * (1 + n % ROTATE_PAGES)                 # 10, 20, … 50, then round again
         out = []
         async with sem:
-            out += await search(title, place, hours=24, remote=remote)
+            out += await search(title, place, hours=24, remote=remote, levels=levels)
             await asyncio.sleep(0.3 + random.random() * 0.5)
-            out += await search(title, place, hours=24 * 7, start=0 if n == 0 else start, remote=remote)
+            out += await search(title, place, hours=24 * 7, start=0 if n == 0 else start, remote=remote, levels=levels)
         return out
 
     batches = await asyncio.gather(*(pages(t, p, r) for t, p, r in combos), return_exceptions=True)
@@ -281,14 +289,15 @@ async def discover(titles: list[str], places: list[str], *, labels: list[str], i
         for c in (b if isinstance(b, list) else []):
             cards.setdefault(c.id, c)
     stats["cards"] = len(cards)
+    common = common_words(c.title for c in cards.values())     # "engineer" alone does not make a post relevant
     kept = []
     for c in cards.values():
         if _bad_company(c.company):
             stats["agencies"] += 1
-        elif _relevance(c.title, labels) > 0:
+        elif _relevance(c.title, labels, common) > 0:
             kept.append(c)
     now = datetime.now(timezone.utc)
-    kept.sort(key=lambda c: (-round(_relevance(c.title, labels), 1), (now - c.posted).days if c.posted else 99))
+    kept.sort(key=lambda c: (-round(_relevance(c.title, labels, common), 1), (now - c.posted).days if c.posted else 99))
     if on_progress:
         await on_progress(f"LinkedIn: {len(cards)} fresh posts, {len(kept)} in your field")
 

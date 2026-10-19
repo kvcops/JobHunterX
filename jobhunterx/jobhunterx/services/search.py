@@ -34,7 +34,7 @@ from jobhunterx.intelligence import skill_links
 from jobhunterx.intelligence.llm_structured import call_structured
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 from jobhunterx.intelligence.policy import get_policy
-from jobhunterx.intelligence.text import term_in_text, tokens
+from jobhunterx.intelligence.text import common_words, term_in_text, title_overlap, tokens
 from jobhunterx.services import profile as profile_svc
 from jobhunterx.services.jobs import summary
 
@@ -224,22 +224,48 @@ _TRIAGE_SYS = """You shortlist job postings for one candidate before a detailed 
 1 = weak link (shares a word but different work);
 0 = a different field, or two or more levels above/below their level (e.g. Senior / Lead / Principal / Staff / Manager
     titles for someone with under 3 years; intern roles for someone with 5+ years).
-Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager". Score every index."""
+Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager".
+A posting may show what it says about experience ("asks: …"). Read it against the candidate's years: asking for clearly
+more years than the candidate has (e.g. 4+ years for someone with 0-2) is out of reach → 0; asking a little more → at most 2.
+For an early-career candidate, entry-level, graduate, trainee and junior openings in their field are the best finds → 3.
+Score every index."""
 TRIAGE_MAX = 140
+COMPANY_CAP = 3          # jobs from one employer per search, so one big board never fills the whole list
+
+
+def _experience_lines(p: JobPosting, limit: int = 2) -> str:
+    """The posting's own sentences about experience ("3+ years of …", "freshers welcome"), cut short — the AI shortlist
+    reads them, so a role asking for 5 years is ruled out before the slow detailed read."""
+    text = re.sub(r"\s+", " ", p.description or "")
+    if not text:
+        return ""
+    out = []
+    for m in re.finditer(r"[^.;•\n]{0,70}\b(year|yr|experience|fresher|graduate|entry)[^.;•\n]{0,50}", text, re.I):
+        bit = m.group(0).strip()
+        if re.search(r"\d|fresher|graduate|entry", bit, re.I):
+            out.append(bit[:120])
+        if len(out) >= limit:
+            break
+    return " / ".join(out)
 
 
 async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[dict[str, int]]:
     """One AI call: job id → 0..3 fit-of-field score. None when no AI answered (callers fall back to word overlap)."""
     if not jobs:
         return {}
-    who = (f"Level: {snap.seniority.value}, about {snap.professional_years:g} years\n"
+    who = (f"Level: {snap.seniority.value}, about {snap.professional_years:g} years of full-time work"
+           f"{' (early-career)' if search.early_career(snap) else ''}\n"
            f"Target titles: {', '.join(snap.target_titles[:6])}\n"
            f"Adjacent titles: {', '.join(snap.adjacent_titles[:6])}\n"
            f"Fields: {', '.join(f.label for f in snap.role_families[:5])}\n"
            f"Strongest skills: {', '.join(s.name for s in snap.skills[:10])}")
-    lines = "\n".join(f"[{i}] {p.title[:90]} | {p.company[:40]} | {(p.location_raw or '')[:40]}" for i, p in enumerate(jobs))
+    def line(i: int, p: JobPosting) -> str:
+        asks = _experience_lines(p)
+        return (f"[{i}] {p.title[:90]} | {p.company[:40]} | {(p.location_raw or '')[:40]}"
+                + (f" | asks: {asks}" if asks else ""))
+    lines = "\n".join(line(i, p) for i, p in enumerate(jobs))
     try:
-        res, _ = await call_structured(task="search_triage", version="v2", model=_Triage, system=_TRIAGE_SYS,
+        res, _ = await call_structured(task="search_triage", version="v3", model=_Triage, system=_TRIAGE_SYS,
                                        user=f"CANDIDATE\n{who}\n\nPOSTINGS\n{lines}", chain="fast", max_tokens=3000,
                                        cache_parts=(snap.profile_hash, lines))
     except Exception as exc:
@@ -252,14 +278,24 @@ async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[d
     return out
 
 
-def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
-    jt = set(tokens(job.title))
-    best = 0.0
-    for label in [*snap.target_titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]]:
-        lt = set(tokens(label))
-        if jt and lt:
-            best = max(best, len(jt & lt) / len(jt | lt))
-    return best
+def _cap_per_company(jobs: list[JobPosting], cap: int = COMPANY_CAP) -> list[JobPosting]:
+    """Keep the order, but at most `cap` jobs per employer (the best ones, as the list is sorted best first)."""
+    seen: dict[str, int] = {}
+    out = []
+    for p in jobs:
+        key = re.sub(r"[^a-z0-9]", "", (p.company or "").lower())
+        if key and key != "unknowncompany":
+            seen[key] = seen.get(key, 0) + 1
+            if seen[key] > cap:
+                continue
+        out.append(p)
+    return out
+
+
+def _title_relevance(job: JobPosting, snap: CandidateSnapshot, generic: frozenset | set = frozenset(),
+                     titles: Optional[list[str]] = None) -> float:
+    labels = [*(titles or []), *snap.target_titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]]
+    return title_overlap(job.title, labels, generic)
 
 
 async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompany]]], snap: CandidateSnapshot,
@@ -287,14 +323,35 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
                 queries = [f"{queries[0]} {city}", *queries]     # huge global boards: ask for local roles first
             jobs = await ats.ADAPTERS[ref.kind].search_jobs(ref.token, queries)
         if not jobs:
-            return []
+            return ref, []
         jobs = [j for j in jobs if _location_prefilter(j, snap, include_remote)]
         known_name = company.name if company else (names or {}).get((ref.kind, ref.token.lower()))
         for j in jobs:
             j.id = j.id or str(uuid.uuid4())
             if company or (known_name and (not j.company or j.company.lower() == ref.token.lower())):
                 j.company = known_name            # ATS boards often carry a token or legal-entity name
-        keep = [(j, _title_relevance(j, snap)) for j in jobs]
+        return ref, jobs
+
+    async def counted(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
+        try:
+            return await one(ref, company)
+        finally:
+            if on_board_done:
+                await on_board_done()
+
+    results = await asyncio.gather(*(counted(r, c) for r, c in refs), return_exceptions=True)
+    pulled: list[tuple[AtsRef, list[JobPosting]]] = []
+    for r in results:
+        if isinstance(r, tuple):
+            pulled.append(r)
+        elif isinstance(r, Exception):
+            log.debug("board_expand_failed", error=str(r)[:120])
+    # Relevance is judged on the words that mean something in this run's titles: on an engineering company's board
+    # every title says "Engineer", which alone made its Platform / DevOps roles look relevant to an AI engineer.
+    generic = common_words(j.title for _, jobs in pulled for j in jobs)
+
+    async def pick(ref: AtsRef, jobs: list[JobPosting]) -> list[JobPosting]:
+        keep = [(j, _title_relevance(j, snap, generic, titles)) for j in jobs]
         keep = [jr for jr in keep if jr[1] > 0]
         keep.sort(key=lambda jr: (-jr[1], _age_days(jr[0])))
         picked = [j for j, _ in keep[:BOARD_JOBS_PER_BOARD]]
@@ -314,19 +371,9 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
 
         return list(await asyncio.gather(*(hydrate(j) for j in picked)))
 
-    async def counted(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
-        try:
-            return await one(ref, company)
-        finally:
-            if on_board_done:
-                await on_board_done()
-
-    results = await asyncio.gather(*(counted(r, c) for r, c in refs), return_exceptions=True)
-    for r in results:
+    for r in await asyncio.gather(*(pick(ref, jobs) for ref, jobs in pulled if jobs), return_exceptions=True):
         if isinstance(r, list):
             out += r
-        elif isinstance(r, Exception):
-            log.debug("board_expand_failed", error=str(r)[:120])
     return out
 
 
@@ -399,7 +446,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             posts, st = await linkedin.discover(
                 scope.titles, scope.locations or [scope.country or "India"],
                 labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
-                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2),
+                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2), level=snap.seniority.value,
                 max_applicants=settings.linkedin_max_applicants, skip=already_seen, on_progress=note)
         except Exception as exc:                  # a blocked or changed feed never fails the search
             log.warning("linkedin_source_failed", error=str(exc)[:160])
@@ -594,6 +641,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     if fit:
         before = len(pool)
         pool = [p for p in pool if fit.get(p.id, 1) > 0] or pool
+        # Early career: "shares a word" (1) postings crowd out the few that are really theirs — drop them while
+        # enough good ones remain.
+        if search.early_career(snap):
+            good = [p for p in pool if fit.get(p.id, 1) >= 2]
+            if len(good) >= min(12, max_jobs // 3):
+                pool = good
         unique = pool
         await run.say("dedupe", f"Shortlisted {len(pool)} of {before} postings that match your field"
                       + (f" ({before - len(pool)} are a different line of work)" if before > len(pool) else ""), "info")
@@ -601,7 +654,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         unique = pool + rest
     unique.sort(key=lambda p: (-(fit or {}).get(p.id, 0), -(p.primary_source.first_party if p.primary_source else 0),
                                -round(_title_relevance(p, snap), 1), _age_days(p)))
-    unique = unique[:max_jobs]
+    unique = _cap_per_company(unique)[:max_jobs]
     run.data["total"] = len(unique)
     await run.stage("dedupe", "done", f"{dups} duplicates merged · {len(unique)} unique")
     await run.say("dedupe", (f"Merged {dups} duplicate listings — " if dups else "No duplicates — ")
