@@ -287,4 +287,52 @@ def search(labels: list[str], places: list[str], *, level: Optional[str] = None,
         score = rel * fit * (1.25 if age <= 3 else 1.1 if age <= 7 else 1.0 if age <= 14 else 0.8)
         out.append((r, score))
     out.sort(key=lambda x: -x[1])
-    return out[:limit]
+    # one employer's ten copies of "Storage AI Engineer" must not take ten of the slots
+    per: dict[str, int] = {}
+    capped = []
+    for r, sc in out:
+        per[r.company] = per.get(r.company, 0) + 1
+        if per[r.company] <= PER_COMPANY:
+            capped.append((r, sc))
+    return capped[:limit]
+
+
+PER_COMPANY = 2
+
+
+def _local(places: list[str]):
+    forms = {p.lower() for p in places if p}
+    if forms & {"bengaluru", "bangalore"}:
+        forms |= {"bengaluru", "bangalore"}
+    if forms & {"hyderabad", "secunderabad"}:
+        forms |= {"hyderabad", "secunderabad"}
+    return lambda loc: any(f in loc.lower() for f in forms) if forms else True
+
+
+def level_titles(labels: list[str], places: list[str], level: str, *, max_age_days: int = 45, limit: int = 40) -> list[tuple[str, int]]:
+    """Real titles of openings at this level in these places, from employers' own boards: [(title, employers)].
+
+    The search plan picks its wording from these instead of inventing titles nobody uses ("RAG Engineer Junior"):
+    for a fresher they are what entry-level openings are really called here ("Associate Data Scientist",
+    "Data Scientist 1", "Graduate Engineer Trainee"). Kept: titles sharing a meaningful word with the candidate's
+    titles, and titles made only of common words ("Associate Software Engineer"), which fit any field."""
+    rows = _load()
+    me = LEVELS.get((level or "").lower())
+    if not rows or me is None:
+        return []
+    common = _common()
+    want = set().union(*[set(tokens(l)) - common for l in labels if l]) if labels else set()
+    local = _local(places)
+    seen: dict[str, tuple[str, set[str]]] = {}
+    for r in rows:
+        lv = LEVELS.get(r.level)
+        if lv is None or abs(lv - me) > 0 or _age_days(r) > max_age_days or not local(r.location):
+            continue
+        title = re.sub(r"\s+", " ", r.title).strip()[:80]
+        core = set(tokens(title)) - common
+        if core and not (core & want):
+            continue
+        key = title.lower()
+        seen.setdefault(key, (title, set()))[1].add(r.company)
+    ranked = sorted(seen.values(), key=lambda x: -len(x[1]))
+    return [(t, len(cos)) for t, cos in ranked[:limit]]

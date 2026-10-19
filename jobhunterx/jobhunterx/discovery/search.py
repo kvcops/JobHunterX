@@ -140,8 +140,11 @@ def _record(profile_hash: str, queries: list[str]) -> None:
     _history().set(profile_hash, {"used": used, "round": round_ + 1}, expire=60 * 86400)
 
 
-async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries: int) -> tuple[list[str], str]:
-    """Return (queries, method). Queries asked in the last few days go last, so repeated runs find new postings."""
+async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries: int,
+                       real_titles: Optional[list[tuple[str, int]]] = None) -> tuple[list[str], str]:
+    """Return (queries, method). Queries asked in the last few days go last, so repeated runs find new postings.
+    real_titles: what openings at the candidate's level are really called in their places [(title, employers)] —
+    the plan words its titles from these instead of inventing ones nobody posts."""
     import time
     used, round_ = _recent(snap.profile_hash)
     recent = [q for q, t in sorted(used.items(), key=lambda kv: -kv[1]) if time.time() - t < HISTORY_FRESH_S][:20]
@@ -155,6 +158,13 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
         f"{f'; education: {edu}' if edu else ''}\n"
         f"Locations: {', '.join(scope.locations) or scope.country}; remote accepted: {scope.include_remote}; country: {scope.country}\n"
         f"Applicant-tracking-system job hosts you may target with site: {', '.join([*ats_site_hints(), *INDIA_SITE_HINTS])}"
+        + ("\nWhat openings at the candidate's level are REALLY called in their places right now (employers' own job "
+           "boards, last 45 days; number of employers in brackets). Learn from them HOW employers word this level "
+           "(the level words and numbering patterns they use), then write level_titles that combine that real level "
+           "wording with the candidate's own field, the way these employers would. A title seen at one employer only "
+           "is that employer's naming, not a pattern; a title with no field word fits every field, so use it only "
+           "together with the candidate's field or skills. Every level_title must be in the candidate's field:\n- "
+           + "\n- ".join(f"{t} ({n})" for t, n in real_titles[:40]) if real_titles else "")
         + ("\nAlready searched in the last few days (their words, sorted) — write DIFFERENT queries: other title "
            "wordings, other skills, other hosts:\n- " + "\n- ".join(recent) if recent else "")
     )

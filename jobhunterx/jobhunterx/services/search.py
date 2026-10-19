@@ -417,7 +417,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     else:
         await run.say("plan", "Deciding which titles and places to search", "work")
         max_queries = max(4, min(16, max_jobs // 4))
-        queries, plan_method = await search.plan_queries(snap, scope, max_queries)
+        real_titles = None
+        if search.early_career(snap) and settings.enable_ats_index:
+            # what entry-level openings are really called here, so the plan does not invent titles nobody posts
+            real_titles = ats_index.level_titles([*scope.titles, *snap.adjacent_titles], scope.locations or [scope.country],
+                                                 snap.seniority.value)
+        queries, plan_method = await search.plan_queries(snap, scope, max_queries, real_titles)
     c["queries"] = len(queries)
     run.data["plan"] = {"role_families": [f.label for f in snap.role_families], "titles": scope.titles,
                         "locations": scope.locations, "queries": queries, "method": plan_method,
@@ -446,7 +451,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             posts, st = await linkedin.discover(
                 scope.titles, scope.locations or [scope.country or "India"],
                 labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
-                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2), level=snap.seniority.value,
+                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2),
                 max_applicants=settings.linkedin_max_applicants, skip=already_seen, on_progress=note)
         except Exception as exc:                  # a blocked or changed feed never fails the search
             log.warning("linkedin_source_failed", error=str(exc)[:160])
