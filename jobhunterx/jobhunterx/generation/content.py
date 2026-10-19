@@ -17,6 +17,12 @@ def short_url(url: str, limit: int = 42) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def clean_label(text: str) -> str:
+    """A link's button text without the icons a resume puts around it ("GitHub ↗", "🔗 Demo", "Live ") — the PDF
+    font has no such glyphs and prints them as black boxes."""
+    return re.sub(r"^[^\w+#]+|[^\w+#]+$", "", (text or "").strip()) if re.search(r"\w", text or "") else ""
+
+
 def _host(url: str) -> str:
     return short_url(url, 200).split("/", 1)[0]
 
@@ -103,13 +109,13 @@ def header_for(p: CandidateProfile, max_links: int = 6) -> Header:
         key = short_url(url, 500).lower()
         if _web(url) and key not in seen:
             seen.add(key)
-            links.append(Link(label=label or _host(url), url=url, text=short_url(url, 90)))
+            links.append(Link(label=clean_label(label) or _host(url), url=url, text=short_url(url, 90)))
     return Header(name=p.name, email=p.email, phone=p.phone, location=p.location, links=links[:max_links])
 
 
 def project_item(p: Project, max_links: int = 3) -> "ProjectItem":
     """A project with its links labelled the way the resume had them ("Code", "Live demo"), or by site."""
-    links = [Link(label=l.label or _host(l.url), url=l.url, text=l.label or short_url(l.url, 34))
+    links = [Link(label=clean_label(l.label) or _host(l.url), url=l.url, text=clean_label(l.label) or short_url(l.url, 34))
              for l in p.all_links() if _web(l.url)][:max_links]
     return ProjectItem(title=p.title, description=p.description, technologies=p.technologies,
                        url=links[0].url if links else "", links=links)
@@ -119,7 +125,8 @@ def item_links_for(p: CandidateProfile) -> dict[str, list[Link]]:
     out: dict[str, list[Link]] = {}
     for il in p.item_links:
         if _web(il.url) and il.item:
-            out.setdefault(il.item, []).append(Link(label=il.label or _host(il.url), url=il.url, text=il.label or short_url(il.url, 34)))
+            out.setdefault(il.item, []).append(Link(label=clean_label(il.label) or _host(il.url), url=il.url,
+                                                    text=clean_label(il.label) or short_url(il.url, 34)))
     return out
 
 

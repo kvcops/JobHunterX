@@ -7,6 +7,7 @@ import {
   Button, Icon, ChipsInput, Field, Notice, Meter, Seg, Skeleton, ScanDoc, ErrorBox, AutoTextarea, Spinner, Elapsed, UPLOAD_STAGES,
 } from '../components/ui.js';
 import { ExperienceSummary } from '../components/experience.js';
+import { PayFields, AnswerFields } from '../components/answers.js';
 import { normalizeProfile, setIn, defaultSearchRequest } from '../state/domain.js';
 import { api } from '../lib/api.js';
 import { CountryInput, CityInput, CityChips, WorkAuthInput } from '../components/places.js';
@@ -167,25 +168,7 @@ function PrefsStep({ draft, set }) {
 }
 
 function PayStep({ draft, set }) {
-  const p = draft.preferences;
-  const q = draft.qa_memory;
-  return html`<div class="form-grid tight">
-    <${Field} label="Current CTC" hint="Annual, as you'd write it on a form (e.g. 6 LPA).">${(id) => html`<input id=${id} class="input" value=${q.current_ctc || ''}
-      onInput=${(e) => set(['qa_memory', 'current_ctc'], e.currentTarget.value)} placeholder="e.g. 6 LPA" />`}</${Field}>
-    <${Field} label="Expected CTC">${(id) => html`<input id=${id} class="input" value=${q.expected_ctc || ''}
-      onInput=${(e) => set(['qa_memory', 'expected_ctc'], e.currentTarget.value)} placeholder="e.g. 10 LPA" />`}</${Field}>
-    <${Field} label="Minimum annual salary (filter)" hint="Roles that clearly pay less are ruled out. Leave empty if flexible.">${(id) => html`<input id=${id} class="input" type="number" min="0" step="1000"
-      value=${p.min_annual_salary ?? ''} onInput=${(e) => set(['preferences', 'min_annual_salary'], e.currentTarget.value === '' ? null : Number(e.currentTarget.value))} placeholder="e.g. 800000" />`}</${Field}>
-    <${Field} label="Currency">${(id) => html`<input id=${id} class="input" value=${p.salary_currency || ''} maxlength="6" placeholder="INR"
-      onInput=${(e) => set(['preferences', 'salary_currency'], e.currentTarget.value.toUpperCase())} />`}</${Field}>
-    <${Field} label="Notice period (days)" hint="0 if you can join immediately.">${(id) => html`<input id=${id} class="input" type="number" min="0" max="365"
-      value=${p.notice_period_days ?? ''} onInput=${(e) => { const v = e.currentTarget.value === '' ? null : Number(e.currentTarget.value);
-        set(['preferences', 'notice_period_days'], v); set(['qa_memory', 'notice_period'], v == null ? '' : `${v} days`); }} />`}</${Field}>
-    <${Field} label="Work authorization" hint="Pick from the list or type your own.">${(id) => html`<${WorkAuthInput} id=${id} value=${q.work_authorization}
-      country=${p.home_country} onChange=${(v) => set(['qa_memory', 'work_authorization'], v)} />`}</${Field}>
-    <${Field} label="Need visa sponsorship?">${(id) => html`<${Seg} label="Sponsorship" options=${[['No', 'No'], ['Yes', 'Yes']]}
-      value=${q.requires_sponsorship || 'No'} onChange=${(v) => set(['qa_memory', 'requires_sponsorship'], v)} />`}</${Field}>
-  </div>`;
+  return html`<div class="stack"><${PayFields} draft=${draft} set=${set} /><${AnswerFields} draft=${draft} set=${set} /></div>`;
 }
 
 const lpa = (v) => (v == null || v === '' ? null : `${(Number(v) / 100000).toFixed(Number(v) % 100000 ? 1 : 0)} LPA`);
@@ -231,7 +214,9 @@ function LaunchStep({ draft, goTo }) {
       <${SummaryCard} title="Pay & notice" onEdit=${() => goTo('pay')}>
         <ul class="ob-facts">
           <li>Minimum pay: <strong>${lpa(p.min_annual_salary) || 'no minimum'}</strong>${p.min_annual_salary ? html` <span class="muted">(roles that clearly pay less are left out)</span>` : null}</li>
-          <li>Current CTC: <strong>${q.current_ctc || '—'}</strong> · Expected: <strong>${q.expected_ctc || '—'}</strong></li>
+          <li>Current CTC: <strong>${q.current_fixed_lpa != null || q.current_variable_lpa != null
+            ? `${Math.round(((q.current_fixed_lpa || 0) + (q.current_variable_lpa || 0)) * 100) / 100} LPA` : (q.current_ctc || '—')}</strong>
+            · Expected: <strong>${q.expected_ctc_lpa != null ? `${q.expected_ctc_lpa} LPA` : (q.expected_ctc || '—')}</strong></li>
           <li>Notice period: <strong>${p.notice_period_days != null ? `${p.notice_period_days} days` : 'not set'}</strong>${p.notice_period_days ? html` <span class="muted">("immediate joiner" roles get flagged)</span>` : null}</li>
         </ul>
       </${SummaryCard}>

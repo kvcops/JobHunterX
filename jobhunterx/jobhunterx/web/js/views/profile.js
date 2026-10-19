@@ -6,6 +6,7 @@ import {
 } from '../components/ui.js';
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
 import { ExperienceSummary } from '../components/experience.js';
+import { PayFields, AnswerFields } from '../components/answers.js';
 import { WORK_MODES, WORK_MODE_LABEL, SENIORITIES, YEARS_SOURCE_LABEL, humanize } from '../lib/format.js';
 import { CountryInput, CityInput, CityChips, WorkAuthInput } from '../components/places.js';
 
@@ -199,13 +200,10 @@ function Editor({ profile }) {
         html`<${Field} label=${l} wide><${ChipsInput} label=${l} value=${draft[k]} onChange=${(v) => set([k], v)} /></${Field}>`)}
       <${Field} label="Links for certificates & achievements" hint="e.g. a credential page next to the certification." wide><${ItemLinksEditor} draft=${draft} set=${set} /></${Field}>
     </div>` : null}
-    ${tab === 'qa' ? html`<div class="form-grid">
-      <p class="muted small field-wide">Used only by the browser agent to answer application-form questions.</p>
-      ${['current_ctc', 'expected_ctc', 'expected_salary', 'notice_period', 'work_authorization', 'requires_sponsorship', 'preferred_work_mode', 'willing_to_relocate', 'years_of_experience'].map((k) =>
-        (k === 'work_authorization'
-          ? html`<${Field} label="Work authorization">${(id) => html`<${WorkAuthInput} id=${id} value=${draft.qa_memory.work_authorization}
-              country=${p.home_country} onChange=${(v) => set(['qa_memory', 'work_authorization'], v)} />`}</${Field}>`
-          : html`<${TextField} draft=${draft} path=${['qa_memory', k]} label=${humanize(k)} set=${set} />`))}
+    ${tab === 'qa' ? html`<div class="stack">
+      <p class="muted small">Used by the browser agent to answer application-form questions. Empty ones are filled from the rest of your profile.</p>
+      <${PayFields} draft=${draft} set=${set} />
+      <${AnswerFields} draft=${draft} set=${set} />
     </div>` : null}
     </div>
   </div>`;

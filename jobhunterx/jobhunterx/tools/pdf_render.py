@@ -116,8 +116,26 @@ def sanitize_html_for_pdf(html: str) -> str:
 
     # Special bullets
     html = html.replace("\u2022", "&bull;")
+    html = html.replace("\u2192", "->").replace("\u2190", "<-")
 
-    return html
+    # Anything else the built-in PDF fonts cannot draw (icons, emoji, arrows like \u2197, private-use icon-font glyphs)
+    # prints as a black box: keep its plain-letter form when it has one ("\ufb01" -> "fi"), else drop it.
+    return "".join(ch if _pdf_drawable(ch) else _plain(ch) for ch in html)
+
+
+def _pdf_drawable(ch: str) -> bool:
+    if ch < "\x80":
+        return True
+    try:
+        ch.encode("cp1252")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def _plain(ch: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", ch) if _pdf_drawable(c) and not unicodedata.combining(c))
 
 
 def _html_to_pdf(html: str) -> tuple[bytes, int]:

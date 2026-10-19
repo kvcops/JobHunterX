@@ -206,6 +206,10 @@ export function Monogram({ name, size }) {
 export function ChipsInput({ value = [], onChange, placeholder, label, suggestions = [], max = 30, onQuery }) {
   const [draft, setDraft] = useState('');
   const inputRef = useRef();
+  // Leaving the field adds what was typed — but a tap on a suggestion also leaves the field first. Wait a moment, so
+  // the tapped suggestion ("Bengaluru") wins over the half-typed text ("benga").
+  const blurTimer = useRef(0);
+  useEffect(() => () => clearTimeout(blurTimer.current), []);
   const has = (x) => value.some((v) => v.toLowerCase() === x.toLowerCase());
   const add = (raw) => {
     const parts = String(raw).split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
@@ -228,12 +232,15 @@ export function ChipsInput({ value = [], onChange, placeholder, label, suggestio
           if ((e.key === 'Enter' || (e.key === 'Tab' && draft.trim())) && draft.trim()) { e.preventDefault(); add(draft); }
           else if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1));
         }}
-        onBlur=${() => draft.trim() && add(draft)} />
+        onBlur=${() => { clearTimeout(blurTimer.current); blurTimer.current = setTimeout(() => {
+          const typedNow = inputRef.current ? inputRef.current.value : '';
+          if (typedNow.trim()) add(typedNow);
+        }, 200); }} />
       ${draft.trim() ? html`<button type="button" class="chip-add" onMouseDown=${(e) => e.preventDefault()} onClick=${() => add(draft)}>
         <${Icon} name="plus" size=${12} /> Add “${draft.trim()}”</button>` : null}
     </div>
     ${sugg.length ? html`<div class="chip-suggest" aria-label="Suggestions">${sugg.map((x) => html`<button type="button" key=${x} class="chip chip-ghost"
-      onClick=${() => add(x)}><${Icon} name="plus" size=${11} />${x}</button>`)}</div>` : null}
+      onMouseDown=${(e) => e.preventDefault()} onClick=${() => { clearTimeout(blurTimer.current); add(x); }}><${Icon} name="plus" size=${11} />${x}</button>`)}</div>` : null}
   </div>`;
 }
 
@@ -386,8 +393,26 @@ export function Toasts() {
 export function Drawer({ onClose, children, label }) {
   const ref = useRef();
   useFocusTrap(ref, onClose);
-  return html`<div class="drawer-overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
-    <aside class="drawer" role="dialog" aria-modal="true" aria-label=${label} ref=${ref} tabindex="-1">${children}</aside></div>`;
+  // in <body>: a frosted card around it would otherwise pin the "full screen" drawer inside that card
+  return html`<${Portal}><div class="drawer-overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label=${label} ref=${ref} tabindex="-1">${children}</aside></div></${Portal}>`;
+}
+
+const PHONE = '(max-width: 900px)';
+/**
+ * Phone layout shows either a list or the item opened from it, and the whole page scrolls. Opening an item starts it
+ * at the top; going back returns to the spot in the list you left.
+ */
+export function usePhonePane(showingItem) {
+  const listY = useRef(0);
+  useLayoutEffect(() => {
+    if (!window.matchMedia(PHONE).matches) return undefined;
+    if (showingItem) { window.scrollTo(0, 0); return undefined; }
+    window.scrollTo(0, listY.current);
+    const keep = () => { listY.current = window.scrollY; };
+    window.addEventListener('scroll', keep, { passive: true });
+    return () => window.removeEventListener('scroll', keep);
+  }, [showingItem]);
 }
 
 /** Anchored panel; closes on outside click or Escape. Parent must be position: relative. */
@@ -486,6 +511,71 @@ export function Select({ value, options, onChange, label, id, size, disabled, ic
           class=${`${i === hi ? 'hi' : ''} ${i === idx ? 'sel' : ''}`} style=${{ '--i': i }} onPointerEnter=${() => setHi(i)} onClick=${() => pick(v)}>
         <span class="opt-text"><span>${l}</span>${hint ? html`<small>${hint}</small>` : null}</span>
         ${i === idx ? html`<${Icon} name="check" size=${15} />` : null}</li>`)}
+    </ul></${Portal}>` : null}
+  </div>`;
+}
+
+/**
+ * Text field with a styled suggestion list under it: type anything, or pick a suggestion (replaces the browser's
+ * <datalist>, which cannot be styled and on phones shows as a bare grey strip). The list opens on focus with every
+ * suggestion, narrows while typing, and picking one puts exactly that suggestion in the field.
+ * Keyboard: ↑/↓ move, Enter picks, Esc closes.
+ */
+export function ComboInput({ id, value, onChange, options = [], placeholder, autocomplete = 'off', onBlur, label }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState(false);
+  const [hi, setHi] = useState(-1);
+  const [pos, setPos] = useState(null);
+  const input = useRef();
+  const q = String(value || '').trim().toLowerCase();
+  const all = [...new Set(options.filter((o) => o && String(o).trim()).map((o) => String(o).trim()))];
+  const shown = (typed && q
+    ? [...all.filter((o) => o.toLowerCase().startsWith(q)), ...all.filter((o) => !o.toLowerCase().startsWith(q) && o.toLowerCase().includes(q))]
+    : all).slice(0, 80);
+  const place = () => {
+    const el = input.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12;
+    const up = below < 180 && r.top > below;
+    setPos({ left: r.left, width: r.width, up, max: Math.max(120, Math.min(280, (up ? r.top : below) - 12)),
+      ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }) });
+  };
+  useEffect(() => {
+    if (!open) return undefined;
+    // follow the field (page scroll, phone keyboard opening) instead of closing under the user's finger
+    const onMove = (e) => { if (!(e.target && e.target.closest && e.target.closest('.combo-list'))) place(); };
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => { window.removeEventListener('scroll', onMove, true); window.removeEventListener('resize', onMove); };
+  }, [open]);
+  const pick = (o) => { onChange(o); setOpen(false); setTyped(false); setHi(-1); };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { place(); setOpen(true); return; }
+      const n = shown.length;
+      if (n) setHi((h) => (e.key === 'ArrowDown' ? (h + 1) % n : (h <= 0 ? n - 1 : h - 1)));
+    } else if (e.key === 'Enter' && open && hi >= 0 && shown[hi]) {
+      e.preventDefault(); pick(shown[hi]);
+    } else if (e.key === 'Escape' && open) {
+      e.preventDefault(); e.stopPropagation(); setOpen(false);
+    }
+  };
+  const listId = `${useId()}-list`;
+  return html`<div class="combo">
+    <input id=${id} ref=${input} class="input" value=${value || ''} placeholder=${placeholder} autocomplete=${autocomplete} aria-label=${label}
+      role="combobox" aria-autocomplete="list" aria-expanded=${open && shown.length ? 'true' : 'false'} aria-controls=${listId}
+      onFocus=${() => { place(); setTyped(false); setHi(-1); setOpen(true); }}
+      onClick=${() => { if (!open) { place(); setOpen(true); } }}
+      onInput=${(e) => { onChange(e.currentTarget.value); setTyped(true); setHi(-1); place(); setOpen(true); }}
+      onKeyDown=${onKey} onBlur=${(e) => { setOpen(false); if (onBlur) onBlur(e); }} />
+    ${open && pos && shown.length ? html`<${Portal}><ul id=${listId} class=${`select-list combo-list ${pos.up ? 'up' : ''}`} role="listbox" aria-label=${label || placeholder}
+        style=${{ left: `${pos.left}px`, width: `${pos.width}px`, maxHeight: `${pos.max}px`, ...(pos.up ? { bottom: `${pos.bottom}px` } : { top: `${pos.top}px` }) }}>
+      ${shown.map((o, i) => html`<li key=${o} role="option" aria-selected=${String(o).toLowerCase() === q ? 'true' : 'false'}
+          class=${`${i === hi ? 'hi' : ''} ${String(o).toLowerCase() === q ? 'sel' : ''}`} style=${{ '--i': Math.min(i, 8) }}
+          onPointerEnter=${() => setHi(i)} onMouseDown=${(e) => e.preventDefault()} onClick=${() => pick(o)}>
+        <span>${o}</span>${String(o).toLowerCase() === q ? html`<${Icon} name="check" size=${15} />` : null}</li>`)}
     </ul></${Portal}>` : null}
   </div>`;
 }

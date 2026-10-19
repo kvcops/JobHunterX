@@ -3,7 +3,7 @@
 // Cities are suggested while typing, from the server's /api/places (Open-Meteo geocoder).
 import { html, useEffect, useRef, useState } from '../lib/preact.js';
 import { api } from '../lib/api.js';
-import { ChipsInput } from './ui.js';
+import { ChipsInput, ComboInput } from './ui.js';
 
 export const DEFAULT_COUNTRY = 'India';
 // Region codes that are not countries (EU, UN, "unknown", private-use ranges, a few logistics territories).
@@ -37,15 +37,11 @@ export function countryCode(name) {
   return hit ? hit.code : '';
 }
 
-let listSeq = 0;
-const useListId = (prefix) => useRef(`${prefix}-${++listSeq}`).current;
-
-/** Home country: an editable dropdown of every country, India when empty. */
+/** Home country: a dropdown of every country you can also type into, India when empty. */
 export function CountryInput({ id, value, onChange }) {
-  const list = useListId('countries');
-  return html`<input id=${id} class="input" list=${list} autocomplete="country-name" value=${value || DEFAULT_COUNTRY}
-      onInput=${(e) => onChange(e.currentTarget.value)} onBlur=${(e) => { if (!e.currentTarget.value.trim()) onChange(DEFAULT_COUNTRY); }} />
-    <datalist id=${list}>${countries().map((c) => html`<option key=${c.code} value=${c.name} />`)}</datalist>`;
+  return html`<${ComboInput} id=${id} label="Country" autocomplete="country-name" value=${value || DEFAULT_COUNTRY}
+    options=${countries().map((c) => c.name)} onChange=${onChange}
+    onBlur=${(e) => { if (!e.currentTarget.value.trim()) onChange(DEFAULT_COUNTRY); }} />`;
 }
 
 /** Cities matching what is typed (debounced; the newest answer wins). */
@@ -66,12 +62,10 @@ function useCitySearch(text, country) {
 
 /** One place ("Hyderabad, Telangana, India"), with city suggestions while typing. */
 export function CityInput({ id, value, onChange, country, placeholder, extra = [] }) {
-  const list = useListId('cities');
   const places = useCitySearch(value, country);
   const options = [...new Set([...places.map((p) => p.label), ...extra.filter(Boolean)])];
-  return html`<input id=${id} class="input" list=${list} autocomplete="address-level2" value=${value || ''} placeholder=${placeholder}
-      onInput=${(e) => onChange(e.currentTarget.value)} />
-    <datalist id=${list}>${options.map((o) => html`<option key=${o} value=${o} />`)}</datalist>`;
+  return html`<${ComboInput} id=${id} label="City" autocomplete="address-level2" value=${value || ''} placeholder=${placeholder}
+    options=${options} onChange=${onChange} />`;
 }
 
 /** Several cities as chips; suggestions follow what is being typed. */
@@ -85,11 +79,9 @@ export function CityChips({ value, onChange, label, placeholder, country, extra 
 
 /** Work authorization: an editable dropdown — status in the home country first, then citizenship of any country. */
 export function WorkAuthInput({ id, value, onChange, country }) {
-  const list = useListId('workauth');
   const home = (country || '').trim() || DEFAULT_COUNTRY;
   const options = [`Citizen of ${home}`, `Permanent resident of ${home}`, `Work visa / permit for ${home}`, `Student visa in ${home}`,
     'Need visa sponsorship', ...countries().filter((c) => c.name !== home).map((c) => `Citizen of ${c.name}`)];
-  return html`<input id=${id} class="input" list=${list} autocomplete="off" value=${value || ''} placeholder=${`e.g. Citizen of ${home}`}
-      onInput=${(e) => onChange(e.currentTarget.value)} />
-    <datalist id=${list}>${options.map((o) => html`<option key=${o} value=${o} />`)}</datalist>`;
+  return html`<${ComboInput} id=${id} label="Work authorization" value=${value || ''} placeholder=${`e.g. Citizen of ${home}`}
+    options=${options} onChange=${onChange} />`;
 }

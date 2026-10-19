@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -143,9 +144,58 @@ class Project(_Lenient):
         return out
 
 
-class QAMemory(_Lenient):
-    """Pre-filled answers for common application questionnaire fields."""
+def parse_lpa(text: Any) -> Optional[float]:
+    """An annual pay amount in lakhs (LPA) from how people write it: "8", "8 LPA", "8 lakhs", "8L", "800000",
+    "8,00,000", "1.2 Cr", "66k per month". A bare small number is lakhs; a large one is rupees."""
+    if isinstance(text, (int, float)):
+        n = float(text)
+        return round(n / 100000 if n >= 1000 else n, 2) if n > 0 else None
+    t = str(text or "").lower().replace(",", "").strip()
+    m = re.search(r"\d+(?:\.\d+)?", t)
+    if not m:
+        return None
+    n = float(m.group())
+    rest = t[m.end():]
+    if re.match(r"\s*(cr|crore)", rest):
+        n *= 100
+    elif re.match(r"\s*(lpa|lakh|lac|l\b)", rest):
+        pass
+    elif re.match(r"\s*(k|thousand)\b", rest):
+        n = n * 1000 / 100000
+    elif n >= 1000:
+        n = n / 100000
+    if re.search(r"(per month|/\s*month|monthly|\bpm\b|p\.m\.)", t):
+        n *= 12
+    return round(n, 2) if n > 0 else None
 
+
+def fmt_lpa(n: Optional[float]) -> str:
+    return "" if n is None else f"{n:g} LPA"
+
+
+def inr(lpa: Optional[float]) -> str:
+    """8.5 -> "₹8,50,000" (Indian digit grouping)."""
+    if lpa is None:
+        return ""
+    s = str(int(round(lpa * 100000)))
+    head, tail = s[:-3], s[-3:]
+    groups = []
+    while len(head) > 2:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    return "₹" + ",".join(([head] if head else []) + groups + [tail])
+
+
+class QAMemory(_Lenient):
+    """Pre-filled answers for common application questionnaire fields.
+
+    Pay is kept as numbers in lakhs per year (LPA) so nobody has to guess between "8", "8 LPA" and "800000":
+    fixed + variable = current CTC. The text answers (current_ctc, expected_ctc, expected_salary) are written from
+    those numbers; older profiles that only had the text are read into the numbers once."""
+
+    current_fixed_lpa: Optional[float] = Field(None, description="current fixed pay per year, in lakhs")
+    current_variable_lpa: Optional[float] = Field(None, description="current variable pay / bonus per year, in lakhs")
+    expected_ctc_lpa: Optional[float] = Field(None, description="expected total CTC per year, in lakhs")
     expected_salary: str = ""
     current_ctc: str = ""
     expected_ctc: str = ""
@@ -162,6 +212,33 @@ class QAMemory(_Lenient):
         "work_authorization", "requires_sponsorship", "preferred_work_mode",
         "willing_to_relocate", "years_of_experience", mode="before",
     )(_coerce_str)
+
+    @field_validator("current_fixed_lpa", "current_variable_lpa", "expected_ctc_lpa", mode="before")
+    @classmethod
+    def _amount(cls, v: Any) -> Any:
+        if v is None or v == "":
+            return None
+        n = parse_lpa(v)
+        return n if n is not None else (0.0 if str(v).strip() in ("0", "0.0") else None)
+
+    @model_validator(mode="after")
+    def _pay_answers(self) -> "QAMemory":
+        if self.current_fixed_lpa is None and self.current_ctc:
+            self.current_fixed_lpa = parse_lpa(self.current_ctc)
+        if self.expected_ctc_lpa is None and (self.expected_ctc or self.expected_salary):
+            self.expected_ctc_lpa = parse_lpa(self.expected_ctc or self.expected_salary)
+        total = self.current_total_lpa
+        if total is not None:
+            self.current_ctc = fmt_lpa(total)
+        if self.expected_ctc_lpa is not None:
+            self.expected_ctc = self.expected_salary = fmt_lpa(self.expected_ctc_lpa)
+        return self
+
+    @property
+    def current_total_lpa(self) -> Optional[float]:
+        if self.current_fixed_lpa is None and self.current_variable_lpa is None:
+            return None
+        return round((self.current_fixed_lpa or 0) + (self.current_variable_lpa or 0), 2)
 
 
 class CandidatePreferences(_Lenient):

@@ -457,7 +457,7 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 .stepper .current .stepper-text strong, .stepper .done .stepper-text strong { color: var(--ink); }
 .ob-main { display: grid; place-items: center; min-width: 0; }
 .ob-card { width: min(620px, 100%); max-height: calc(100dvh - 48px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.step-anim.from-right { animation: stepR .6s var(--ease) both; } .step-anim.from-left { animation: stepL .6s var(--ease) both; }
+.step-anim.from-right { animation: stepR .32s var(--ease) both; } .step-anim.from-left { animation: stepL .32s var(--ease) both; }
 @keyframes stepR { from { opacity: 0; transform: translateX(46px) scale(.98); filter: blur(6px); } }
 @keyframes stepL { from { opacity: 0; transform: translateX(-46px) scale(.98); filter: blur(6px); } }
 .ob-body { padding: 28px; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 18px; }
@@ -1767,3 +1767,140 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 }
 /* the narrow-sidebar rule hides .brand-name; outside the sidebar the name always shows */
 .admin-start-head .brand-name, .mobile-top .brand-name, .login .brand-name { display: inline; }
+
+/* -------------------------------------------------------------------------- phone app layout
+   Phones and small tablets: the page itself scrolls (no boxes inside boxes that each scroll), the top bar stays
+   pinned above the content, the tab bar stays pinned at the bottom, and a list and the item opened from it take
+   turns on screen with a Back button. Nothing sits under the bars and nothing is wider than the screen. */
+.phone-back, .phone-bar { display: none; }
+@media (max-width: 900px) {
+  :root { --top-h: 60px; --tab-h: 64px; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { overflow-x: hidden; overflow-y: auto; }
+  .shell { min-height: 100dvh; overflow-x: clip; padding: 0 12px calc(var(--tab-h) + 22px + env(safe-area-inset-bottom)); }
+  .main { min-height: calc(100dvh - var(--tab-h)); }
+  .view { gap: 12px; }
+
+  /* top bar: pinned, opaque enough that content scrolling under it never shows through the text */
+  .mobile-top { position: sticky; top: 0; z-index: 40; min-height: var(--top-h); margin: 0 -12px 12px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
+    border: 0; border-bottom: 1px solid var(--line); border-radius: 0 0 20px 20px;
+    background: color-mix(in srgb, var(--card-solid) 90%, transparent); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+    box-shadow: 0 8px 24px -18px rgba(40, 30, 80, .35); }
+  .mobile-top .brand { flex: none; min-width: 0; }
+  .mobile-top .mt-actions { flex: 1; justify-content: flex-end; }
+  .mobile-top .mt-actions > * { flex: none; }
+  .mobile-top .mt-actions > :first-child { flex: 0 1 auto; min-width: 0; }
+  .mobile-top .icon-btn { width: 40px; height: 40px; }
+  /* the profile list drops down from the top bar (in the sidebar it opens upward, which here would be off screen) */
+  .mobile-top .switcher .popover { top: calc(100% + 8px); bottom: auto; left: 8px; right: 8px; max-height: 60dvh; overflow-y: auto; transform-origin: top center; }
+  .mobile-top .switcher .me { padding: 4px; }
+
+  /* bottom tab bar: clear of the home indicator, edge fades show it scrolls sideways */
+  .sidebar { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .sidebar-card { min-height: 56px; }
+  .nav-groups { scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+    mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent); }
+  .nav a { width: 44px; height: 44px; padding: 0; justify-content: center; scroll-snap-align: center; }
+
+  /* page heading */
+  .page-head { padding: 0 2px; gap: 10px; }
+  .page-head-text { min-width: 0; }
+  .page-head h1, .page-sub { overflow-wrap: anywhere; }
+
+  /* lists and the item opened from them */
+  .vscroll { contain: none; }                 /* the windowed list sizes itself and scrolls with the page */
+  .card.pane { overflow: visible; }
+  .phone-back { display: inline-flex; }
+  .detail-x { display: none; }
+  .phone-bar { display: flex; padding: 12px 14px 0; }
+  .view-discover .split.show-overview .detail-pane { display: flex; }
+  .view-discover .split.show-overview .list-pane { display: none; }
+  .detail-tools { position: static; flex-direction: row; justify-content: space-between; margin: -6px -8px 0; }
+  .detail-top { padding: 18px 16px 12px; }
+  .detail-header { gap: 12px; }
+  .detail-header h2 { font-size: 1.3rem; overflow-wrap: anywhere; }
+  .detail-company { flex-wrap: wrap; overflow-wrap: anywhere; }
+  .detail-body { padding: 16px 16px 22px; }
+  .detail-top > .tabs { width: 100%; }
+  .action-bar > * { flex: 1 1 auto; justify-content: center; }
+  .action-bar .select { min-width: 0; }
+  .job-company { flex-wrap: wrap; }
+  .job-title, .job-headline, .job-sub { overflow-wrap: anywhere; }
+  .constraints, .components, .two-col, .facts-grid, .connect-drafts { grid-template-columns: 1fr; }
+  .checks { display: block; overflow-x: auto; }
+  .tk-group-head { top: var(--top-h); }
+  .tk-tip { display: none; }
+  .tr-actions { padding-left: 12px; flex-wrap: wrap; }
+
+  /* search overview & live feed */
+  .mission { padding: 18px 16px; gap: 18px; }
+  .mission.live { padding: 18px 16px 16px; }
+  .mc-hero { gap: 12px; }
+  .mc-hero h2 { font-size: 1.3rem; }
+  .mc-stats > div { flex: 1 1 40%; padding: 0 10px; }
+  .mc-stats > div:nth-child(3) { border-left: 0; padding-left: 0; }
+  .feed-list { max-height: 60dvh; }
+  .mission-stats .n, .tk-stats .n { font-size: 1.8rem; }
+  .tk-overview { padding: 18px 16px; }
+  .fn-row { grid-template-columns: 82px minmax(0, 1fr) 28px; gap: 8px; }
+
+  /* browser agent */
+  .bw-title { display: none; }
+  .bw-chrome { gap: 10px; padding: 10px; }
+  .control-banner { white-space: normal; max-width: calc(100% - 24px); text-align: center; }
+  .ap-head { max-height: none; overflow: visible; }
+  .ap-title { white-space: normal; }
+
+  /* overlays fit the screen and clear the bars */
+  .popover { max-width: calc(100vw - 24px); min-width: 0; }
+  .select-list { max-width: calc(100vw - 16px); max-height: min(320px, 50dvh); }
+  .drawer { overflow-y: auto; padding-bottom: env(safe-area-inset-bottom); }
+  .dialog { padding: 22px 18px; max-height: calc(100dvh - 32px); overflow-y: auto; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions .btn { flex: 1 1 auto; }
+  .toasts { top: calc(var(--top-h) + 8px + env(safe-area-inset-top)); }
+  .scout-window, .scout-window.is-big, .scout-window.is-min { bottom: calc(var(--tab-h) + 16px + env(safe-area-inset-bottom)); max-height: calc(100dvh - var(--tab-h) - var(--top-h) - 32px); overflow-y: auto; }
+
+  /* long words (links, emails, skill names) wrap instead of pushing the page wider */
+  .card, .notice, .error-box, .chip, .fact, .feed-msg, .todo, .kit-row .grow, .set-toggle > div { overflow-wrap: anywhere; }
+  img, video, canvas, svg { max-width: 100%; }
+}
+@media (max-width: 900px) and (hover: none) {
+  /* no hover on touch: the save star is always visible and no card jumps on tap */
+  .job-card > .save-btn { opacity: 1; transform: none; }
+  .job-card:hover, .feed-item.is-link:hover, .todo:hover { transform: none; }
+}
+@media (max-width: 520px) {
+  .shell { padding-left: 8px; padding-right: 8px; }
+  .mobile-top { margin-left: -8px; margin-right: -8px; padding-left: 10px; padding-right: 10px; }
+  .mobile-top .brand-name { display: none; }
+  .mobile-top .me-text strong { max-width: 34vw; }
+  .detail-header { flex-direction: row; align-items: flex-start; }
+  .results { padding: 10px 10px 0; }
+  .job-list { margin: 0 -10px; padding: 2px 10px 12px; }
+  .search-box { padding: 14px 12px 12px; }
+  .run-strip { padding: 12px; }
+  .list-foot { flex-wrap: wrap; gap: 6px; }
+  .mc-pct .n { font-size: 2rem; }
+}
+@media (max-width: 360px) {
+  .mobile-top .me-text { display: none; }
+}
+
+/* editable dropdown (ComboInput): a styled suggestion list under a text field */
+.combo { position: relative; width: 100%; min-width: 0; }
+.combo-list { min-width: 0; overscroll-behavior: contain; }
+.combo-list li { min-height: 40px; }
+.combo-list li > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* number fields with a unit (LPA, days, years) */
+.unit-input { position: relative; display: flex; align-items: center; width: 100%; }
+.unit-input .input { padding-right: 58px; }
+.unit-input .unit { position: absolute; right: 12px; pointer-events: none; font-size: .76rem; font-weight: 600; letter-spacing: .04em; color: var(--text-3);
+  padding: 3px 8px; border-radius: 99px; background: var(--line); }
+.pay-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-height: 44px; padding: 10px 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--card-solid)); border: 1px dashed color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.pay-total strong { font-size: 1.05rem; font-weight: 600; color: var(--ink); }
+.pay-note { margin: 0; }
+.pay-note code { font-size: .9em; color: var(--ink); }

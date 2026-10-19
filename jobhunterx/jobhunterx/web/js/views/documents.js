@@ -1,7 +1,7 @@
 import { html, useState, useEffect } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import { generateCv, loadDocuments, loadDocument, updateDocument, deleteDocument } from '../actions.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Tabs } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Tabs, ComboInput } from '../components/ui.js';
 import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
 import { api } from '../lib/api.js';
 import { genKey } from '../state/domain.js';
@@ -214,8 +214,7 @@ function CvGenerator() {
       <div class="stack" style=${{ gap: '12px', width: '300px' }}>
         <div><strong>Comprehensive CV</strong><p class="muted small">Your full career on multiple pages — every role, project and achievement. Not tailored to one job.</p></div>
         <label class="field"><span class="field-label">Optional focus</span>
-          <input class="input" list="cv-tracks" value=${focus} placeholder="Whole career" onInput=${(e) => setFocus(e.currentTarget.value)} />
-          <datalist id="cv-tracks">${tracks.map((t) => html`<option value=${t} />`)}</datalist></label>
+          <${ComboInput} label="Optional focus" value=${focus} placeholder="Whole career" options=${tracks} onChange=${setFocus} /></label>
         ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
         <${Button} variant="primary" icon=${g && g.status === 'failed' ? 'refresh' : 'spark'} busy=${busy} onClick=${() => { setOpen(false); generateCv(focus.trim()); }}>
           ${g && g.status === 'failed' ? 'Retry' : 'Generate CV'}</${Button}>

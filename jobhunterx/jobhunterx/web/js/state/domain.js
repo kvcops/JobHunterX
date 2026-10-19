@@ -97,7 +97,7 @@ export function emptyProfile() {
     languages: [], skills: [], certifications: [], competitions: [], achievements: [],
     experience: [], education: [], projects: [],
     qa_memory: {
-      expected_salary: '', current_ctc: '', expected_ctc: '', notice_period: '', work_authorization: '',
+      current_fixed_lpa: null, current_variable_lpa: null, expected_ctc_lpa: null, expected_salary: '', current_ctc: '', expected_ctc: '', notice_period: '', work_authorization: '',
       requires_sponsorship: '', preferred_work_mode: '', willing_to_relocate: '', years_of_experience: '',
       custom_answers: {},
     },

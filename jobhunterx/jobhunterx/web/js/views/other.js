@@ -7,7 +7,7 @@ import {
   loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion, changePassword, setOfficeAI,
 } from '../actions.js';
 import { PeopleManager } from './people.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice, reduced } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice, reduced, usePhonePane } from '../components/ui.js';
 import { api } from '../lib/api.js';
 import { TRACKING_LABEL, DEFAULT_TRACKING, relTime, humanize, fmtNum, safeUrl } from '../lib/format.js';
 import { setTheme } from '../actions.js';
@@ -98,6 +98,7 @@ export function TrackerView() {
   const jobs = tr.ids.map((id) => byId[id]).filter(Boolean);
   const open = (id) => navigate(`#/tracker/job/${encodeURIComponent(id)}`);
   const close = () => navigate('#/tracker');
+  usePhonePane(!!route.jobId);
   useEffect(() => {
     if (!route.jobId) return undefined;
     const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay, .popover, .select-list')) close(); };

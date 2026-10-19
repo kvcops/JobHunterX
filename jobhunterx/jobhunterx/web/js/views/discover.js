@@ -8,7 +8,7 @@ import {
 import { VirtualList } from '../components/virtual.js';
 import {
   Button, Badge, ScoreRing, Skeleton, EmptyState, ErrorBox, ChipsInput, Tabs, Icon, Field, Notice, PageHead, Popover, Seg,
-  Monogram, Orb, CountUp, Select, Spinner, Drawer, VERDICT_TONE,
+  Monogram, Orb, CountUp, Select, Spinner, Drawer, VERDICT_TONE, usePhonePane,
 } from '../components/ui.js';
 import { JobDetail } from './jobdetail.js';
 import { AgentWorld } from './agentworld.js';
@@ -430,6 +430,10 @@ export function DiscoverView() {
   const run = useStore((s) => s.search.run);
   const active = run && ACTIVE.has(run.status);
   const overview = () => navigate('#/discover');
+  // phones show one pane at a time: the search overview opens from the progress strip, over the list
+  const [phoneOverview, setPhoneOverview] = useState(false);
+  const openOverview = () => { overview(); setPhoneOverview(true); };
+  usePhonePane(!!route.jobId || phoneOverview);
   // Esc closes the open job (unless a dialog or popover is handling it).
   useEffect(() => {
     if (!route.jobId) return undefined;
@@ -440,13 +444,15 @@ export function DiscoverView() {
   return html`<div class="view view-discover">
     <${PageHead} title=${html`Roles that <span class="serif">fit</span> you`}
       sub=${active ? 'Searching now — results stream in as they are verified.' : 'Verified postings, ranked by genuine fit and explained.'} />
-    <div class=${`split ${route.jobId ? 'has-detail' : ''}`}>
+    <div class=${`split ${route.jobId ? 'has-detail' : ''} ${phoneOverview && !route.jobId ? 'show-overview' : ''}`}>
       <section class="pane list-pane card" aria-label="Search and results">
         <${SearchBar} />
-        <${RunStrip} onOverview=${overview} />
+        <${RunStrip} onOverview=${openOverview} />
         <${JobList} />
       </section>
       <section class="pane detail-pane card" aria-label=${route.jobId ? 'Job details' : 'Search overview'}>
+        ${!route.jobId ? html`<div class="phone-bar"><button type="button" class="btn btn-sm phone-back" onClick=${() => setPhoneOverview(false)}>
+          <${Icon} name="back" size=${15} />Back to jobs</button></div>` : null}
         ${route.jobId ? html`<${JobDetail} key=${route.jobId} jobId=${route.jobId} onClose=${overview} />` : html`<${MissionControl} />`}
       </section>
     </div>

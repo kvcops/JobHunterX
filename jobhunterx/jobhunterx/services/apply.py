@@ -150,7 +150,27 @@ async def _prepare_kit(sess, job_id: str, emit: Emit) -> tuple[dict, dict[str, s
         sess.update(kit=kit)
 
     profile_dict = profile.model_dump(mode="json")
+    profile_dict["qa_memory"] = form_answers(profile, snapshot)
     return profile_dict, files
+
+
+def form_answers(profile, snapshot) -> dict:
+    """The application-form answers, with every empty one filled from what the profile already says (preferences,
+    the years worked) — so the agent never meets an empty "Years of experience" or "Willing to relocate"."""
+    qa = profile.qa_memory.model_dump(mode="json")
+    pr = profile.preferences
+    if not qa.get("notice_period") and pr.notice_period_days is not None:
+        qa["notice_period"] = "Immediate joiner" if pr.notice_period_days == 0 else f"{pr.notice_period_days} days"
+    if not qa.get("preferred_work_mode") and pr.work_modes:
+        qa["preferred_work_mode"] = " / ".join(m.value.replace("onsite", "on-site").capitalize() for m in pr.work_modes)
+    if not qa.get("willing_to_relocate"):
+        qa["willing_to_relocate"] = "Yes" if pr.willing_to_relocate else "No"
+    if not qa.get("years_of_experience") and snapshot is not None:
+        qa["years_of_experience"] = f"{round(snapshot.professional_years, 1):g}"
+    if not qa.get("requires_sponsorship") and (qa.get("work_authorization") or "").lower().startswith(("citizen of", "permanent resident of")):
+        qa["requires_sponsorship"] = "No"
+    qa["current_total_lpa"] = profile.qa_memory.current_total_lpa
+    return qa
 
 
 async def _restore(job_id: str):

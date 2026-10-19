@@ -29,6 +29,12 @@ from jobhunterx.models import AgentEvent, HITLType
 
 log = get_logger("browser_agent")
 
+# browser-use gives a browser 30 s to start and connect. A cloud browser that is still booting, a first Chrome start
+# on a cold machine or a slow link easily takes longer, and the whole run then fails with
+# "on_BrowserStartEvent ... timed out after 30.0s". Give the start real room (still overridable from the env).
+for _ev, _secs in (("BrowserStartEvent", "120"), ("BrowserLaunchEvent", "120"), ("BrowserConnectedEvent", "90")):
+    os.environ.setdefault(f"TIMEOUT_{_ev}", _secs)
+
 # Persistent profile path reused across runs. A stable profile accumulates
 # cookies, localStorage and an auth "history" that Cloudflare scores as a
 # real returning user rather than a fresh headless instance.
@@ -1619,6 +1625,30 @@ def profile_links(profile: dict) -> dict[str, str]:
     return out
 
 
+def _pay_lines(qa: dict) -> list[str]:
+    """Pay in every shape a form asks for it: LPA, full rupees per year, per month; total and fixed / variable."""
+    from jobhunterx.domain.candidate import inr
+
+    def amount(lpa: float) -> str:
+        return f"{lpa:g} LPA = {inr(lpa)} per year (about {inr(lpa / 12)} per month)"
+
+    out = []
+    fixed, var, total, exp = (qa.get("current_fixed_lpa"), qa.get("current_variable_lpa"),
+                              qa.get("current_total_lpa"), qa.get("expected_ctc_lpa"))
+    if total is not None:
+        out.append(f"  • Current CTC (total, per year): {amount(total)}")
+        if fixed is not None:
+            out.append(f"  • Current fixed pay: {amount(fixed)}")
+        if var:
+            out.append(f"  • Current variable pay / bonus: {amount(var)}")
+    if exp is not None:
+        out.append(f"  • Expected CTC / expected salary (total, per year): {amount(exp)}")
+    if out:
+        out.append("  • Salary fields: if the field asks for LPA or lakhs, write the LPA number (e.g. 8); if it takes a plain "
+                   "amount, write full rupees without symbols or commas (e.g. 800000); if it asks per month, use the monthly figure.")
+    return out
+
+
 def _profile_block(profile: dict) -> str:
     edu = "\n".join(
         f"  • {ed.get('degree', '')} ({ed.get('start', '')} – {ed.get('end', '')})"
@@ -1635,11 +1665,13 @@ def _profile_block(profile: dict) -> str:
         + "".join(f"\n    - {b}" for b in (e.get("bullets") or [])[:3])
         for e in profile.get("experience", [])) or "  (Not provided)"
     qa = profile.get("qa_memory", {}) or {}
-    labels = {"current_ctc": "Current CTC", "expected_ctc": "Expected CTC", "expected_salary": "Expected salary",
-              "notice_period": "Notice period", "work_authorization": "Work authorization",
+    qa_lines = _pay_lines(qa)
+    labels = {"notice_period": "Notice period", "work_authorization": "Work authorization",
               "requires_sponsorship": "Requires visa sponsorship", "preferred_work_mode": "Preferred work mode",
               "willing_to_relocate": "Willing to relocate", "years_of_experience": "Years of experience"}
-    qa_lines = [f"  • {lbl}: {qa[k]}" for k, lbl in labels.items() if qa.get(k)]
+    if not qa_lines:          # pay written as text the numbers could not be read from: pass it on as written
+        labels = {"current_ctc": "Current CTC", "expected_ctc": "Expected CTC", **labels}
+    qa_lines += [f"  • {lbl}: {qa[k]}" for k, lbl in labels.items() if qa.get(k)]
     qa_lines += [f"  • {k}: {v}" for k, v in (qa.get("custom_answers") or {}).items()]
     prefs = profile.get("preferences", {}) or {}
     if prefs.get("notice_period_days") is not None and not qa.get("notice_period"):
@@ -1807,6 +1839,49 @@ def build_task(sess: ApplySession, continuing: bool) -> str:
 
 # ---------------------------------------------------------------------------- the run (worker loop)
 
+async def _wait_cdp_ready(cdp_url: str, seconds: float = 40) -> None:
+    """A browser that was just started (ours or a cloud one) answers its debugging address a little later: wait for
+    it here, so browser-use's own start does not spend its time limit on a browser that is still booting."""
+    if not cdp_url.startswith("http"):
+        return                               # a ws:// address is connected to directly
+    import httpx
+    deadline = time.monotonic() + seconds
+    async with httpx.AsyncClient(timeout=5) as client:
+        while time.monotonic() < deadline:
+            try:
+                if (await client.get(cdp_url.rstrip("/") + "/json/version")).status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(1)
+
+
+async def _open_browser(settings: Settings, sess: ApplySession) -> Any:
+    """Start and connect the browser before the agent runs, with one fresh retry. Returns a started BrowserSession."""
+    from browser_use import BrowserSession
+    last: Optional[BaseException] = None
+    for attempt in (1, 2):
+        profile = await _build_stealth_profile(settings, sess)
+        if getattr(profile, "cdp_url", None):
+            await _wait_cdp_ready(profile.cdp_url)
+        bs = BrowserSession(browser_profile=profile)
+        try:
+            await asyncio.wait_for(bs.start(), timeout=150)
+            return bs
+        except Exception as exc:              # TimeoutError, CDP connection refused, browser exited, ...
+            last = exc
+            log.warning("browser_start_failed", attempt=attempt, error=str(exc)[:200])
+            try:
+                await asyncio.wait_for(bs.kill(), timeout=15)
+            except Exception:
+                pass
+            if sess.cloud:
+                await _stop_cloud_browser(sess.cloud)
+                sess.cloud = None
+            await _stop_own_chrome()
+    raise RuntimeError("The browser did not start in time (tried twice). "
+                       f"Try again in a minute. Details: {str(last)[:160]}")
+
 async def _attach_live_view(sess: ApplySession, agent: Any) -> None:
     for _ in range(240):
         bs = getattr(agent, "browser_session", None)
@@ -1903,8 +1978,8 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
         kwargs["browser_session"] = sess.browser_session
     else:
         try:
-            kwargs["browser_profile"] = await _build_stealth_profile(settings, sess)
-        except RuntimeError as exc:          # e.g. the user's Browser Use key was rejected
+            kwargs["browser_session"] = await _open_browser(settings, sess)
+        except RuntimeError as exc:          # e.g. the user's Browser Use key was rejected, or no browser would start
             sess.update(status="failed", message="Could not open a browser", notice=str(exc)[:300])
             return
     agent = Agent(**kwargs)

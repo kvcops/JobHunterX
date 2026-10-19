@@ -14,12 +14,15 @@ log = get_logger("render")
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-# Extra compaction steps for a one-page resume, applied after font shrinking:
-# fewer bullets per role and fewer projects (lowest-relevance items are last).
+# Extra compaction steps for a one-page resume, applied after font shrinking: fewer bullets and achievements first,
+# projects last and one at a time (they are ordered most relevant first, so the least relevant goes).
 _TRIM_STEPS = [
-    {"max_bullets_per_exp": 3, "max_projects": 2, "max_achievements": 2},
-    {"max_bullets_per_exp": 2, "max_projects": 2, "max_achievements": 1},
-    {"max_bullets_per_exp": 2, "max_projects": 1, "max_achievements": 0},
+    {"max_bullets_per_exp": 3, "max_achievements": 2},
+    {"max_bullets_per_exp": 2, "max_achievements": 1},
+    {"max_bullets_per_exp": 2, "max_projects": 5, "max_achievements": 1},
+    {"max_bullets_per_exp": 2, "max_projects": 4, "max_achievements": 0},
+    {"max_bullets_per_exp": 2, "max_projects": 3, "max_achievements": 0},
+    {"max_bullets_per_exp": 2, "max_projects": 2, "max_achievements": 0},
 ]
 
 _CV_LAYOUT = {**SHRINK_PROFILES[0], "font_size_body": "9.5pt", "font_size_bullet": "9.3pt", "font_size_name": "20pt",
