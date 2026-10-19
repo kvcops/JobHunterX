@@ -67,9 +67,14 @@ class ConnectionManager:
         """
         if "type" not in data:
             data = {"type": "browser", "job_id": data.get("job_id"), "message": data.get("message", ""),
+                    **({"person_id": data["person_id"]} if data.get("person_id") else {}),
                     "data": data, "ts": datetime.now(timezone.utc).isoformat()}
         user = auth_ctx.current()
         owner = user.id if user else None
+        if owner is None and data.get("person_id"):
+            # sent from the browser worker thread, where no login is known: the profile says whose it is
+            from jobhunterx import storage
+            owner = await storage.user_of_person(data["person_id"])
         if "person_id" not in data and data.get("type") not in ("people.changed", "log"):
             from jobhunterx import storage
             pid = storage.active_person()      # the profile this event belongs to: other open profiles ignore it

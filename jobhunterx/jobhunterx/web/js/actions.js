@@ -830,12 +830,16 @@ export async function resetEverything() {
 // ---------------------------------------------------------------------------
 // Browser agent & interventions
 // ---------------------------------------------------------------------------
+let ivSeq = 0;      // a late answer for the previous profile never lands in the new one
 export async function loadInterventions() {
+  const seq = ++ivSeq;
   setSlice('interventions', (v) => ({ ...v, status: v.items.length ? 'refreshing' : 'loading', error: null }));
   try {
     const { interventions } = await api.interventions();
+    if (seq !== ivSeq) return;
     setSlice('interventions', { status: 'ready', items: interventions });
   } catch (err) {
+    if (seq !== ivSeq) return;
     setSlice('interventions', { status: 'error', error: errorText(err) });
   }
 }
@@ -871,12 +875,16 @@ export async function focusIntervention(item) {
   } catch { /* the browser may be closed; the Auto-apply tab still shows the saved run */ }
   navigate('#/browser');
 }
+let applySeq = 0;
 export async function loadApplySession() {
+  const seq = ++applySeq;
   setSlice('browser', (b) => ({ ...b, status: b.session ? 'refreshing' : 'loading', error: null }));
   try {
     const { session } = await api.applyCurrent();
+    if (seq !== applySeq) return;
     setSlice('browser', { status: 'ready', session: session || null });
   } catch (err) {
+    if (seq !== applySeq) return;
     setSlice('browser', { status: 'error', error: errorText(err) });
   }
 }
@@ -1061,7 +1069,7 @@ export async function loadPeople() {
 /** Forget everything that belongs to the previous person (jobs, runs, documents…). */
 function resetPersonState() {
   const fresh = initialState();
-  listSeq++; docsSeq++; trackerSeq++;
+  listSeq++; docsSeq++; trackerSeq++; ivSeq++; applySeq++;
   listCtrl?.abort();
   setState((s) => ({
     ...s,
@@ -1069,7 +1077,11 @@ function resetPersonState() {
     pending: fresh.pending, gen: fresh.gen, docs: fresh.docs, docDetails: fresh.docDetails, tracker: fresh.tracker,
     watch: fresh.watch, monitors: fresh.monitors,   // the Companies page loads again for the new profile
     browser: fresh.browser, interventions: fresh.interventions,   // the previous profile's application is not this one's
+    activity: fresh.activity,
   }));
+  // an open job of the previous profile does not exist in this one: go to the page itself
+  const route = getState().route;
+  if (route.jobId) navigate(`#/${route.page}`);
 }
 
 async function loadSessionData() {
@@ -1079,6 +1091,8 @@ async function loadSessionData() {
   if (run && ['queued', 'running'].includes(run.status)) setSlice('list', { scope: 'run', runId: run.id });
   loadList();
   loadDocuments();
+  loadInterventions();            // the nav badge counts this profile's own, right after a switch
+  loadApplySession();
   if (getState().route.page === 'tracker') loadTracker();
 }
 

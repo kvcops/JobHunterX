@@ -1284,10 +1284,7 @@ async def browser_release(job_id: str = ""):
 
 
 async def _my_interventions() -> list[dict]:
-    items = await db.get_pending_interventions()
-    if auth_ctx.current() is None:
-        return items
-    return [it for it in items if it.get("job_id") and await storage.owns("job", it["job_id"])]
+    return await storage.pending_interventions()       # the open profile's own (and so the signed-in user's)
 
 
 @router.get("/interventions")

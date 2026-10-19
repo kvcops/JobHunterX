@@ -393,7 +393,8 @@ class ApplySession:
 
     def publish(self) -> None:
         snap = self.snapshot()
-        live_view.broadcast_event({"type": "apply.session", "job_id": snap["job_id"], "data": {"session": snap}})
+        live_view.broadcast_event({"type": "apply.session", "job_id": snap["job_id"], "person_id": snap.get("person_id"),
+                                   "data": {"session": snap}})
         from jobhunterx import storage
         live_view._on_main(storage.save_apply_session(snap))
 
@@ -2044,7 +2045,8 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
         log.warning("intervention_create_failed", error=str(exc)[:160])
     sess.update(status="needs_you", message="Waiting for you", notice=HELP_TEXT.get(hitl, "The agent needs your help."),
                 result=final[:400], live=_alive(sess))
-    live_view.broadcast_event({"agent": "browser_agent", "event_type": "hitl_request", "job_id": job_id, "message": HELP_TEXT.get(hitl, "")})
+    live_view.broadcast_event({"agent": "browser_agent", "event_type": "hitl_request", "job_id": job_id,
+                               "person_id": sess.data.get("person_id"), "message": HELP_TEXT.get(hitl, "")})
 
 
 # ---------------------------------------------------------------------------- public API (call from the server loop)

@@ -214,6 +214,32 @@ async def list_people() -> list[dict]:
     return people
 
 
+_person_user: dict[str, Optional[str]] = {}
+
+
+async def user_of_person(pid: str) -> Optional[str]:
+    """The login user a profile belongs to (None in the local app). Remembered: a profile never changes owner."""
+    if pid not in _person_user:
+        async with _conn() as db:
+            row = await (await db.execute("SELECT user_id FROM people WHERE id = ?", (pid,))).fetchone()
+        if row is None:
+            return None
+        _person_user[pid] = row[0]
+    return _person_user[pid]
+
+
+async def pending_interventions() -> list[dict]:
+    """Pending interventions of the open profile only — another profile's application never shows here."""
+    where, params = _scope()
+    async with _conn() as db:
+        db.row_factory = aiosqlite.Row
+        rows = await (await db.execute(
+            "SELECT i.id, i.job_id, i.hitl_type, i.url, i.company, i.role, i.status, i.created_at "
+            f"FROM intervention_sessions i JOIN jobs j ON j.id = i.job_id WHERE i.status = 'pending' AND j.{where} "
+            "ORDER BY i.created_at DESC", params)).fetchall()
+        return [dict(r) for r in rows]
+
+
 async def get_person(pid: str) -> Optional[dict]:
     """The person, or None when it does not exist or belongs to another user."""
     where, params = _owner()
