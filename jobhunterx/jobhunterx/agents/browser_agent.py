@@ -1781,6 +1781,9 @@ DROPDOWN / SELECT FIELD RULES:
 - Country fields → the home country above (India → "India"). Never pick "Indiana", "Indian Ocean…" or another country.
 - If an option says "Other" and the form has a text field next to it, select "Other" and type the specific value.
 - For "Years of Experience" dropdowns, pick the option that matches the candidate's total experience.
+- EXPERIENCE QUESTIONS ARE NEVER ROUNDED UP. "Do you have N+ years of X?" → answer "No" unless the work history above
+  really shows it. A numeric experience box gets the true number (0 for a fresher). If an honest answer would end the
+  application, still answer honestly — an inflated answer is caught at interview and gets the candidate blacklisted.
 - For "Salary" / "Expected CTC" dropdowns, use the Q&A answers provided above.
 
 DATE / CALENDAR FIELD RULES:

@@ -331,3 +331,40 @@ def level_titles(labels: list[str], places: list[str], level: str, *, max_age_da
         seen.setdefault(key, (title, set()))[1].add(r.company)
     ranked = sorted(seen.values(), key=lambda x: -len(x[1]))
     return [(t, len(cos)) for t, cos in ranked[:limit]]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Which employers actually hire early-career people right now — from their own recent postings, not a fixed list.
+_entry_cache: tuple[int, dict[str, tuple[int, int]]] = (0, {})
+ENTRY_WINDOW_DAYS = 90
+
+
+def _company_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+def employer_entry_stats() -> dict[str, tuple[int, int]]:
+    """company key -> (intern / entry / junior postings in India in the last 90 days, all postings in that window).
+    Levels come from the aggregator's own classification of each posting. Recomputed whenever the daily copy changes."""
+    global _entry_cache
+    rows = _load()
+    if _entry_cache[0] == id(rows) and _entry_cache[1]:
+        return _entry_cache[1]
+    out: dict[str, list[int]] = {}
+    for r in rows:
+        if _age_days(r) > ENTRY_WINDOW_DAYS:
+            continue
+        k = _company_key(r.company)
+        if not k:
+            continue
+        c = out.setdefault(k, [0, 0])
+        c[1] += 1
+        if LEVELS.get(r.level, 9) <= 1:
+            c[0] += 1
+    _entry_cache = (id(rows), {k: (v[0], v[1]) for k, v in out.items()})
+    return _entry_cache[1]
+
+
+def fresher_reachability(company: str) -> Optional[tuple[int, int]]:
+    """(entry-level postings, all postings) for this employer in the last 90 days, or None when it is not in the index."""
+    return employer_entry_stats().get(_company_key(company))

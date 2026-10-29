@@ -401,6 +401,8 @@ function JobList() {
     { key: 'applied', label: 'Applied', count: counts.applied },
     { key: 'rejected', label: 'Not a fit', count: counts.rejected },
   ];
+  // early career: large IT-services fresher programmes, kept out of the main list (shown when there are any)
+  if (counts.safety_net) tabs.splice(2, 0, { key: 'safety_net', label: 'Safety net', count: counts.safety_net });
   const jobs = list.ids.map((id) => byId[id]).filter(Boolean);
   const runActive = run && ACTIVE.has(run.status);
   const recent = new Set(streamed.slice(-3));

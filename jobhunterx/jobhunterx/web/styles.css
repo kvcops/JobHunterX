@@ -391,10 +391,11 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 /* job list tabs: always one row of six equal tabs, label on top and count below, so the bar keeps its size when
    counts grow (9 -> 145) and never scrolls or wraps; only a very narrow column switches to a 3 x 2 grid */
 .results { container-type: inline-size; }
-.results > .tabs-sm { width: 100%; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; overflow: visible; }
+/* one row, columns sized to their labels — the tab count changes (Safety net shows only when it has jobs) */
+.results > .tabs-sm { width: 100%; display: grid; grid-auto-flow: column; grid-auto-columns: auto; gap: 2px; overflow: visible; }
 .results > .tabs-sm .tab { flex-direction: column; justify-content: center; gap: 1px; min-width: 0; padding: 5px 2px; font-size: .76rem; line-height: 1.15; }
 .results > .tabs-sm .tab-count { font-size: .66rem; }
-@container (max-width: 330px) { .results > .tabs-sm { grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: 18px; } }
+@container (max-width: 330px) { .results > .tabs-sm { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); border-radius: 18px; } }
 .tab-count { font-family: var(--mono); font-size: .7rem; color: var(--text-3); }
 .tab.active .tab-count { color: var(--accent); }
 
@@ -1979,3 +1980,19 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 @keyframes chatdot { 0%, 80%, 100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-4px); opacity: 1; } }
 :root[data-motion="reduced"] .paper.whoosh::after { display: none; }
 @media (max-width: 900px) { .chat-dock { position: absolute; inset: 8px; width: auto; border: 1px solid var(--line-strong); border-radius: 18px; z-index: 7; box-shadow: var(--shadow-lg); } .chat-fab { right: 12px; bottom: 12px; } }
+
+/* -------------------------------------------------------------------------- early career: reachability, outcomes, results */
+.fresher-box, .outcome-box { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: var(--radius-md);
+  border: 1px solid var(--line); background: var(--card-solid); }
+.fresher-box .bullets { margin: 6px 0; }
+.referral-pack { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.outcome-box .chip { cursor: pointer; font: inherit; font-size: .78rem; }
+.outcome-box .chip:disabled { cursor: default; }
+.results-panel { padding: 14px 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.results-panel table { font-size: .82rem; }
+
+/* Recently funded (Companies) */
+.funded-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.funded-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }
+.funded-row:first-child { border-top: 0; }
+.funded-head a { color: inherit; }

@@ -10,18 +10,23 @@ from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import MatchAssessment
 from jobhunterx.intelligence import job as job_ai
-from jobhunterx.intelligence import skill_links
+from jobhunterx.intelligence import domain_age, skill_links
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 
+_MAIN = "COALESCE(json_extract(match_json, '$.track'), 'main') != 'floor'"   # safety-net jobs have their own view
 VIEWS = {
-    "recommended": "verdict IN ('strong','good','stretch') AND COALESCE(validation_status,'') NOT IN ('closed','invalid')",
+    "recommended": "verdict IN ('strong','good','stretch') AND COALESCE(validation_status,'') NOT IN ('closed','invalid') "
+                   f"AND {_MAIN}",
     "all": "",
     "rejected": "(verdict = 'incompatible' OR validation_status IN ('closed','invalid'))",
     "saved": "saved_at IS NOT NULL",
     "applied": "tracking_status IN ('applied','interviewing','offer')",
     # first seen in the last 48 hours and worth a look — new watchlist postings land here
     "fresh": "created_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-2 days') AND verdict IN ('strong','good','stretch') "
-             "AND COALESCE(validation_status,'') NOT IN ('closed','invalid')",
+             f"AND COALESCE(validation_status,'') NOT IN ('closed','invalid') AND {_MAIN}",
+    # early career: large IT-services fresher programmes (national tests, off-campus drives), kept apart from the main list
+    "safety_net": "json_extract(match_json, '$.track') = 'floor' AND verdict != 'incompatible' "
+                  "AND COALESCE(validation_status,'') NOT IN ('closed','invalid')",
 }
 
 SORTS = {
@@ -72,6 +77,8 @@ def _summary(p: JobPosting, m: Optional[MatchAssessment], row: dict, current_has
             "missing_required": m.missing_required[:4],
             "experience": m.experience.model_dump(mode="json"),
             "rejected_reasons": m.rejected_reasons,
+            "track": m.track,
+            "scam": m.scam.model_dump(mode="json") if m.scam else None,
         } if m else None,
         "reach": {
             "score": m.reach.score, "level": m.reach.level, "headline": m.reach.headline,
@@ -82,7 +89,16 @@ def _summary(p: JobPosting, m: Optional[MatchAssessment], row: dict, current_has
         "tracking_status": row.get("tracking_status") or "new",
         "pipeline_status": row.get("status") or "discovered",
         "documents": {"resume": docs.get("resume"), "cover_letter": docs.get("cover_letter")},
+        "outcome": _outcome(row),
     }
+
+
+def _outcome(row: dict) -> Optional[dict]:
+    import json
+    try:
+        return json.loads(row["outcome_json"]) if row.get("outcome_json") else None
+    except (TypeError, ValueError):
+        return None
 
 
 async def list_jobs(view: str, current_hash: Optional[str], *, run_id: str = "", q: str = "", work_mode: str = "",
@@ -174,6 +190,24 @@ async def rescore(job_id: str, snapshot: CandidateSnapshot, profile_dict: dict, 
     return True
 
 
+async def reassess_outdated(snapshot: CandidateSnapshot, profile_dict: dict, limit: int = 500) -> int:
+    """Re-score jobs that an older matcher version scored for this same profile — no AI calls: the stored requirements
+    and role fit are reused, only the rules change (e.g. the early-career experience bands). Returns how many changed."""
+    from jobhunterx.intelligence.matching import ENGINE_VERSION
+    rows = await storage.list_rows("match_json IS NOT NULL", order="updated_at DESC", limit=limit)
+    text = candidate_work_text(profile_dict)
+    done = 0
+    for row in rows:
+        p, m = storage.row_to_objects(row)
+        if m is None or m.engine_version == ENGINE_VERSION or m.profile_hash != snapshot.profile_hash:
+            continue
+        fit = (m.role_fit, m.role_track, "", m.method or "fallback")
+        new = assess(snapshot, p, role_fit=fit, candidate_text=text, idf=build_idf([p.description, text]))
+        await storage.update_match(p.id, new)
+        done += 1
+    return done
+
+
 async def verify(job_id: str, snapshot: Optional[CandidateSnapshot], profile_dict: Optional[dict]) -> bool:
     row = await storage.get_row(job_id)
     if not row:
@@ -183,6 +217,10 @@ async def verify(job_id: str, snapshot: Optional[CandidateSnapshot], profile_dic
         p.validation.status = "unverified"     # re-evaluate from fresh evidence
     live = await validate.check_liveness(p)
     validate.finalize(p, live)
+    try:
+        await domain_age.annotate(p)
+    except Exception:
+        pass
     await storage.update_posting(p)
     if snapshot and profile_dict:
         text = candidate_work_text(profile_dict)

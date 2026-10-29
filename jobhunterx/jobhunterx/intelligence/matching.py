@@ -27,10 +27,11 @@ from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import ConstraintResult, ExperienceFit, MatchAssessment, ScoreComponent
 from jobhunterx.intelligence.policy import Policy, get_policy
 from jobhunterx.discovery.watchlist import is_mass_recruiter
+from jobhunterx.intelligence import scam as scam_rules
 from jobhunterx.intelligence.reach import assess_reach
 from jobhunterx.intelligence.text import term_in_text, tokens
 
-ENGINE_VERSION = "match-v2"
+ENGINE_VERSION = "match-v3"   # v3: early-career experience bands, safety-net track, scam rules
 
 _EDU_ORDER = ["none", "diploma", "bachelor", "master", "phd"]
 
@@ -234,6 +235,48 @@ def _location_check(snapshot: CandidateSnapshot, job: JobPosting) -> tuple[Const
 # Main assessment
 # ---------------------------------------------------------------------------
 
+def floor_track_on() -> bool:
+    from jobhunterx.config.settings import get_settings
+    return bool(getattr(get_settings(), "fresher_floor_track", True))
+
+
+def early_career(snapshot: CandidateSnapshot) -> bool:
+    """Under ~3 years: recruiters' databases filter these candidates out by years, so postings need a different reading."""
+    return snapshot.professional_years < 3 or Seniority.INTERN.rank <= snapshot.seniority.rank <= Seniority.JUNIOR.rank
+
+
+def recruiter_years(snapshot: CandidateSnapshot) -> float:
+    """Experience as recruiters' systems count it: dated internships included (LinkedIn and Naukri add them up)."""
+    return max(snapshot.professional_years, snapshot.total_years,
+               snapshot.professional_years + snapshot.internship_years)
+
+
+def years_label(years: float, with_internships: bool) -> str:
+    months = int(round(years * 12))
+    y, m = divmod(months, 12)
+    text = (f"{y} yr" + ("s" if y != 1 else "") if y else "") + (f" {m} mo" if m else "")
+    return (text.strip() or "0 mo") + (" (incl. internships)" if with_internships else "")
+
+
+def experience_band(req_min: float, req_max: Optional[float], years: float) -> tuple[str, str]:
+    """How reachable a posting is for someone with `years` (early career only). Returns (band, advice).
+
+    Posted years are often a wish, not a rule: Naukri itself counts 0-3 years as "fresher", and studies of entry-level
+    postings find most ask for more experience than the people they hire have. But recruiters' database searches use
+    years as a hard filter, so a below-range candidate is found only by applying directly or through a person. The bands
+    are a calibration (docs/research/freshers-getting-shortlisted.md), not a measured rate."""
+    gap = req_min - years
+    if gap <= 0.5:
+        return "reachable", "Your experience fits this posting."
+    if req_min <= 1.0 or gap <= 1.0:
+        return "direct", ("Apply on the company's own site or with a referral — recruiters searching resume databases "
+                          "filter by years, so don't wait to be found.")
+    if gap <= 2.0:                        # a fresher on "2+", or 1.5 years on "3+"
+        return "stretch", ("A stretch: worth it with a referral and one project that proves the core skill. "
+                           "A cold application alone rarely gets read.")
+    return "out_of_range", ""
+
+
 def assess(
     snapshot: CandidateSnapshot,
     job: JobPosting,
@@ -252,6 +295,8 @@ def assess(
     gaps: list[str] = []
     unknowns: list[str] = []
     years = snapshot.professional_years
+    early = early_career(snapshot)
+    job_track = "main"
     closeness, track, fit_reason, fit_method = role_fit
 
     # --- 1. Role track -----------------------------------------------------
@@ -270,7 +315,41 @@ def assess(
 
     # --- 2. Experience -----------------------------------------------------
     exp = ExperienceFit(required_min=req.experience_min, required_max=req.experience_max, candidate_years=years)
-    if req.experience_min is not None:
+    if early:
+        ry = recruiter_years(snapshot)
+        exp.candidate_label = years_label(ry, ry > years + 0.05)
+    if req.experience_min is not None and early:
+        ry = recruiter_years(snapshot)
+        band_txt = f"{req.experience_min:g}" + (f"–{req.experience_max:g}" if req.experience_max is not None else "+")
+        exp.band, exp.advice = experience_band(req.experience_min, req.experience_max, ry)
+        exp.gap_years = max(0.0, round(req.experience_min - ry, 1))
+        you = exp.candidate_label
+        if exp.band == "reachable":
+            exp.fit = "within"
+            constraints.append(ConstraintResult(key="experience", label="Experience", status="pass",
+                                                detail=f"Asks for {band_txt} years; you have {you}."))
+            strengths.append(f"Experience fits ({band_txt} yrs asked, you have {you})")
+            es = 1.0
+        elif exp.band == "direct":
+            exp.fit = "under"
+            constraints.append(ConstraintResult(key="experience", label="Experience", status="warn", hard=False,
+                                                detail=f"Asks for {band_txt} years; you have {you} — reachable by applying "
+                                                       f"directly or with a referral."))
+            es = 0.75
+        elif exp.band == "stretch":
+            exp.fit = "under"
+            constraints.append(ConstraintResult(key="experience", label="Experience", status="warn", hard=False,
+                                                detail=f"Asks for {band_txt} years; you have {you} — stretch, referral preferred."))
+            gaps.append(f"About {exp.gap_years:g} years under the {band_txt}-year ask — needs a referral and a proof project")
+            es = 0.5
+        else:
+            exp.fit = "under"
+            constraints.append(ConstraintResult(key="experience", label="Experience", status="fail",
+                                                detail=f"Requires {band_txt} years; you have {you}."))
+            es = max(0.0, 1 - exp.gap_years / max(1.0, req.experience_min))
+        comps.append(ScoreComponent(key="experience_fit", label="Experience fit", weight=pol.weights.experience_fit,
+                                    score=es, detail=f"{band_txt} yrs asked · you {you}"))
+    elif req.experience_min is not None:
         gap = round(req.experience_min - years, 1)
         exp.gap_years = max(0.0, gap)
         band = f"{req.experience_min:g}" + (f"–{req.experience_max:g}" if req.experience_max is not None else "+")
@@ -315,7 +394,12 @@ def assess(
         sen_score = pol.unknown_component
     else:
         diff = js.rank - cs.rank
-        if diff >= pol.seniority_fail_steps:
+        if early and diff >= pol.seniority_warn_steps and exp.band in ("reachable", "direct"):
+            # the years asked are within reach; a "mid" label on the same posting does not make it twice as far
+            constraints.append(ConstraintResult(key="seniority", label="Seniority", status="warn", hard=False,
+                                                detail=f"{js.value.title()}-level title, but the years asked are within reach."))
+            sen_score = 0.6
+        elif diff >= pol.seniority_fail_steps:
             constraints.append(ConstraintResult(key="seniority", label="Seniority", status="fail",
                                                 detail=f"{js.value.title()}-level role; you are at {cs.value} level."))
             sen_score = 0.1
@@ -473,10 +557,25 @@ def assess(
     if job.company and any(norm_term(job.company) == norm_term(x) for x in snapshot.excluded_companies):
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is on your excluded list."))
+    elif is_mass_recruiter(job.company) and early and floor_track_on():
+        # Large IT-services employers run the biggest fresher programmes (national tests, off-campus drives). They are a
+        # safety net, kept apart so their generic postings never crowd out targeted roles.
+        job_track = "floor"
+        constraints.append(ConstraintResult(key="company", label="Company", status="warn", hard=False,
+                                            detail=f"Safety-net track: {job.company} hires freshers in bulk through national "
+                                                   "tests and off-campus drives — apply on its official hiring portal."))
     elif is_mass_recruiter(job.company):
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is a mass-recruitment IT services firm — "
                                                    "bulk hiring, little real product AI work."))
+
+    scam = scam_rules.check(job)
+    if scam.level == "critical":
+        constraints.append(ConstraintResult(key="scam", label="Possible scam", status="fail",
+                                            detail="Possible scam: " + scam.flags[0].detail))
+    elif scam.level == "high":
+        constraints.append(ConstraintResult(key="scam", label="Scam warning", status="warn", hard=False,
+                                            detail="Be careful: " + "; ".join(f.detail for f in scam.flags if f.severity == "high")[:240]))
 
     if job.employment_type and snapshot.employment_types and job.employment_type not in snapshot.employment_types:
         constraints.append(ConstraintResult(key="employment_type", label="Employment type", status="warn", hard=False,
@@ -530,7 +629,9 @@ def assess(
         rejected_reasons=[f.detail for f in fails],
         role_fit=round(closeness, 3),
         role_track=track,
-        reach=assess_reach(job, snapshot, now),
+        reach=assess_reach(job, snapshot, now, scam=scam, floor=job_track == "floor"),
+        track=job_track,
+        scam=scam if scam.flags else None,
         method="llm" if (req.method == "llm" and fit_method == "llm") else "fallback",
         profile_hash=snapshot.profile_hash,
         engine_version=ENGINE_VERSION,

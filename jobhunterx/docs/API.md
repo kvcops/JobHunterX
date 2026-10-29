@@ -486,3 +486,26 @@ Every jobs, documents and search-run query is scoped to the active profile.
 
 Generated documents expose `header.links[]`, `projects[].links[]` and `item_links{ entry text: Link[] }`; each link has
 `text`, what is printed (a short address in the header, the label next to a project).
+
+
+## Early career and results
+
+* `GET /api/jobs?view=safety_net` — large IT-services fresher programmes (early-career profiles only); kept out of
+  `recommended` and `fresh`. The match carries `track: "main" | "floor"`, `experience.band`
+  (`reachable` · `direct` · `stretch` · `out_of_range`), `experience.advice`, `experience.candidate_label` and
+  `scam: {level: "none"|"medium"|"high"|"critical", flags: [{rule, severity, detail}]} | null`.
+* `PATCH /api/jobs/{id}` also takes `channel` (`own_site` · `referral` · `hiring_team` · `founder_outreach` · `linkedin` ·
+  `job_board` · `challenge` · `it_services_test` · `email` · `other`), `human_path: bool` and
+  `event` (`reply` · `screen` · `interview` · `offer` · `rejected`). Applying creates an outcome record (channel guessed
+  from the source, posting age, experience band, track, tailored resume yes/no); job summaries return it as `outcome`.
+* `GET /api/outcomes` → `{overall, by_channel, with_person, direct_only, interviews_from_unlocked_jobs, diagnosis[],
+  targets, channels, events}`; each block has `applied, replies, interviews, offers, response_rate, interviews_per_10`.
+* Connector kits include `referral: {job_url, job_id, blurb, proof_link, proof_label}`.
+* Setting `fresher_floor_track` (tunable, default true).
+* `GET /api/funding?refresh=bool` → `{enabled, events: [{company, amount, date, headline, url, source, openings,
+  entry_openings, board_url}], status}` — startups in the funding news of the last 120 days, with their open roles in the
+  employer-boards copy. Reach signals may include `funded`; scam flags may include `new_domain`; validation checks may
+  include `domain_age` (days since the apply site was registered, from RDAP).
+* Settings (`GET/PUT /api/settings`, booleans): `enable_yc_source`, `enable_reddit_source`, `enable_founder_posts`,
+  `enable_funding_signals`, `enable_domain_age_check`. Job sources may have `kind: "community"` (`reddit`, `founder_post`)
+  or name `yc_waas`.

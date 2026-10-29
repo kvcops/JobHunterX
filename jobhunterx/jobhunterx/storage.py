@@ -34,6 +34,7 @@ _JOB_COLUMNS = {
     "ats_key": "TEXT", "run_id": "TEXT", "saved_at": "TEXT", "tracking_status": "TEXT DEFAULT 'new'",
     "verdict": "TEXT", "fit_score": "INTEGER", "profile_hash": "TEXT", "validation_status": "TEXT",
     "reach_score": "INTEGER", "connect_json": "TEXT",
+    "outcome_json": "TEXT",          # what happened after applying (services/outcomes.py)
 }
 
 _SCHEMA = """
@@ -529,6 +530,28 @@ async def set_tracking(job_id: str, status: str) -> bool:
         cur = await db.execute(f"UPDATE jobs SET tracking_status = ?{saved_clause} WHERE id = ?", params)
         await db.commit()
         return cur.rowcount > 0
+
+
+async def set_outcome(job_id: str, outcome: dict) -> bool:
+    async with _conn() as db:
+        cur = await db.execute("UPDATE jobs SET outcome_json = ? WHERE id = ?", (json.dumps(outcome), job_id))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def list_outcomes() -> list[dict]:
+    """Outcome records of the active profile's tracked jobs."""
+    where, params = _scope("outcome_json IS NOT NULL")
+    async with _conn() as db:
+        cur = await db.execute(f"SELECT id, outcome_json, tracking_status FROM jobs WHERE {where}", params)
+        rows = await cur.fetchall()
+    out = []
+    for jid, raw, status in rows:
+        try:
+            out.append({"id": jid, "status": status, **json.loads(raw)})
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 async def delete_jobs(scope: str) -> int:

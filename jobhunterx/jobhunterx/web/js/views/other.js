@@ -118,6 +118,7 @@ export function TrackerView() {
     ${tr.status === 'error' ? html`<${ErrorBox} message=${tr.error} onRetry=${loadTracker} />` : null}
     ${tr.status === 'ready' && !jobs.length ? html`<div class="card pane-center grow-fill"><${EmptyState} icon="star" title="Nothing tracked yet"
       action=${html`<${Button} variant="primary" onClick=${() => navigate('#/discover')}>Find roles <${Icon} name="arrow" size=${16} /></${Button}>`}>Star a job in Discover and it lands here, ready to move from shortlist to offer.</${EmptyState}></div>` : html`
+    <${ResultsPanel} />
     <${StageBar} jobs=${jobs} value=${stage} onChange=${setStage} />
     <div class=${`split split-tracker ${route.jobId ? 'has-detail' : ''}`}>
       <section class="pane list-pane card" aria-label="Tracked jobs">
@@ -503,6 +504,22 @@ function BrowserKeyCard({ d }) {
   </section>`;
 }
 
+// No key needed. Server-wide switches, so hidden on shared (multi-user) servers.
+const FREE_SOURCES = [
+  { k: 'enable_yc_source', name: 'YC Work at a Startup', label: 'Use YC startup jobs',
+    hint: "No key — YC startups' public job pages in India and remote. Each role shows the company's own minimum experience (many say \u201cnew grads ok\u201d) and the founder who is hiring." },
+  { k: 'enable_reddit_source', name: 'r/developersIndia', label: 'Use Reddit hiring posts',
+    hint: 'No key — the monthly \u201cWho\u2019s hiring?\u201d thread, where small teams post roles with pay and experience. Reddit blocks some cloud servers; from a home connection it works.' },
+  { k: 'enable_founder_posts', name: 'Founder hiring posts', label: 'Find founder posts',
+    hint: '\u201cWe\u2019re hiring\u201d posts on X and LinkedIn, found through your web search providers. JobHunterX never opens or logs in to X or LinkedIn — you open the post yourself.' },
+  { k: 'enable_funding_signals', name: 'Funding news', label: 'Use funding news',
+    hint: 'No key — startups that just raised money (Inc42, Entrackr, YourStory, Google News). Their openings come first and they get listed under Recently funded.' },
+  { k: 'enable_domain_age_check', name: 'Website age check', label: 'Check website age',
+    hint: 'No key — looks up when the apply site was registered (public domain registry). A site made weeks ago is a scam warning.' },
+  { k: 'enable_hn_source', name: 'Hacker News', label: 'Use Hacker News jobs',
+    hint: 'No key — YC startups\u2019 job posts and the monthly \u201cWho is hiring?\u201d thread. Only India or India-friendly remote roles in your field are kept; many posts give a direct hiring email.' },
+];
+
 function JobApisCard({ d }) {
   const own = !!d.restricted;
   const apis = [
@@ -516,9 +533,9 @@ function JobApisCard({ d }) {
           <div class="muted small">${m.hint} · <a href=${m.url} target="_blank" rel="noopener noreferrer">get a key <${Icon} name="external" size=${12} /></a></div></div></div>
         <${KeyField} field=${`${m.k}_api_key`} label=${m.name} configured=${d[`${m.k}_configured`]} masked=${d[`${m.k}_key_masked`]} source=${d[`${m.k}_source`]} />
       </div>`)}
-      ${own ? null : html`<div class="prov-card"><div class="prov-head"><div class="grow"><strong>Hacker News</strong>
-        <div class="muted small">No key — YC startups' job posts and the monthly "Who is hiring?" thread. Only India or India-friendly remote roles in your field are kept; many posts give a direct hiring email.</div></div>
-        <${Toggle} on=${d.enable_hn_source !== false} label="Use Hacker News jobs" onChange=${(v) => saveSettings({ enable_hn_source: v })} /></div></div>`}
+      ${own ? null : FREE_SOURCES.map((m) => html`<div class="prov-card" key=${m.k}><div class="prov-head"><div class="grow"><strong>${m.name}</strong>
+        <div class="muted small">${m.hint}</div></div>
+        <${Toggle} on=${d[m.k] !== false} label=${m.label} onChange=${(v) => saveSettings({ [m.k]: v })} /></div></div>`)}
     </div></section>`;
 }
 
@@ -574,8 +591,34 @@ function TuningSection({ d }) {
       <${Field} label="Tavily depth">${(id) => html`<${Select} id=${id} block label="Tavily depth" value=${t.tavily_search_depth}
         onChange=${(v) => setT({ ...t, tavily_search_depth: v })} options=${[['basic', 'Basic', '1 credit'], ['advanced', 'Advanced', '2 credits']]} />`}</${Field}>
     </div>
+    <div class="set-toggles" style=${{ margin: '12px 0' }}><div class="set-toggle"><div><strong>Safety-net track for freshers</strong>
+      <span class="muted small">Under ~3 years: show large IT-services fresher programmes (national tests, off-campus drives) in their own “Safety net” tab instead of hiding them.</span></div>
+      <label class="switch"><input type="checkbox" checked=${t.fresher_floor_track !== false} onChange=${(e) => setT({ ...t, fresher_floor_track: e.currentTarget.checked })} /><span class="switch-ui"></span></label></div></div>
     <div class="row gap"><${Button} variant="primary" disabled=${!dirty} onClick=${() => saveSettings({ tunables: t })}>Save</${Button}>
       <${Button} disabled=${!dirty} onClick=${() => setT(d.tunables)}>Discard</${Button}></div>
+  </section>`;
+}
+
+/** Interviews per 10 applications, per channel — and what to change when nothing is working. */
+function ResultsPanel() {
+  const [data, setData] = useState(null);
+  const jobsVersion = useStore((s) => s.tracker.ids.length);
+  useEffect(() => { api.getOutcomes().then(setData).catch(() => setData(null)); }, [jobsVersion]);
+  if (!data || !data.overall.applied) return html`<section class="card results-panel"><strong>Results</strong>
+    <p class="muted small">Mark a job “Applied” and log what happens (on the job's page). After a few applications you'll see which route gets you replies.</p></section>`;
+  const pct = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`);
+  const rows = Object.entries(data.by_channel).sort((a, b) => (b[1].interviews_per_10 || 0) - (a[1].interviews_per_10 || 0));
+  const o = data.overall;
+  return html`<section class="card results-panel">
+    <div class="row gap wrap"><strong>Results</strong>
+      <span class="muted small">${o.applied} applied · ${pct(o.response_rate)} got a human reply · ${o.interviews_per_10 ?? '—'} interviews per 10 applications
+        · target ${pct(data.targets.response_rate)} replies</span></div>
+    ${data.diagnosis.length ? html`<${Notice} tone="warning"><ul class="bullets">${data.diagnosis.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul></${Notice}>` : null}
+    <table class="checks"><thead><tr><th>Route</th><th>Applied</th><th>Replies</th><th>Interviews</th><th>Per 10</th></tr></thead><tbody>
+      ${rows.map(([k, r]) => html`<tr key=${k}><td>${r.label}</td><td>${r.applied}</td><td>${r.replies} (${pct(r.response_rate)})</td><td>${r.interviews}</td><td>${r.interviews_per_10 ?? '—'}</td></tr>`)}
+    </tbody></table>
+    <p class="muted small">With a person involved: ${pct(data.with_person.response_rate)} replies (${data.with_person.applied}) ·
+      direct only: ${pct(data.direct_only.response_rate)} (${data.direct_only.applied})${data.interviews_from_unlocked_jobs ? ` · ${data.interviews_from_unlocked_jobs} interview(s) from jobs older versions hid` : ''}</p>
   </section>`;
 }
 

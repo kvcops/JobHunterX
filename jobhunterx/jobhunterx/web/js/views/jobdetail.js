@@ -1,7 +1,7 @@
 import { html, useState, useEffect } from '../lib/preact.js';
 import { useStore, getState } from '../state/store.js';
 import {
-  loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, connectJob, copyText, generateDocument, generateCv, loadDocuments, autoApply, deleteJob, navigate,
+  loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, connectJob, copyText, generateDocument, generateCv, loadDocuments, autoApply, deleteJob, navigate, recordOutcome,
 } from '../actions.js';
 import {
   Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, Select, VERDICT_TONE, Elapsed,
@@ -25,6 +25,59 @@ function ReachSection({ reach }) {
       <span class="pts">${s.points > 0 ? `+${s.points}` : s.points}</span><span>${s.detail}</span></li>`)}</ul>
     ${reach.application_email ? html`<${Notice} tone="success">The posting asks for applications at <strong>${reach.application_email}</strong> (found in the job text).
       A short, specific email with your proof of work beats a portal application.</${Notice}>` : null}
+  </section>`;
+}
+
+const BAND = {
+  reachable: ['success', 'Within reach'],
+  direct: ['info', 'Apply directly or with a referral'],
+  stretch: ['warning', 'Stretch — referral preferred'],
+  out_of_range: ['danger', 'Out of range'],
+};
+
+/** Early career: how reachable the posting is despite the years it asks, the safety-net track and scam warnings. */
+function FresherCard({ m }) {
+  const e = m.experience || {};
+  const band = BAND[e.band];
+  if (!band && m.track !== 'floor' && !m.scam) return null;
+  return html`<section class="fresher-box">
+    ${m.scam ? html`<${Notice} tone=${m.scam.level === 'medium' ? 'warning' : 'danger'}>
+      <strong>${m.scam.level === 'critical' ? 'Possible scam — not recommended' : 'Be careful with this posting'}</strong>
+      <ul class="bullets">${m.scam.flags.map((f) => html`<li key=${f.rule}>${f.detail}</li>`)}</ul>
+      Report fraud at cybercrime.gov.in or call 1930.</${Notice}>` : null}
+    ${band ? html`<div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>Can you get this one?</h3>
+      <${Badge} tone=${band[0]}>${band[1]}</${Badge}>
+      ${e.candidate_label ? html`<span class="muted small">Your experience as recruiters count it: <strong>${e.candidate_label}</strong></span>` : null}</div>
+      ${e.advice ? html`<p class="small">${e.advice}</p>` : null}` : null}
+    ${m.track === 'floor' ? html`<${Notice} tone="info"><strong>Safety-net track.</strong> Large IT-services employers hire freshers in volume
+      through national tests and off-campus drives. Register on their official hiring portal and note the test dates — keep applying to
+      targeted roles alongside. You can turn this track off in Settings → Search tuning.</${Notice}>` : null}
+  </section>`;
+}
+
+const CHANNEL_OPTIONS = [['own_site', "Company's own site"], ['referral', 'Referral'], ['hiring_team', 'Note to the hiring team'],
+  ['founder_outreach', 'Founder outreach'], ['linkedin', 'LinkedIn'], ['job_board', 'Other job board'], ['challenge', 'Hiring challenge'],
+  ['it_services_test', 'IT-services test / drive'], ['email', 'Email to the posting'], ['other', 'Other']];
+const EVENT_LABEL = { reply: 'A person replied', screen: 'Screening call', interview: 'Interview', offer: 'Offer', rejected: 'Rejected' };
+
+/** What happened after applying — feeds the per-channel results in the tracker. */
+function OutcomeSection({ job }) {
+  const o = job.outcome;
+  const [busy, setBusy] = useState(false);
+  const save = async (extra) => { setBusy(true); await recordOutcome(job.id, extra); setBusy(false); };
+  const done = new Set((o && o.events || []).map((e) => e.kind));
+  return html`<section class="outcome-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>How did you apply, and what happened?</h3>
+      ${o ? html`<span class="muted small">Applied ${relTime(o.applied_at)}${o.age_days_at_apply != null ? ` · the posting was ${o.age_days_at_apply} days old` : ''}</span>` : null}</div>
+    <p class="muted small">Logging this shows which route actually works for you (Tracker → Results).</p>
+    <div class="row gap wrap">
+      <${Select} label="How you applied" value=${(o && o.channel) || ''} options=${(o && o.channel) ? CHANNEL_OPTIONS : [['', 'How you applied…'], ...CHANNEL_OPTIONS]}
+        onChange=${(v) => { if (v) save({ channel: v }); }} />
+      <label class="switch small"><input type="checkbox" checked=${!!(o && o.human_path)} disabled=${busy}
+        onChange=${(e) => save({ human_path: e.currentTarget.checked })} /><span class="switch-ui"></span> A person referred me / I wrote to the team</label>
+    </div>
+    <div class="row gap wrap" style=${{ marginTop: '8px' }}>${Object.entries(EVENT_LABEL).map(([k, label]) => html`
+      <button type="button" key=${k} class=${`chip ${done.has(k) ? 'chip-good' : ''}`} disabled=${busy || done.has(k)} onClick=${() => save({ event: k })}>${done.has(k) ? '✓ ' : '+ '}${label}</button>`)}</div>
   </section>`;
 }
 
@@ -56,6 +109,12 @@ function ConnectSection({ job }) {
           <${Button} size="sm" onClick=${() => copyText(k.subject ? `${k.subject}\n\n${k.message}` : k.message, 'Message copied')}>Copy</${Button}></div>
           <p class="pre">${k.message}</p></div>
       </div>
+      ${k.referral && k.referral.blurb ? html`<div class="connect-draft referral-pack">
+        <div class="row gap"><strong>Referral pack</strong><span class="muted small">for the person who refers you — their portal asks for the job and a few lines</span>
+          <${Button} size="sm" onClick=${() => copyText([k.referral.job_url, k.referral.job_id ? `Job ID: ${k.referral.job_id}` : '', '', k.referral.blurb].filter((x, i) => x || i === 2).join('\n'), 'Referral pack copied')}>Copy</${Button}></div>
+        <p class="pre">${k.referral.blurb}</p>
+        <div class="muted small">${k.referral.job_id ? `Job ID ${k.referral.job_id} · ` : ''}${safeUrl(k.referral.job_url) ? html`<a href=${safeUrl(k.referral.job_url)} target="_blank" rel="noopener noreferrer">job link</a>` : ''}
+          ${job.documents && job.documents.resume ? ' · attach your tailored resume from Documents' : ' · make a tailored resume first (Application kit)'}</div></div>` : null}
       <div class="row gap wrap"><span class="muted small">Uses only: ${(k.facts || []).join(' · ') || 'your profile'}</span>
         <${Button} size="sm" icon="refresh" busy=${busy} onClick=${() => connectJob(job.id)}>Write again</${Button}></div>`
     : html`<div><${Button} size="sm" variant="primary" icon="user" busy=${busy} onClick=${() => connectJob(job.id)}>Find people & draft a referral note</${Button}></div>`}
@@ -96,8 +155,10 @@ function MatchTab({ job }) {
   if (!m) return html`<${Notice}>This job has not been scored yet.</${Notice}>`;
   return html`<div class="stack">
     ${m.headline ? html`<p class="detail-headline">${m.headline}</p>` : null}
+    <${FresherCard} m=${m} />
     <${ReachSection} reach=${m.reach} />
     <${ConnectSection} job=${job} />
+    ${['applied', 'interviewing', 'offer', 'rejected'].includes(job.tracking_status) || job.outcome ? html`<${OutcomeSection} job=${job} />` : null}
     <${CompanySection} c=${job.company_profile} />
     ${m.method === 'fallback' ? html`<${Notice} tone="warning">Partial analysis — the AI could not read this posting fully, so skill coverage and requirements may be incomplete.</${Notice}>` : null}
     <section>

@@ -44,6 +44,24 @@ class ExperienceFit(BaseModel):
     candidate_years: float = 0.0
     fit: Literal["under", "within", "over", "unknown"] = "unknown"
     gap_years: float = 0.0
+    # Early career (under ~3 years): how reachable the posting is despite its stated years (intelligence/matching.py).
+    # reachable · direct (apply on the company site / with a referral) · stretch (referral preferred) · out_of_range
+    band: Literal["reachable", "direct", "stretch", "out_of_range", ""] = ""
+    advice: str = ""
+    candidate_label: str = ""          # "1 yr 4 mo (incl. internships)" — counted the way recruiters' systems count
+
+
+class ScamFlag(BaseModel):
+    rule: str
+    severity: Literal["critical", "high", "medium"]
+    detail: str
+
+
+class ScamCheck(BaseModel):
+    """Fraud signals in a posting (intelligence/scam.py). critical → never recommended; high → shown with a warning."""
+
+    level: Literal["none", "medium", "high", "critical"] = "none"
+    flags: list[ScamFlag] = Field(default_factory=list)
 
 
 class ReachSignal(BaseModel):
@@ -82,6 +100,9 @@ class MatchAssessment(BaseModel):
     role_fit: float = 0.0
     role_track: str = ""
     reach: Optional[Reach] = None      # chance of being seen — separate from fit, never mixed into `score`
+    # main = ranked with everything else · floor = safety-net track (large IT-services fresher programmes)
+    track: Literal["main", "floor"] = "main"
+    scam: Optional[ScamCheck] = None
     method: str = ""                   # llm | fallback — how the JD/role fit were understood
     profile_hash: str = ""
     engine_version: str = ""
