@@ -85,7 +85,8 @@ jobs:
             { echo "build=true"; echo "sync=true"; echo "release=true"; echo "ref=$(git rev-parse HEAD)"; } >> "$GITHUB_OUTPUT"
           else
             release=false
-            if [ "$ASK_RELEASE" = "true" ] || printf '%s' "$HEAD_MESSAGE" | grep -qi '\[release\]'; then release=true; fi
+            # only the subject line counts, so a commit body that merely mentions the word doesn't publish
+            if [ "$ASK_RELEASE" = "true" ] || printf '%s\n' "$HEAD_MESSAGE" | head -1 | grep -qi '\[release\]'; then release=true; fi
             { echo "build=true"; echo "sync=false"; echo "release=$release"; echo "ref=$GITHUB_SHA"; } >> "$GITHUB_OUTPUT"
           fi
 
@@ -104,8 +105,11 @@ jobs:
             echo
             echo "Changes:"
             git log --no-merges --pretty='- %s' ${prev:+$prev..}"$REF" | head -40; } > notes.md
-          gh release create "$TAG" --draft --target "$REF" --title "JobHunterX $VERSION" --notes-file notes.md
-          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)" >> "$GITHUB_OUTPUT"
+          # the id comes straight from the create call (a draft has no real tag yet, so it can't be looked up by tag)
+          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -f target_commitish="$REF" \
+                 -f name="JobHunterX $VERSION" -F body=@notes.md -F draft=true --jq .id)
+          test -n "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build · ${{ matrix.name }}
@@ -251,8 +255,21 @@ jobs:
       - name: Make the release public (apps see it as the latest version)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          ID: ${{ needs.prepare.outputs.release_id }}
+        run: |
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/$ID/assets" --paginate --jq '.[].name')
+          echo "$assets"
+          for ext in '\.exe$' '\.dmg$' '\.AppImage$' '\.deb$'; do
+            echo "$assets" | grep -q "$ext" || { echo "::error::installer matching $ext missing — not publishing"; exit 1; }
+          done
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" -F draft=false -f make_latest=true --jq .html_url
+      - name: Remove desktop releases that ended up without files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select((.tag_name | startswith("desktop-v")) and (.assets | length) == 0 and (.draft | not)) | .tag_name' |
+          while read -r tag; do echo "removing empty release $tag"; gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done
 
   report:
     name: Report a failed update
@@ -263,10 +280,10 @@ jobs:
       - name: Open an issue and clean up
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.prepare.outputs.tag }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ -n "$TAG" ]; then gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true; fi
+          ID="${{ needs.prepare.outputs.release_id }}"
+          if [ -n "$ID" ]; then gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$ID" || true; fi
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "Desktop app not updated for main@${GITHUB_SHA::7}" \
             --body "The desktop app was **not** changed: merging main into \`$DESKTOP_BRANCH\` or building it failed. Details: $RUN_URL"

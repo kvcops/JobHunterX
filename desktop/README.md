@@ -75,7 +75,7 @@ Run only the backend the way the app does (handy for debugging): `python desktop
 4. installed apps see the new version and offer to update.
 
 If anything fails, the desktop branch and the published app stay as they were and an issue is opened with a link to
-the run. Pushes to `jobhunterx-desktop` itself are built and checked too (add `[release]` to the commit message, or
+the run. Pushes to `jobhunterx-desktop` itself are built and checked too (put `[release]` in the commit subject line, or
 use **Run workflow → publish**, to release one).
 
 The workflow file must also be on `main`: GitHub only runs a "push to main" workflow from main's own copy.
