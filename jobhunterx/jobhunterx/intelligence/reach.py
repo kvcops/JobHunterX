@@ -194,6 +194,12 @@ def assess_reach(job: JobPosting, snapshot: Optional[CandidateSnapshot] = None,
                 add("early_career", 3, f"{job.company} posted {entry} entry-level opening(s) in India in the last 90 days.")
             elif total >= 10:
                 add("early_career", -6, f"None of {job.company}'s {total} recent Indian postings were entry-level.")
+    if not mass and job.company:
+        from jobhunterx.discovery import funding
+        raised = funding.lookup(job.company)
+        if raised:
+            add("funded", 6, f"{job.company} raised {raised['amount']} (news of {raised['date']}) — newly funded teams hire, "
+                             "often before posting on the big boards.")
     if risky:
         add("scam", -30, "Scam signals in this posting — see the warning before you share anything.")
 

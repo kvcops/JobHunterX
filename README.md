@@ -127,6 +127,9 @@ person reading a direct application or a referral treats "1–3 years" as a pref
 | **Referral pack** in the Connector: the job link and ID, three lines the referrer can paste, one proof link from your profile | Referral portals work per job ID |
 | **Results**: log how you applied (own site, referral, note to the team…) and what happened; Tracker → Results shows interviews per 10 applications per route, and switches to a diagnosis after 40 applications under 3% replies | Learn what works *for you* |
 | **Honest forms**: the browser agent never rounds experience up on knockout questions | An inflated answer gets caught at interview |
+| **Startup and community sources** (no key): YC Work at a Startup (each role shows its own minimum experience — many say "new grads ok" — and the founder hiring), the r/developersIndia monthly "Who's hiring?" thread, and founders' "we're hiring" posts on X / LinkedIn found through your search providers | Small teams hire early-career people and often post nowhere else |
+| **Recently funded**: startup funding headlines (Inc42, Entrackr, YourStory, Google News). Their openings in the employer-boards copy go first in a search, their jobs get a small "newly funded" reach signal, and Companies → Recently funded lists them with a Watch button | Teams that just raised hire next, before posting on the big boards |
+| **Website age check**: the apply site's registration date from the public domain registry (RDAP). Under 30 days → warning, under 180 → caution, a new site plus another scam signal → never recommended | Fake job sites are usually weeks old |
 
 Jobs scored before an update are re-scored automatically (no AI calls) the next time you open the job list.
 
@@ -672,8 +675,10 @@ e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000
 | **Other pages** (job boards, aggregators) | Unverified | Text only; if the page links to a supported ATS posting, that posting is used instead |
 | **Adzuna** — optional, off until you add `ADZUNA_API_KEY=app_id:app_key` | Aggregated, **inferred** | Each role is first looked up on the employer's own board (first-party wins); staffing agencies are dropped. Code: `discovery/job_apis.py` |
 | **Hacker News** — optional, **off by default** (`ENABLE_HN_SOURCE=true`) | Community post, **inferred** | YC startups' job posts + monthly "Who is hiring?"; only India / your cities / India-friendly remote roles in your field are kept; the hiring email is passed to the Connector |
-| **Adzuna** *(optional, off until you add `ADZUNA_API_KEY=app_id:app_key`)* | Aggregated, **inferred** | Official India index, newest first. Each role is looked up on the employer's own board first; staffing agencies dropped. Code: `discovery/job_apis.py` |
-| **Hacker News** *(optional, **off by default** — `ENABLE_HN_SOURCE=true`)* | Community post, **inferred** | YC startups' job posts + the monthly "Who is hiring?" thread; only India / your cities / India-friendly remote roles in your field; the hiring email in the post is passed to the Connector |
+| **YC Work at a Startup** — on by default (`ENABLE_YC_SOURCE`), no key | Job board, **verified** title and minimum experience | Public ycombinator.com/jobs pages for India, your city and remote; US-only remote roles and listings older than 120 days dropped; the job page adds the description, the hiring founder and the company site. Code: `discovery/community.py` |
+| **r/developersIndia "Who's hiring?"** — on by default (`ENABLE_REDDIT_SOURCE`), no key | Community post, **inferred** | Top-level comments of the monthly megathread, read from their fixed template (company, link, location, role, experience, pay); questions and other countries skipped. Public JSON with RSS fallback; Reddit refuses some cloud addresses and rate-limits, so it may give nothing on a server |
+| **Founder hiring posts** — on by default (`ENABLE_FOUNDER_POSTS`) | Search result, **inferred** | "We're hiring" posts on X / LinkedIn found through your web search providers only. JobHunterX never opens or logs in to X or LinkedIn; the post's date is read from its id and posts older than 60 days dropped. Free search engines rarely surface fresh posts, so expect few |
+| **Funding news** — on by default (`ENABLE_FUNDING_SIGNALS`), no key | News headline | Inc42, Entrackr, YourStory and Google News RSS, refreshed at most every 6 hours, kept 6 months. Used to rank, not as job postings. Code: `discovery/funding.py` |
 | **Web search** — TinyFish → Tavily → Exa → Brave → **Deep Search** (free) → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
 
 ### 🔎 Deep Search — good results without any search key
@@ -944,6 +949,8 @@ SECRET_KEY=a-long-random-text      # encrypts users' saved keys; keep it the sam
 | `MODEL_LIMITS_JSON` | — | Override any model's free-tier limits |
 | `ADZUNA_API_KEY` | — | Optional Adzuna jobs, `app_id:app_key` |
 | `ENABLE_HN_SOURCE` | `false` | Optional Hacker News jobs |
+| `ENABLE_YC_SOURCE` · `ENABLE_REDDIT_SOURCE` · `ENABLE_FOUNDER_POSTS` | `true` | YC startup jobs, r/developersIndia hiring thread, founder hiring posts |
+| `ENABLE_FUNDING_SIGNALS` · `ENABLE_DOMAIN_AGE_CHECK` | `true` | Funding news (ranking + Recently funded) and the website-age scam check |
 | `ENABLE_LINKEDIN_SOURCE` · `LINKEDIN_MAX_APPLICANTS` | `true` · `150` | LinkedIn public feed and its crowd limit |
 
 <br/>
@@ -957,7 +964,7 @@ jobhunterx/jobhunterx/
 ├── domain/          # 📦 Data contracts: profile, snapshot, job posting, match, document
 ├── intelligence/    # 🧠 Understanding + judgement (candidate, job, matching, reach, connect, skill links, policy)
 ├── discovery/       # 🔎 Search, ATS adapters (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, Workday,
-│                    #    Oracle, Keka), ATS index, LinkedIn feed, Adzuna / Hacker News (job_apis.py), watchlist, recipes,
+│                    #    Oracle, Keka), ATS index, LinkedIn feed, Adzuna / Hacker News (job_apis.py), YC / Reddit / founder posts (community.py), funding.py, watchlist, recipes,
 │                    #    page parsing, dedupe, validation, SSRF-safe fetch
 ├── tools/           # 🛠️ Deep Search, search providers + router, zero-spend guard, usage ledger, PDF rendering
 ├── watchlist/       # 🏢 companies.json — the researched company watchlist (Hyderabad, Bengaluru, remote India)
@@ -1025,6 +1032,7 @@ python -m pytest -q tests/frontend
 * `tests/test_api_v2.py` — API contract, errors, cancellation, CSRF / WebSocket / SSRF guards
 * `tests/test_doc_styles_chat.py` — every style renders every document kind to a real PDF; the AI editor's checks (invented facts, links, bad indexes, reorder-only skills); style, download, size-limit and rate-limit endpoints
 * `tests/test_job_apis.py` — Adzuna and Hacker News parsers and the merge (fake network)
+* `tests/test_sources.py` — YC, r/developersIndia (real megathread sample), founder posts, funding headlines, website age (fake network)
 * `tests/test_security.py`, `tests/test_zero_spend.py`, `tests/test_search_providers.py` — guards, search cost and providers
 * `tests/frontend/test_ui.py` — Playwright against the real app
 

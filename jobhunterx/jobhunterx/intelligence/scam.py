@@ -64,6 +64,10 @@ _ATS_HOSTS = ("greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com",
               "icims.com", "jobvite.com", "bamboohr.com", "breezy.hr", "pyjamahr", "turbohire", "superset")
 
 
+YOUNG_DAYS = 180         # younger than this: a caution
+NEW_DAYS = 30            # younger than this: a warning
+
+
 def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
@@ -87,6 +91,20 @@ def check(job: JobPosting) -> ScamCheck:
         if re.search(r"(?i)(bit\.ly|tinyurl|forms\.gle|docs\.google\.com/forms|t\.me|wa\.me)", host + (job.apply_url or "")):
             flags.append(ScamFlag(rule="odd_link", severity="high",
                                   detail="The apply link is a short link, a Google Form or a chat app — not the company's site."))
+    # A website registered only weeks ago (from the domain registry, looked up during validation).
+    age = job.validation.checks.get("domain_age")
+    days = int(age.value) if age and age.value and age.value.isdigit() else None
+    if days is not None and days < YOUNG_DAYS:
+        others = [f for f in flags if f.severity in ("critical", "high")]
+        when = f"{days} days ago" if days != 1 else "yesterday"
+        if others:          # a brand-new site that also asks for money / chats on WhatsApp is the classic fake-job setup
+            flags.append(ScamFlag(rule="new_domain", severity="critical",
+                                  detail=f"The website was registered {when} and the posting shows other scam signals. {age.evidence}."))
+        else:
+            flags.append(ScamFlag(rule="new_domain", severity="high" if days < NEW_DAYS else "medium",
+                                  detail=f"The website was registered only {when}. Fake job sites are usually weeks old — "
+                                         f"genuine new startups are too, so check the founders and the company before you "
+                                         f"share anything. {age.evidence}."))
     order = {"critical": 3, "high": 2, "medium": 1}
     level = max((f.severity for f in flags), key=lambda s: order[s], default="none")
     return ScamCheck(level=level, flags=flags)

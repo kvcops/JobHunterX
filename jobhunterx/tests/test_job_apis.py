@@ -57,14 +57,19 @@ def test_hn_job_story():
     assert job_apis.parse_hn_job({**item, "title": "Quux is hiring a designer in London"}, LABELS) is None
 
 
+OFF = {"enable_yc_source": False, "enable_reddit_source": False, "enable_founder_posts": False}
+
+
 def test_status_flags():
-    s = SimpleNamespace(adzuna_api_key="a:b", enable_hn_source=False)
-    assert job_apis.status(s) == {"adzuna": True, "hackernews": False}
-    assert job_apis.status(SimpleNamespace(adzuna_api_key=None, enable_hn_source=False)) == {"adzuna": False, "hackernews": False}
+    s = SimpleNamespace(adzuna_api_key="a:b", enable_hn_source=False, **OFF)
+    assert job_apis.status(s) == {"adzuna": True, "hackernews": False, "yc": False, "reddit": False, "founders": False}
+    assert job_apis.status(SimpleNamespace(adzuna_api_key=None, enable_hn_source=False))["adzuna"] is False
+    on = job_apis.status(SimpleNamespace(adzuna_api_key=None, enable_hn_source=False))       # keyless community sources default on
+    assert on["yc"] and on["reddit"] and on["founders"]
 
 
 def test_discover_merges_and_survives_failures(monkeypatch):
-    s = SimpleNamespace(adzuna_api_key="a:b", enable_hn_source=True)
+    s = SimpleNamespace(adzuna_api_key="a:b", enable_hn_source=True, **OFF)
     adz = job_apis.parse_adzuna({"results": [
         {"title": "AI Engineer", "company": {"display_name": "Acme AI"}, "redirect_url": "https://www.adzuna.in/land/ad/1",
          "location": {"display_name": "Hyderabad"}, "created": "2026-10-27T09:00:00Z"},

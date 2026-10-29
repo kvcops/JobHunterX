@@ -673,6 +673,36 @@ async def get_outcomes():
             "events": outcomes.EVENTS}
 
 
+@router.get("/funding")
+async def get_funding(refresh: bool = False):
+    """Startups whose funding round was in the news in the last 120 days, with their open roles in the employer-boards index."""
+    from jobhunterx.config.settings import get_settings
+    from jobhunterx.discovery import ats_index, funding
+    if not get_settings().enable_funding_signals:
+        return {"enabled": False, "events": [], "status": funding.status()}
+    places = None
+    profile = await profile_svc.get_profile()
+    if profile and not profile.is_empty():
+        places = list(getattr(profile.preferences, "locations", None) or [])
+    try:
+        await asyncio.wait_for(funding.refresh(places, force=refresh), 25)
+    except Exception as exc:                 # feeds down: show what is already known
+        log.info("funding_refresh_failed", error=str(exc)[:120])
+    events = funding.recent()[:80]
+    keys = {funding.company_key(e["company"]) for e in events}
+    openings: dict[str, list] = {}
+    for r in ats_index._load() if get_settings().enable_ats_index else []:
+        k = funding.company_key(r.company)
+        if k in keys:
+            openings.setdefault(k, []).append(r)
+    out = []
+    for e in events:
+        rows = openings.get(funding.company_key(e["company"]), [])
+        out.append({**e, "openings": len(rows), "entry_openings": sum(1 for r in rows if ats_index.LEVELS.get(r.level, 9) <= 1),
+                    "board_url": rows[0].url if rows else ""})
+    return {"enabled": True, "events": out, "status": funding.status()}
+
+
 @router.post("/jobs/{job_id}/verify")
 async def verify_job(job_id: str):
     profile = await profile_svc.get_profile()
@@ -1070,7 +1100,10 @@ _KEY_FIELDS = {  # payload key → (settings attr, env var names)
     "adzuna_api_key": ("adzuna_api_key", ["ADZUNA_API_KEY"]),
 }
 _BOOL_FIELDS = {"enable_web_search_apis": "ENABLE_WEB_SEARCH_APIS", "brave_enabled": "BRAVE_ENABLED",
-                "strict_zero_spend_protection": "STRICT_ZERO_SPEND_PROTECTION", "enable_hn_source": "ENABLE_HN_SOURCE"}
+                "strict_zero_spend_protection": "STRICT_ZERO_SPEND_PROTECTION", "enable_hn_source": "ENABLE_HN_SOURCE",
+                "enable_yc_source": "ENABLE_YC_SOURCE", "enable_reddit_source": "ENABLE_REDDIT_SOURCE",
+                "enable_founder_posts": "ENABLE_FOUNDER_POSTS", "enable_funding_signals": "ENABLE_FUNDING_SIGNALS",
+                "enable_domain_age_check": "ENABLE_DOMAIN_AGE_CHECK"}
 _SEARCH_PROVIDERS = ("tinyfish", "tavily", "exa", "brave", "deep", "ddgs")
 
 

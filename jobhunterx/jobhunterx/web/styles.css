@@ -1989,3 +1989,9 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .outcome-box .chip:disabled { cursor: default; }
 .results-panel { padding: 14px 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
 .results-panel table { font-size: .82rem; }
+
+/* Recently funded (Companies) */
+.funded-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.funded-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }
+.funded-row:first-child { border-top: 0; }
+.funded-head a { color: inherit; }

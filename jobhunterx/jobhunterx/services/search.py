@@ -24,13 +24,13 @@ from jobhunterx import storage
 from jobhunterx.config import capacity
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
-from jobhunterx.discovery import ats, ats_index, dedupe, job_apis, linkedin, page, registry, search, validate, watchlist
+from jobhunterx.discovery import ats, ats_index, dedupe, funding, job_apis, linkedin, page, registry, search, validate, watchlist
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
 from jobhunterx.intelligence import connect
 from jobhunterx.intelligence import job as job_ai
-from jobhunterx.intelligence import skill_links
+from jobhunterx.intelligence import domain_age, skill_links
 from jobhunterx.intelligence.llm_structured import call_structured
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 from jobhunterx.intelligence.policy import get_policy
@@ -381,6 +381,23 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
     return out
 
 
+async def _funded_openings(task: Optional[asyncio.Task], scope, snap: CandidateSnapshot, have: set[str]) -> list:
+    """Openings in the employer-boards index at companies whose funding round was in the news in the last 120 days."""
+    if task is None:
+        return []
+    try:
+        await asyncio.wait_for(asyncio.shield(task), 15)
+    except Exception:                       # slow or failed feeds: use what was fetched before
+        pass
+    keys = {funding.company_key(e["company"]) for e in funding.recent()}
+    keys.discard("")
+    if not keys:
+        return []
+    wide = ats_index.search([*scope.titles, *snap.adjacent_titles[:4]], scope.locations or [scope.country],
+                            level=snap.seniority.value, include_remote=scope.include_remote, max_age_days=60, limit=2000)
+    return [(r, sc) for r, sc in wide if r.url not in have and funding.company_key(r.company) in keys][:10]
+
+
 def _age_days(p: JobPosting) -> float:
     if not p.posted_at:
         return 999.0
@@ -485,11 +502,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             posts, st = await job_apis.discover(
                 settings, scope.titles, scope.locations or [scope.country or "India"],
                 labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
-                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2), skip=already_seen, on_progress=note)
+                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2), skip=already_seen, on_progress=note,
+                fresher=search.early_career(snap))
         except Exception as exc:                  # a source that is down or out of quota never fails the search
             log.warning("job_apis_failed", error=str(exc)[:160])
             return []
-        bits = [f"{len(posts)} postings kept from " + ", ".join(st["enabled"])]
+        bits = [f"{len(posts)} postings kept from " + ", ".join(job_apis.SOURCE_NAMES.get(n, n) for n in st["enabled"])]
         if st.get("first_party"):
             bits.append(f"{st['first_party']} found on the employer's own job board")
         if st.get("agencies"):
@@ -501,6 +519,8 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
 
     linkedin_task = asyncio.create_task(from_linkedin())
     job_apis_task = asyncio.create_task(from_job_apis())
+    funding_task = (asyncio.create_task(funding.refresh(scope.locations))
+                    if not watch_mode and settings.enable_funding_signals else None)
     index_leads = []
     if not watch_mode and settings.enable_ats_index:
         refresh = ats_index.ensure_background()
@@ -513,6 +533,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         hits = ats_index.search([*scope.titles, *snap.adjacent_titles[:4]], scope.locations or [scope.country],
                                 level=snap.seniority.value, include_remote=scope.include_remote, limit=max_jobs)
         hits = [(r, sc) for r, sc in hits if keep_mass or not watchlist.is_mass_recruiter(r.company)]
+        funded_hits = await _funded_openings(funding_task, scope, snap, {r.url for r, _ in hits})
+        if funded_hits:
+            names = sorted({r.company for r, _ in funded_hits})
+            await run.say("discover", f"{len(funded_hits)} matching openings at recently funded startups ("
+                          + ", ".join(names[:4]) + (" …" if len(names) > 4 else "") + ") — newly funded teams hire first", "good")
+        hits = funded_hits + hits
         index_leads = [search.Lead(url=r.url, title=r.title, snippet=f"{r.company} · {r.location} · first seen {r.first_seen[:10]}",
                                    provider="ats_index", query="employer boards index") for r, _ in hits]
         st = ats_index.status()
@@ -722,6 +748,14 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
             listed_now = bool(p.ats and p.sources and p.sources[0].kind == "ats_api" and p.validation.status != "closed")
             live = ("live", f"{p.ats.kind.title()} API: listed now") if listed_now else await validate.check_liveness(p)
             validate.finalize(p, live)
+            try:
+                days = await domain_age.annotate(p)        # a website registered weeks ago is a scam signal
+            except Exception as exc:
+                days = None
+                log.debug("domain_age_failed", error=str(exc)[:120])
+            if days is not None and days < 180:
+                await run.say("validate", f"{p.company}'s website was registered only {days} days ago — checked for scam signals",
+                              "warn", _job_ref(p))
 
         await run.say("validate", f"Checking that the next {len(chunk)} jobs are real and still open", "work")
         await asyncio.gather(*(check(p) for p in chunk))

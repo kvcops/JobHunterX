@@ -23,7 +23,7 @@ export const CHECK_LABEL = {
   url_reachable: 'Posting URL reachable', ats_confirmed: 'Confirmed on company ATS', company: 'Company',
   title: 'Title', location: 'Location', work_mode: 'Work mode', posted_at: 'Posted date',
   valid_through: 'Valid through', employment_type: 'Employment type', salary: 'Salary',
-  experience: 'Experience requirement', application_open: 'Accepting applications',
+  experience: 'Experience requirement', application_open: 'Accepting applications', domain_age: 'Website age (days)',
 };
 export const CHECK_STATUS_LABEL = {
   verified: 'Verified', inferred: 'Inferred', unverified: 'Unverified', unknown: 'Unknown', failed: 'Failed',

@@ -10,7 +10,7 @@ from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import MatchAssessment
 from jobhunterx.intelligence import job as job_ai
-from jobhunterx.intelligence import skill_links
+from jobhunterx.intelligence import domain_age, skill_links
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 
 _MAIN = "COALESCE(json_extract(match_json, '$.track'), 'main') != 'floor'"   # safety-net jobs have their own view
@@ -217,6 +217,10 @@ async def verify(job_id: str, snapshot: Optional[CandidateSnapshot], profile_dic
         p.validation.status = "unverified"     # re-evaluate from fresh evidence
     live = await validate.check_liveness(p)
     validate.finalize(p, live)
+    try:
+        await domain_age.annotate(p)
+    except Exception:
+        pass
     await storage.update_posting(p)
     if snapshot and profile_dict:
         text = candidate_work_text(profile_dict)

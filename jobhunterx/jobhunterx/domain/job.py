@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from jobhunterx.domain.common import Seniority, WorkMode
 
-SourceKind = Literal["ats_api", "career_page", "job_board", "aggregator", "search_result"]
+SourceKind = Literal["ats_api", "career_page", "job_board", "aggregator", "search_result", "community"]
 CheckStatus = Literal["verified", "inferred", "unverified", "unknown", "failed"]
 ValidationStatus = Literal["active", "likely_active", "unverified", "stale", "closed", "invalid"]
 

@@ -127,6 +127,11 @@ class Settings(BaseSettings):
     enable_linkedin_source: bool = True     # LinkedIn's public (logged-out) job feed: newest posts, resolved to employer boards
     fresher_floor_track: bool = True        # under ~3 yrs: show large IT-services fresher programmes as a separate safety-net track
     enable_hn_source: bool = False          # Hacker News: YC job posts + monthly 'Who is hiring?' (India / India-friendly remote only)
+    enable_yc_source: bool = True           # YC Work at a Startup public job pages (minimum experience shown per role)
+    enable_reddit_source: bool = True       # r/developersIndia posts flaired 'Hiring' (Reddit's public JSON / RSS)
+    enable_founder_posts: bool = True       # founders' 'we're hiring' posts on X / LinkedIn, via your web search providers only
+    enable_funding_signals: bool = True     # startup funding news (Inc42, Entrackr, YourStory, Google News RSS)
+    enable_domain_age_check: bool = True    # registration date of the apply site (public RDAP registry) as a scam signal
     linkedin_max_applicants: int = 150      # skip LinkedIn posts that already show this many applicants
     max_llm_jd_extractions_per_search: int = 40
     watch_interval_hours: float = 4.0            # how often watchlist boards are checked while the app runs; 0 = off

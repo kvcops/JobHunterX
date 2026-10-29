@@ -3,12 +3,14 @@
 import { html, useEffect, useRef, useState } from '../lib/preact.js';
 import { ReconnectingSocket } from '../lib/ws.js';
 import { useStore } from '../state/store.js';
+import { api } from '../lib/api.js';
 import {
   loadWatchlist, checkWatchlistNow, navigate, setList, loadMonitors, ensureWatchlist, ensureMonitors, refreshCompanies, addMonitor, checkMonitor, rescoutMonitor, removeMonitor,
 } from '../actions.js';
 import { Button, Badge, Skeleton, ErrorBox, EmptyState, PageHead, Tabs, Icon, Monogram, Notice, Spinner, Portal } from '../components/ui.js';
 import { CompanySection } from './jobdetail.js';
 import { runProgress } from './discover.js';
+import { safeUrl, fmtDate } from '../lib/format.js';
 import {
   COMPANY_VERDICT_LABEL, COMPANY_VERDICT_TONE, COMPETITION_LABEL, EARLY_CAREER_LABEL, relTime, humanize, plural,
 } from '../lib/format.js';
@@ -234,6 +236,38 @@ function MyCompanies() {
   </section>`;
 }
 
+/** Startups whose funding round was in the news lately — they hire next, often before posting on the big boards. */
+function RecentlyFunded() {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const load = (refresh = false) => {
+    setBusy(true);
+    api.getFunding(refresh).then(setData).catch(() => setData({ enabled: true, events: [], error: true })).finally(() => setBusy(false));
+  };
+  useEffect(() => { load(); }, []);
+  if (!data || data.enabled === false) return null;
+  const events = data.events || [];
+  const shown = open ? events : events.slice(0, 6);
+  return html`<section class="card pad stack funded-panel">
+    <div class="row gap wrap"><h2 class="my-companies-title">Recently funded</h2>
+      <span class="muted small">${events.length ? `${plural(events.length, 'startup')} raised money in the last 4 months` : 'No funding news loaded yet'}</span>
+      <span class="grow"></span>
+      <${Button} size="sm" icon="refresh" busy=${busy} onClick=${() => load(true)}>Refresh</${Button}></div>
+    <p class="muted small">Teams that just raised hire next — often before they post anywhere. Watch the ones in your field, or write to a founder
+      with one proof-of-work link. From Inc42, Entrackr, YourStory and Google News headlines.</p>
+    ${data.error ? html`<${Notice} tone="warning">Couldn't load funding news right now.</${Notice}>` : null}
+    ${events.length ? html`<ul class="funded-list">${shown.map((e) => html`<li key=${e.company + e.date} class="funded-row">
+      <div class="grow"><strong>${e.company}</strong> <span class="muted small">raised ${e.amount} · ${fmtDate(e.date)}</span>
+        <div class="muted small funded-head">${safeUrl(e.url) ? html`<a href=${safeUrl(e.url)} target="_blank" rel="noopener noreferrer">${e.headline}</a>` : e.headline}</div></div>
+      ${e.openings ? html`<${Badge} tone=${e.entry_openings ? 'success' : 'info'}>${e.entry_openings ? `${e.entry_openings} entry-level of ${e.openings} open` : `${e.openings} open`}</${Badge}>` : null}
+      ${safeUrl(e.board_url) ? html`<a class="btn btn-sm" href=${safeUrl(e.board_url)} target="_blank" rel="noopener noreferrer">Jobs <${Icon} name="external" size=${12} /></a>` : null}
+      <${Button} size="sm" icon="plus" onClick=${() => addMonitor(e.company, '', '')}>Watch</${Button}>
+    </li>`)}</ul>` : null}
+    ${events.length > 6 ? html`<button type="button" class="link-btn" onClick=${() => setOpen(!open)}>${open ? 'Show fewer' : `Show all ${events.length}`}</button>` : null}
+  </section>`;
+}
+
 /** Live view of a running watchlist check — every line and number comes from the server as it happens. */
 function LiveCheck({ run, feed }) {
   const pct = runProgress(run);
@@ -285,6 +319,7 @@ export function CompaniesView() {
         <${Button} icon="plus" onClick=${() => { const el = document.getElementById('add-company'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }}>Add company</${Button}>
         <${Button} variant="primary" icon="refresh" busy=${checking} onClick=${checkWatchlistNow}>${checking ? 'Checking…' : 'Check for new roles now'}</${Button}>`} />
     <${MyCompanies} />
+    <${RecentlyFunded} />
     <div class="card pad stack">
       <div class="row gap wrap">
         ${d && d.cities && d.cities.length ? html`<span>Your cities: <strong>${d.cities.join(', ')}</strong></span>` : null}

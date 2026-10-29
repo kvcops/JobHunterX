@@ -504,6 +504,22 @@ function BrowserKeyCard({ d }) {
   </section>`;
 }
 
+// No key needed. Server-wide switches, so hidden on shared (multi-user) servers.
+const FREE_SOURCES = [
+  { k: 'enable_yc_source', name: 'YC Work at a Startup', label: 'Use YC startup jobs',
+    hint: "No key — YC startups' public job pages in India and remote. Each role shows the company's own minimum experience (many say \u201cnew grads ok\u201d) and the founder who is hiring." },
+  { k: 'enable_reddit_source', name: 'r/developersIndia', label: 'Use Reddit hiring posts',
+    hint: 'No key — the monthly \u201cWho\u2019s hiring?\u201d thread, where small teams post roles with pay and experience. Reddit blocks some cloud servers; from a home connection it works.' },
+  { k: 'enable_founder_posts', name: 'Founder hiring posts', label: 'Find founder posts',
+    hint: '\u201cWe\u2019re hiring\u201d posts on X and LinkedIn, found through your web search providers. JobHunterX never opens or logs in to X or LinkedIn — you open the post yourself.' },
+  { k: 'enable_funding_signals', name: 'Funding news', label: 'Use funding news',
+    hint: 'No key — startups that just raised money (Inc42, Entrackr, YourStory, Google News). Their openings come first and they get listed under Recently funded.' },
+  { k: 'enable_domain_age_check', name: 'Website age check', label: 'Check website age',
+    hint: 'No key — looks up when the apply site was registered (public domain registry). A site made weeks ago is a scam warning.' },
+  { k: 'enable_hn_source', name: 'Hacker News', label: 'Use Hacker News jobs',
+    hint: 'No key — YC startups\u2019 job posts and the monthly \u201cWho is hiring?\u201d thread. Only India or India-friendly remote roles in your field are kept; many posts give a direct hiring email.' },
+];
+
 function JobApisCard({ d }) {
   const own = !!d.restricted;
   const apis = [
@@ -517,9 +533,9 @@ function JobApisCard({ d }) {
           <div class="muted small">${m.hint} · <a href=${m.url} target="_blank" rel="noopener noreferrer">get a key <${Icon} name="external" size=${12} /></a></div></div></div>
         <${KeyField} field=${`${m.k}_api_key`} label=${m.name} configured=${d[`${m.k}_configured`]} masked=${d[`${m.k}_key_masked`]} source=${d[`${m.k}_source`]} />
       </div>`)}
-      ${own ? null : html`<div class="prov-card"><div class="prov-head"><div class="grow"><strong>Hacker News</strong>
-        <div class="muted small">No key — YC startups' job posts and the monthly "Who is hiring?" thread. Only India or India-friendly remote roles in your field are kept; many posts give a direct hiring email.</div></div>
-        <${Toggle} on=${d.enable_hn_source !== false} label="Use Hacker News jobs" onChange=${(v) => saveSettings({ enable_hn_source: v })} /></div></div>`}
+      ${own ? null : FREE_SOURCES.map((m) => html`<div class="prov-card" key=${m.k}><div class="prov-head"><div class="grow"><strong>${m.name}</strong>
+        <div class="muted small">${m.hint}</div></div>
+        <${Toggle} on=${d[m.k] !== false} label=${m.label} onChange=${(v) => saveSettings({ [m.k]: v })} /></div></div>`)}
     </div></section>`;
 }
 

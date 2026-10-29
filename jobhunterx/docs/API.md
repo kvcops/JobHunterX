@@ -502,3 +502,10 @@ Generated documents expose `header.links[]`, `projects[].links[]` and `item_link
   targets, channels, events}`; each block has `applied, replies, interviews, offers, response_rate, interviews_per_10`.
 * Connector kits include `referral: {job_url, job_id, blurb, proof_link, proof_label}`.
 * Setting `fresher_floor_track` (tunable, default true).
+* `GET /api/funding?refresh=bool` → `{enabled, events: [{company, amount, date, headline, url, source, openings,
+  entry_openings, board_url}], status}` — startups in the funding news of the last 120 days, with their open roles in the
+  employer-boards copy. Reach signals may include `funded`; scam flags may include `new_domain`; validation checks may
+  include `domain_age` (days since the apply site was registered, from RDAP).
+* Settings (`GET/PUT /api/settings`, booleans): `enable_yc_source`, `enable_reddit_source`, `enable_founder_posts`,
+  `enable_funding_signals`, `enable_domain_age_check`. Job sources may have `kind: "community"` (`reddit`, `founder_post`)
+  or name `yc_waas`.

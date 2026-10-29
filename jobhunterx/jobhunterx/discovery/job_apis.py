@@ -1,5 +1,6 @@
 """
-Optional extra job sources: Adzuna (India, needs a free key) and Hacker News (YC jobs + "Who is hiring?", opt-in).
+Optional extra job sources: Adzuna (India, needs a free key), Hacker News (YC jobs + "Who is hiring?", opt-in), and the
+community / startup sources in community.py (YC Work at a Startup, r/developersIndia, founder hiring posts).
 
 Why these three, and how each is used (see README "Job Sources"):
 
@@ -33,6 +34,7 @@ log = get_logger("job_apis")
 
 CONCURRENCY = 3
 BUDGET_S = 40.0
+SOURCE_TIMEOUT_S = 60.0          # one slow source (web searches for founder posts) never holds up the rest
 FIRST_PARTY_TIMEOUT_S = 10
 ADZUNA_URL = "https://api.adzuna.com/v1/api/jobs/in/search/{page}"
 HN_JOBS_URL = "https://hacker-news.firebaseio.com/v0/jobstories.json"
@@ -97,6 +99,24 @@ async def _json(url: str, *, params: Optional[dict] = None, headers: Optional[di
         return r.json()
     except ValueError:
         return None
+
+
+async def fetch_json(url: str, *, params: Optional[dict] = None, headers: Optional[dict] = None):
+    return await _json(url, params=params, headers=headers)
+
+
+async def fetch_text(url: str, *, params: Optional[dict] = None, headers: Optional[dict] = None) -> Optional[str]:
+    """GET → page text, or None on any failure."""
+    try:
+        r = await _http().get(url, params=params, headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                                                           **(headers or {})})
+    except httpx.HTTPError as exc:
+        log.debug("job_api_fetch_failed", host=url.split("/")[2], error=str(exc)[:80])
+        return None
+    if r.status_code != 200:
+        log.info("job_api_status", host=url.split("/")[2], status=r.status_code)
+        return None
+    return r.text
 
 
 # ------------------------------------------------------------------ keys
@@ -265,17 +285,26 @@ async def _prefer_first_party(p: JobPosting) -> JobPosting:
 def status(settings) -> dict:
     """Which of these sources are on (for the UI and for the search's own log)."""
     return {"adzuna": adzuna_credentials(getattr(settings, "adzuna_api_key", None)) is not None,
-            "hackernews": bool(getattr(settings, "enable_hn_source", False))}
+            "hackernews": bool(getattr(settings, "enable_hn_source", False)),
+            "yc": bool(getattr(settings, "enable_yc_source", True)),
+            "reddit": bool(getattr(settings, "enable_reddit_source", True)),
+            "founders": bool(getattr(settings, "enable_founder_posts", True))}
+
+
+SOURCE_NAMES = {"adzuna": "Adzuna", "hackernews": "Hacker News", "yc": "YC Work at a Startup", "reddit": "r/developersIndia",
+                "founders": "founder hiring posts"}
+# free-text sources: the post was matched to the candidate's field when it was parsed
+_PREMATCHED = {"hackernews", "reddit", "founder_post"}
 
 
 async def discover(settings, titles: list[str], places: list[str], *, labels: list[str], include_remote: bool = False,
                    max_postings: int = 30, skip: Optional[Callable[[JobPosting], Awaitable[bool]]] = None,
-                   on_progress: Progress = None) -> tuple[list[JobPosting], dict]:
+                   on_progress: Progress = None, fresher: bool = False) -> tuple[list[JobPosting], dict]:
     """Postings from every enabled source for titles × places. Returns (postings, stats per source)."""
     from jobhunterx.discovery import linkedin
     t0 = time.monotonic()
     on = status(settings)
-    stats: dict = {"enabled": [k for k, v in on.items() if v], "adzuna": 0, "hackernews": 0,
+    stats: dict = {"enabled": [k for k, v in on.items() if v], **{k: 0 for k in on},
                    "agencies": 0, "seen": 0, "first_party": 0}
     if not stats["enabled"]:
         return [], stats
@@ -284,7 +313,10 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
 
     async def guarded(name: str, coro) -> list[JobPosting]:
         try:
-            return await coro
+            return await asyncio.wait_for(coro, SOURCE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            log.warning("job_api_timeout", source=name)
+            return []
         except Exception as exc:                  # a blocked, changed or out-of-quota source never fails the search
             log.warning("job_api_failed", source=name, error=str(exc)[:160])
             return []
@@ -302,13 +334,20 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
         jobs.append(("adzuna", guarded("adzuna", adzuna())))
     if on["hackernews"]:
         jobs.append(("hackernews", guarded("hackernews", hackernews_search(labels, places, include_remote=include_remote))))
+    from jobhunterx.discovery import community
+    if on["yc"]:
+        jobs.append(("yc", guarded("yc", community.yc_search(labels, places, include_remote=include_remote))))
+    if on["reddit"]:
+        jobs.append(("reddit", guarded("reddit", community.reddit_search(labels, include_remote=include_remote))))
+    if on["founders"] and titles:
+        jobs.append(("founders", guarded("founders", community.founder_posts(titles, places, labels, fresher=fresher))))
     results = await asyncio.gather(*(j for _, j in jobs))
     found: list[JobPosting] = []
     for (name, _), res in zip(jobs, results):
         stats[name] = len(res)
         found += res
     if on_progress and found:
-        await on_progress("Job APIs: " + ", ".join(f"{n} {stats[n]}" for n in ("adzuna", "hackernews") if on[n]) + " leads")
+        await on_progress("Extra sources: " + ", ".join(f"{SOURCE_NAMES[n]} {stats[n]}" for n in on if on[n]) + " leads")
 
     common = common_words(p.title for p in found)
     kept: list[JobPosting] = []
@@ -316,7 +355,7 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
     for p in found:
         if linkedin._bad_company(p.company):
             stats["agencies"] += 1
-        elif p.sources[0].name == "hackernews" or title_overlap(p.title, labels, common) > 0:   # HN titles are free text; matched already
+        elif p.sources[0].name in _PREMATCHED or title_overlap(p.title, labels, common) > 0:
             if p.canonical_url not in ids:
                 ids.add(p.canonical_url)
                 kept.append(p)

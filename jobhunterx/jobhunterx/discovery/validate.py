@@ -21,6 +21,8 @@ _FIELDS = ("company", "title", "location", "work_mode", "posted_at", "valid_thro
 
 async def check_liveness(job: JobPosting) -> tuple[str, str]:
     """Return (state, evidence) with state in live | gone | unknown."""
+    if job.sources and job.sources[0].name == "founder_post":
+        return "unknown", "Public post found through web search — JobHunterX does not open X / LinkedIn posts"
     if job.ats and job.ats.job_id:
         state, _ = await ats.ADAPTERS[job.ats.kind].check(job.ats)
         if state != "unknown":
