@@ -763,6 +763,13 @@ Search providers are tried in priority order (primary first, DuckDuckGo last) wi
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
 
+## 🖥️ Desktop app
+
+Prefer a normal app? Install **JobHunterX for Windows, macOS or Linux** from the
+[latest desktop release](https://github.com/kvcops/JobHunterX/releases/latest): double-click, it opens in its own window,
+runs entirely on your computer and updates itself. Details, building it yourself and how it stays in step with `main`:
+[`desktop/README.md`](desktop/README.md).
+
 ## ⚡ Quickstart
 
 ### 🚀 One command (recommended)

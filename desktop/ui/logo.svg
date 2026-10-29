@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="JobHunterX">
+  <title>JobHunterX</title>
+  <defs>
+    <linearGradient id="jhx-tile" x1="10" y1="4" x2="54" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2a2a2f"/>
+      <stop offset="1" stop-color="#0b0b0d"/>
+    </linearGradient>
+    <linearGradient id="jhx-spark" x1="18" y1="16" x2="46" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd2b8"/>
+      <stop offset=".45" stop-color="#f58a52"/>
+      <stop offset="1" stop-color="#e2541f"/>
+    </linearGradient>
+    <radialGradient id="jhx-glow" cx="32" cy="32" r="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ee6b33" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ee6b33" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="jhx-shine" x1="32" y1="0" x2="32" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="jhx-orbit" x1="51" y1="22" x2="13" y2="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity=".75"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".1"/>
+    </linearGradient>
+  </defs>
+  <!-- tile -->
+  <rect x="1" y="1" width="62" height="62" rx="18" fill="url(#jhx-tile)"/>
+  <rect x="1" y="1" width="62" height="31" rx="18" fill="url(#jhx-shine)"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="17.5" fill="none" stroke="#fff" stroke-opacity=".09"/>
+  <!-- orbit, back half -->
+  <path d="M12.58 42.33 A22 8.5 -28 0 1 51.42 21.67" fill="none" stroke="#fff" stroke-opacity=".18" stroke-width="1.1" stroke-linecap="round"/>
+  <!-- glow + spark (an X-shaped four-point star) -->
+  <circle cx="32" cy="32" r="18" fill="url(#jhx-glow)"/>
+  <path transform="rotate(45 32 32)" fill="url(#jhx-spark)"
+        d="M32 11.5C32.7 25.2 34.4 29.9 52.5 32 34.4 34.1 32.7 38.8 32 52.5 31.3 38.8 29.6 34.1 11.5 32 29.6 29.9 31.3 25.2 32 11.5Z"/>
+  <!-- orbit, front half + satellite -->
+  <path d="M51.42 21.67 A22 8.5 -28 0 1 12.58 42.33" fill="none" stroke="url(#jhx-orbit)" stroke-width="1.2" stroke-linecap="round"/>
+  <circle cx="49.45" cy="28.91" r="2.1" fill="#fff"/>
+  <circle cx="49.45" cy="28.91" r="4.2" fill="#fff" fill-opacity=".12"/>
+</svg>

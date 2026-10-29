@@ -1,0 +1,6 @@
+# build output (made by scripts/build_backend.py and `tauri build`)
+node_modules/
+build/
+src-tauri/backend/
+src-tauri/target/
+src-tauri/gen/

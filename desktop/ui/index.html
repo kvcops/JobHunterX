@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JobHunterX</title>
+  <link rel="stylesheet" href="splash.css" />
+</head>
+<body>
+  <main class="splash" aria-live="polite">
+    <img class="logo" src="logo.svg" alt="" width="72" height="72" />
+    <h1>JobHunter<span>X</span></h1>
+    <p id="status">Starting…</p>
+    <div class="bar" id="bar"><span></span></div>
+    <section id="error" class="error" hidden>
+      <strong>JobHunterX couldn't start.</strong>
+      <p id="error-text"></p>
+      <p class="muted">Details are in <code id="error-log"></code>. Closing and opening the app again usually helps.</p>
+    </section>
+  </main>
+  <script src="splash.js"></script>
+</body>
+</html>
