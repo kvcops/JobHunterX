@@ -16,8 +16,8 @@ def test_not_found_for_account_rests_only_that_model():
 
 def test_402_usage_credits_rests_the_provider(monkeypatch):
     monkeypatch.setattr(M, "provider_key", lambda p: "k" * 20)
-    M.mark_failure("ollama/gpt-oss:20b", '402 {"error":{"message":"Add usage credits to use cloud models"}}')
-    assert M.key_rejected("ollama")
+    M.mark_failure("nim/openai/gpt-oss-20b", '402 {"error":{"message":"Add usage credits"}}')
+    assert M.key_rejected("nvidia")
 
 
 def test_a_timeout_without_message_still_rests_the_model():

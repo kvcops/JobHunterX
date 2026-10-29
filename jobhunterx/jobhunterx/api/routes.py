@@ -146,7 +146,7 @@ async def setup_free():
 
 
 class KeyTest(BaseModel):
-    provider: Literal["google", "nvidia", "groq", "mistral", "tavily", "exa", "tinyfish", "brave", "browser_use", "ollama"]
+    provider: Literal["google", "nvidia", "groq", "mistral", "tavily", "exa", "tinyfish", "brave", "browser_use"]
     key: str = Field(..., max_length=256)
 
 
@@ -184,26 +184,6 @@ async def test_key(body: KeyTest):
             except Exception:
                 last = "busy"
         return {"ok": False, "message": f"NVIDIA did not answer ({last}). Its free endpoints get busy — try again in a minute."}
-    if body.provider == "ollama":           # listing models is free, so also read the balance: the $0 plan is pay-per-token
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.get("https://ollama.com/api/balance", headers={"Authorization": f"Bearer {key}"})
-        except httpx.HTTPError:
-            return {"ok": False, "message": "Could not reach Ollama — check your internet connection and try again."}
-        if r.status_code in (401, 403):
-            return {"ok": False, "message": "Ollama rejected this key. Create a new key and paste it again."}
-        if r.status_code == 200:
-            try:
-                bal = r.json()
-                left = float((bal.get("included") or {}).get("balance_usd") or 0) + float((bal.get("purchased") or {}).get("balance_usd") or 0)
-            except (ValueError, TypeError, AttributeError):
-                left = None
-            if left == 0:
-                return {"ok": True, "message": "Key works, but this account has no usage credits. Ollama Cloud is pay-per-token, "
-                                               "so its models answer only after you add credits at ollama.com/plans."}
-            if left is not None:
-                return {"ok": True, "message": f"Key works · ${left:.2f} of usage credits left."}
-        return {"ok": True, "message": "Key works."}
     if body.provider not in checks:
         return {"ok": True, "message": "Saved format looks right — it is checked on the first search."}
     url, headers = checks[body.provider]
@@ -1037,7 +1017,6 @@ _KEY_FIELDS = {  # payload key → (settings attr, env var names)
     "kilo_api_key": ("kilo_api_key", ["KILO_API_KEY"]),
     "browser_use_api_key": ("browser_use_api_key", ["BROWSER_USE_API_KEY"]),
     "adzuna_api_key": ("adzuna_api_key", ["ADZUNA_API_KEY"]),
-    "ollama_api_key": ("ollama_api_key", ["OLLAMA_API_KEY"]),
 }
 _BOOL_FIELDS = {"enable_web_search_apis": "ENABLE_WEB_SEARCH_APIS", "brave_enabled": "BRAVE_ENABLED",
                 "strict_zero_spend_protection": "STRICT_ZERO_SPEND_PROTECTION", "enable_hn_source": "ENABLE_HN_SOURCE"}
@@ -1092,7 +1071,7 @@ async def get_settings_masked():
     out["search_providers"] = list(_SEARCH_PROVIDERS)
     names = {"google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"], "groq": ["GROQ_API_KEY"], "mistral": ["MISTRAL_API_KEY"],
              "nvidia": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"], "kilo": ["KILO_API_KEY"], "tinyfish": ["TINYFISH_API_KEY"], "tavily": ["TAVILY_API_KEY"], "exa": ["EXA_API_KEY"], "brave": ["BRAVE_API_KEY"],
-             "browser_use": ["BROWSER_USE_API_KEY"], "adzuna": ["ADZUNA_API_KEY"], "ollama": ["OLLAMA_API_KEY"]}
+             "browser_use": ["BROWSER_USE_API_KEY"], "adzuna": ["ADZUNA_API_KEY"]}
     for name, env_names in names.items():
         val = getattr(s, f"{name}_api_key")
         out[f"{name}_configured"] = bool(val)

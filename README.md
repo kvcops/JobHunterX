@@ -25,13 +25,12 @@
   <a href="https://mistral.ai"><img src="https://img.shields.io/badge/Mistral_Large-Mistral-FF7000?style=for-the-badge&logo=mistral&logoColor=white" /></a>
   <a href="https://kilo.ai"><img src="https://img.shields.io/badge/Free_models,_no_key-Kilo_Gateway-8B5CF6?style=for-the-badge" /></a>
   <a href="https://build.nvidia.com"><img src="https://img.shields.io/badge/Nemotron_·_GLM_·_DeepSeek-NVIDIA_NIM-76B900?style=for-the-badge&logo=nvidia&logoColor=white" /></a>
-  <a href="https://ollama.com"><img src="https://img.shields.io/badge/Open_models_(opt--in)-Ollama_Cloud-111111?style=for-the-badge" /></a>
   
 </p>
 
 <p align="center">
   
-  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Kilo_·_LLM7_·_NVIDIA_·_Groq_·_Mistral_·_Ollama-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
+  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_NVIDIA_·_Kilo_·_Groq_·_Mistral_·_LLM7-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
   <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_Workday_·_SmartRecruiters_·_Keka-10B981?style=flat-square&labelColor=1e1b2e" />
   
 </p>
@@ -500,9 +499,9 @@ graph LR
         K2["nemotron-3-super-120b:free"]
         K3["dots-3-note · north-mini-code · laguna-s-2.1 · …"]
     end
-    subgraph NIM["🟩 NVIDIA NIM"]
-        N1["nemotron-nano-3-30b-a3b"]
-        N2["glm-5.3-flash · deepseek-v4.1-flash"]
+    subgraph NIM["🟩 NVIDIA NIM (free key)"]
+        N1["nemotron-3-ultra-550b"]
+        N2["minimax-m3.1-flash · gpt-oss-20b · nemotron-3.5-lightning / bolt"]
     end
     subgraph Groq["⚡ Groq"]
         GR1["gpt-oss-120b / 20b"]
@@ -511,22 +510,18 @@ graph LR
     subgraph Mistral["🌀 Mistral"]
         M1["medium · small · large"]
     end
-    subgraph Ollama["🦙 Ollama Cloud (opt-in)"]
-        O1["gpt-oss:120b / 20b"]
-    end
     subgraph LLM7["🆓 LLM7 (no key, last resort)"]
         L1["GLM-5.3-Flash · DeepSeek-V4-Flash"]
     end
-    G1 -->|fallback| K1 -->|fallback| N1 -->|fallback| GR1 -->|fallback| M1 -->|fallback| O1 -->|fallback| L1
+    G1 -->|fallback| N1 -->|fallback| K1 -->|fallback| GR1 -->|fallback| M1 -->|fallback| L1
 
     classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px;
     classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px;
     classDef mistral fill:#FF7000,stroke:#cc5a00,color:#fff,stroke-width:2px;
     classDef kilo fill:#8B5CF6,stroke:#6d28d9,color:#fff,stroke-width:2px;
     classDef nim fill:#76B900,stroke:#5a8f00,color:#fff,stroke-width:2px;
-    classDef ollama fill:#111,stroke:#000,color:#fff,stroke-width:2px;
     classDef llm7 fill:#64748b,stroke:#475569,color:#fff,stroke-width:2px;
-    class K1,K2,K3 kilo; class N1,N2 nim; class G1 google; class GR1,GR2 groq; class M1 mistral; class O1 ollama; class L1 llm7;
+    class K1,K2,K3 kilo; class N1,N2 nim; class G1 google; class GR1,GR2 groq; class M1 mistral; class L1 llm7;
 ```
 
 > [!NOTE]
@@ -538,10 +533,10 @@ graph LR
 
 | Task (Settings label) | Chain | Model order (a model without a key / switched off / not on your account is skipped) |
 |:--|:--|:--|
-| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Lightning, Nemotron 3.5 Bolt, GPT-OSS 20B) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → Ollama GPT-OSS 20B *(opt-in, paid)* → LLM7 |
-| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** (Nemotron 3 Super, Nemotron 3.5 Super VL, Auto, Dots 3 Note, Laguna S, Xing 4.0, Nemotron 3 Nano Omni) → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → Ollama *(opt-in, paid)* → LLM7 |
-| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B — the two that kept every fact in the rewrite test) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → NIM MiniMax M3.1 Flash → Ollama *(opt-in, paid)* → LLM7 |
-| Resume reading, job reading, Company Scout | `extraction` | same as Matching & analysis (Mistral Medium before Groq GPT-OSS 120B) |
+| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Lightning, Nemotron 3.5 Bolt, GPT-OSS 20B) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → LLM7 |
+| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, MiniMax M3.1 Flash, GPT-OSS 20B, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** (Nemotron 3 Super, Nemotron 3.5 Super VL, Auto, Dots 3 Note, Laguna S, Xing 4.0, Nemotron 3 Nano Omni) → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → LLM7 |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B, then MiniMax M3.1 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → LLM7 |
+| Resume reading, job reading, Company Scout | `extraction` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B, MiniMax M3.1 Flash, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** → Groq Qwen3.8 27B → Mistral Medium → Groq GPT-OSS 120B → LLM7 |
 | **Resume chat editor** | `editor` | Gemini 3.5 Flash Lite → **Kilo** free models only — thinking off |
 | Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra, Nemotron 3.5 Lightning) → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
 
@@ -561,21 +556,6 @@ Llama models are deliberately not used. In **Settings → AI providers** you can
 pick the first model for each task, and press **Check available models** — the app asks each provider's `/models`
 endpoint with your key and skips models your account cannot call.
 
-### 🦙 Ollama Cloud (optional, off by default — **not free**)
-
-Ollama Cloud runs **open-weight models only** behind `https://ollama.com/v1` (OpenAI-compatible, `Authorization: Bearer <key>`;
-model names are the ones `https://ollama.com/api/tags` lists, e.g. `gpt-oss:120b`).
-
-* **It costs money.** Since October 2026 its `$0` plan is *pay as you go* — every cloud model is billed per token
-  ([ollama.com/pricing](https://ollama.com/pricing): e.g. `gpt-oss:20b` $0.07 in / $0.30 out per million tokens, 3 concurrent
-  requests; Pro $20/month includes $60 of usage). An account without credits gets `402 Add usage credits` — checked live with a
-  free account on 29 Oct 2026. The app then skips Ollama for 30 minutes instead of retrying.
-* So it stays **off until you turn it on** (Settings → AI providers → Ollama Cloud, plus a key from
-  [ollama.com/settings/keys](https://ollama.com/settings/keys)) and sits after every free provider. The key test reads your
-  balance (`/api/balance`, free) and tells you when the account has no credits.
-* **Models in the catalog:** `gpt-oss:120b` and `gpt-oss:20b` (both on Ollama's cloud list). Thinking is set to the lowest level
-  (`reasoning_effort`); a model that rejects it is asked again without it. Ollama says it does not train on cloud prompts.
-
 ### 🟩 NVIDIA NIM (free key)
 
 `https://integrate.api.nvidia.com/v1`, OpenAI-compatible, key from [build.nvidia.com](https://build.nvidia.com/settings/api-keys).
@@ -590,11 +570,11 @@ thinking off, run through the app's own router):
 | **Nemotron 3.5 Bolt** | ~1 s | quick tasks |
 | **GPT-OSS 20B** | 2–6 s (reasoning effort *low*), kept every fact | all tasks, writing backup |
 | Nemotron 3 Nano Omni | 1.4 s when free, often "16/16 requests" busy | backup |
-| MiniMax M3.1 Flash | 3–25 s, always thinks a little | late writing backup |
+| **MiniMax M3.1 Flash** | 1–13 s with reasoning effort *low* (5–30 s without); the most thorough job-fit judgments and good cover-letter prose, **but added tools the candidate never used when rewriting a resume bullet** (the fact-checker rejects those lines); its shared endpoint often answers 429 | 2nd for matching, 3rd for reading and writing |
 
 Not used: Nemotron 3 Super, Nemotron Nano 3 and Kimi K2.6 (listed, but not callable on a free key), DeepSeek V4.1 Flash, GLM 5.3
-Flash and Step 5 (no answer within 150 s), Llama models (never used here), Gemma (dropped app-wide). The router waits at most 30 s
-for a NIM answer, rests a model that times out, and rests a model "not found for account" for 12 hours, so a busy endpoint never
+Flash and Step 5 (no answer within 150 s), Llama models (never used here), Gemma (dropped app-wide). A 429 from NIM rests only that model (it usually means its shared endpoint is busy; the account's
+40/min has its own limiter). The router waits at most 30 s for a NIM answer, rests a model that times out, and rests a model "not found for account" for 12 hours, so a busy endpoint never
 holds a search up. NIM serves every agent that goes through a task chain — profile and job reading, matching, shortlisting, the
 Connector, resume / CV / letter writing, the Company Scout and the agents office — and drives the browser agent too. The ~40
 requests/minute is what NVIDIA's free tier is widely reported to allow per account (not an official number), so the router spaces
@@ -619,8 +599,7 @@ e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
 | Kilo Gateway | `kilo-auto/free` · `nvidia/nemotron-3-super-120b-a12b:free` · `nvidia/nemotron-3.5-super-vl:free` · `dots-studio/dots-3-note-preview:free` · `cohere/north-mini-code:free` · `poolside/laguna-s-2.1:free` · `xingchen-agi/xing4.0-29b-a4b:free` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | — | **200 req / hour per model** | — | No key. Measured 1–9 s per answer. May train on prompts |
 | LLM7 | `GLM-5.3-Flash` · `DeepSeek-V4-Flash-0731` | ~5 per minute (spaced) | small token quota | — | No key, one call at a time, 10–60 s: last resort |
-| NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` · `nvidia/nemotron-3.5-lightning-30b-a3b` · `nvidia/nemotron-3.5-bolt-e4b` · `openai/gpt-oss-20b` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` · `minimaxai/minimax-m3.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget. Thinking off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS); a call waits at most 30 s before the next model takes over |
-| Ollama Cloud | `gpt-oss:120b` · `gpt-oss:20b` | 3 concurrent (spaced, 1 at a time here) | pay-per-token | — | **Opt-in and not free** — see above |
+| NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` · `nvidia/nemotron-3.5-lightning-30b-a3b` · `nvidia/nemotron-3.5-bolt-e4b` · `openai/gpt-oss-20b` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` · `minimaxai/minimax-m3.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget. Thinking off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS and MiniMax); a call waits at most 30 s before the next model takes over |
 
 > [!NOTE]
 > Resume upload runs in the background with live progress, so a slow free-tier call never times out the page.
@@ -912,7 +891,6 @@ SECRET_KEY=a-long-random-text      # encrypts users' saved keys; keep it the sam
 | `BROWSER_SHOW_WINDOW` | `false` | Also open a real Chrome window (debugging only) |
 | `MAX_JOBS_PER_SEARCH` | see `.env.example` | How many jobs one search analyses |
 | `MODEL_LIMITS_JSON` | — | Override any model's free-tier limits |
-| `OLLAMA_API_KEY` | — | Optional Ollama Cloud key (also turn the provider on in Settings) |
 | `ADZUNA_API_KEY` | — | Optional Adzuna jobs, `app_id:app_key` |
 | `ENABLE_HN_SOURCE` | `false` | Optional Hacker News jobs |
 | `ENABLE_LINKEDIN_SOURCE` · `LINKEDIN_MAX_APPLICANTS` | `true` · `150` | LinkedIn public feed and its crowd limit |
@@ -1012,7 +990,7 @@ python -m pytest -q tests/frontend
 | Generated text | Fact-checked against your profile; chat edits cannot touch contact details, links, dates, companies or degrees |
 | Uploads | PDF only, size-limited, parsed in the background |
 | Free shared pools | Kilo / LLM7 are IP-limited, so in prod mode only the admin uses them; users bring their own keys and have their own rate-limit slots |
-| Paid-API accidents | `STRICT_ZERO_SPEND_PROTECTION` blocks any search call that could cost money; Ollama Cloud and the optional job APIs are off until you opt in |
+| Paid-API accidents | `STRICT_ZERO_SPEND_PROTECTION` blocks any search call that could cost money; the optional job APIs are off until you opt in |
 
 Found a problem? Open an issue — please don't post keys or resumes in it.
 

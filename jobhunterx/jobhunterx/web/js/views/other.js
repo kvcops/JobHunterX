@@ -409,8 +409,6 @@ const LLM_META = {
   nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Nemotron 3 Ultra 550B, Nemotron 3.5 Lightning / Bolt, GPT-OSS 20B · free key · 40 requests/min for the whole account · thinking off — leads every task when a key is set, and drives the browser agent', url: 'build.nvidia.com' },
   groq: { name: 'Groq', field: 'groq_api_key', hint: 'GPT-OSS, Kimi K2, Qwen3 — very fast', url: 'console.groq.com' },
   mistral: { name: 'Mistral', field: 'mistral_api_key', hint: 'Mistral Medium / Small / Large (latest)', url: 'console.mistral.ai' },
-  ollama: { name: 'Ollama Cloud', field: 'ollama_api_key', hint: 'Open-weight models (GPT-OSS 120B / 20B) · pay-per-token: needs usage credits on your Ollama account · off until you turn it on', url: 'ollama.com/settings/keys',
-    note: 'Not free: Ollama Cloud bills per token (its $0 plan has no included usage). Without credits it is skipped automatically.' },
 };
 const SEARCH_META = {
   tinyfish: { name: 'TinyFish', field: 'tinyfish_api_key', hint: 'Search API — free utility credits' },
@@ -610,7 +608,7 @@ function AgentSection({ d, mode }) {
   </section>`;
 }
 
-const PROVIDER_NAMES = { google: 'Google', kilo: 'Kilo (free)', llm7: 'LLM7 (free)', nvidia: 'NVIDIA NIM', groq: 'Groq', mistral: 'Mistral', ollama: 'Ollama Cloud' };
+const PROVIDER_NAMES = { google: 'Google', kilo: 'Kilo (free)', llm7: 'LLM7 (free)', nvidia: 'NVIDIA NIM', groq: 'Groq', mistral: 'Mistral' };
 const SEARCH_NAMES = { tinyfish: 'TinyFish', tavily: 'Tavily', exa: 'Exa', brave: 'Brave Search', deep: 'Deep Search (free)', ddgs: 'DuckDuckGo (free)' };
 
 function UsageBody({ u }) {
@@ -633,7 +631,7 @@ function UsageBody({ u }) {
 
 function SettingsOverview({ d }) {
   if (!d) return null;
-  const llm = ['google', 'kilo', 'llm7', 'nvidia', 'groq', 'mistral', 'ollama'];
+  const llm = ['google', 'kilo', 'llm7', 'nvidia', 'groq', 'mistral'];
   const search = d.search_providers || [];
   const on = (kind, p) => !d.providers || !d.providers[kind] || d.providers[kind][p] !== false;
   const llmReady = llm.filter((p) => (p === 'kilo' || p === 'llm7' || d[`${p}_configured`]) && on('llm', p)).length;

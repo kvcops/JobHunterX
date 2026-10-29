@@ -19,12 +19,11 @@ from jobhunterx.config.logging import get_logger
 log = get_logger("app_state")
 
 SEARCH_PROVIDERS = ["tinyfish", "tavily", "exa", "brave", "deep", "ddgs"]   # deep + ddgs need no key
-LLM_PROVIDERS = ["google", "kilo", "llm7", "nvidia", "groq", "mistral", "ollama"]   # kilo and llm7 need no key
+LLM_PROVIDERS = ["google", "kilo", "llm7", "nvidia", "groq", "mistral"]   # kilo and llm7 need no key
 
 # Seeded on first start; later releases only ever add keys.
 DEFAULTS: dict[str, Any] = {
-    "llm.providers": {"google": True, "kilo": True, "llm7": True, "nvidia": True, "groq": True, "mistral": True,
-                      "ollama": False},         # opt-in: its free plan is small and changes often
+    "llm.providers": {"google": True, "kilo": True, "llm7": True, "nvidia": True, "groq": True, "mistral": True},
     "llm.overrides": {},                       # chain -> preferred first model id
     "search.providers": {p: True for p in SEARCH_PROVIDERS},
     "search.order": list(SEARCH_PROVIDERS),
@@ -102,7 +101,7 @@ def llm_provider_enabled(provider: str) -> bool:
     if auth_ctx.restricted() is not None:
         # prod mode: a user's own keys are always theirs to use; the IP-limited free pools never are
         return provider not in auth_ctx.SHARED_POOLS
-    return bool(_cache["llm.providers"].get(provider, provider != "ollama"))
+    return bool(_cache["llm.providers"].get(provider, True))
 
 
 def office_ai_enabled() -> bool:

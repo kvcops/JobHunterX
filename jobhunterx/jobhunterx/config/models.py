@@ -79,19 +79,14 @@ CATALOG: list[dict[str, Any]] = [
      "note": "2-6 s, reliable JSON, keeps facts. Reasoning effort low."},
     {"id": "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "name": "Nemotron 3 Nano Omni (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "Fast when free, often busy (503). Backup. Thinking off."},
+    # MiniMax M3.1 Flash, tested separately (reasoning effort low): the most thorough job-fit judgments of the three and good
+    # cover-letter prose, 3-13 s; but in resume-bullet rewrites it added the job's tools the candidate never used (both runs) —
+    # the fact-checker rejects that — so it is second for analysis and third for writing. Its shared endpoint often answers 429.
     {"id": "nim/minimaxai/minimax-m3.1-flash", "name": "MiniMax M3.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Good writing but always thinks a little (3-25 s). Late backup."},
+     "note": "Thorough analysis and good prose, 3-13 s with reasoning effort low. Second for matching, third for writing."},
     # Google AI Studio.
     {"id": "gemini/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "provider": "google", "rpm": 15, "rpd": 500, "tpm": 250_000, "tpd": None,
      "note": "Fast (~1 s) and reliable — first choice for every task."},
-    # Ollama Cloud (ollama.com) — OPT-IN, off by default, and NOT FREE: since Oct 2026 the $0 plan is pay-per-token
-    # (ollama.com/pricing, checked 29 Oct 2026; gpt-oss:20b $0.07 / $0.30 per million tokens in / out, 3 concurrent requests).
-    # An account without credits gets "402 Add usage credits" — the router then skips Ollama for 30 minutes. Open-weight
-    # models only; names are the ones /api/tags lists. Calls are spaced and one at a time.
-    {"id": "ollama/gpt-oss:120b", "name": "GPT-OSS 120B (Ollama Cloud)", "provider": "ollama", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Open-weight reasoning model. Opt-in; one request at a time."},
-    {"id": "ollama/gpt-oss:20b", "name": "GPT-OSS 20B (Ollama Cloud)", "provider": "ollama", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Light and fast. Opt-in; one request at a time."},
     # Groq — production/preview open models (Llama deliberately not used).
     {"id": "groq/openai/gpt-oss-120b", "name": "GPT-OSS 120B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200_000,
      "note": "Best open reasoning model on Groq; low TPM on the free plan."},
@@ -121,9 +116,12 @@ BY_ID = {m["id"]: m for m in CATALOG}
 # NVIDIA NIM (free key): 40 requests/minute for the whole account — about 2,400 an hour against Kilo's 200 an hour per model —
 # so with a key NIM leads right after Gemini. Without a key these entries are skipped. Thinking is off / low on all of them.
 _NIM_FAST = ["nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3.5-bolt-e4b", "nim/openai/gpt-oss-20b"]
-_NIM_SMART = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b", "nim/nvidia/nemotron-3.5-lightning-30b-a3b",
-              "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
-_NIM_WRITE = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b"]     # the two that kept every fact in the rewrite test
+_NIM_SMART = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/minimaxai/minimax-m3.1-flash", "nim/openai/gpt-oss-20b",
+              "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
+_NIM_READ = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b", "nim/minimaxai/minimax-m3.1-flash",
+             "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
+# writing: the two that never invented a tool lead; MiniMax (good prose, but keyword-stuffs rewrites) comes third
+_NIM_WRITE = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b", "nim/minimaxai/minimax-m3.1-flash"]
 _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
               "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
 _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemotron-3.5-super-vl:free", "kilo/kilo-auto/free",
@@ -131,22 +129,19 @@ _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemot
                "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
 # No-key backup after Kilo: LLM7 (one call at a time, small daily quota).
 _LLM7 = ["llm7/GLM-5.3-Flash", "llm7/DeepSeek-V4-Flash-0731"]
-# Opt-in (Settings → AI providers): used only when turned on and a key is set; after the other keyed providers.
-_OLLAMA_FAST = ["ollama/gpt-oss:20b"]
-_OLLAMA_SMART = ["ollama/gpt-oss:120b", "ollama/gpt-oss:20b"]
 CHAINS: dict[str, list[str]] = {
     # quick tasks want speed; LLM7 last (slow)
     "fast": ["gemini/gemini-3.5-flash-lite", *_NIM_FAST, *_KILO_FAST, "groq/qwen/qwen3.8-27b",
-             "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", *_OLLAMA_FAST, *_LLM7],
+             "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", *_LLM7],
     "reasoning": ["gemini/gemini-3.5-flash-lite", *_NIM_SMART, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
                   "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
-                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", *_OLLAMA_SMART, *_LLM7],
+                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", *_LLM7],
     "tailoring": ["gemini/gemini-3.5-flash-lite", *_NIM_WRITE, "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "groq/qwen/qwen3.8-27b",
                   "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b",
-                  "mistral/mistral-medium-latest", "nim/minimaxai/minimax-m3.1-flash", *_OLLAMA_SMART, *_LLM7],
-    "extraction": ["gemini/gemini-3.5-flash-lite", *_NIM_SMART, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
+                  "mistral/mistral-medium-latest", *_LLM7],
+    "extraction": ["gemini/gemini-3.5-flash-lite", *_NIM_READ, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
                    "mistral/mistral-medium-latest", "groq/openai/gpt-oss-120b",
-                   *_OLLAMA_SMART, *_LLM7],
+                   *_LLM7],
     # chat editor for resumes / CVs / letters: Gemini 3.5 Flash Lite or Kilo's free models only, thinking off
     "editor": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST],
     "browser": ["gemini/gemini-3.5-flash-lite", "nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
@@ -157,15 +152,14 @@ CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tail
 
 
 def provider_of(model: str) -> str:
-    return {"gemini": "google", "groq": "groq", "mistral": "mistral", "kilo": "kilo", "nim": "nvidia", "llm7": "llm7", "ollama": "ollama"}.get(model.split("/", 1)[0], "other")
+    return {"gemini": "google", "groq": "groq", "mistral": "mistral", "kilo": "kilo", "nim": "nvidia", "llm7": "llm7"}.get(model.split("/", 1)[0], "other")
 
 
 KILO_FREE = "free"                # Kilo's free pool needs no key; a Kilo account key (optional) is used when set
 NIM_ACCOUNT = "nim/__account__"   # one shared limiter: NIM's 40 requests/minute counts across all models
 # Shared limiters for providers whose limits count per client, not per model.
 # LLM7: about one call every 5 s keeps clear of its short per-minute caps.
-ACCOUNT_LIMITERS = {"llm7": ("llm7/__account__", 12),
-                    "ollama": ("ollama/__account__", 20)}   # unpublished: spaced conservatively, plus one call at a time
+ACCOUNT_LIMITERS = {"llm7": ("llm7/__account__", 12)}
 
 
 def account_limiter(model: str) -> Optional[str]:
@@ -198,7 +192,7 @@ def provider_key(provider: str) -> Optional[str]:
         return None                     # prod mode: the IP-limited free pools are kept for the admin
     s = get_settings()
     env = {"google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "groq": ("GROQ_API_KEY",), "mistral": ("MISTRAL_API_KEY",),
-           "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"), "kilo": ("KILO_API_KEY",), "ollama": ("OLLAMA_API_KEY",)}.get(provider)
+           "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"), "kilo": ("KILO_API_KEY",)}.get(provider)
     if provider == "llm7":
         return KILO_FREE                # used without any key
     if env is None:
@@ -237,10 +231,10 @@ async def _list_provider(provider: str, key: str) -> list[str]:
                 if not token:
                     break
         return [f"gemini/{n}" for n in names]
-    if provider in ("kilo", "nvidia", "llm7", "ollama"):
+    if provider in ("kilo", "nvidia", "llm7"):
         from jobhunterx.config import openai_compat as oc
         base, prefix = {"kilo": (oc.KILO_BASE, "kilo"), "nvidia": (oc.NIM_BASE, "nim"),
-                        "llm7": (oc.LLM7_BASE, "llm7"), "ollama": (oc.OLLAMA_BASE, "ollama")}[provider]
+                        "llm7": (oc.LLM7_BASE, "llm7")}[provider]
         data = await oc.list_models(base, None if key == KILO_FREE else key)
         # LLM7 marks paid models (usage_based_only): without a key they answer 401, so they are never "available"
         return [f"{prefix}/{m['id']}" for m in data if isinstance(m, dict) and m.get("id")
@@ -271,7 +265,7 @@ async def refresh_available(force: bool = False) -> dict[str, dict[str, Any]]:
         _refresh_lock = asyncio.Lock()
     async with _refresh_lock:
         now = time.monotonic()
-        for provider in ("google", "groq", "mistral", "kilo", "nvidia", "llm7", "ollama"):
+        for provider in ("google", "groq", "mistral", "kilo", "nvidia", "llm7"):
             key = provider_key(provider)
             if not key:
                 _available.pop(provider, None)
@@ -461,7 +455,7 @@ def mark_failure(model: str, error: str) -> Optional[float]:
         log.warning("model_not_on_account", model=model)
         return 12 * 3600.0
     if "402" in e or "usage credits" in e or "payment required" in e or "insufficient credit" in e:
-        # pay-per-token provider with no credits (Ollama Cloud's $0 plan): skip every model of it for a while
+        # a pay-per-token provider or key with no credits left: skip every model of it for a while
         provider = provider_of(model)
         _bad_keys[provider + _scope()] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
         _health[model] = {"trips": 1, "until": time.monotonic() + BAD_KEY_REST_S, "why": "the account has no usage credits"}

@@ -206,7 +206,7 @@ _OC_TIMEOUT = {"nvidia": 30}
 
 def _single_gate(provider: str) -> asyncio.Semaphore:
     """One call at a time (per event loop and, in prod mode, per user): LLM7 answers 429 to a 2nd parallel call from one
-    client, and the free Ollama Cloud plan allows one concurrent request."""
+    client."""
     from jobhunterx.config import auth_ctx
     loop_key = id(asyncio.get_running_loop())
     sem_map = _semaphores.setdefault(loop_key, {})
@@ -226,11 +226,10 @@ def _provider_slot(model: str) -> str:
     if model.startswith("kilo/"):
         return model                    # Kilo limits are per model: a busy one hands over to the next free model
     if model.startswith("nim/"):
-        return "nvidia"
+        return model                    # a 429 from NIM is usually that model's shared endpoint being busy; the account's
+                                        # 40/min is kept by its own limiter (config/models.py NIM_ACCOUNT)
     if model.startswith("llm7/"):
         return "llm7"                   # limits count per client: a 429 rests every LLM7 model
-    if model.startswith("ollama/"):
-        return "ollama"                 # one account budget for all its models
     if model.startswith("gemini/"):
         return "gemini"
     elif model.startswith("groq/"):
@@ -509,12 +508,12 @@ async def call_llm(
             return {**cached, "cache_hit": True}
 
     # --- Kilo / LLM7 / NVIDIA NIM: direct OpenAI-compatible calls (no-key pools must get no auth header) ---
-    if model.startswith(("kilo/", "nim/", "llm7/", "ollama/")):
+    if model.startswith(("kilo/", "nim/", "llm7/")):
         from jobhunterx.config import openai_compat as oc
         provider = M.provider_of(model)
         key = M.provider_key(provider)
-        base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE, "ollama": oc.OLLAMA_BASE}[provider]
-        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.nim_extra(model.split("/", 1)[1]), "llm7": oc.LLM7_EXTRA, "ollama": oc.OLLAMA_EXTRA}[provider]
+        base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE}[provider]
+        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.nim_extra(model.split("/", 1)[1]), "llm7": oc.LLM7_EXTRA}[provider]
         json_mode = any("JSON object" in (m.get("content") or "") for m in messages if m.get("role") == "system")
         est = sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024)
         shared = M.account_limiter(model)
@@ -523,7 +522,7 @@ async def call_llm(
         await _enforce_rate_limit(model, est)
         # thinking models need room: a tiny budget can end before the answer starts
         budget_out = max(1500, int(kwargs.get("max_tokens") or 1024))
-        one_at_a_time = _single_gate(provider) if provider in ("llm7", "ollama") else None   # one call at a time per client (LLM7 refuses a 2nd; Ollama free allows 1)
+        one_at_a_time = _single_gate(provider) if provider == "llm7" else None   # LLM7 refuses a 2nd parallel call from one client
         try:
             if one_at_a_time:
                 await one_at_a_time.acquire()
