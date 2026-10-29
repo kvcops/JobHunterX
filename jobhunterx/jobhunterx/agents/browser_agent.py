@@ -593,7 +593,8 @@ def _actions_of(model_output: Any, state: Any) -> list[str]:
 _KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "nvidia/nemotron-3.5-super-vl:free", "poolside/laguna-s-2.1:free"]
 # LLM7 free model (no key): last resort only — measured 17 Oct 2026 at 10-60 s per answer.
 _LLM7_BROWSER = ["GLM-5.3-Flash"]
-_NIM_BROWSER = ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3.5-lightning-30b-a3b"]   # NIM free key: 40/min, thinking off
+_NIM_BROWSER = ["nvidia/nemotron-3.5-super-vl-120b-a12b", "mistralai/mistral-large-4-1t-a52b",
+                "nvidia/nemotron-3-ultra-550b-a55b"]   # NIM free key: 40/min; fastest strong models first, thinking off / low
 
 
 def _json_only(text: str) -> str:

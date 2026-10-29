@@ -71,6 +71,19 @@ CATALOG: list[dict[str, Any]] = [
     # Flash, GLM 5.3 Flash, Step 5 (no answer within 150 s), Llama models (not used), Gemma (dropped app-wide).
     {"id": "nim/nvidia/nemotron-3-ultra-550b-a55b", "name": "Nemotron 3 Ultra 550B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "Strongest free NVIDIA model; 1-7 s, clean JSON, keeps facts when rewriting. Thinking off."},
+    # Second round, 29 Oct 2026 (same four tasks: extraction, fit judgment, fact-keeping rewrite, cover-letter paragraph; x2):
+    #   Mistral Large 4 8/8, 1-6 s, the only one that kept the "2,000" figure AND invented nothing — the best writer here ·
+    #   Nemotron 3.5 Super VL 8/8, 0.8-2.3 s (dropped the figure, invented nothing) · Muse Glimmer 30B 7/8, kept facts, 7-21 s ·
+    #   DiffusionGemma 26B judged well but added the job's tools in both rewrites (never used for writing), 3-15 s.
+    #   Still left out: Laguna XS 2.1 (busy 503 on every call), DeepSeek V4.1 Flash / GLM 5.3 Flash / Step 5 (45 s timeouts).
+    {"id": "nim/mistralai/mistral-large-4-1t-a52b", "name": "Mistral Large 4 (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Best writer in the tests: keeps every fact, invents nothing; 1-6 s. Reasoning effort low."},
+    {"id": "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "name": "Nemotron 3.5 Super VL 120B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Fastest of the strong models (0.8-2.3 s), clean JSON. Thinking off."},
+    {"id": "nim/meta/muse-glimmer-30b", "name": "Muse Glimmer 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Keeps facts, but slow (7-21 s). Backup. Reasoning effort low."},
+    {"id": "nim/google/diffusiongemma-26b-a4b-it", "name": "DiffusionGemma 26B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Judges well, 3-15 s; adds unused tools when rewriting, so never used for writing. Late backup."},
     {"id": "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "name": "Nemotron 3.5 Lightning 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "3B active, ~1 s, clean JSON. Quick tasks. Thinking off."},
     {"id": "nim/nvidia/nemotron-3.5-bolt-e4b", "name": "Nemotron 3.5 Bolt (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
@@ -115,13 +128,18 @@ BY_ID = {m["id"]: m for m in CATALOG}
 # Kilo models are spread across chains so their 200 req/hour per-model budgets add up.
 # NVIDIA NIM (free key): 40 requests/minute for the whole account — about 2,400 an hour against Kilo's 200 an hour per model —
 # so with a key NIM leads right after Gemini. Without a key these entries are skipped. Thinking is off / low on all of them.
-_NIM_FAST = ["nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3.5-bolt-e4b", "nim/openai/gpt-oss-20b"]
-_NIM_SMART = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/minimaxai/minimax-m3.1-flash", "nim/openai/gpt-oss-20b",
-              "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
-_NIM_READ = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b", "nim/minimaxai/minimax-m3.1-flash",
-             "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
-# writing: the two that never invented a tool lead; MiniMax (good prose, but keyword-stuffs rewrites) comes third
-_NIM_WRITE = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b", "nim/minimaxai/minimax-m3.1-flash"]
+_NIM_FAST = ["nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b",
+             "nim/nvidia/nemotron-3.5-bolt-e4b", "nim/openai/gpt-oss-20b", "nim/google/diffusiongemma-26b-a4b-it"]
+_NIM_SMART = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b",
+              "nim/minimaxai/minimax-m3.1-flash", "nim/openai/gpt-oss-20b", "nim/nvidia/nemotron-3.5-lightning-30b-a3b",
+              "nim/meta/muse-glimmer-30b", "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nim/google/diffusiongemma-26b-a4b-it"]
+_NIM_READ = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "nim/nvidia/nemotron-3-ultra-550b-a55b",
+             "nim/openai/gpt-oss-20b", "nim/minimaxai/minimax-m3.1-flash", "nim/nvidia/nemotron-3.5-lightning-30b-a3b",
+             "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
+# writing: only models that never invented a tool in the rewrite test lead; MiniMax (keyword-stuffs rewrites) comes last.
+# DiffusionGemma is never used for writing.
+_NIM_WRITE = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b",
+              "nim/meta/muse-glimmer-30b", "nim/minimaxai/minimax-m3.1-flash"]
 _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
               "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
 _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemotron-3.5-super-vl:free", "kilo/kilo-auto/free",
@@ -144,7 +162,8 @@ CHAINS: dict[str, list[str]] = {
                    *_LLM7],
     # chat editor for resumes / CVs / letters: Gemini 3.5 Flash Lite or Kilo's free models only, thinking off
     "editor": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST],
-    "browser": ["gemini/gemini-3.5-flash-lite", "nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
+    "browser": ["gemini/gemini-3.5-flash-lite", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "nim/mistralai/mistral-large-4-1t-a52b",
+                "nim/nvidia/nemotron-3-ultra-550b-a55b", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
                 "mistral/mistral-small-latest", "llm7/GLM-5.3-Flash"],
 }
 CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tailoring": "Resume & letter writing",
@@ -157,6 +176,7 @@ def provider_of(model: str) -> str:
 
 KILO_FREE = "free"                # Kilo's free pool needs no key; a Kilo account key (optional) is used when set
 NIM_ACCOUNT = "nim/__account__"   # one shared limiter: NIM's 40 requests/minute counts across all models
+NIM_ACCOUNT_RPM = 36              # 10% under the documented 40/min, so retries and parallel searches stay inside it
 # Shared limiters for providers whose limits count per client, not per model.
 # LLM7: about one call every 5 s keeps clear of its short per-minute caps.
 ACCOUNT_LIMITERS = {"llm7": ("llm7/__account__", 12)}
@@ -172,7 +192,7 @@ def account_limiter(model: str) -> Optional[str]:
 
 def limits(model: str) -> dict[str, Optional[int]]:
     if model == NIM_ACCOUNT:
-        return {"rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None}
+        return {"rpm": NIM_ACCOUNT_RPM, "rph": None, "rpd": None, "tpm": None, "tpd": None}
     for lid, rpm in ACCOUNT_LIMITERS.values():
         if model == lid:
             return {"rpm": rpm, "rph": None, "rpd": None, "tpm": None, "tpd": None}
@@ -471,6 +491,17 @@ def mark_failure(model: str, error: str) -> Optional[float]:
         _bad_keys[provider + _scope()] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
         log.warning("api_key_rejected", provider=provider, rest_s=int(BAD_KEY_REST_S))
         return BAD_KEY_REST_S
+    if "request limit reached" in e or "resourceexhausted" in e:
+        # NIM: "503 ResourceExhausted: Worker local total request limit reached (16/16)" — that endpoint is full right now.
+        # It frees up in seconds, so a short flat rest (no growing back-off) and the next model answers meanwhile.
+        _health[model] = {"trips": 0, "until": time.monotonic() + 60, "why": "the free endpoint is busy"}
+        log.info("model_busy", model=model)
+        return 60.0
+    if any(k in e for k in _RATE_ERR) and model.startswith("nim/") and _nim_account_limited(model):
+        # several different NIM models answered 429 within a minute: the key itself is limited, not one busy endpoint —
+        # rest all of NIM briefly so the chain moves to Kilo / Groq instead of trying every NIM model in turn
+        _provider_rest["nvidia" + _scope()] = time.monotonic() + NIM_ACCOUNT_REST_S
+        log.warning("nim_account_rate_limited", rest_s=int(NIM_ACCOUNT_REST_S))
     if any(k in e for k in _RATE_ERR):
         # the provider says how long ("retry after 86464 seconds", "retryDelay": "33s"): a used-up daily quota rests
         # for hours instead of failing once a minute; capped at 6 h so a restarted day is picked up again
@@ -491,10 +522,27 @@ def mark_failure(model: str, error: str) -> Optional[float]:
     return rest
 
 
+_provider_rest: dict[str, float] = {}           # provider+scope -> until (a whole provider rate limited)
+_nim_429s: dict[str, deque] = {}                 # scope -> recent (time, model) NIM 429s
+NIM_ACCOUNT_REST_S = 45.0
+
+
+def _nim_account_limited(model: str) -> bool:
+    """Three 429s from at least two different NIM models inside 60 s mean the key's limit, not one busy endpoint."""
+    q = _nim_429s.setdefault(_scope(), deque(maxlen=20))
+    now = time.monotonic()
+    q.append((now, model))
+    recent = [(t, m) for t, m in q if now - t <= 60]
+    return len(recent) >= 3 and len({m for _, m in recent}) >= 2
+
+
 def resting(model: str) -> Optional[str]:
     """Why this model is being skipped right now, e.g. 'resting 3 min after Google server errors'."""
     now = time.monotonic()
     sc = _scope()
+    until = _provider_rest.get(provider_of(model) + sc, 0.0)
+    if until > now:
+        return f"resting {max(1, round((until - now) / 60))} min — the provider is rate limiting this key"
     hits = [h for h in (_health.get(model), _health.get(model + sc) if sc else None) if h and h["until"] > now]
     if not hits:
         return None          # rest is over: try it again (trips are kept, so a new failure rests it longer)

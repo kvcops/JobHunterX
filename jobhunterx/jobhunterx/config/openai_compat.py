@@ -44,7 +44,7 @@ def nim_extra(model: str) -> dict:
     take an effort level instead — live test (Oct 2026): MiniMax M3.1 Flash with no setting 5-30 s, with "low" 1.3-3.3 s and a
     short, steady reasoning trace. A model that rejects any of this is asked again without (chat())."""
     extra = {**NIM_EXTRA}
-    if "gpt-oss" in model or "minimax" in model:
+    if any(k in model for k in ("gpt-oss", "minimax", "mistral-large", "muse-glimmer")):
         extra["reasoning_effort"] = "low"
     return extra
 
@@ -88,7 +88,8 @@ async def chat(base: str, model: str, messages: list[dict], *, key: Optional[str
             body.pop(k, None)
         r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
     if r.status_code >= 400:
-        raise ChatError(r.status_code, r.text[:300])
+        wait = r.headers.get("retry-after", "").strip()
+        raise ChatError(r.status_code, r.text[:300] + (f" retry after {wait}" if wait.isdigit() else ""))
     data = r.json()
     choices = data.get("choices") or []
     if not choices:

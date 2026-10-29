@@ -500,8 +500,8 @@ graph LR
         K3["dots-3-note · north-mini-code · laguna-s-2.1 · …"]
     end
     subgraph NIM["🟩 NVIDIA NIM (free key)"]
-        N1["nemotron-3-ultra-550b"]
-        N2["minimax-m3.1-flash · gpt-oss-20b · nemotron-3.5-lightning / bolt"]
+        N1["mistral-large-4 · nemotron-3-ultra-550b"]
+        N2["nemotron-3.5-super-vl · lightning · bolt · minimax-m3.1-flash · gpt-oss-20b · muse-glimmer"]
     end
     subgraph Groq["⚡ Groq"]
         GR1["gpt-oss-120b / 20b"]
@@ -533,12 +533,12 @@ graph LR
 
 | Task (Settings label) | Chain | Model order (a model without a key / switched off / not on your account is skipped) |
 |:--|:--|:--|
-| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Lightning, Nemotron 3.5 Bolt, GPT-OSS 20B) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → LLM7 |
-| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, MiniMax M3.1 Flash, GPT-OSS 20B, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** (Nemotron 3 Super, Nemotron 3.5 Super VL, Auto, Dots 3 Note, Laguna S, Xing 4.0, Nemotron 3 Nano Omni) → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → LLM7 |
-| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B, then MiniMax M3.1 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → LLM7 |
-| Resume reading, job reading, Company Scout | `extraction` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B, MiniMax M3.1 Flash, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** → Groq Qwen3.8 27B → Mistral Medium → Groq GPT-OSS 120B → LLM7 |
+| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Lightning, Nemotron 3.5 Super VL, Nemotron 3.5 Bolt, GPT-OSS 20B, DiffusionGemma) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → LLM7 |
+| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3 Ultra 550B, Nemotron 3.5 Super VL, MiniMax M3.1 Flash, GPT-OSS 20B, Nemotron 3.5 Lightning, Muse Glimmer 30B, Nemotron 3 Nano Omni, DiffusionGemma) → **Kilo** → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → LLM7 |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3 Ultra 550B, GPT-OSS 20B, Muse Glimmer 30B, then MiniMax M3.1 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → LLM7 |
+| Resume reading, job reading, Company Scout | `extraction` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3.5 Super VL, Nemotron 3 Ultra 550B, GPT-OSS 20B, MiniMax M3.1 Flash, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** → Groq Qwen3.8 27B → Mistral Medium → Groq GPT-OSS 120B → LLM7 |
 | **Resume chat editor** | `editor` | Gemini 3.5 Flash Lite → **Kilo** free models only — thinking off |
-| Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra, Nemotron 3.5 Lightning) → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
+| Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Super VL, Mistral Large 4, Nemotron 3 Ultra) → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
 
 **With a key, NVIDIA NIM leads right after Gemini.** Its free tier allows about 40 requests/minute for the whole account (≈ 2,400 an
 hour — against Kilo's 200 an hour *per model*), which is what a search with many AI reads needs. Without a NIM key those entries are skipped
@@ -563,18 +563,30 @@ A free key **lists 84 models but can call only some of them** — the rest answe
 models below were picked from a live test with a free key (29 Oct 2026: a JSON extraction and a fact-keeping resume rewrite,
 thinking off, run through the app's own router):
 
-| Model | Seen in the test | Used for |
+| Model | Seen in the tests (4 tasks × 2 runs: extraction, job-fit judgment, fact-keeping rewrite, cover-letter paragraph) | Used for |
 |:--|:--|:--|
-| **Nemotron 3 Ultra 550B** | 1–8 s (sometimes slower under load), clean JSON, kept every fact when rewriting | matching, reading, writing, browser agent |
-| **Nemotron 3.5 Lightning 30B** | ~1 s, clean JSON | quick tasks, browser agent backup |
-| **Nemotron 3.5 Bolt** | ~1 s | quick tasks |
-| **GPT-OSS 20B** | 2–6 s (reasoning effort *low*), kept every fact | all tasks, writing backup |
+| **Mistral Large 4** | 8/8, 1–6 s; the only model that kept the "2,000" figure **and** invented nothing in the rewrite | 1st for matching, reading and writing |
+| **Nemotron 3 Ultra 550B** | 1–8 s, clean JSON, invented nothing | matching, reading, writing, browser agent |
+| **Nemotron 3.5 Super VL 120B** | 8/8, 0.8–2.3 s — the fastest of the strong models (dropped the figure, invented nothing) | quick tasks, matching, reading, browser agent |
+| **Nemotron 3.5 Lightning 30B** · **Nemotron 3.5 Bolt** | ~1 s, clean JSON | quick tasks |
+| **GPT-OSS 20B** | 2–6 s (reasoning effort *low*), invented nothing | all tasks |
+| **MiniMax M3.1 Flash** | 1–13 s with reasoning effort *low* (5–30 s without); the most thorough job-fit judgments, good prose, **but added the job's tools to a resume bullet** (fact-checker rejects those lines); shared endpoint often 429 | 2nd–4th for matching / reading, last for writing |
+| **Muse Glimmer 30B** (Meta) | 7/8, kept facts, but 7–21 s with one timeout | backup for matching and writing |
+| **DiffusionGemma 26B** | judged well, 3–15 s, but added the job's tools in both rewrites | late backup for quick tasks and matching — **never for writing** |
 | Nemotron 3 Nano Omni | 1.4 s when free, often "16/16 requests" busy | backup |
-| **MiniMax M3.1 Flash** | 1–13 s with reasoning effort *low* (5–30 s without); the most thorough job-fit judgments and good cover-letter prose, **but added tools the candidate never used when rewriting a resume bullet** (the fact-checker rejects those lines); its shared endpoint often answers 429 | 2nd for matching, 3rd for reading and writing |
 
-Not used: Nemotron 3 Super, Nemotron Nano 3 and Kimi K2.6 (listed, but not callable on a free key), DeepSeek V4.1 Flash, GLM 5.3
-Flash and Step 5 (no answer within 150 s), Llama models (never used here), Gemma (dropped app-wide). A 429 from NIM rests only that model (it usually means its shared endpoint is busy; the account's
-40/min has its own limiter). The router waits at most 30 s for a NIM answer, rests a model that times out, and rests a model "not found for account" for 12 hours, so a busy endpoint never
+Not used: Nemotron 3 Super, Nemotron Nano 3 and Kimi K2.6 (listed, but not callable on a free key); DeepSeek V4.1 Flash, GLM 5.3
+Flash and Step 5 (time out on every try, 45–150 s); Laguna XS 2.1 ("busy" on every call); Llama models (never used here). **Rate limits, handled gracefully** (tested with a burst of 60 parallel calls: 0 failed, NIM took what its budget allowed and the
+rest spilled to Kilo in 11 s):
+
+* Calls are paced to **36/min** — 10 % under NVIDIA's 40 — as one budget for every NIM model, so retries stay inside it.
+* A call that would queue more than 6 s for NIM goes straight to the next provider instead of waiting.
+* `429` from one model = that endpoint is busy: only that model rests (60 s, or as long as `Retry-After` says).
+* `429`s from several NIM models within a minute = the key itself is limited: all of NIM rests 45 s and Kilo / Groq answer.
+* `503 ResourceExhausted … request limit reached` = endpoint full: a flat 60 s rest, no growing back-off.
+* A timeout (30 s), "not found for account" (12 h) and a rejected key (30 min) each rest the right thing, and the chain moves on.
+
+The router waits at most 30 s for a NIM answer, rests a model that times out, and rests a model "not found for account" for 12 hours, so a busy endpoint never
 holds a search up. NIM serves every agent that goes through a task chain — profile and job reading, matching, shortlisting, the
 Connector, resume / CV / letter writing, the Company Scout and the agents office — and drives the browser agent too. The ~40
 requests/minute is what NVIDIA's free tier is widely reported to allow per account (not an official number), so the router spaces
