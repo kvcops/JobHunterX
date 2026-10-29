@@ -45,9 +45,12 @@ class Settings(BaseSettings):
     # Browser Use cloud browsers (cloud.browser-use.com): with a key, auto-apply runs in a cloud browser instead of a
     # Chrome on this server — no server memory, and several people can apply at once
     browser_use_api_key: Optional[str] = None
+    # Extra job APIs (discovery/job_apis.py). Adzuna is one value: app_id:app_key (free key at developer.adzuna.com).
+    adzuna_api_key: Optional[str] = None
+    jsearch_api_key: Optional[str] = None         # RapidAPI key for JSearch (Google for Jobs); ~200 free calls a month
 
     @field_validator("google_api_key", "groq_api_key", "mistral_api_key", "nvidia_api_key", "kilo_api_key", "tinyfish_api_key", "tavily_api_key",
-                     "exa_api_key", "brave_api_key", "browser_use_api_key", mode="before")
+                     "exa_api_key", "brave_api_key", "browser_use_api_key", "adzuna_api_key", "jsearch_api_key", mode="before")
     @classmethod
     def _drop_placeholder_keys(cls, v):
         # A placeholder must count as "no key": otherwise every AI call fails and retries, and the UI waits forever.
@@ -126,6 +129,7 @@ class Settings(BaseSettings):
     max_jobs_per_search: int = 60
     enable_ats_index: bool = True           # daily India copy of ~28k employers' own boards (job-board-aggregator data)
     enable_linkedin_source: bool = True     # LinkedIn's public (logged-out) job feed: newest posts, resolved to employer boards
+    enable_hn_source: bool = True           # Hacker News: YC job posts + monthly 'Who is hiring?' (India / India-friendly remote only)
     linkedin_max_applicants: int = 150      # skip LinkedIn posts that already show this many applicants
     max_llm_jd_extractions_per_search: int = 40
     watch_interval_hours: float = 4.0            # how often watchlist boards are checked while the app runs; 0 = off

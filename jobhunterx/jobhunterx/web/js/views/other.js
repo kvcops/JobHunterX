@@ -503,15 +503,35 @@ function BrowserKeyCard({ d }) {
   </section>`;
 }
 
+function JobApisCard({ d }) {
+  const own = !!d.restricted;
+  const apis = [
+    { k: 'adzuna', name: 'Adzuna', hint: 'Official India job index, newest first. Paste both values as app_id:app_key', url: 'https://developer.adzuna.com' },
+    { k: 'jsearch', name: 'JSearch', hint: 'Google for Jobs (LinkedIn, Indeed, Naukri, direct employer links) via RapidAPI · about 200 free calls a month', url: 'https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch' },
+  ];
+  return html`<section class="set-section"><h2>More job sources</h2>
+    <p class="muted small">Optional. Their postings join every search and go through the same checks as all other jobs.</p>
+    <div class="prov-list">
+      ${apis.map((m) => html`<div class="prov-card" key=${m.k}>
+        <div class="prov-head"><div class="grow"><strong>${m.name}</strong>
+          <div class="muted small">${m.hint} · <a href=${m.url} target="_blank" rel="noopener noreferrer">get a key <${Icon} name="external" size=${12} /></a></div></div></div>
+        <${KeyField} field=${`${m.k}_api_key`} label=${m.name} configured=${d[`${m.k}_configured`]} masked=${d[`${m.k}_key_masked`]} source=${d[`${m.k}_source`]} />
+      </div>`)}
+      ${own ? null : html`<div class="prov-card"><div class="prov-head"><div class="grow"><strong>Hacker News</strong>
+        <div class="muted small">No key — YC startups' job posts and the monthly "Who is hiring?" thread. Only India or India-friendly remote roles in your field are kept; many posts give a direct hiring email.</div></div>
+        <${Toggle} on=${d.enable_hn_source !== false} label="Use Hacker News jobs" onChange=${(v) => saveSettings({ enable_hn_source: v })} /></div></div>`}
+    </div></section>`;
+}
+
 function SearchSection({ d }) {
-  if (d.restricted) return html`<${BrowserKeyCard} d=${d} /><section class="set-section"><h2>Web search</h2>
+  if (d.restricted) return html`<${BrowserKeyCard} d=${d} /><${JobApisCard} d=${d} /><section class="set-section"><h2>Web search</h2>
     <p class="muted small">Optional. Without a key, the free Deep Search finds jobs for you. Your keys are saved encrypted in your account.</p>
     <div class="prov-list">${Object.entries(SEARCH_META).filter(([, m]) => m.field).map(([k, m]) => html`<div class="prov-card" key=${k}>
       <div class="prov-head"><div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint}</div></div></div>
       <${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />
     </div>`)}</div></section>`;
   const order = d.providers.search_order;
-  const browserCard = html`<${BrowserKeyCard} d=${d} />`;
+  const browserCard = html`<${BrowserKeyCard} d=${d} /><${JobApisCard} d=${d} />`;
   const move = (p, dir) => {
     const i = order.indexOf(p); const j = i + dir;
     if (j < 0 || j >= order.length) return;

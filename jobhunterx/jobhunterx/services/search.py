@@ -24,7 +24,7 @@ from jobhunterx import storage
 from jobhunterx.config import capacity
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
-from jobhunterx.discovery import ats, ats_index, dedupe, linkedin, page, registry, search, validate, watchlist
+from jobhunterx.discovery import ats, ats_index, dedupe, job_apis, linkedin, page, registry, search, validate, watchlist
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
@@ -471,7 +471,33 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         await run.say("discover", " · ".join(bits), "good" if posts else "info")
         return posts
 
+    api_on = job_apis.status(settings) if not watch_mode else {}
+
+    async def from_job_apis() -> list[JobPosting]:
+        if not any(api_on.values()):
+            return []
+        async def note(msg: str) -> None:
+            await run.say("discover", msg, "info")
+        try:
+            posts, st = await job_apis.discover(
+                settings, scope.titles, scope.locations or [scope.country or "India"],
+                labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
+                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2), skip=already_seen, on_progress=note)
+        except Exception as exc:                  # a source that is down or out of quota never fails the search
+            log.warning("job_apis_failed", error=str(exc)[:160])
+            return []
+        bits = [f"{len(posts)} postings kept from " + ", ".join(st["enabled"])]
+        if st.get("first_party"):
+            bits.append(f"{st['first_party']} found on the employer's own job board")
+        if st.get("agencies"):
+            bits.append(f"{st['agencies']} from staffing agencies / mass recruiters dropped")
+        if st.get("seen"):
+            bits.append(f"{st['seen']} you've already seen")
+        await run.say("discover", " · ".join(bits), "good" if posts else "info")
+        return posts
+
     linkedin_task = asyncio.create_task(from_linkedin())
+    job_apis_task = asyncio.create_task(from_job_apis())
     index_leads = []
     if not watch_mode and settings.enable_ats_index:
         refresh = ats_index.ensure_background()
@@ -558,6 +584,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     if board_refs:
         await run.say("discover", f"Pulled {len(board_jobs)} relevant openings straight from employer boards", "good")
     board_jobs += await linkedin_task
+    board_jobs += await job_apis_task
     if watch_mode:
         before = len(board_jobs)
         stale_after = get_policy().stale_after_days
