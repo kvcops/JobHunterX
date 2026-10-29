@@ -580,13 +580,13 @@ export async function loadDocument(docId) {
     setEntry('docDetails', docId, { status: 'error', doc: null, error: errorText(err) });
   }
 }
-export async function updateDocument(docId, content) {
+export async function updateDocument(docId, content, { quiet = false } = {}) {
   try {
     const { document } = await api.updateDocument(docId, content);
     setEntry('docDetails', docId, { status: 'ready', doc: document, error: null });
     loadDocuments();
     if (document.job_id && getState().details[document.job_id]) loadDetail(document.job_id, { silent: true });
-    toast('Document saved and PDF updated.', 'success');
+    if (!quiet) toast('Document saved and PDF updated.', 'success');      // the AI editor says so in its own chat
     return document;
   } catch (err) {
     toast(errorText(err), 'danger');

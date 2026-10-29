@@ -123,7 +123,7 @@ def _setup_status() -> dict:
     free_ok = bool(app_state.get("setup.free_ok")) and free_allowed
     return {"llm_ready": any(have[n] for n in _LLM_KEYS) or (free_on > 0 and free_ok), "keys": have,
             "llm_count": sum(have[n] for n in _LLM_KEYS) + free_on, "kilo_on": kilo_on, "free_ok": free_ok,
-            "free_allowed": free_allowed}
+            "free_allowed": free_allowed, "desktop": s.desktop}
 
 
 @router.get("/setup")

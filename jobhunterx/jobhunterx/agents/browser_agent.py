@@ -38,7 +38,8 @@ for _ev, _secs in (("BrowserStartEvent", "120"), ("BrowserLaunchEvent", "120"), 
 # Persistent profile path reused across runs. A stable profile accumulates
 # cookies, localStorage and an auth "history" that Cloudflare scores as a
 # real returning user rather than a fresh headless instance.
-_STEALTH_USER_DATA_DIR = Path("./data/browser_profile")
+from jobhunterx.config.settings import _BASE_DIR  # noqa: E402
+_STEALTH_USER_DATA_DIR = _BASE_DIR / "data" / "browser_profile"
 
 # Where a real Google Chrome usually lives. A real Chrome (not Playwright's test Chromium) carries the
 # codecs, brand list and GPU behaviour bot checks expect.

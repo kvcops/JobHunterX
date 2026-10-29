@@ -141,6 +141,18 @@ def test_chat_reorders_and_removes(monkeypatch):
     assert len(out.content["experience"][0]["bullets"]) == 1
 
 
+def test_chat_adds_a_skill_only_when_the_user_or_profile_names_it(monkeypatch):
+    _fake(monkeypatch, [{"op": "add_skill", "index": 0, "items": ["Docker", "Python"]}])
+    out = _chat("add that I know Docker")
+    assert out.changes[0].accepted and out.content["skills"][0]["items"] == ["Python", "LangChain", "FAISS", "Docker"]
+    _fake(monkeypatch, [{"op": "add_skill", "index": 0, "items": ["Kubernetes"]}])
+    out = _chat("add more skills")
+    assert not out.changes[0].accepted and "Kubernetes" in out.changes[0].reason
+    assert out.content["skills"] == CONTENT["skills"]
+    _fake(monkeypatch, [{"op": "add_skill", "index": 0, "items": ["Go"]}])         # "go" inside other words doesn't count
+    assert not _chat("add a good skill").changes[0].accepted
+
+
 def test_chat_input_hygiene(monkeypatch):
     _fake(monkeypatch, [])
     with pytest.raises(chat_edit.ChatEditError):

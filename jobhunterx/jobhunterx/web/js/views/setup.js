@@ -71,7 +71,7 @@ export function SetupView() {
       <ul class="setup-why">
         ${freeAllowed ? html`<li><${Icon} name="check" size=${15} /> <span><strong>No key</strong> works: free models from Kilo, with LLM7 as a backup. <strong>One key</strong> is faster and private.</span></li>` : null}
         <li><${Icon} name="bolt" size=${15} /> <span><strong>Two or three</strong> make searches much faster — each free plan allows only a few calls a minute.</span></li>
-        <li><${Icon} name="shield" size=${15} /> <span>${freeAllowed ? html`Saved only on your computer, in <code>jobhunterx/.env</code>. Nothing is paid.`
+        <li><${Icon} name="shield" size=${15} /> <span>${freeAllowed ? html`Saved only on your computer, ${setup.data && setup.data.desktop ? 'in the app\u2019s own folder' : html`in <code>jobhunterx/.env</code>`}. Nothing is paid.`
           : 'Saved encrypted in your account on this server. Only your searches use them. Nothing is paid.'}</span></li>
       </ul>
     </aside>
