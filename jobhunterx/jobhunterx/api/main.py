@@ -190,6 +190,22 @@ app.add_middleware(PinPerson)
 app.add_middleware(auth.AuthGate)
 app.add_middleware(CORSMiddleware, **_cors_options())
 
+def _local_host_ok(host: str) -> bool:
+    """Desktop app: only requests addressed to this computer by name. A web page that points its own domain at
+    127.0.0.1 (DNS rebinding) sends its domain in Host, so it never reaches the API."""
+    if not get_settings().desktop:
+        return True
+    name = (host or "").rsplit(":", 1)[0].strip("[]").lower()
+    return name in ("127.0.0.1", "localhost", "::1")
+
+
+@app.middleware("http")
+async def _desktop_hosts_only(request: Request, call_next):
+    if not _local_host_ok(request.headers.get("host", "")):
+        return _error(403, "This address is not allowed.")
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def _block_cross_site_writes(request: Request, call_next):
     """CSRF guard: browsers attach Origin to cross-site POST/PUT/PATCH/DELETE (including plain
@@ -256,6 +272,8 @@ async def login_page():
 
 def _ws_origin_ok(websocket: WebSocket) -> bool:
     """Block cross-site WebSocket hijacking: browsers always send Origin; it must be ours."""
+    if not _local_host_ok(websocket.headers.get("host", "")):
+        return False
     origin = websocket.headers.get("origin")
     if origin is None:
         return True   # non-browser client (tests, CLI)

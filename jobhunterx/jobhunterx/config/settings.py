@@ -8,6 +8,7 @@ All API keys are optional for graceful degradation.
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -23,8 +24,9 @@ def is_real_key(value: Optional[str]) -> bool:
     return len(v) >= 12 and not v.lower().startswith(_PLACEHOLDER_PREFIXES)
 
 
-# Project root (jobhunterx/): settings.py lives at jobhunterx/jobhunterx/config/settings.py
-_BASE_DIR = Path(__file__).resolve().parents[2]
+# Where .env and data/ live. Normally the project root (jobhunterx/; settings.py is jobhunterx/jobhunterx/config/settings.py).
+# The desktop app sets JOBHUNTERX_HOME to the user's app-data folder, because an installed app's own folder is read-only.
+_BASE_DIR = Path(os.environ.get("JOBHUNTERX_HOME") or Path(__file__).resolve().parents[2])
 
 
 class Settings(BaseSettings):
@@ -66,6 +68,7 @@ class Settings(BaseSettings):
     # --- Production mode (APP_ENV=prod): login page, users, per-user data and keys ---
     # Not set (or anything else) = the local single-user app, exactly as before: no login at all.
     app_env: str = ""
+    desktop: bool = False               # set by the desktop app: one user on this computer, server only on 127.0.0.1
     admin_username: str = ""            # the admin account; created / updated from these on every start
     admin_password: str = ""
     secret_key: str = ""                # encrypts users' saved API keys; empty = a random one kept in data/.secret_key

@@ -10,9 +10,10 @@ experience 1", "reorder this skill group", "remove that project"). Every operati
 3. applied to a COPY of the document, which must still validate as a document.
 
 Operations that fail a check are dropped and reported with the reason; the rest are returned as a proposal. Nothing is
-saved here: the app previews the proposal and the user keeps or undoes it (saving goes through the normal, validated
-document update, which re-renders the PDF). Links, contact details, dates, company names and degrees can't be edited
-by chat at all — there is no operation for them.
+saved here: the app shows the proposal in the document and saves it through the normal, validated document update
+(which re-renders the PDF); "Undo last" saves the earlier version back. Links, contact details, dates, company names and degrees can't be edited
+by chat at all — there is no operation for them. A skill can be added only when the profile or the user's own message
+names it.
 
 Chain `editor` (config/models.py): Gemini 3.5 Flash Lite first, then Kilo's free models; thinking is switched off for
 both (config/llm_router.py, config/openai_compat.py).
@@ -44,7 +45,7 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _URL = re.compile(r"(?i)\b(?:https?://|www\.)\S+")
 
 OpName = Literal["set_headline", "set_summary", "rewrite_bullet", "add_bullet", "remove_bullet", "rewrite_project",
-                 "remove_project", "reorder_skills", "remove_item", "rewrite_paragraph", "remove_paragraph",
+                 "remove_project", "reorder_skills", "add_skill", "remove_item", "rewrite_paragraph", "remove_paragraph",
                  "set_greeting", "set_closing"]
 
 
@@ -54,7 +55,7 @@ class EditOp(BaseModel):
     sub: Optional[int] = None            # bullet number inside that experience (0-based)
     list_name: str = ""                  # for remove_item: achievements | certifications | competitions | languages
     text: str = ""                       # the new wording
-    items: list[str] = Field(default_factory=list)   # reorder_skills: the group's skills in the new order (none added)
+    items: list[str] = Field(default_factory=list)   # reorder_skills: the group's skills in a new order; add_skill: new skills
 
 
 class ChatEdit(BaseModel):
@@ -91,13 +92,15 @@ Rules:
   set_headline(text) · set_summary(text) · rewrite_bullet(index=experience, sub=bullet, text) · add_bullet(index=experience, text) ·
   remove_bullet(index, sub) · rewrite_project(index, text = the project's description) · remove_project(index) ·
   reorder_skills(index=skill group, items = the SAME skills in a new order; you may drop some, never add) ·
+  add_skill(index=skill group, items = skills to add — only ones the user names in their message or that appear in the profile) ·
   remove_item(list_name = achievements|certifications|competitions|languages, index) ·
   rewrite_paragraph(index, text) · remove_paragraph(index) · set_greeting(text) · set_closing(text)   (the last four are for cover letters)
 - Keep every fact true. Do not invent numbers, tools, employers, titles, dates, links or achievements. You may use details the user states in their message. If the user asks for something that would need an invented fact, make no edit for it and say so in `reply`.
 - Keep the user's voice: same tense, concrete, no buzzword padding. Keep bullets to one line where you can (under {LIMITS['bullet']} characters).
+- Make the change clearly visible. "Shorter" means cut about a third or more (drop filler, merge clauses), not swap one word. "Stronger" or "better" means a real rewrite: a strong action verb first, what was built and what it did, using only facts already given. Requests about a whole section (all bullets, every project) need one operation per item.
 - Change only what was asked. Do not touch contact details, links, dates, company names or degrees (there is no operation for them).
 - If the request is unclear or nothing should change, return no operations and ask one short question in `reply`.
-- `reply` is plain text, at most two sentences. No markdown, no lists.
+- `reply` is plain text, at most two sentences, saying what you changed. Do not repeat the new text — the document shows it. No markdown, no lists.
 """
 
 
@@ -222,6 +225,29 @@ class _Applier:
             before = ", ".join(g["items"])
             g["items"] = new_items
             return self._change(op, f"Skills · {g.get('category', '')}", f"skills.{op.index}", before, ", ".join(new_items), True)
+        if k == "add_skill":
+            groups = d.get("skills", [])
+            if not _in_range(op.index, groups):
+                return self._change(op, "Skills", "skills", "", "", False, "that skill group doesn't exist")
+            g = groups[op.index]
+            label, before = f"Skills · {g.get('category', '')}", ", ".join(g.get("items", []))
+            have = {s.lower() for s in g.get("items", [])}
+            corpus = self.corpus.lower()
+            new_items = []
+            for raw in op.items:
+                skill = clean_text(raw, LIMITS["short"])
+                if not skill or skill.lower() in have or skill.lower() in {x.lower() for x in new_items}:
+                    continue
+                if not re.search(r"(?<![a-z0-9])" + re.escape(skill.lower()) + r"(?![a-z0-9])", corpus):
+                    return self._change(op, label, f"skills.{op.index}", before, skill, False,
+                                        f"'{skill}' isn't in your profile or your message — say you know it and I'll add it")
+                new_items.append(skill)
+            if not new_items:
+                return self._change(op, label, f"skills.{op.index}", before, "", False, "nothing new to add")
+            if len(have) + len(new_items) > 25:
+                return self._change(op, label, f"skills.{op.index}", before, "", False, "this group is already long")
+            g.setdefault("items", []).extend(new_items)
+            return self._change(op, label, f"skills.{op.index}", before, ", ".join(g["items"]), True)
         if k == "remove_item":
             name = op.list_name if op.list_name in LIST_NAMES else ""
             seq = d.get(name, []) if name else []
@@ -277,7 +303,7 @@ async def chat_edit(kind: str, content: dict, instruction: str, profile: Candida
     user = ("<document>\n" + json.dumps(base, ensure_ascii=False) + "\n</document>\n\n"
             + (("EARLIER IN THIS CHAT\n" + "\n".join(turns) + "\n\n") if turns else "")
             + f"DOCUMENT KIND: {kind}\nUSER REQUEST: {instruction}")
-    res, model_used = await call_structured(task="resume_chat_edit", version="v1", model=ChatEdit, system=_SYSTEM, user=user,
+    res, model_used = await call_structured(task="resume_chat_edit", version="v2", model=ChatEdit, system=_SYSTEM, user=user,
                                             chain="editor", max_tokens=1500, use_cache=False)
     if res is None:
         raise ChatEditError("The AI couldn't answer just now. Try again in a moment.")

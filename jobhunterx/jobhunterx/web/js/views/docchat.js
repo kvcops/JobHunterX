@@ -2,8 +2,8 @@
 //
 // Style: the preview switches instantly in the browser (CSS only, same content); the server re-renders the PDF in the
 // background and a download can name any style.
-// Chat: the AI proposes small, fact-checked edits (nothing is saved by it). Accepted edits "snap" in: the old text
-// disintegrates and the new text assembles. The user keeps the result (normal save) or undoes it.
+// Chat: the AI proposes small, fact-checked edits. Accepted edits "snap" in (the old text disintegrates, the new text
+// assembles) and are saved at once through the normal validated update, so the PDF matches; "Undo last" restores and saves.
 import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { api } from '../lib/api.js';
 import { Button, Icon } from '../components/ui.js';
@@ -88,18 +88,36 @@ function dust(els, dir, ms) {
 const SAFE_PATH = /^[a-z_]+(\.\d+)?(\.[a-z_]+(\.\d+)?)*$/i;      // paths come from the server; only plain ones reach a selector
 const pick = (root, paths) => (root ? paths.filter((p) => SAFE_PATH.test(p)).flatMap((p) => Array.from(root.querySelectorAll(`[data-p="${p}"]`))) : []);
 
-/** Show an accepted proposal: the old text snaps away, `commit()` swaps in the new content, the new text assembles. */
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+/** Briefly mark the lines that changed, so the edit is easy to spot on the page. */
+function flash(els) {
+  els.forEach((el) => { el.classList.remove('snap-flash'); void el.offsetWidth; el.classList.add('snap-flash'); });
+  setTimeout(() => els.forEach((el) => el.classList.remove('snap-flash')), 2200);
+}
+
+/** Show an accepted proposal: the changed lines come into view, the old text snaps away, `commit()` swaps in the new
+ *  content, the new text assembles and is highlighted for a moment. */
 export async function playSnap(root, changes, commit) {
   const touched = changes.filter((c) => c.accepted);
-  if (!root || !touched.length || reduced()) { commit(); return; }
+  const old = pick(root, touched.map((c) => c.path));
+  if (old[0]) old[0].scrollIntoView({ block: 'center', behavior: reduced() ? 'auto' : 'smooth' });
+  if (!root || !touched.length || reduced()) {
+    commit();
+    await nextFrame();
+    flash(pick(root, touched.filter((c) => c.after).map((c) => c.path)));
+    return;
+  }
+  if (old.length) await new Promise((r) => setTimeout(r, 280));       // let the scroll settle before the snap
   root.classList.add('whoosh');
-  await dust(pick(root, touched.map((c) => c.path)), 1, 650);
+  await dust(old, 1, 650);
   commit();
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));      // let the new text render
+  await nextFrame();                                                   // let the new text render
   const fresh = pick(root, touched.filter((c) => c.after).map((c) => c.path));
   fresh.forEach((el) => { el.style.opacity = '0'; });
   await dust(fresh, -1, 750);
   root.classList.remove('whoosh');
+  flash(fresh);
 }
 
 // ---------------------------------------------------------------------------------------------- chat dock
@@ -127,8 +145,14 @@ export function ChatDock({ doc, draft, onProposal, onUndo, canUndo, getPaper }) 
     try {
       const out = await api.chatDocument(doc.id, { instruction: q, content: draft, history });
       const applied = out.changes.filter((c) => c.accepted);
-      setLog((l) => [...l, { role: 'assistant', text: out.reply, changes: out.changes }]);
-      if (applied.length) await playSnap(getPaper(), out.changes, () => onProposal(out.content, out.changes));
+      const msg = { role: 'assistant', text: out.reply, changes: out.changes, saved: applied.length ? 'saving' : '' };
+      setLog((l) => [...l, msg]);
+      if (applied.length) {
+        let saving = Promise.resolve(false);
+        await playSnap(getPaper(), out.changes, () => { saving = onProposal(out.content, out.changes); });
+        const ok = await saving;
+        setLog((l) => l.map((m) => (m === msg ? { ...m, saved: ok ? 'saved' : 'failed' } : m)));
+      }
     } catch (err) {
       setLog((l) => [...l, { role: 'assistant', text: errorText(err), error: true }]);
     } finally {
@@ -143,15 +167,18 @@ export function ChatDock({ doc, draft, onProposal, onUndo, canUndo, getPaper }) 
       <div class="row gap">${canUndo ? html`<button type="button" class="link-btn small" onClick=${onUndo}>Undo last</button>` : null}
         <button type="button" class="icon-btn" aria-label="Close" onClick=${() => setOpen(false)}><${Icon} name="back" size=${15} /></button></div></header>
     <div class="chat-log scroll" role="log" aria-live="polite">
-      ${!log.length ? html`<p class="muted small">Ask for a change in your own words. I only reword and reorder what is already true — nothing is invented, links and dates are never touched, and nothing is saved until you keep it.</p>
+      ${!log.length ? html`<p class="muted small">Ask for a change in your own words. It is made right in your document and the PDF updates; “Undo last” takes it back. I only reword and reorder what is already true — nothing is invented, and links and dates are never touched.</p>
         <div class="chat-sugs">${(SUGGESTIONS[doc.kind] || SUGGESTIONS.resume).map((s) => html`<button type="button" class="chip" key=${s} onClick=${() => send(s)}>${s}</button>`)}</div>` : null}
       ${log.map((m, i) => html`<div class=${`chat-msg ${m.role} ${m.error ? 'err' : ''}`} key=${i}>
         <p>${m.text}</p>
         ${m.changes && m.changes.length ? html`<ul class="chat-changes">${m.changes.map((c) => html`<li key=${c.id} class=${c.accepted ? 'ok' : 'no'}>
-          <span class="chat-chg-label">${c.accepted ? '✓' : '✕'} ${c.label}</span>
-          ${c.before ? html`<span class="diff-old">${c.before}</span>` : null}
-          ${c.after ? html`<span class="diff-new">${c.after}</span>` : null}
-          ${!c.accepted && c.reason ? html`<span class="muted small">${c.reason}</span>` : null}</li>`)}</ul>` : null}</div>`)}
+          <span class="chat-chg-label">${c.accepted ? '✓' : '✕'} ${c.label}${c.accepted ? (c.after ? ' updated in your document' : ' removed') : ''}</span>
+          ${!c.accepted && c.reason ? html`<span class="muted small">${c.reason}</span>` : null}
+          ${c.accepted && (c.before || c.after) ? html`<details class="chat-diff"><summary>Before / after</summary>
+            ${c.before ? html`<span class="diff-old">${c.before}</span>` : null}
+            ${c.after ? html`<span class="diff-new">${c.after}</span>` : null}</details>` : null}</li>`)}</ul>` : null}
+        ${m.saved ? html`<p class=${`chat-saved is-${m.saved}`}>${m.saved === 'saving' ? 'Saving and updating the PDF…'
+          : m.saved === 'saved' ? '✓ Saved — the PDF and downloads now include this change.' : 'Couldn’t save it automatically. Press “Save changes” to keep it.'}</p>` : null}</div>`)}
       ${busy ? html`<div class="chat-msg assistant"><span class="chat-typing" aria-label="Thinking"><i></i><i></i><i></i></span></div>` : null}
       <div ref=${endRef}></div>
     </div>

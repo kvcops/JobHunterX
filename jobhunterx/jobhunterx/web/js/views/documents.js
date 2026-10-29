@@ -1,6 +1,6 @@
 import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
-import { generateCv, loadDocuments, loadDocument, updateDocument, deleteDocument, saveDocumentStyle } from '../actions.js';
+import { generateCv, loadDocuments, loadDocument, updateDocument, deleteDocument, saveDocumentStyle, toast } from '../actions.js';
 import { StylePicker, ChatDock, SnapFilter, useStyles } from './docchat.js';
 import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Tabs, ComboInput } from '../components/ui.js';
 import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
@@ -201,8 +201,20 @@ function DocumentDetail({ docId }) {
       setStyleBusy(false);
     }, 500);
   };
-  const propose = (content) => { setUndo((u) => [...u.slice(-9), draft]); setDraft(content); };
-  const undoLast = () => { setUndo((u) => { if (!u.length) return u; setDraft(u[u.length - 1]); return u.slice(0, -1); }); };
+  // AI edits are saved at once, so the stored PDF (and Download) matches what the preview shows. Returns true when saved.
+  const persist = async (content) => {
+    const updated = await updateDocument(docId, content, { quiet: true });
+    if (updated) { dirtyRef.current = false; setDraft(clone(updated.content)); }
+    return !!updated;
+  };
+  const propose = (content) => { setUndo((u) => [...u.slice(-9), draft]); setDraft(content); return persist(content); };
+  const undoLast = async () => {
+    if (!undo.length) return;
+    const prev = undo[undo.length - 1];
+    setUndo((u) => u.slice(0, -1));
+    setDraft(prev);
+    if (await persist(prev)) toast('Undone — the PDF is back to the earlier version.', 'info');
+  };
   const body = draft || d.content;
   return html`<div class="detail">
     <header class="detail-top doc-top">
