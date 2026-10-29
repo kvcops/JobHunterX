@@ -1979,3 +1979,13 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 @keyframes chatdot { 0%, 80%, 100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-4px); opacity: 1; } }
 :root[data-motion="reduced"] .paper.whoosh::after { display: none; }
 @media (max-width: 900px) { .chat-dock { position: absolute; inset: 8px; width: auto; border: 1px solid var(--line-strong); border-radius: 18px; z-index: 7; box-shadow: var(--shadow-lg); } .chat-fab { right: 12px; bottom: 12px; } }
+
+/* -------------------------------------------------------------------------- early career: reachability, outcomes, results */
+.fresher-box, .outcome-box { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: var(--radius-md);
+  border: 1px solid var(--line); background: var(--card-solid); }
+.fresher-box .bullets { margin: 6px 0; }
+.referral-pack { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.outcome-box .chip { cursor: pointer; font: inherit; font-size: .78rem; }
+.outcome-box .chip:disabled { cursor: default; }
+.results-panel { padding: 14px 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+.results-panel table { font-size: .82rem; }

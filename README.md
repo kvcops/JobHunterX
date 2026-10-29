@@ -111,6 +111,25 @@ So "apply to more jobs" does not work. **Being seen early, on the right channel,
 | ⏳ **Notice period aware** | "Immediate joiners only" posts are flagged when your notice is 45+ days |
 | 🌍 **India only** | Jobs outside your country are dropped before scoring, so they never push out Indian roles |
 
+### 🎓 Made for 0–2 years: reachable jobs, a safety net, honest results
+
+Recruiters' résumé databases (Naukri Resdex, LinkedIn Recruiter) filter by years, so a fresher is rarely *found* — but a
+person reading a direct application or a referral treats "1–3 years" as a preference. JobHunterX reads postings that way
+(details and sources: [`docs/research/freshers-getting-shortlisted.md`](jobhunterx/docs/research/freshers-getting-shortlisted.md)):
+
+| What changed | Why |
+|:--|:--|
+| **Experience bands instead of a hard cap** (under ~3 years): *within reach* · *apply directly or with a referral* · *stretch, referral preferred* · *out of range*. Experience is counted the way recruiters' systems count it (dated internships included) and shown to you | "1–3 years" roles used to be marked "Not a fit" for freshers |
+| **Safety-net tab**: large IT-services fresher programmes (national tests, off-campus drives) in their own tab, not mixed into your main list. Switch in Settings → Search tuning | They run the biggest fresher intake; hiding them helped nobody |
+| **Immediate-joiner boost**: with no notice period, "immediate joiner" posts rank up | ~27% of postings want joining within 15 days, only ~14% of candidates can |
+| **Employer reachability from data**: an employer's own entry-level postings in the last 90 days (daily India copy of employer boards) raise or lower the chance to be seen | No hand-made "fresher-friendly" company list |
+| **Scam filter**: fees / UPI, per-task payouts, WhatsApp-only contact, ID or OTP requests, "no interview" offers… critical hits are never recommended | Fake jobs target freshers hardest |
+| **Referral pack** in the Connector: the job link and ID, three lines the referrer can paste, one proof link from your profile | Referral portals work per job ID |
+| **Results**: log how you applied (own site, referral, note to the team…) and what happened; Tracker → Results shows interviews per 10 applications per route, and switches to a diagnosis after 40 applications under 3% replies | Learn what works *for you* |
+| **Honest forms**: the browser agent never rounds experience up on knockout questions | An inflated answer gets caught at interview |
+
+Jobs scored before an update are re-scored automatically (no AI calls) the next time you open the job list.
+
 > [!NOTE]
 > The watchlist covers **Hyderabad, Bengaluru and remote-India** today. More South Indian cities (Chennai, Kochi,
 > Coimbatore, Vizag…) come next. The research lives in `jobhunterx/jobhunterx/watchlist/companies.json`.
@@ -979,8 +998,9 @@ The full contract (REST + WebSocket) is in [`jobhunterx/docs/API.md`](jobhunterx
 | 🔑 Setup | `GET /api/setup` (which keys are set), `POST /api/setup/test-key` (one free call to check a key) |
 | 🔎 Searches | `POST /api/searches`, `GET /api/searches/current`, `GET /api/searches/{id}`, `POST /api/searches/{id}/cancel` |
 | 🏢 Watchlist | `GET /api/watchlist?scope=mine` or `scope=all`, `POST /api/watchlist/check` |
-| 💼 Jobs | `GET /api/jobs` (views incl. `fresh`; sorts `chance` · `score` · `reach` · `recent`), `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore` |
+| 💼 Jobs | `GET /api/jobs` (views incl. `fresh`, `safety_net`; sorts `chance` · `score` · `reach` · `recent`), `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore` |
 | 📝 Documents | `POST /api/jobs/{id}/documents`, `POST /api/documents/cv`, `GET /api/documents`, `GET/PATCH /api/documents/{id}`, `GET /api/documents/{id}/pdf[?style=]` |
+| 📈 Results | `PATCH /api/jobs/{id}` with `channel`, `human_path`, `event` · `GET /api/outcomes` (interviews per 10, per route, diagnosis) |
 | 🎨 Styles & AI editor | `GET /api/document-styles`, `PATCH /api/documents/{id}/style`, `POST /api/documents/{id}/chat` (returns a proposal; nothing is saved) |
 | 🤖 Auto-apply | `POST /api/jobs/{id}/apply`, `GET /api/apply/current`, `POST /api/apply/{job_id}/stop · take-over · release · continue · close · done`, `WS /ws/browser` |
 | ⚙️ System | settings, providers, models, usage, database health / repair / backup, interventions, reset |

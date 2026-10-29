@@ -560,6 +560,31 @@ async def check_watchlist():
 # Jobs
 # ---------------------------------------------------------------------------
 
+_reassessed: set[str] = set()      # profiles whose jobs were brought up to the current matcher in this process
+
+
+async def _refresh_outdated_once() -> None:
+    """Jobs scored by an older matcher version are re-scored once (no AI, a few ms each), so rule changes such as the
+    early-career experience bands reach jobs found before them."""
+    profile = await profile_svc.get_profile()
+    if profile is None or profile.is_empty():
+        return
+    h = profile.content_hash()
+    key = f"{storage.active_person() or ''}:{h}"
+    if key in _reassessed:
+        return
+    _reassessed.add(key)
+    snap = await storage.get_snapshot(h)          # only an understanding that already exists — never starts an AI build
+    if snap is None:
+        return
+    try:
+        n = await jobs_svc.reassess_outdated(snap, profile.model_dump(mode="json"))
+        if n:
+            log.info("jobs_reassessed", count=n)
+    except Exception as exc:
+        log.warning("jobs_reassess_failed", error=str(exc)[:160])
+
+
 @router.get("/jobs")
 async def list_jobs(view: str = "recommended", run_id: str = "", q: str = "", work_mode: str = "",
                     min_score: int = 0, sort: Literal["chance", "score", "reach", "recent"] = "chance", limit: int = 200,
@@ -567,6 +592,7 @@ async def list_jobs(view: str = "recommended", run_id: str = "", q: str = "", wo
     """One page of jobs (page through with offset; has_more says whether another page exists) plus the tab counts."""
     if view not in jobs_svc.VIEWS:
         raise HTTPException(400, f"Unknown view '{view}'")
+    await _refresh_outdated_once()
     items, counts = await jobs_svc.list_jobs(view, await _current_hash(), run_id=run_id, q=q.strip()[:100],
                                              work_mode=work_mode, min_score=min_score, sort=sort,
                                              limit=max(1, min(limit, 500)) + 1, offset=max(0, offset))
@@ -611,15 +637,40 @@ async def unsave_job(job_id: str):
 
 class TrackingUpdate(BaseModel):
     tracking_status: str
+    # results tracking (services/outcomes.py): how you applied, whether a person was involved, what happened since
+    channel: Optional[str] = Field(None, max_length=32)
+    human_path: Optional[bool] = None
+    event: Optional[Literal["reply", "screen", "interview", "offer", "rejected"]] = None
 
 
 @router.patch("/jobs/{job_id}")
 async def update_job(job_id: str, body: TrackingUpdate):
+    from jobhunterx.services import outcomes
     if body.tracking_status not in storage.TRACKING_STATUSES:
         raise HTTPException(422, f"tracking_status must be one of {storage.TRACKING_STATUSES}")
+    if body.channel is not None and body.channel not in outcomes.CHANNELS:
+        raise HTTPException(422, f"channel must be one of {outcomes.CHANNELS}")
     if not await storage.set_tracking(job_id, body.tracking_status):
         raise HTTPException(404, "Job not found")
+    row = await storage.get_row(job_id)
+    if row:
+        posting, match = storage.row_to_objects(row)
+        try:
+            current = json.loads(row.get("outcome_json") or "null")
+        except ValueError:
+            current = None
+        tailored = bool(await storage.list_documents(job_id, "resume"))
+        await outcomes.record_status(job_id, body.tracking_status, posting, match, current, channel=body.channel,
+                                     human_path=body.human_path, tailored=tailored, event=body.event)
     return {"job": await _summary_and_publish(job_id)}
+
+
+@router.get("/outcomes")
+async def get_outcomes():
+    """Interviews per 10 applications, per channel and overall, and what to change when nothing is working."""
+    from jobhunterx.services import outcomes
+    return {**outcomes.summarize(await storage.list_outcomes()), "channels": outcomes.CHANNEL_LABELS,
+            "events": outcomes.EVENTS}
 
 
 @router.post("/jobs/{job_id}/verify")
@@ -1056,6 +1107,7 @@ _TUNABLES = {
     "browser_step_delay_s": ("BROWSER_STEP_DELAY_S", float, 0, 20),
     "apply_with_cover_letter": ("APPLY_WITH_COVER_LETTER", bool, None, None),
     "apply_with_cv": ("APPLY_WITH_CV", bool, None, None),
+    "fresher_floor_track": ("FRESHER_FLOOR_TRACK", bool, None, None),
 }
 
 

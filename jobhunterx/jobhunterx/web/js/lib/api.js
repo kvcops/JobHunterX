@@ -166,6 +166,7 @@ export const api = {
   saveJob: (id, o) => request(`/jobs/${enc(id)}/saved`, { method: 'PUT', ...o }),
   unsaveJob: (id, o) => request(`/jobs/${enc(id)}/saved`, { method: 'DELETE', ...o }),
   patchJob: (id, body, o) => request(`/jobs/${enc(id)}`, { method: 'PATCH', body, ...o }),
+  getOutcomes: (o) => request('/outcomes', o),
   verifyJob: (id, o) => request(`/jobs/${enc(id)}/verify`, { method: 'POST', timeout: 45_000, ...o }),
   officeChat: (body) => request('/office/chat', { method: 'POST', body, timeout: 10_000 }),
   officeBank: () => request('/office/bank'),

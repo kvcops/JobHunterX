@@ -166,9 +166,9 @@ def _relevance(title: str, labels: list[str], common: set[str] | frozenset = fro
     return title_overlap(title, labels, common)
 
 
-def _bad_company(name: str) -> bool:
+def _bad_company(name: str, keep_mass: bool = False) -> bool:
     from jobhunterx.discovery import watchlist
-    return watchlist.is_mass_recruiter(name) or bool(_STAFFING.search(name or ""))
+    return (not keep_mass and watchlist.is_mass_recruiter(name)) or bool(_STAFFING.search(name or ""))
 
 
 # ------------------------------------------------------------------ employer's own board
@@ -250,7 +250,8 @@ def _rotation(key: str) -> int:
 async def discover(titles: list[str], places: list[str], *, labels: list[str], include_remote: bool = False,
                    max_postings: int = 40, max_applicants: int = 150,
                    skip: Optional[Callable[[JobPosting], Awaitable[bool]]] = None,
-                   on_progress: Optional[Callable[[str], Awaitable[None]]] = None) -> tuple[list[JobPosting], dict]:
+                   on_progress: Optional[Callable[[str], Awaitable[None]]] = None,
+                   keep_mass: bool = False) -> tuple[list[JobPosting], dict]:
     """Fresh postings for titles × places. Returns (postings, stats)."""
     t0 = time.monotonic()
     stats = {"cards": 0, "agencies": 0, "crowded": 0, "first_party": 0, "seen": 0, "read": 0}
@@ -278,7 +279,7 @@ async def discover(titles: list[str], places: list[str], *, labels: list[str], i
     common = common_words(c.title for c in cards.values())     # "engineer" alone does not make a post relevant
     kept = []
     for c in cards.values():
-        if _bad_company(c.company):
+        if _bad_company(c.company, keep_mass):
             stats["agencies"] += 1
         elif _relevance(c.title, labels, common) > 0:
             kept.append(c)

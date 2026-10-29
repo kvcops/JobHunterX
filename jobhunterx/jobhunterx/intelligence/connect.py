@@ -43,6 +43,16 @@ class Route(BaseModel):
     note: str = ""
 
 
+class ReferralPack(BaseModel):
+    """What a referrer needs to refer you in two minutes: their internal portal asks for the job and a few lines about you."""
+
+    job_url: str = ""
+    job_id: str = ""            # the employer's own posting id when known (referral portals work per job id)
+    blurb: str = ""             # three lines the referrer can paste
+    proof_link: str = ""        # one link that shows the work (project demo / code), from the profile only
+    proof_label: str = ""
+
+
 class Connection(BaseModel):
     company: str = ""
     title: str = ""
@@ -52,6 +62,7 @@ class Connection(BaseModel):
     message: str = ""
     method: str = "template"                    # llm | template
     facts: list[str] = Field(default_factory=list)   # what the drafts were allowed to say
+    referral: ReferralPack = Field(default_factory=ReferralPack)
     created_at: str = ""
 
 
@@ -103,6 +114,45 @@ def _highlight(profile: CandidateProfile, skills: list[str]) -> str:
         if pr.title and n > best_n:
             best, best_n = f"project “{pr.title}”", n
     return best
+
+
+def _proof(profile: CandidateProfile, skills: list[str]) -> tuple[str, str]:
+    """The one project link that shows the most matched skills (a live demo or code link already in the profile)."""
+    want = [s.lower() for s in skills]
+    best, best_n = ("", ""), -1
+    for pr in profile.projects or []:
+        links = [l for l in pr.all_links() if (l.url or "").startswith(("http://", "https://"))]
+        if not links:
+            continue
+        text = " ".join([pr.title, pr.description, *pr.technologies]).lower()
+        n = sum(1 for s in want if s and s in text)
+        if n > best_n:
+            best, best_n = (links[0].url, pr.title), n
+    if not best[0]:
+        for url in (profile.github, profile.portfolio):
+            if url and url.startswith(("http://", "https://")):
+                return url, "GitHub" if "github" in url else "Portfolio"
+    return best
+
+
+def referral_pack(job: JobPosting, f: dict, profile: CandidateProfile, snap: Optional[CandidateSnapshot]) -> ReferralPack:
+    link, label = _proof(profile, f["matched_skills"])
+    who = f["candidate_role"] or "engineer"
+    exp = f" with {f['years_experience']} years" if f["years_experience"] else ""
+    lines = [f"{profile.name or f['candidate_first_name']} — {who}{exp}, applying for {job.title}"
+             + (f" ({f['city']})" if f["city"] else "") + "."]
+    if f["matched_skills"]:
+        lines.append("Matches the role on " + ", ".join(f["matched_skills"][:3])
+                     + (f"; shown in {f['real_role_or_project']}." if f["real_role_or_project"] else "."))
+    tail = []
+    if link:
+        tail.append(f"Work: {link}")
+    if snap is not None and not snap.notice_period_days:
+        tail.append("Can join immediately")
+    if tail:
+        lines.append(" · ".join(tail) + ".")
+    return ReferralPack(job_url=job.apply_url or job.canonical_url, job_id=(job.ats.job_id if job.ats else ""),
+                        blurb="\n".join(lines[:3]), proof_link=link, proof_label=label)
 
 
 def _li_people(q: str) -> str:
@@ -229,4 +279,5 @@ async def build(job: JobPosting, match: Optional[MatchAssessment], profile: Cand
     facts = [x for x in [f["candidate_role"], *f["matched_skills"], f["real_role_or_project"]] if x]
     return Connection(company=job.company, title=job.title, routes=routes_for(job, profile), note=draft.note,
                       subject=draft.subject, message=draft.message, method=method, facts=facts,
+                      referral=referral_pack(job, f, profile, snap),
                       created_at=datetime.now(timezone.utc).isoformat())

@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 from jobhunterx.discovery import watchlist
 from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.job import JobPosting
-from jobhunterx.domain.match import Reach, ReachSignal
+from jobhunterx.domain.match import Reach, ReachSignal, ScamCheck
 
 # Public boards where one post collects a crowd. Seeing a job here is fine for
 # discovery; applying here is usually a lottery.
@@ -78,8 +78,15 @@ def application_email(job: JobPosting) -> Optional[str]:
     return None
 
 
+def _early(snapshot: Optional[CandidateSnapshot]) -> bool:
+    if snapshot is None:
+        return False
+    from jobhunterx.intelligence.matching import early_career
+    return early_career(snapshot)
+
+
 def assess_reach(job: JobPosting, snapshot: Optional[CandidateSnapshot] = None,
-                 now: Optional[datetime] = None) -> Reach:
+                 now: Optional[datetime] = None, *, scam: Optional[ScamCheck] = None, floor: bool = False) -> Reach:
     now = now or datetime.now(timezone.utc)
     signals: list[ReachSignal] = []
 
@@ -139,16 +146,26 @@ def assess_reach(job: JobPosting, snapshot: Optional[CandidateSnapshot] = None,
     # 5. Notice period: Indian startups often want immediate joiners.
     notice = snapshot.notice_period_days if snapshot else None
     im = _IMMEDIATE.search(job.description or "")
+    early = _early(snapshot)
+    risky = bool(scam and scam.level in ("high", "critical"))
     if im and notice:
         limit = int(im.group(1)) if im.group(1) else 0
         if limit < notice:
             want = "immediate joiners" if not im.group(1) else f"joining within {limit} days"
             add("notice", -15, f"Asks for {want}; your notice is {notice} days — likely filtered on this.")
+    elif im and not notice and early and not risky:
+        # About 27% of Indian postings want people within 15 days, but only ~14% of candidates can join that fast
+        # (foundit Hiring Urgency Index, 2026). A fresher with no notice period is in the scarce group.
+        add("notice", 12, "Wants someone who can join soon — you can join immediately, and most applicants can't. "
+                          "Say so in the first line of your application.")
 
     # 6. Company — researched watchlist data, or a mass recruiter.
     company = watchlist.find(job)
     mass = watchlist.is_mass_recruiter(job.company)
-    if mass:
+    if floor:
+        add("company", 0, f"Safety net: {job.company} hires freshers in volume through national tests and off-campus "
+                          "drives — the official hiring portal and test dates matter more than this posting.")
+    elif mass:
         add("company", -25, f"{job.company} is a mass-recruitment IT services firm — huge applicant volume, little product AI work.")
     elif company:
         comp = {"low": 12, "medium": 4, "high": -6, "very_high": -14}.get(company.competition, 0)
@@ -164,9 +181,24 @@ def assess_reach(job: JobPosting, snapshot: Optional[CandidateSnapshot] = None,
                                         "rare": "Rarely hires engineers under 3 years."}[company.hires_early_career])
         if company.verdict == "caution" and company.red_flags:
             add("company_flags", -4, "Watch out: " + "; ".join(company.red_flags[:2]))
+    if early and not mass and not (company and company.hires_early_career):
+        # Not researched by hand: read the employer's own recent postings instead (the daily India copy of employer boards).
+        from jobhunterx.discovery import ats_index
+        stats = ats_index.fresher_reachability(job.company or "")
+        if stats:
+            entry, total = stats
+            if entry >= 3:
+                add("early_career", 8, f"{job.company} posted {entry} entry-level openings in India in the last 90 days — "
+                                       "it does hire early-career people.")
+            elif entry:
+                add("early_career", 3, f"{job.company} posted {entry} entry-level opening(s) in India in the last 90 days.")
+            elif total >= 10:
+                add("early_career", -6, f"None of {job.company}'s {total} recent Indian postings were entry-level.")
+    if risky:
+        add("scam", -30, "Scam signals in this posting — see the warning before you share anything.")
 
     score = max(0, min(100, 50 + sum(s.points for s in signals)))
-    if mass:
+    if mass and not floor:
         score = min(score, 25)          # a fresh post doesn't change who reads a bulk-hiring pipeline
     level = "high" if score >= 70 else "medium" if score >= 45 else "low"
     best = sorted([s for s in signals if s.points > 0], key=lambda s: -s.points)

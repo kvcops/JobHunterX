@@ -441,6 +441,8 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     # 3. Discover -------------------------------------------------------------
     await run.stage("discover")
     use_linkedin = not watch_mode and settings.enable_linkedin_source
+    # early career: large IT-services fresher programmes stay in as a separate safety-net track (intelligence/matching.py)
+    keep_mass = search.early_career(snap) and settings.fresher_floor_track
 
     async def already_seen(p: JobPosting) -> bool:
         p.fingerprint = p.fingerprint or dedupe.fingerprint(p)
@@ -456,7 +458,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 scope.titles, scope.locations or [scope.country or "India"],
                 labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
                 include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2),
-                max_applicants=settings.linkedin_max_applicants, skip=already_seen, on_progress=note)
+                max_applicants=settings.linkedin_max_applicants, skip=already_seen, on_progress=note, keep_mass=keep_mass)
         except Exception as exc:                  # a blocked or changed feed never fails the search
             log.warning("linkedin_source_failed", error=str(exc)[:160])
             return []
@@ -510,7 +512,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 pass
         hits = ats_index.search([*scope.titles, *snap.adjacent_titles[:4]], scope.locations or [scope.country],
                                 level=snap.seniority.value, include_remote=scope.include_remote, limit=max_jobs)
-        hits = [(r, sc) for r, sc in hits if not watchlist.is_mass_recruiter(r.company)]
+        hits = [(r, sc) for r, sc in hits if keep_mass or not watchlist.is_mass_recruiter(r.company)]
         index_leads = [search.Lead(url=r.url, title=r.title, snippet=f"{r.company} · {r.location} · first seen {r.first_seen[:10]}",
                                    provider="ats_index", query="employer boards index") for r, _ in hits]
         st = ats_index.status()

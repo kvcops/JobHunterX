@@ -431,6 +431,23 @@ export async function setTracking(jobId, status) {
     setPending('track', jobId, false);
   }
 }
+/** Log how you applied and what happened (channel, a person involved, reply / screening / interview / offer). */
+export async function recordOutcome(jobId, extra) {
+  const job = getState().jobs.byId[jobId] || (getState().details[jobId] || {}).job;
+  const current = job ? job.tracking_status : 'applied';
+  const status = extra.tracking_status || (['new', 'saved', 'preparing'].includes(current) ? 'applied' : current);
+  try {
+    const res = await api.patchJob(jobId, { ...extra, tracking_status: status });
+    upsertJobs([res.job]);
+    reconcileListMembership(getState().jobs.byId[jobId]);
+    const entry = getState().details[jobId];
+    if (entry && entry.job) setEntry('details', jobId, { ...entry, job: { ...entry.job, ...res.job, match: entry.job.match } });
+    return res.job;
+  } catch (err) {
+    toast(`Could not save the result: ${errorText(err)}`, 'danger');
+    return null;
+  }
+}
 async function detailAction(kind, jobId, call, okMsg) {
   if (getState().pending[kind][jobId]) return;
   setPending(kind, jobId, true);

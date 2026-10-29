@@ -125,6 +125,7 @@ class Settings(BaseSettings):
     max_jobs_per_search: int = 60
     enable_ats_index: bool = True           # daily India copy of ~28k employers' own boards (job-board-aggregator data)
     enable_linkedin_source: bool = True     # LinkedIn's public (logged-out) job feed: newest posts, resolved to employer boards
+    fresher_floor_track: bool = True        # under ~3 yrs: show large IT-services fresher programmes as a separate safety-net track
     enable_hn_source: bool = False          # Hacker News: YC job posts + monthly 'Who is hiring?' (India / India-friendly remote only)
     linkedin_max_applicants: int = 150      # skip LinkedIn posts that already show this many applicants
     max_llm_jd_extractions_per_search: int = 40

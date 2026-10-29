@@ -69,6 +69,7 @@ export function summaryFromDetail(d) {
     required_total: (m.matched_required || []).length + (m.missing_required || []).length,
     missing_required: (m.missing_required || []).slice(0, 5),
     experience: m.experience, rejected_reasons: m.rejected_reasons || [],
+    track: m.track || 'main', scam: m.scam || null,
   } : null;
   const r = m && m.reach;
   const reachSummary = r ? {

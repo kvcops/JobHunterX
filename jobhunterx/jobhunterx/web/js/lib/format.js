@@ -182,6 +182,9 @@ export function experienceText(exp) {
   if (!exp) return 'Experience: unknown';
   const req = fmtRange(exp.required_min, exp.required_max);
   const gap = exp.gap_years ? Math.round(exp.gap_years * 10) / 10 : 0;
+  // early career: how reachable the posting is, not just how far below its number you are
+  if (exp.band === 'direct') return `${req} asked · apply direct or with a referral`;
+  if (exp.band === 'stretch') return `${req} asked · stretch, referral preferred`;
   switch (exp.fit) {
     case 'within': return `Experience fits (${req})`;
     case 'under': return gap ? `Under by ${gap} yrs (${req})` : `Below range (${req})`;
