@@ -15,6 +15,28 @@ Codes: `bad_request` (400), `forbidden` (403 — cross-site write blocked), `not
 
 ---
 
+## Login (only when `APP_ENV=prod`)
+
+Without `APP_ENV=prod` none of this applies and there is no login. With it, every path except `/login`,
+`/healthz`, `/api/auth/login`, `/api/auth/me` and the login page's static files needs the `jhx_session`
+cookie: API calls without it get `401`, pages redirect to `/login`, WebSockets close with code `4401`.
+Ids of another user's records answer `404`. `/docs`, `/redoc` and `/openapi.json` are off.
+
+| Method | Path | Body | Response |
+|:--|:--|:--|:--|
+| GET | `/api/auth/me` | – | `{ enabled, user: { id, username, is_admin } \| null }` |
+| POST | `/api/auth/login` | `{ username, password }` | `{ user }` + session cookie. `401` wrong login, `429` after 5 wrong tries (15 min) |
+| POST | `/api/auth/logout` | – | `{ ok }`, clears the cookie, `Clear-Site-Data` |
+| POST | `/api/auth/password` | `{ current, new }` | `{ ok }` (not for the admin: that one is set in `.env`) |
+| GET | `/api/auth/users` | – | admin: `{ users: [{ id, username, is_admin, disabled, profiles, keys, signed_in, last_login }] }` |
+| POST | `/api/auth/users` | `{ username, password }` | admin: creates a normal user |
+| PATCH | `/api/auth/users/{id}` | `{ password?, disabled? }` | admin: new password / block sign-in (signs them out) |
+| DELETE | `/api/auth/users/{id}` | – | admin: deletes the user and all their data |
+
+Admin only in prod mode: `POST /api/providers`, `POST /api/models`, `/api/system/*`, `GET /api/usage`,
+`POST /api/pipeline-mode`, `POST /api/reset`. For other users `GET/POST /api/settings` show and save only
+their own keys (`*_api_key` fields).
+
 ## Profile
 
 The candidate profile is a first-class object. `snapshot` is derived from it
@@ -282,7 +304,10 @@ concurrent generation for the same `(job_id, kind)` with 409.
 | GET | `/api/documents?job_id=&kind=` | – | `{ documents: DocumentSummary[] }` |
 | GET | `/api/documents/{id}` | – | `{ document: DocumentDetail }` |
 | PATCH | `/api/documents/{id}` | `{ content: ResumeContent \| CoverLetterContent }` | `{ document: DocumentDetail }` |
-| GET | `/api/documents/{id}/pdf` | – | `application/pdf` (attachment) |
+| GET | `/api/documents/{id}/pdf?style=` | – | `application/pdf` (attachment). `style` is optional: a style id from `/api/document-styles`; the saved style is used when omitted. Other styles are rendered once and cached; an unknown id is `422`. |
+| GET | `/api/document-styles` | – | `{ default: "classic", styles: { id, label, description, accent, font, heading, align }[] }` |
+| PATCH | `/api/documents/{id}/style` | `{ style: string }` | `{ document: DocumentDetail }` — saves the style and re-renders the stored PDF; content is untouched. Unknown style `422`. Rate limited (30/min). |
+| POST | `/api/documents/{id}/chat` | `{ instruction: string (3–600), content?: <the unsaved draft>, history?: { role: "user"\|"assistant", text }[] (≤ 12) }` | `ChatProposal` — **nothing is saved**; keep a proposal with `PATCH /api/documents/{id}`. Rate limited (10/min, 80/h per user → `429` + `Retry-After`). |
 | DELETE | `/api/documents/{id}` | – | `{ ok: true }` |
 
 `PATCH /api/documents/{id}` updates the existing document in place. The content is
@@ -295,6 +320,7 @@ updates, downloads, and deletes are scoped to the active profile.
 
 ```ts
 type DocumentSummary = {
+  style: string;                                 // visual style id (classic, professional, harvard, modern, slate)
   id: string; kind: "resume"|"cv"|"cover_letter"; job_id: string|null;
   title: string; focus: string; created_at: string; updated_at: string;
   profile_hash: string; stale: boolean;          // profile changed since generation
@@ -324,7 +350,26 @@ type ResumeContent = {   // used by both resume and cv
 };
 
 type CoverLetterContent = { greeting: string; paragraphs: string[]; closing: string; signature: string };
+
+type ChatProposal = {
+  reply: string;                                 // one or two plain sentences
+  content: ResumeContent | CoverLetterContent;   // the draft with every ACCEPTED change applied (the input when none applied)
+  model: string;
+  changes: { id: number; op: string; label: string; path: string;   // path e.g. "experience.0.bullets.1" (what the preview highlights)
+             before: string; after: string; accepted: boolean; reason: string }[];
+};
 ```
+
+### AI chat editor
+
+`POST /api/documents/{id}/chat` runs the chain `editor` (Gemini 3.5 Flash Lite, then Kilo's free models; thinking off). The
+model answers with at most 8 whitelisted operations — `set_headline`, `set_summary`, `rewrite_bullet`, `add_bullet`,
+`remove_bullet`, `rewrite_project`, `remove_project`, `reorder_skills` (same skills, new order, none added), `remove_item`
+(achievements / certifications / competitions / languages) and, for cover letters, `rewrite_paragraph`, `remove_paragraph`,
+`set_greeting`, `set_closing`. Every operation is range-checked, fact-checked (no new numbers, tools, employers or links
+absent from the profile, the document and the user's message) and applied to a copy that must still validate; failures come
+back with `accepted: false` and a `reason`. Contact details, links, dates, companies and degrees have no operation. Errors:
+`422` (bad or empty input, document unreadable, AI unavailable), `404`, `429`.
 
 ---
 

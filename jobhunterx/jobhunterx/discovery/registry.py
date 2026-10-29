@@ -30,9 +30,9 @@ _store = None
 def _cache():
     global _store
     if _store is None:
-        from diskcache import Cache
+        from jobhunterx.config import capacity
         from jobhunterx.config.settings import get_settings
-        _store = Cache(str(get_settings().cache_full_path / "board_registry"))
+        _store = capacity.disk_cache(get_settings().cache_full_path / "board_registry", 64)
     return _store
 
 

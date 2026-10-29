@@ -54,3 +54,4 @@ class GeneratedDocument(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     manually_edited: bool = False
+    style: str = "classic"                # visual style id (generation/styles.py); content is the same in every style

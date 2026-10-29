@@ -47,10 +47,15 @@ export class ReconnectingSocket {
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg && typeof msg === 'object') this.onMessage(msg);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.ws !== ws) return;
       this.ws = null;
       if (this.closed) return;
+      if (ev && ev.code === 4401) {        // login ended (prod mode): stop retrying, go to the login page
+        this.close();
+        window.dispatchEvent(new Event('jhx:unauthorized'));
+        return;
+      }
       this.onStatus('reconnecting');
       this.schedule();
     };

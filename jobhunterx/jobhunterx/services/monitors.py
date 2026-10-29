@@ -40,7 +40,7 @@ def _publish(m: dict) -> None:
     """Save and tell the UI — callable from the browser worker thread."""
     snap = dict(m)
     live_view._on_main(storage.save_monitor(snap))
-    live_view.broadcast_event({"type": "monitor.updated", "data": {"monitor": public(snap)}})
+    live_view.broadcast_event({"type": "monitor.updated", "person_id": snap.get("person_id"), "data": {"monitor": public(snap)}})
 
 
 async def add(company: str, location: str = "", keyword: str = "", default_keyword: str = "") -> dict:
@@ -76,6 +76,9 @@ async def _scout(m: dict, keyword: str) -> None:
     if _scout_lock is None:
         _scout_lock = asyncio.Lock()
     async with _scout_lock:
+        from jobhunterx.config import auth_ctx
+        user = auth_ctx.current()
+        live_view.set_owner("scout", user.id if user else None)     # prod mode: only this user watches it
         m.update(status="scouting", message=f"Finding {m['company']}'s careers site", steps=[])
         _publish(m)
 
@@ -115,7 +118,7 @@ async def check(monitor_id: str, keywords: Optional[list[str]] = None) -> Option
         log.warning("monitor_check_failed", company=m["company"], error=str(exc)[:200])
         m.update(error=f"Check failed: {str(exc)[:160]} — try Re-scout if the site changed.", last_check_at=_now())
     await storage.save_monitor(m)
-    live_view.broadcast_event({"type": "monitor.updated", "data": {"monitor": public(m)}})
+    live_view.broadcast_event({"type": "monitor.updated", "person_id": m.get("person_id"), "data": {"monitor": public(m)}})
     return public(m)
 
 

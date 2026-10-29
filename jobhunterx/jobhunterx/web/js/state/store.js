@@ -10,6 +10,7 @@ export function parseHash(hash = window.location.hash) {
   const route = { page, jobId: null, docId: null };
   if ((page === 'discover' || page === 'tracker') && parts[1] === 'job' && parts[2]) route.jobId = parts[2];
   if (page === 'documents' && parts[1]) route.docId = parts[1];
+  if (page === 'settings' && parts[1]) route.section = parts[1];
   return route;
 }
 
@@ -53,7 +54,8 @@ export function initialState() {
       feed: { runId: null, items: [] },   // plain-language live activity of the active run
     },
     jobs: { byId: {} },
-    watch: { status: 'idle', data: null, error: null, checking: false, run: null, feed: [] },   // run = live background check
+    // run = live background check; stale = a check finished since the list was loaded (refresh is manual)
+    watch: { status: 'idle', data: null, error: null, checking: false, run: null, feed: [], stale: false },
     monitors: { status: 'idle', items: [], error: null, busy: {} },   // companies you watch (Company Scout recipes)
     setup: { data: null, error: null, saving: false, tests: {} },   // API keys; checked before anything else
     details: {},            // jobId -> { status, job, error }
@@ -76,6 +78,9 @@ export function initialState() {
     db: { status: 'idle', data: null, error: null },
     usage: { status: 'idle', data: null, error: null },
     pipelineMode: { status: 'idle', mode: null, error: null },
+    // Login (prod mode only): enabled=false means the local single-user app with no login at all.
+    auth: { enabled: false, user: null },
+    users: { status: 'idle', data: null, error: null },   // admin: the Users page
   };
 }
 

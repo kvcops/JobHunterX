@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from jobhunterx import storage
+from jobhunterx.config import auth_ctx
 from jobhunterx.config import database as db
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
@@ -69,7 +70,13 @@ async def _job_dict(job_id: str) -> dict:
         raise ApplyError("This job has no application link.")
     return {"id": job_id, "company": posting.company if posting else row.get("company", ""),
             "role": posting.title if posting else row.get("role", ""), "apply_url": url,
-            "career_page_url": posting.canonical_url if posting else url, "person_id": storage.active_person()}
+            "career_page_url": posting.canonical_url if posting else url, "person_id": storage.active_person(),
+            "user_id": _user_id()}
+
+
+def _user_id() -> Optional[str]:
+    user = auth_ctx.current()
+    return user.id if user else None
 
 
 async def _existing(kind: str, job_id: str, profile_hash: str) -> Optional[GeneratedDocument]:
@@ -143,7 +150,25 @@ async def _prepare_kit(sess, job_id: str, emit: Emit) -> tuple[dict, dict[str, s
         sess.update(kit=kit)
 
     profile_dict = profile.model_dump(mode="json")
+    profile_dict["qa_memory"] = form_answers(profile, snapshot)
     return profile_dict, files
+
+
+def form_answers(profile, snapshot) -> dict:
+    """The application-form answers, with every empty one filled from what the profile already says (preferences,
+    the years worked) — so the agent never meets an empty "Years of experience" or "Willing to relocate"."""
+    qa = profile.qa_memory.model_dump(mode="json")
+    pr = profile.preferences
+    if not qa.get("notice_period") and pr.notice_period_days is not None:
+        qa["notice_period"] = "Immediate joiner" if pr.notice_period_days == 0 else f"{pr.notice_period_days} days"
+    if not qa.get("preferred_work_mode") and pr.work_modes:
+        qa["preferred_work_mode"] = " / ".join(m.value.capitalize() for m in pr.work_modes)
+    if not qa.get("willing_to_relocate"):
+        qa["willing_to_relocate"] = "Yes" if pr.willing_to_relocate else "No"
+    if not qa.get("years_of_experience") and snapshot is not None:
+        qa["years_of_experience"] = f"{round(snapshot.professional_years, 1):g}"
+    qa["current_total_lpa"] = profile.qa_memory.current_total_lpa
+    return qa
 
 
 async def _restore(job_id: str):
@@ -169,6 +194,11 @@ async def start(job_id: str, emit: Emit, continuing: bool = False) -> dict:
     existing = ba.get_session(job_id)
     if existing and existing.data["status"] in ("launching", "running", "paused", "stopping"):
         raise ApplyError("The agent is already working on this job.")
+    if ba.cloud_required() and not ba.browser_use_key():
+        raise ApplyError("Auto-apply needs your own Browser Use API key (it runs the browser in your Browser Use cloud, "
+                         "not on this server). Add it in Settings → Web search & browser.")
+    if ba.busy_for(_user_id()):
+        raise ApplyError(ba.busy_message())       # prod mode: one browser, and another user has it open
 
     if continuing:
         sess = await _restore(job_id)
@@ -208,7 +238,7 @@ async def stop(job_id: str) -> Optional[dict]:
 async def current() -> Optional[dict]:
     from jobhunterx.agents import browser_agent as ba
     sess = ba.current_session()
-    if sess and sess.data.get("person_id") in (None, storage.active_person()):
+    if sess and sess.data.get("person_id") in (None, storage.active_person()) and sess.data.get("user_id") == _user_id():
         return sess.snapshot()
     return await storage.latest_apply_session()
 

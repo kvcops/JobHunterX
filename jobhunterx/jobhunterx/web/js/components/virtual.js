@@ -1,6 +1,7 @@
 // A windowed list: only the rows near the viewport exist in the page, so a list of thousands scrolls like a list of ten.
 // Rows can have any height; each is measured once it renders (until then an estimate is used), and when a row above
 // the viewport changes height the scroll position is corrected so nothing on screen jumps.
+// On phones the list does not scroll by itself (the whole page does); then the window is the viewport.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../lib/preact.js';
 
 /** Index of the first row whose bottom edge is at or below y (binary search over the row tops). */
@@ -11,6 +12,11 @@ function firstBelow(tops, heights, y) {
     if (tops[mid] + heights[mid] >= y) { ans = mid; hi = mid - 1; } else lo = mid + 1;
   }
   return ans;
+}
+
+/** True when the list box does not scroll itself (phone layout: the page scrolls). */
+function pageScrolls(el) {
+  return getComputedStyle(el).overflowY === 'visible';
 }
 
 /** One positioned row; measured while it is on screen, forgotten by the observer when it leaves. */
@@ -42,7 +48,9 @@ export function VirtualList({ items, itemKey, renderItem, estimate = 180, gap = 
   if (!observer.current) {
     observer.current = new ResizeObserver((entries) => {
       const el = scroller.current;
-      const anchor = el ? el.scrollTop - (body.current ? body.current.offsetTop : 0) : 0;
+      const win = el && pageScrolls(el);
+      const anchor = !el ? 0 : win ? (body.current ? -body.current.getBoundingClientRect().top : 0)
+        : el.scrollTop - (body.current ? body.current.offsetTop : 0);
       const { keys: ks, tops: ts } = layout.current;
       let changed = false, shift = 0;
       for (const e of entries) {
@@ -57,7 +65,7 @@ export function VirtualList({ items, itemKey, renderItem, estimate = 180, gap = 
         sizes.current.set(k, hgt);
         changed = true;
       }
-      if (shift && el) el.scrollTop += shift;
+      if (shift && el) { if (win) window.scrollBy(0, shift); else el.scrollTop += shift; }
       if (changed) setVersion((v) => v + 1);
     });
   }
@@ -82,15 +90,22 @@ export function VirtualList({ items, itemKey, renderItem, estimate = 180, gap = 
       frame.current = 0;
       const el2 = scroller.current;
       if (!el2) return;
-      const next = { top: el2.scrollTop, height: el2.clientHeight, offset: body.current ? body.current.offsetTop : 0 };
+      const next = pageScrolls(el2)
+        ? { top: body.current ? Math.round(-body.current.getBoundingClientRect().top) : 0, height: window.innerHeight, offset: 0 }
+        : { top: el2.scrollTop, height: el2.clientHeight, offset: body.current ? body.current.offsetTop : 0 };
       setView((v) => (v.top === next.top && v.height === next.height && v.offset === next.offset ? v : next));
     };
     const onScroll = () => { if (!frame.current) frame.current = requestAnimationFrame(sync); };
     const box = new ResizeObserver(onScroll);
     box.observe(el);
     el.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
     sync();
-    return () => { observer.current.disconnect(); box.disconnect(); el.removeEventListener('scroll', onScroll); cancelAnimationFrame(frame.current); };
+    return () => {
+      observer.current.disconnect(); box.disconnect(); el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); cancelAnimationFrame(frame.current);
+    };
   }, []);
 
   // forget the sizes of rows that left the list, so the map never grows without bound

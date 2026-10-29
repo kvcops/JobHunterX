@@ -8,18 +8,22 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from jobhunterx.config.logging import get_logger
+from jobhunterx.generation import styles
 from jobhunterx.tools.pdf_render import SHRINK_PROFILES, _html_to_pdf
 
 log = get_logger("render")
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
-# Extra compaction steps for a one-page resume, applied after font shrinking:
-# fewer bullets per role and fewer projects (lowest-relevance items are last).
+# Extra compaction steps for a one-page resume, applied after font shrinking: fewer bullets and achievements first,
+# projects last and one at a time (they are ordered most relevant first, so the least relevant goes).
 _TRIM_STEPS = [
-    {"max_bullets_per_exp": 3, "max_projects": 2, "max_achievements": 2},
-    {"max_bullets_per_exp": 2, "max_projects": 2, "max_achievements": 1},
-    {"max_bullets_per_exp": 2, "max_projects": 1, "max_achievements": 0},
+    {"max_bullets_per_exp": 3, "max_achievements": 2},
+    {"max_bullets_per_exp": 2, "max_achievements": 1},
+    {"max_bullets_per_exp": 2, "max_projects": 5, "max_achievements": 1},
+    {"max_bullets_per_exp": 2, "max_projects": 4, "max_achievements": 0},
+    {"max_bullets_per_exp": 2, "max_projects": 3, "max_achievements": 0},
+    {"max_bullets_per_exp": 2, "max_projects": 2, "max_achievements": 0},
 ]
 
 _CV_LAYOUT = {**SHRINK_PROFILES[0], "font_size_body": "9.5pt", "font_size_bullet": "9.3pt", "font_size_name": "20pt",
@@ -29,19 +33,20 @@ _CV_LAYOUT = {**SHRINK_PROFILES[0], "font_size_body": "9.5pt", "font_size_bullet
 
 @lru_cache(maxsize=1)
 def _env() -> Environment:
-    return Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)),
-                       autoescape=select_autoescape(["html", "j2"]))
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=select_autoescape(["html", "j2"]))
+    env.filters["cap"] = lambda text, st: str(text).upper() if st.get("caps") else str(text)   # xhtml2pdf ignores text-transform
+    return env
 
 
 def _render(template: str, **ctx) -> str:
     return _env().get_template(template).render(**ctx)
 
 
-def _fit_one_page(template: str, content: dict, steps: list[dict], kind: str) -> tuple[bytes, int]:
+def _fit_one_page(template: str, content: dict, steps: list[dict], kind: str, style: str = styles.DEFAULT_STYLE) -> tuple[bytes, int]:
     """Try each layout until the document fits on one page; otherwise keep the shortest result."""
     best: tuple[bytes, int] | None = None
     for sp in steps:
-        pdf, pages = _html_to_pdf(_render(template, doc=content, **sp))
+        pdf, pages = _html_to_pdf(_render(template, doc=content, s=styles.get(style), **sp))
         if pages == 1:
             return pdf, 1
         if best is None or pages < best[1]:
@@ -50,19 +55,28 @@ def _fit_one_page(template: str, content: dict, steps: list[dict], kind: str) ->
     return best  # type: ignore[return-value]
 
 
-def render_resume(content: dict) -> tuple[bytes, int]:
+def render_resume(content: dict, style: str = styles.DEFAULT_STYLE) -> tuple[bytes, int]:
     """One page: shrink typography first, then trim lowest-relevance items."""
     steps = [dict(sp) for sp in SHRINK_PROFILES] + [{**SHRINK_PROFILES[-1], **t} for t in _TRIM_STEPS]
-    return _fit_one_page("resume.html", content, steps, "resume")
+    return _fit_one_page("resume.html", content, steps, "resume", style)
 
 
-def render_cv(content: dict) -> tuple[bytes, int]:
+def render_cv(content: dict, style: str = styles.DEFAULT_STYLE) -> tuple[bytes, int]:
     """A CV gets a roomier layout, but is still squeezed onto one page when it can be."""
     roomy = {**_CV_LAYOUT, "margin_section": "10px"}
     steps = [roomy] + [dict(sp) for sp in SHRINK_PROFILES] \
         + [{**SHRINK_PROFILES[-1], **t} for t in _TRIM_STEPS]
-    return _fit_one_page("cv.html", content, steps, "cv")
+    return _fit_one_page("cv.html", content, steps, "cv", style)
 
 
-def render_cover_letter(content: dict, header: dict) -> tuple[bytes, int]:
-    return _html_to_pdf(_render("cover_letter.html", doc=content, header=header, **_CV_LAYOUT))
+def render_cover_letter(content: dict, header: dict, style: str = styles.DEFAULT_STYLE) -> tuple[bytes, int]:
+    return _html_to_pdf(_render("cover_letter.html", doc=content, header=header, s=styles.get(style), **_CV_LAYOUT))
+
+
+def render_document(kind: str, content: dict, header: dict, style: str) -> tuple[bytes, int]:
+    """Any document kind in any style (the style id is checked against the table, never used as a path)."""
+    if kind == "resume":
+        return render_resume(content, style)
+    if kind == "cv":
+        return render_cv(content, style)
+    return render_cover_letter(content, header, style)

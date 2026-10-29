@@ -29,6 +29,12 @@ from jobhunterx.models import AgentEvent, HITLType
 
 log = get_logger("browser_agent")
 
+# browser-use gives a browser 30 s to start and connect. A cloud browser that is still booting, a first Chrome start
+# on a cold machine or a slow link easily takes longer, and the whole run then fails with
+# "on_BrowserStartEvent ... timed out after 30.0s". Give the start real room (still overridable from the env).
+for _ev, _secs in (("BrowserStartEvent", "120"), ("BrowserLaunchEvent", "120"), ("BrowserConnectedEvent", "90")):
+    os.environ.setdefault(f"TIMEOUT_{_ev}", _secs)
+
 # Persistent profile path reused across runs. A stable profile accumulates
 # cookies, localStorage and an auth "history" that Cloudflare scores as a
 # real returning user rather than a fresh headless instance.
@@ -55,7 +61,23 @@ def _real_chrome() -> Optional[str]:
         p = os.path.expandvars(p)
         if Path(p).exists():
             return p
-    return None
+    return _playwright_chromium()
+
+
+def _playwright_chromium() -> Optional[str]:
+    """No Chrome installed (a bare server): the Chromium that `playwright install chromium` downloaded. Started by us
+    as well, so it gets the flags a server needs (no sandbox as root) and keeps its logins in one profile."""
+    base = Path(os.getenv("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache" / "ms-playwright")
+    names = {"win32": "chrome.exe", "darwin": "Chromium"}
+    exe = names.get(sys.platform, "chrome")
+    found = sorted(base.glob(f"chromium-*/chrome-*/{exe}"), reverse=True) if base.exists() else []
+    if sys.platform == "darwin":
+        found = sorted(base.glob("chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium"), reverse=True)
+    return str(found[0]) if found else None
+
+
+def _as_root() -> bool:
+    return sys.platform.startswith("linux") and hasattr(os, "geteuid") and os.geteuid() == 0
 
 
 def _chrome_major(path: str) -> Optional[str]:
@@ -130,7 +152,7 @@ def _detect_page_type(page_text: str) -> str:
 # Stealth browser profile builder (Cloudflare / bot-detection mitigation)
 # ---------------------------------------------------------------------------
 
-async def _build_stealth_profile(settings: Settings) -> Any:
+async def _build_stealth_profile(settings: Settings, sess: Optional["ApplySession"] = None) -> Any:
     """Build a BrowserProfile that bot checks (Cloudflare, reCAPTCHA v3, hCaptcha) score as a normal person.
 
     What actually gets agents flagged, and what is done about each:
@@ -146,18 +168,25 @@ async def _build_stealth_profile(settings: Settings) -> Any:
     Tiers: BROWSER_CDP_URL (any Chrome you started, or a hosted browser) → browser-use cloud → local real Chrome.
     """
     from browser_use import BrowserProfile
+    from jobhunterx.config import auth_ctx
 
-    cdp_url = (getattr(settings, "browser_cdp_url", "") or os.getenv("BROWSER_CDP_URL") or "").strip()
+    key = browser_use_key()
+    if key:                                 # a Browser Use cloud browser: runs on their machines, not on our memory
+        cloud = await _create_cloud_browser(key)
+        if sess is not None:
+            sess.cloud = {"id": cloud["id"], "key": key, "liveUrl": cloud.get("liveUrl")}
+        log.info("browser_profile_browser_use_cloud", session=str(cloud["id"])[:12])
+        return BrowserProfile(cdp_url=cloud["cdpUrl"], keep_alive=True,
+                              viewport=dict(zip(("width", "height"), live_view.viewport_size())))
+    if cloud_required():
+        raise RuntimeError("Add your Browser Use API key in Settings to use auto-apply.")
+
+    # the server's own Chrome (BROWSER_CDP_URL) has the admin's logins: only the admin / local app may use it
+    cdp_url = "" if auth_ctx.restricted() else (getattr(settings, "browser_cdp_url", "") or os.getenv("BROWSER_CDP_URL") or "").strip()
     if cdp_url:
         log.info("browser_profile_cdp", url=cdp_url.split("?")[0][:60])
         return BrowserProfile(cdp_url=cdp_url, keep_alive=True,
                               viewport=dict(zip(("width", "height"), live_view.viewport_size())))
-
-    use_cloud = bool(os.getenv("BROWSER_USE_API_KEY")) and bool(getattr(settings, "browser_use_cloud", False))
-
-    if use_cloud:
-        log.info("browser_profile_cloud", reason="BROWSER_USE_API_KEY present + cloud enabled")
-        return BrowserProfile(use_cloud=True, captcha_solver=True)
 
     # Local stealth profile
     resolved_dir = str(_STEALTH_USER_DATA_DIR.resolve())
@@ -199,6 +228,7 @@ async def _build_stealth_profile(settings: Settings) -> Any:
         disable_security=False,
         captcha_solver=False,  # DISABLED: cloud-only feature that adds startup overhead locally
         keep_alive=True,  # keep the browser after the agent stops: the user can take over, continue or close it
+        chromium_sandbox=not _as_root(),   # as root Chrome only starts without its sandbox
         args=["--disable-blink-features=AutomationControlled", "--disable-popup-blocking", "--no-first-run",
               "--no-default-browser-check"],
     )
@@ -230,13 +260,15 @@ async def _launch_chrome(exe: str, user_data_dir: str, mode: str, w: int, h: int
         ua = _user_agent(major)
         if ua:
             args.append(f"--user-agent={ua}")
-        if sys.platform.startswith("linux"):
-            args += ["--disable-dev-shm-usage", *(["--no-sandbox"] if hasattr(os, "geteuid") and os.geteuid() == 0 else [])]
     else:
         args.append(f"--window-size={w + 16},{h + 140}")
         if mode == "offscreen":
             # a real, GPU-rendered window parked where nobody sees it — the live view streams it into the app
             args.append("--window-position=-2400,-2400")
+    if sys.platform.startswith("linux"):
+        # Chrome refuses to start as root with its sandbox on ("Running as root without --no-sandbox is not supported")
+        # and waits forever: the agent then fails with "Browser did not start within 30 seconds".
+        args += ["--disable-dev-shm-usage", *(["--no-sandbox"] if _as_root() else [])]
     args.append("about:blank")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
@@ -322,7 +354,7 @@ from jobhunterx.agents import browser_worker, live_view
 ACTIVE = {"preparing", "launching", "running", "paused", "stopping"}
 
 _sessions: dict[str, "ApplySession"] = {}
-_current: Optional[str] = None
+_current: dict[str, str] = {}          # login user id ("" without login) -> job id of their latest application
 
 
 def _now() -> str:
@@ -337,12 +369,13 @@ class ApplySession:
         self.agent: Any = None
         self.browser_session: Any = None
         self.screencast: Optional[live_view.Screencast] = None
+        self.cloud: Optional[dict] = None     # a Browser Use cloud browser: {id, key, liveUrl}
         self.task: Optional[asyncio.Task] = None
         self.files: dict[str, str] = {}
         self.profile: dict = {}
         self.data: dict[str, Any] = {
             "job_id": job["id"], "company": job.get("company", ""), "role": job.get("role", ""),
-            "apply_url": job.get("apply_url", ""), "person_id": job.get("person_id"),
+            "apply_url": job.get("apply_url", ""), "person_id": job.get("person_id"), "user_id": job.get("user_id"),
             "status": "preparing", "message": "Getting your application kit ready…", "control": "agent",
             "started_at": _now(), "updated_at": _now(), "url": "", "title": "", "live": False,
             "kit": {}, "steps": [], "notice": "", "result": "", "runs": 0,
@@ -360,7 +393,8 @@ class ApplySession:
 
     def publish(self) -> None:
         snap = self.snapshot()
-        live_view.broadcast_event({"type": "apply.session", "job_id": snap["job_id"], "data": {"session": snap}})
+        live_view.broadcast_event({"type": "apply.session", "job_id": snap["job_id"], "person_id": snap.get("person_id"),
+                                   "data": {"session": snap}})
         from jobhunterx import storage
         live_view._on_main(storage.save_apply_session(snap))
 
@@ -369,8 +403,82 @@ def get_session(job_id: str) -> Optional[ApplySession]:
     return _sessions.get(job_id)
 
 
+def _uid() -> str:
+    from jobhunterx.config import auth_ctx
+    user = auth_ctx.current()
+    return user.id if user else ""
+
+
 def current_session() -> Optional[ApplySession]:
-    return _sessions.get(_current) if _current else None
+    """The signed-in user's latest application (the only one in the local single-user app)."""
+    jid = _current.get(_uid())
+    return _sessions.get(jid) if jid else None
+
+
+def busy_for(user_id: Optional[str]) -> bool:
+    """True when this user would need the server's one local browser and another user has it open (prod mode).
+    A Browser Use cloud browser runs elsewhere and never waits for anyone."""
+    if browser_use_key():
+        return False
+    return any(_alive(s) and not s.cloud and s.data.get("user_id") != user_id for s in _sessions.values())
+
+
+def busy_message() -> str:
+    return ("The server's browser is busy with another user's application. Try again in a few minutes — "
+            "or add your own Browser Use key in Settings to apply in your own cloud browser right away.")
+
+
+# ---------------------------------------------------------------------------- Browser Use cloud browsers (own key)
+
+BU_API = "https://api.browser-use.com/api/v2/browsers"
+BU_KEY_URL = "https://cloud.browser-use.com/settings?tab=api-keys&new=1"
+
+
+def browser_use_key() -> Optional[str]:
+    """The Browser Use key for this run: the signed-in user's own (prod mode) or the server's BROWSER_USE_API_KEY."""
+    return (getattr(get_settings(), "browser_use_api_key", None) or "").strip() or None
+
+
+def cloud_required() -> bool:
+    """Users who signed themselves up apply only in their own cloud browser, never on the server's memory."""
+    from jobhunterx.config import auth_ctx
+    user = auth_ctx.current()
+    return bool(user and user.self_signup)
+
+
+async def _create_cloud_browser(key: str) -> dict:
+    """Start a Browser Use cloud browser with this key. Returns {id, cdpUrl, liveUrl}."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(BU_API, headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"}, json={})
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Could not reach Browser Use ({type(exc).__name__}). Try again in a minute.") from exc
+    if r.status_code == 401:
+        raise RuntimeError("Browser Use rejected your API key. Paste a new one in Settings → Web search & browser.")
+    if r.status_code in (402, 403):
+        raise RuntimeError("Browser Use says this key has no credit or plan for cloud browsers. Check your Browser Use account.")
+    if r.status_code == 429:
+        raise RuntimeError("Browser Use is limiting this key right now (too many browsers at once). Try again shortly.")
+    if r.status_code >= 400:
+        raise RuntimeError(f"Browser Use could not start a browser (HTTP {r.status_code}). Try again in a minute.")
+    data = r.json()
+    if not data.get("cdpUrl"):
+        raise RuntimeError("Browser Use did not return a browser address. Try again in a minute.")
+    return {"id": data.get("id"), "cdpUrl": data["cdpUrl"], "liveUrl": data.get("liveUrl")}
+
+
+async def _stop_cloud_browser(cloud: dict) -> None:
+    """Stop the cloud browser so the user's Browser Use credit is not spent on an idle browser."""
+    import httpx
+    if not cloud or not cloud.get("id") or not cloud.get("key"):
+        return
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            await client.patch(f"{BU_API}/{cloud['id']}", headers={"X-Browser-Use-API-Key": cloud["key"]},
+                               json={"action": "stop"})
+    except Exception as exc:
+        log.debug("cloud_browser_stop_failed", error=str(exc)[:120])
 
 
 def _alive(sess: ApplySession) -> bool:
@@ -482,9 +590,11 @@ def _actions_of(model_output: Any, state: Any) -> list[str]:
 
 # Kilo free models that drive the browser well. Measured Oct 2026 with browser-use's output format: all four answer in
 # 1-4 s. Nemotron 3 Nano Omni is left out: it returns no choices for agent-style prompts.
-_KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "poolside/laguna-s-2.1:free", "inclusionai/ling-3.1-flash"]
-# LLM7 free models (no key) after Kilo: a quick backup (small daily quota), the next model answers when it says no.
-_LLM7_BROWSER = ["deepseek-v4-pro", "minimax-m3"]
+_KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "nvidia/nemotron-3.5-super-vl:free", "poolside/laguna-s-2.1:free"]
+# LLM7 free model (no key): last resort only — measured 17 Oct 2026 at 10-60 s per answer.
+_LLM7_BROWSER = ["GLM-5.3-Flash"]
+_NIM_BROWSER = ["nvidia/nemotron-3.5-super-vl-120b-a12b", "mistralai/mistral-large-4-1t-a52b",
+                "nvidia/nemotron-3-ultra-550b-a55b"]   # NIM free key: 40/min; fastest strong models first, thinking off / low
 
 
 def _json_only(text: str) -> str:
@@ -494,7 +604,7 @@ def _json_only(text: str) -> str:
 
 
 def _free_llm(provider: str, model: str, key: str) -> Any:
-    """A no-key pool (Kilo, LLM7) through browser-use's OpenAI client. Kilo's free pool rejects any Authorization header
+    """An OpenAI-compatible pool (Kilo / LLM7 without a key, NVIDIA NIM with one) through browser-use's OpenAI client. Kilo's free pool rejects any Authorization header
     and most free models refuse strict JSON-schema output, so: no auth header, the schema goes in the prompt, Kilo's
     reasoning is off (see openai_compat.KILO_EXTRA), and screenshots are dropped (text models; the page text is still sent)."""
     import openai
@@ -514,8 +624,8 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
             create = client.chat.completions.create
 
             async def create_free(*, messages: list, **kw: Any) -> Any:
-                if provider == "kilo":
-                    kw["extra_body"] = oc.KILO_EXTRA
+                kw["extra_body"] = (oc.KILO_EXTRA if provider == "kilo" else oc.nim_extra(model) if provider == "nvidia"
+                                    else oc.LLM7_EXTRA)   # thinking off
                 resp = await create(messages=[text_only(m) for m in messages], **kw)
                 for choice in resp.choices or []:
                     if choice.message.content:
@@ -526,7 +636,7 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
             return client
 
     free = key == M.KILO_FREE
-    base = oc.KILO_BASE if provider == "kilo" else oc.LLM7_BASE
+    base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE}.get(provider, oc.LLM7_BASE)
     return FreeChat(model=model, api_key="no-key" if free else key, base_url=base,
                     default_headers={"Authorization": openai.Omit()} if free else None,
                     temperature=0.2, frequency_penalty=None, max_retries=0, timeout=90,
@@ -536,7 +646,7 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
 class _LLMChain:
     """Many models behind one. browser-use switches to its fallback_llm only once per run and then stops, so a
     Gemini "RESOURCE_EXHAUSTED" followed by one busy fallback ended the whole run. Here every call walks the list
-    (Gemini → Kilo free models → LLM7 → Groq → Mistral → Gemma) and skips models the app's AI router already knows are
+    (Gemini → NVIDIA NIM → Kilo free models → Groq → Mistral → LLM7) and skips models the app's AI router already knows are
     resting or rate limited (shared state in config.models), so the browser agent and the rest of the app agree."""
 
     def __init__(self, links: list[tuple[str, Any]]):
@@ -591,30 +701,30 @@ def _build_llms() -> tuple[Any, Any]:
         ChatMistral = None
     from jobhunterx.config import app_state as _app_state
     from jobhunterx.config import models as M
-    s = get_settings()
-    google_key = (s.google_api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) if _app_state.llm_provider_enabled("google") else None
-    groq_key = (s.groq_api_key or os.getenv("GROQ_API_KEY")) if _app_state.llm_provider_enabled("groq") else None
-    mistral_key = (s.mistral_api_key or os.getenv("MISTRAL_API_KEY")) if _app_state.llm_provider_enabled("mistral") else None
+    # provider_key: the signed-in user's own keys in prod mode (no Kilo / LLM7 for them), the server's otherwise
+    google_key = M.provider_key("google") if _app_state.llm_provider_enabled("google") else None
+    groq_key = M.provider_key("groq") if _app_state.llm_provider_enabled("groq") else None
+    mistral_key = M.provider_key("mistral") if _app_state.llm_provider_enabled("mistral") else None
     kilo_key = M.provider_key("kilo") if _app_state.llm_provider_enabled("kilo") else None
-    llm7_on = _app_state.llm_provider_enabled("llm7")
+    nim_key = M.provider_key("nvidia") if _app_state.llm_provider_enabled("nvidia") else None
+    llm7_on = _app_state.llm_provider_enabled("llm7") and bool(M.provider_key("llm7"))
     links: list[tuple[str, Any]] = []
     if google_key:
         # 429 / RESOURCE_EXHAUSTED is not retried here: the next model in the chain answers at once instead
         links.append(("gemini/gemini-3.5-flash-lite", ChatGoogle(
             model="gemini-3.5-flash-lite", api_key=google_key, temperature=0.2, max_retries=3,
+            config={"thinking_config": {"thinking_level": "MINIMAL"}},   # browser-use only knows Gemini 3 / 3.1 by name
             retry_base_delay=2.0, retry_max_delay=10.0, retryable_status_codes=[500, 502, 503, 504])))
+    if nim_key:                          # a keyed 40 requests/minute pool: ahead of the shared free ones
+        links += [(f"nim/{m}", _free_llm("nvidia", m, nim_key)) for m in _NIM_BROWSER]
     if kilo_key:
         links += [(f"kilo/{m}", _free_llm("kilo", m, kilo_key)) for m in _KILO_BROWSER]
-    if llm7_on:
-        links += [(f"llm7/{m}", _free_llm("llm7", m, M.KILO_FREE)) for m in _LLM7_BROWSER]
     if groq_key and ChatGroq is not None:
         links.append(("groq/openai/gpt-oss-120b", ChatGroq(model="openai/gpt-oss-120b", api_key=groq_key, temperature=0.2, max_retries=1)))
     if mistral_key and ChatMistral is not None:
         links.append(("mistral/mistral-small-latest", ChatMistral(model="mistral-small-latest", api_key=mistral_key, temperature=0.2, max_retries=1)))
-    if google_key:
-        # last resort only: free Gemma is slow and often overloaded, so don't sit in long retry loops on it
-        links.append(("gemini/gemma-4-31b-it", ChatGoogle(model="gemma-4-31b-it", api_key=google_key, temperature=0.2, max_retries=1,
-                                                          retry_base_delay=2.0, retry_max_delay=5.0)))
+    if llm7_on:                          # slowest of all (10-60 s an answer): only when everything else said no
+        links += [(f"llm7/{m}", _free_llm("llm7", m, M.KILO_FREE)) for m in _LLM7_BROWSER]
     if not links:
         raise RuntimeError("No AI provider is available for the browser agent. Add a key or turn a provider on in Settings.")
     return _LLMChain(links), None        # the chain does the falling back; browser-use's one-time fallback is not needed
@@ -1484,6 +1594,10 @@ def name_parts(profile: dict) -> tuple[str, str, str]:
     the last name and everything before it the first name ("Vamsi Krishna Kakarla" → "Vamsi Krishna" + "Kakarla"); leading
     initials as in "K. Vamsi Krishna" are the family initial, so they become the last name only when one word is left."""
     full = re.sub(r"\s+", " ", (profile.get("name") or "")).strip()
+    own_first, own_last = (profile.get("first_name") or "").strip(), (profile.get("last_name") or "").strip()
+    if own_first or own_last:            # the person set their name parts in the profile: never guess from word order
+        return own_first or own_last, own_last, full or " ".join(
+            x for x in (own_first, (profile.get("middle_name") or "").strip(), own_last) if x)
     saved = {re.sub(r"[^a-z]", "", k.lower()): str(v).strip()
              for k, v in (((profile.get("qa_memory") or {}).get("custom_answers")) or {}).items() if v}
     first, last = saved.get("firstname", ""), saved.get("lastname", "") or saved.get("surname", "")
@@ -1532,6 +1646,30 @@ def profile_links(profile: dict) -> dict[str, str]:
     return out
 
 
+def _pay_lines(qa: dict) -> list[str]:
+    """Pay in every shape a form asks for it: LPA, full rupees per year, per month; total and fixed / variable."""
+    from jobhunterx.domain.candidate import inr
+
+    def amount(lpa: float) -> str:
+        return f"{lpa:g} LPA = {inr(lpa)} per year (about {inr(lpa / 12)} per month)"
+
+    out = []
+    fixed, var, total, exp = (qa.get("current_fixed_lpa"), qa.get("current_variable_lpa"),
+                              qa.get("current_total_lpa"), qa.get("expected_ctc_lpa"))
+    if total is not None:
+        out.append(f"  • Current CTC (total, per year): {amount(total)}")
+        if fixed is not None:
+            out.append(f"  • Current fixed pay: {amount(fixed)}")
+        if var:
+            out.append(f"  • Current variable pay / bonus: {amount(var)}")
+    if exp is not None:
+        out.append(f"  • Expected CTC / expected salary (total, per year): {amount(exp)}")
+    if out:
+        out.append("  • Salary fields: if the field asks for LPA or lakhs, write the LPA number (e.g. 8); if it takes a plain "
+                   "amount, write full rupees without symbols or commas (e.g. 800000); if it asks per month, use the monthly figure.")
+    return out
+
+
 def _profile_block(profile: dict) -> str:
     edu = "\n".join(
         f"  • {ed.get('degree', '')} ({ed.get('start', '')} – {ed.get('end', '')})"
@@ -1548,11 +1686,13 @@ def _profile_block(profile: dict) -> str:
         + "".join(f"\n    - {b}" for b in (e.get("bullets") or [])[:3])
         for e in profile.get("experience", [])) or "  (Not provided)"
     qa = profile.get("qa_memory", {}) or {}
-    labels = {"current_ctc": "Current CTC", "expected_ctc": "Expected CTC", "expected_salary": "Expected salary",
-              "notice_period": "Notice period", "work_authorization": "Work authorization",
+    qa_lines = _pay_lines(qa)
+    labels = {"notice_period": "Notice period", "work_authorization": "Work authorization",
               "requires_sponsorship": "Requires visa sponsorship", "preferred_work_mode": "Preferred work mode",
               "willing_to_relocate": "Willing to relocate", "years_of_experience": "Years of experience"}
-    qa_lines = [f"  • {lbl}: {qa[k]}" for k, lbl in labels.items() if qa.get(k)]
+    if not qa_lines:          # pay written as text the numbers could not be read from: pass it on as written
+        labels = {"current_ctc": "Current CTC", "expected_ctc": "Expected CTC", **labels}
+    qa_lines += [f"  • {lbl}: {qa[k]}" for k, lbl in labels.items() if qa.get(k)]
     qa_lines += [f"  • {k}: {v}" for k, v in (qa.get("custom_answers") or {}).items()]
     prefs = profile.get("preferences", {}) or {}
     if prefs.get("notice_period_days") is not None and not qa.get("notice_period"):
@@ -1567,7 +1707,7 @@ def _profile_block(profile: dict) -> str:
     links_block = ("\n- Other links: " + "; ".join(other) if other else "") + \
         ("\n- Project links (use for 'portfolio / work samples / website' questions):\n" + "\n".join(proj_links[:6]) if proj_links else "")
     return f"""=== CANDIDATE ===
-- First name (given name): {first}
+- First name (given name): {first}{chr(10) + '- Middle name: ' + profile['middle_name'].strip() if (profile.get('middle_name') or '').strip() else ''}
 - Last name (surname / family name): {last or first + '  (only one name — repeat it if a last name is required)'}
 - Full name: {full}
 - Email: {profile.get('email', '')}
@@ -1720,6 +1860,49 @@ def build_task(sess: ApplySession, continuing: bool) -> str:
 
 # ---------------------------------------------------------------------------- the run (worker loop)
 
+async def _wait_cdp_ready(cdp_url: str, seconds: float = 40) -> None:
+    """A browser that was just started (ours or a cloud one) answers its debugging address a little later: wait for
+    it here, so browser-use's own start does not spend its time limit on a browser that is still booting."""
+    if not cdp_url.startswith("http"):
+        return                               # a ws:// address is connected to directly
+    import httpx
+    deadline = time.monotonic() + seconds
+    async with httpx.AsyncClient(timeout=5) as client:
+        while time.monotonic() < deadline:
+            try:
+                if (await client.get(cdp_url.rstrip("/") + "/json/version")).status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(1)
+
+
+async def _open_browser(settings: Settings, sess: ApplySession) -> Any:
+    """Start and connect the browser before the agent runs, with one fresh retry. Returns a started BrowserSession."""
+    from browser_use import BrowserSession
+    last: Optional[BaseException] = None
+    for attempt in (1, 2):
+        profile = await _build_stealth_profile(settings, sess)
+        if getattr(profile, "cdp_url", None):
+            await _wait_cdp_ready(profile.cdp_url)
+        bs = BrowserSession(browser_profile=profile)
+        try:
+            await asyncio.wait_for(bs.start(), timeout=150)
+            return bs
+        except Exception as exc:              # TimeoutError, CDP connection refused, browser exited, ...
+            last = exc
+            log.warning("browser_start_failed", attempt=attempt, error=str(exc)[:200])
+            try:
+                await asyncio.wait_for(bs.kill(), timeout=15)
+            except Exception:
+                pass
+            if sess.cloud:
+                await _stop_cloud_browser(sess.cloud)
+                sess.cloud = None
+            await _stop_own_chrome()
+    raise RuntimeError("The browser did not start in time (tried twice). "
+                       f"Try again in a minute. Details: {str(last)[:160]}")
+
 async def _attach_live_view(sess: ApplySession, agent: Any) -> None:
     for _ in range(240):
         bs = getattr(agent, "browser_session", None)
@@ -1728,7 +1911,7 @@ async def _attach_live_view(sess: ApplySession, agent: Any) -> None:
             if sess.screencast is None or sess.screencast.session is not bs:
                 if sess.screencast:
                     await sess.screencast.stop()
-                sess.screencast = live_view.Screencast(bs)
+                sess.screencast = live_view.Screencast(bs, owner=sess.data.get("user_id"))
             sess.screencast.start()
             if sess.data["status"] == "launching":
                 sess.update(status="running", live=True, message="Filling in the application…")
@@ -1815,7 +1998,11 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
     if reuse:
         kwargs["browser_session"] = sess.browser_session
     else:
-        kwargs["browser_profile"] = await _build_stealth_profile(settings)
+        try:
+            kwargs["browser_session"] = await _open_browser(settings, sess)
+        except RuntimeError as exc:          # e.g. the user's Browser Use key was rejected, or no browser would start
+            sess.update(status="failed", message="Could not open a browser", notice=str(exc)[:300])
+            return
     agent = Agent(**kwargs)
     sess.agent = agent
     attach = asyncio.ensure_future(_attach_live_view(sess, agent))
@@ -1859,27 +2046,43 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
         log.warning("intervention_create_failed", error=str(exc)[:160])
     sess.update(status="needs_you", message="Waiting for you", notice=HELP_TEXT.get(hitl, "The agent needs your help."),
                 result=final[:400], live=_alive(sess))
-    live_view.broadcast_event({"agent": "browser_agent", "event_type": "hitl_request", "job_id": job_id, "message": HELP_TEXT.get(hitl, "")})
+    live_view.broadcast_event({"agent": "browser_agent", "event_type": "hitl_request", "job_id": job_id,
+                               "person_id": sess.data.get("person_id"), "message": HELP_TEXT.get(hitl, "")})
 
 
 # ---------------------------------------------------------------------------- public API (call from the server loop)
 
+_KEEP_SESSIONS = 30
+
+
+def _prune_sessions() -> None:
+    """Finished applications whose browser is gone are kept on disk (apply_sessions) — not in memory forever."""
+    done = [jid for jid, s in _sessions.items() if not _alive(s) and s.data.get("status") not in ACTIVE
+            and jid not in _current.values() and (s.task is None or s.task.done())]
+    for jid in done[:max(0, len(_sessions) - _KEEP_SESSIONS)]:
+        _sessions.pop(jid, None)
+
+
 def new_session(job: dict) -> ApplySession:
-    global _current
+    _prune_sessions()
     sess = ApplySession(job)
     _sessions[job["id"]] = sess
-    _current = job["id"]
+    _current[job.get("user_id") or ""] = job["id"]
     sess.publish()
     return sess
 
 
 async def launch(sess: ApplySession, profile: dict, files: dict[str, str], continuing: bool = False) -> None:
     """Hand the session to the browser worker (returns immediately)."""
-    global _current
+    owner = sess.data.get("user_id")
     for other_id, other in list(_sessions.items()):
-        if other is not sess and _alive(other):
-            await close(other_id)               # one browser at a time
-    _current = sess.data["job_id"]
+        if other is sess or not _alive(other):
+            continue
+        if other.data.get("user_id") == owner:
+            await close(other_id)               # one browser per person
+        elif not other.cloud and not browser_use_key():
+            raise RuntimeError(busy_message())  # prod mode: another user has the server's one local browser
+    _current[owner or ""] = sess.data["job_id"]
     sess.profile = profile
     sess.files = files
 
@@ -1989,11 +2192,15 @@ async def close(job_id: str) -> Optional[dict]:
                 await asyncio.wait_for(sess.browser_session.kill(), timeout=15)
             except Exception as exc:
                 log.warning("browser_close_failed", error=str(exc)[:160])
-        await _stop_own_chrome()             # a Chrome we started ourselves outlives browser-use's disconnect
+        if sess.cloud:
+            await _stop_cloud_browser(sess.cloud)      # stops the user's Browser Use billing for it
+            sess.cloud = None
+        elif not any(o is not sess and _alive(o) and not o.cloud for o in _sessions.values()):
+            await _stop_own_chrome()         # a Chrome we started ourselves outlives browser-use's disconnect
         sess.browser_session = None
         sess.agent = None
     await browser_worker.run(_do())
-    live_view.clear_frame()
+    live_view.clear_frame(owner=sess.data.get("user_id"))
     status = sess.data["status"]
     sess.update(live=False, control="agent", status="closed" if status in ACTIVE else status,
                 message="Browser closed" if status in ACTIVE or status in ("stopped", "needs_you") else sess.data["message"])

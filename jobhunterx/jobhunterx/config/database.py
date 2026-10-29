@@ -173,6 +173,74 @@ def get_db_path() -> str:
     return get_settings().db_path
 
 
+# ---------------------------------------------------------------------------
+# Connection pool
+# ---------------------------------------------------------------------------
+# Every aiosqlite connection is its own thread: opening one costs ~10 ms, and a page could open a dozen. A few open
+# connections are reused instead (per event loop: the server loop and the browser worker each get their own).
+# A connection goes back only after a clean exit, with any unfinished transaction rolled back (exactly what closing
+# it would have done) and the row format reset; after an error or cancellation it is closed instead.
+
+POOL_SIZE = 4
+_pool: dict[tuple[int, str], list[aiosqlite.Connection]] = {}
+
+
+class _Pooled:
+    __slots__ = ("conn", "key")
+
+    async def __aenter__(self) -> aiosqlite.Connection:
+        path = get_db_path()
+        self.key = (id(asyncio.get_running_loop()), path)
+        free = _pool.get(self.key)
+        self.conn = free.pop() if free else await _open_daemon(path)
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        conn, self.conn = self.conn, None
+        reuse = exc_type is None
+        if reuse:
+            try:
+                if conn.in_transaction:
+                    await conn.rollback()
+                conn.row_factory = None
+            except Exception:
+                reuse = False
+        free = _pool.setdefault(self.key, [])
+        if reuse and len(free) < POOL_SIZE:
+            free.append(conn)
+        else:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+        return False
+
+
+async def _open_daemon(path: str) -> aiosqlite.Connection:
+    """A pooled connection lives on: its worker thread must never keep Python from exiting (scripts, tests, a loop
+    that ends without close_pool). The thread is created when the connection object is made and started on await."""
+    conn = aiosqlite.connect(path)
+    conn._thread.daemon = True
+    return await conn
+
+
+def pooled() -> _Pooled:
+    """`async with pooled() as db:` — like aiosqlite.connect(db_path), but the connection is reused."""
+    return _Pooled()
+
+
+async def close_pool() -> None:
+    """Close every pooled connection (shutdown, reset, a database file being replaced)."""
+    pools = list(_pool.values())
+    _pool.clear()
+    for conns in pools:
+        while conns:
+            try:
+                await conns.pop().close()
+            except Exception:
+                pass
+
+
 async def get_connection() -> aiosqlite.Connection:
     """Open a new connection to the database."""
     if _db_path is None:
@@ -226,12 +294,12 @@ def _new_id() -> str:
 async def insert_profile(data: dict) -> str:
     """Insert a candidate profile and return its id."""
     profile_id = _new_id()
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
-        from jobhunterx.config import app_state
+        from jobhunterx import storage
         await db.execute(
             "INSERT INTO profiles (id, data_json, created_at, person_id) VALUES (?, ?, ?, ?)",
-            (profile_id, json.dumps(data), _now_iso(), app_state.get("people.active")),
+            (profile_id, json.dumps(data), _now_iso(), storage.active_person()),
         )
         await db.commit()
     return profile_id
@@ -239,10 +307,10 @@ async def insert_profile(data: dict) -> str:
 
 async def get_latest_profile() -> Optional[dict]:
     """Return the most recently stored profile or None."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
-        from jobhunterx.config import app_state
-        pid = app_state.get("people.active")
+        from jobhunterx import storage
+        pid = storage.active_person()        # the signed-in user's open profile in prod mode
         if not pid:
             return None
         cursor = await db.execute(
@@ -288,7 +356,7 @@ async def insert_job(job_data: dict) -> str:
     if not url_hash:
         log.warning("job_insert_without_url", job_id=job_id, company=job_data.get("company", ""))
 
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         # Check for existing job with same URL
         if url_hash:
@@ -360,7 +428,7 @@ async def update_job(job_id: str, **fields: Any) -> None:
         return
     set_clause = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [_now_iso(), job_id]
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         await db.execute(
             f"UPDATE jobs SET {set_clause}, updated_at = ? WHERE id = ?", values
         )
@@ -369,7 +437,7 @@ async def update_job(job_id: str, **fields: Any) -> None:
 
 async def get_jobs(status: Optional[str] = None, limit: int = 100) -> list[dict]:
     """Return jobs, optionally filtered by status."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         if status:
             cursor = await db.execute(
@@ -389,7 +457,7 @@ async def get_jobs_excluding(statuses: list[str], limit: int = 100) -> list[dict
     if not statuses:
         return await get_jobs(limit=limit)
     placeholders = ",".join("?" for _ in statuses)
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             f"SELECT * FROM jobs WHERE status NOT IN ({placeholders}) "
@@ -402,7 +470,7 @@ async def get_jobs_excluding(statuses: list[str], limit: int = 100) -> list[dict
 
 async def get_job(job_id: str) -> Optional[dict]:
     """Return a single job by id."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         row = await cursor.fetchone()
@@ -438,7 +506,7 @@ async def delete_job(job_id: str) -> bool:
     databases without triggers, `_reconcile_fts` rebuilds the index so
     `jobs_fts` never retains ghost entries.
     """
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         await db.execute("DELETE FROM outreach_drafts WHERE job_id = ?", (job_id,))
         await db.execute("DELETE FROM intervention_sessions WHERE job_id = ?", (job_id,))
@@ -455,7 +523,7 @@ async def clear_jobs(status: Optional[str] = None) -> int:
     databases without triggers, `_reconcile_fts` rebuilds the index so
     `jobs_fts_data` never keeps stale rows.
     """
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         if status:
             await db.execute("DELETE FROM outreach_drafts WHERE job_id IN (SELECT id FROM jobs WHERE status = ?)", (status,))
@@ -474,7 +542,7 @@ async def mark_url_seen(url_hash: str, url: str = "", company: str = "", role: s
     """Record a URL hash as seen so it isn't re-discovered after a job queue clear."""
     if not url_hash:
         return
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         await db.execute(
             "INSERT OR IGNORE INTO seen_job_urls (url_hash, url, company, role, seen_at) VALUES (?, ?, ?, ?, ?)",
             (url_hash, url, company, role, _now_iso()),
@@ -484,7 +552,7 @@ async def mark_url_seen(url_hash: str, url: str = "", company: str = "", role: s
 
 async def get_seen_url_hashes() -> set[str]:
     """Get all seen URL hashes."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         cursor = await db.execute("SELECT url_hash FROM seen_job_urls")
         rows = await cursor.fetchall()
         return {r[0] for r in rows if r[0]}
@@ -494,7 +562,7 @@ async def is_url_seen(url_hash: str) -> bool:
     """Check if a URL hash has ever been seen/discovered."""
     if not url_hash:
         return False
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         cursor = await db.execute("SELECT 1 FROM seen_job_urls WHERE url_hash = ?", (url_hash,))
         row = await cursor.fetchone()
         return row is not None
@@ -504,7 +572,7 @@ async def is_url_seen(url_hash: str) -> bool:
 async def insert_outreach(draft: dict) -> str:
     """Insert an outreach draft."""
     draft_id = draft.get("id") or _new_id()
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         await db.execute(
             """INSERT INTO outreach_drafts
                (id, job_id, company, contact_name, contact_role, email_guesses,
@@ -531,7 +599,7 @@ async def insert_outreach(draft: dict) -> str:
 
 async def get_outreach_drafts(limit: int = 100) -> list[dict]:
     """Return active outreach drafts for existing jobs."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT o.* FROM outreach_drafts o
@@ -563,7 +631,7 @@ async def log_agent_event(
     latency_ms: float | None = None,
 ) -> None:
     """Persist an agent run event for observability."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         await db.execute(
             """INSERT INTO agent_runs
                (run_id, agent_name, job_id, event_type, message, data_json,
@@ -588,7 +656,7 @@ async def log_agent_event(
 
 async def get_token_usage_summary() -> dict:
     """Aggregate token usage by model across all runs."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT model,
@@ -672,6 +740,7 @@ async def clear_database() -> None:
                          log.warning("failed_to_delete_dir", path=str(dir_path), error=str(exc))
                     await asyncio.sleep(0.5)
 
+    await close_pool()                       # pooled connections hold the file open
     # 2. Delete database files with retries
     if _db_path:
         db_file = Path(_db_path)
@@ -709,7 +778,7 @@ async def create_intervention_session(
     role: str = "",
 ) -> int:
     """Insert a new intervention session and return its id."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """INSERT INTO intervention_sessions
@@ -727,7 +796,7 @@ async def open_intervention(job_id: str, hitl_type: str, url: str, company: str 
     An intervention stays pending until the application is really finished (submitted,
     marked done, or dismissed) — taking over, continuing or closing the browser keep it.
     """
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         cur = await db.execute("SELECT id FROM intervention_sessions WHERE job_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
                                (job_id,))
         row = await cur.fetchone()
@@ -741,7 +810,7 @@ async def open_intervention(job_id: str, hitl_type: str, url: str, company: str 
 
 async def resolve_job_interventions(job_id: str, status: str = "resolved") -> None:
     """Close every pending intervention of a job (the application is finished)."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         await db.execute("UPDATE intervention_sessions SET status = ?, resolved_at = ? WHERE job_id = ? AND status = 'pending'",
                          (status, _now_iso(), job_id))
         await db.commit()
@@ -749,7 +818,7 @@ async def resolve_job_interventions(job_id: str, status: str = "resolved") -> No
 
 async def get_pending_interventions() -> list[dict]:
     """Return all pending intervention sessions."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """SELECT id, job_id, hitl_type, url, company, role, status, created_at
@@ -763,7 +832,7 @@ async def get_pending_interventions() -> list[dict]:
 
 async def resolve_intervention(session_id: int, status: str = "resolved") -> None:
     """Mark an intervention session as resolved."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         await db.execute(
             """UPDATE intervention_sessions
                SET status = ?, resolved_at = ?
@@ -786,7 +855,7 @@ async def insert_company(data: dict) -> str:
     name = (data.get("name") or "").strip()
     if not name:
         raise ValueError("Company name required")
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT id FROM companies WHERE name = ?", (name,))
         row = await cur.fetchone()
@@ -813,7 +882,7 @@ async def insert_company(data: dict) -> str:
 
 async def get_companies() -> list[dict]:
     """All tracked companies."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             "SELECT id, name, website, careers_url, hub, ats, ats_token, created_at FROM companies ORDER BY name"
@@ -824,7 +893,7 @@ async def get_companies() -> list[dict]:
 
 async def delete_company(company_id: str) -> bool:
     """Remove a tracked company by id."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         cur = await db.execute("DELETE FROM companies WHERE id = ?", (company_id,))
         await db.commit()
         return cur.rowcount > 0
@@ -832,7 +901,7 @@ async def delete_company(company_id: str) -> bool:
 
 async def update_company_ats(company_id: str, ats: str, ats_token: str, careers_url: str = "") -> None:
     """Persist detected ATS board info after a probe + stamp last_probed_at."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         await db.execute(
             """UPDATE companies SET ats = ?, ats_token = ?, careers_url = CASE
                WHEN ? != '' THEN ? ELSE careers_url END,
@@ -847,7 +916,7 @@ async def get_companies_due_probe(stale_after_hours: float = 24.0) -> list[dict]
     from datetime import datetime, timedelta, timezone
 
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=stale_after_hours)).isoformat()
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
             """SELECT id, name, website, careers_url, hub, ats, ats_token,
@@ -863,7 +932,7 @@ async def get_companies_due_probe(stale_after_hours: float = 24.0) -> list[dict]
 
 async def get_company_by_name(name: str) -> Optional[dict]:
     """Look up a company by exact name."""
-    async with aiosqlite.connect(_db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT * FROM companies WHERE name = ?", (name,))
         row = await cur.fetchone()

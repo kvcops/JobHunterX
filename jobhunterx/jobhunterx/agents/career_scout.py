@@ -19,6 +19,7 @@ import asyncio
 import base64
 import json
 import re
+import sys
 from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -534,7 +535,9 @@ async def _new_browser() -> Any:
     from browser_use import BrowserProfile, BrowserSession
     from jobhunterx.agents import browser_agent as ba
     from jobhunterx.config.settings import get_settings
-    cdp_url = (getattr(get_settings(), "browser_cdp_url", "") or os.getenv("BROWSER_CDP_URL") or "").strip()
+    from jobhunterx.config import auth_ctx
+    # the server's own Chrome (BROWSER_CDP_URL) has the admin's logins: only the admin / local app may use it
+    cdp_url = "" if auth_ctx.restricted() else (getattr(get_settings(), "browser_cdp_url", "") or os.getenv("BROWSER_CDP_URL") or "").strip()
     if cdp_url:
         profile = BrowserProfile(cdp_url=cdp_url, keep_alive=True)
     else:
@@ -543,7 +546,9 @@ async def _new_browser() -> Any:
             headless=True, executable_path=exe, user_data_dir=None, keep_alive=True,     # closed by us, after reading
             user_agent=ba._user_agent(ba._chrome_major(exe)) if exe else None,
             viewport={"width": 1280, "height": 900}, enable_default_extensions=False,
+            chromium_sandbox=not ba._as_root(),   # a server running as root: Chrome only starts without its sandbox
             args=["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check",
+                  *(["--disable-dev-shm-usage"] if sys.platform.startswith("linux") else []),
                   f"--lang={os.getenv('BROWSER_LANG', 'en-IN')}"])
     bs = BrowserSession(browser_profile=profile)
     await bs.start()

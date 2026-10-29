@@ -17,12 +17,14 @@ import re
 from typing import Any
 
 from jobhunterx.config.logging import get_logger
-from jobhunterx.domain.candidate import CandidateProfile, ItemLink, Link
+from pydantic import create_model, model_validator
+
+from jobhunterx.domain.candidate import CandidateProfile, ItemLink, Link, _Lenient
 from jobhunterx.intelligence.llm_structured import call_structured, fence
 
 log = get_logger("extractor")
 
-VERSION = "profile-extract-v3"   # v3: college vs affiliating university
+VERSION = "profile-extract-v5"   # v5: read in three parts at once (v4: name split into first / middle / last)
 
 _SYSTEM = """You convert a resume into a structured candidate profile.
 Extract ONLY what is written in the resume. Never invent or infer employers, dates, skills, metrics or links.
@@ -42,6 +44,9 @@ Extract ONLY what is written in the resume. Never invent or infer employers, dat
   which project or entry a link belongs to. Skip email (mailto:) and phone (tel:) links. Never invent a URL.
 - skills: every technology, tool, language, framework and method named anywhere in the resume, as written.
 - certifications, achievements, competitions, languages (spoken languages) as lists.
+- name: the full name exactly as the resume prints it. first_name / middle_name / last_name: the same name split into
+  given name, middle name(s) and family name (surname), in normal capitalisation. Many resumes print the surname first
+  or use an initial for it; split by what the parts are, not by their order. Leave a part empty when it is not clear.
 - suggested_role: the single job title that best describes the candidate today.
 - relevant_experience: a short phrase describing their experience as stated (e.g. "1.5 years in ML engineering").
 - Leave qa_memory and preferences empty."""
@@ -190,6 +195,39 @@ def _attach_links(profile: CandidateProfile, links: list[dict]) -> CandidateProf
     return profile
 
 
+class _Part(_Lenient):
+    """One slice of the profile. Coerced the same lenient way as the full profile (a skills string becomes a list…)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce(cls, v: Any) -> Any:
+        if not isinstance(v, dict):
+            return v
+        full = CandidateProfile.model_validate(v).model_dump()
+        return {k: full[k] for k in cls.model_fields if k in full}
+
+
+def _part_model(name: str, fields: tuple[str, ...]) -> type:
+    f = CandidateProfile.model_fields
+    return create_model(name, __base__=_Part, **{k: (f[k].annotation, f[k]) for k in fields})
+
+
+# The resume is read in three parts at the same time instead of one long answer: free models write one long JSON
+# slowly and, when they run out of room, cut the end off — usually the projects. Three short answers come back in
+# about the time of the longest one, and each has room for everything in its part.
+_PARTS = (
+    ("about", _part_model("ResumeAbout", ("name", "first_name", "middle_name", "last_name", "email", "phone", "location",
+                                          "linkedin", "github", "portfolio", "links", "summary", "suggested_role",
+                                          "relevant_experience", "skills", "languages")), 3000,
+     "the person: name, contact, profile links, summary, role, skills and spoken languages"),
+    ("work", _part_model("ResumeWork", ("experience", "education")), 6000,
+     "EVERY job / internship with ALL its bullets, and EVERY education entry"),
+    ("extras", _part_model("ResumeExtras", ("projects", "certifications", "competitions", "achievements", "item_links")), 6000,
+     "EVERY project (all of them, none skipped, each with its full description, technologies and links), "
+     "certifications, competitions, achievements and their links"),
+)
+
+
 async def extract_profile(pdf_bytes: bytes) -> tuple[CandidateProfile, dict]:
     """Return (profile, extraction_info) — info: {status: ok|partial|failed, warnings: [...]}."""
     text, links = await extract_text_and_links_from_pdf(pdf_bytes)
@@ -197,14 +235,31 @@ async def extract_profile(pdf_bytes: bytes) -> tuple[CandidateProfile, dict]:
     if not text.strip():
         return CandidateProfile(), {"status": "failed", "warnings": ["No text found in the PDF (is it a scanned image?)."]}
     user = "Resume text:\n" + fence(text, 30000) + ("\n\nEmbedded links:\n" + fence("\n".join(link_lines), 6000) if links else "")
-    profile, model = await call_structured(task="profile_extract", version=VERSION, model=CandidateProfile,
-                                           system=_SYSTEM, user=user, chain="extraction", max_tokens=8192,
-                                           cache_parts=(text, "\n".join(link_lines)))
-    if profile is None:
+
+    async def read(key: str, model: type, max_tokens: int, what: str):
+        system = f"{_SYSTEM}\n\nThis answer covers only {what}. Fill only the fields in the schema."
+        return await call_structured(task=f"profile_extract_{key}", version=VERSION, model=model, system=system, user=user,
+                                     chain="extraction", max_tokens=max_tokens, cache_parts=(text, "\n".join(link_lines)))
+
+    results = await asyncio.gather(*(read(*p) for p in _PARTS), return_exceptions=True)
+    merged: dict[str, Any] = {}
+    missing, used_models = [], []
+    for (key, *_), res in zip(_PARTS, results):
+        part, model = res if isinstance(res, tuple) else (None, "")
+        if part is None:
+            missing.append(key)
+            if isinstance(res, BaseException):
+                log.warning("profile_extract_part_failed", part=key, error=str(res)[:160])
+            continue
+        merged.update(part.model_dump())
+        used_models.append(model)
+    if len(missing) == len(_PARTS):
         return CandidateProfile(), {"status": "failed",
                                     "warnings": ["The AI could not read this resume right now. Please try again or fill in your profile manually."]}
-    profile = _attach_links(profile, links)
-    warnings = []
+    profile = _attach_links(CandidateProfile.model_validate(merged), links)
+    model = ", ".join(sorted(set(used_models)))
+    labels = {"about": "name, contact and skills", "work": "experience and education", "extras": "projects and certificates"}
+    warnings = [f"The AI could not read your {labels[k]} this time — please add them or upload again." for k in missing]
     if not profile.experience and not profile.projects:
         warnings.append("No experience or projects were found — please check your profile.")
     if not profile.skills:

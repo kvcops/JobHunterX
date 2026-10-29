@@ -37,6 +37,20 @@ class EmptyAnswer(ChatError):
 # Kilo's free models are reasoning models; with thinking on, a short budget often ends before any answer.
 # Measured Oct 2026: {"reasoning": {"enabled": false}} gives a real answer on every chosen Kilo model, and faster.
 KILO_EXTRA = {"reasoning": {"enabled": False}}
+# NVIDIA NIM: thinking models (Nemotron, GLM, DeepSeek) read these chat-template switches.
+NIM_EXTRA = {"chat_template_kwargs": {"enable_thinking": False, "thinking": False}}
+def nim_extra(model: str) -> dict:
+    """Thinking off or lowest for one NIM model. The chat-template switches cover Nemotron; GPT-OSS and MiniMax ignore them and
+    take an effort level instead — live test (Oct 2026): MiniMax M3.1 Flash with no setting 5-30 s, with "low" 1.3-3.3 s and a
+    short, steady reasoning trace. A model that rejects any of this is asked again without (chat())."""
+    extra = {**NIM_EXTRA}
+    if any(k in model for k in ("gpt-oss", "minimax", "mistral-large", "muse-glimmer")):
+        extra["reasoning_effort"] = "low"
+    return extra
+
+
+# LLM7 (measured 17 Oct 2026): reasoning_effort "none" gives shorter, faster answers.
+LLM7_EXTRA = {"reasoning_effort": "none"}
 
 
 _pool: Optional[tuple[Any, httpx.AsyncClient]] = None
@@ -69,8 +83,13 @@ async def chat(base: str, model: str, messages: list[dict], *, key: Optional[str
     if r.status_code == 400 and json_mode:          # a model without JSON mode: retry plainly (prompts ask for JSON anyway)
         body.pop("response_format", None)
         r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
+    if r.status_code in (400, 422) and extra:       # a model that rejects the thinking switch: ask without it
+        for k in extra:
+            body.pop(k, None)
+        r = await client.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout)
     if r.status_code >= 400:
-        raise ChatError(r.status_code, r.text[:300])
+        wait = r.headers.get("retry-after", "").strip()
+        raise ChatError(r.status_code, r.text[:300] + (f" retry after {wait}" if wait.isdigit() else ""))
     data = r.json()
     choices = data.get("choices") or []
     if not choices:

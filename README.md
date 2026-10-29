@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api"><img src="https://img.shields.io/badge/Gemma_4_31B-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
+  <a href="https://aistudio.google.com/apikey"><img src="https://img.shields.io/badge/Gemini_3.5_Flash_Lite-Google_AI-4285F4?style=for-the-badge&logo=google&logoColor=white" /></a>
   <a href="https://groq.com"><img src="https://img.shields.io/badge/GPT--OSS_·_Kimi_K2_·_Qwen-Groq-F55036?style=for-the-badge" /></a>
   <a href="https://mistral.ai"><img src="https://img.shields.io/badge/Mistral_Large-Mistral-FF7000?style=for-the-badge&logo=mistral&logoColor=white" /></a>
   <a href="https://kilo.ai"><img src="https://img.shields.io/badge/Free_models,_no_key-Kilo_Gateway-8B5CF6?style=for-the-badge" /></a>
@@ -30,8 +30,8 @@
 
 <p align="center">
   
-  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_Kilo_·_NVIDIA_·_Groq_·_Mistral-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
-  <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_SmartRecruiters-10B981?style=flat-square&labelColor=1e1b2e" />
+  <img src="https://img.shields.io/badge/LLM_Providers-Google_·_NVIDIA_·_Kilo_·_Groq_·_Mistral_·_LLM7-06B6D4?style=flat-square&logo=google&logoColor=white&labelColor=1e1b2e" />
+  <img src="https://img.shields.io/badge/ATS_Feeds-Greenhouse_·_Lever_·_Ashby_·_Workday_·_SmartRecruiters_·_Keka-10B981?style=flat-square&labelColor=1e1b2e" />
   
 </p>
 
@@ -82,7 +82,8 @@ writes an honest one-page resume, a cover letter and a CV for you — and then a
 | ⚡ [Quickstart — one command](#-quickstart) | 🧠 [How matching works](#-how-matching-works) | 🔌 [API reference](#-api-reference) |
 | 🗺️ [The whole journey](#️-the-whole-journey) | 📄 [Resume vs CV vs cover letter](#-resume-vs-cv-vs-cover-letter) | 🧪 [Testing](#-testing) |
 | 📸 [A tour, step by step](#-a-tour-step-by-step) | 🤖 [AI models & free limits](#-llm-models--provider-architecture) | 🎨 [Design: fonts & themes](#-design-fonts--themes) |
-| 🤖 [Auto-apply](#-auto-apply--the-browser-agent) | 🌐 [Job sources](#-job-sources--verification) | |
+| 🤖 [Auto-apply](#-auto-apply--the-browser-agent) | 🌐 [Job sources](#-job-sources--verification) | 🔐 [Security](#-security) |
+| 🎨 [Resume styles & AI editor](#-resume-styles--the-ai-editor) | | |
 
 </details>
 
@@ -152,6 +153,7 @@ flowchart LR
 | 4️⃣ | Press **Search now** | Finds postings (web + your watchlist companies' own boards), checks they are real and open, reads each one, scores fit **and** chance to be seen — live |
 | ⏱️ | Nothing — it runs by itself | Every 4 hours it checks the watchlist companies again; new matches appear in the **New** tab |
 | 5️⃣ | Open a job | Explains the score (what fits, what's missing, what's unknown), the chance a person reads your application, and what the company is like |
+| 5️⃣b | Open **Documents** | Pick a **style** (5 ATS-safe looks, instant preview, PDF in that style) and use **Edit with AI** to reword — the AI proposes small fact-checked edits you keep or undo |
 | 6️⃣ | Press **Auto-apply** | Checks your documents → writes the missing ones → opens the browser agent **inside the app** |
 | 7️⃣ | Watch (or take over) | The agent fills the form; you can stop, take over, continue or finish it yourself |
 | 8️⃣ | Relax 😌 | The job moves to **Applied** in your tracker |
@@ -431,6 +433,52 @@ clickable labels next to the right project or entry — nothing extra, no long r
 ✅ **Nothing invented:** every AI-written line is fact-checked (`generation/evidence.py`). A new number, tool, employer
 or claim that isn't in your profile is rejected and your own words are kept.
 
+🎨 Each document can be shown and downloaded in 5 ATS-safe styles, and reworded through a small chat — see
+[Resume styles & the AI editor](#-resume-styles--the-ai-editor).
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
+
+## 🎨 Resume styles & the AI editor
+
+**Styles** change how a document looks, never what it says. Every style is **ATS-safe by construction**: one column, real
+selectable text in a built-in font, standard section titles, no icons, images, tables-as-layout tricks or text on dark
+backgrounds. Open any resume, CV or cover letter and pick one:
+
+| Style | Look |
+|:--|:--|
+| **Classic** *(default)* | The original: black headings with a thin rule, name left, contact right |
+| **Professional** | Navy name and capital section titles, centred header with a fine navy rule |
+| **Harvard** | Serif type, all black, centred — the traditional academic / finance format |
+| **Modern** | Left-aligned, one blue accent under the header and each section title |
+| **Slate** | Quiet slate capitals over a hairline; calm and compact |
+
+(Documents saved with the retired ids *elegant, minimal, bold, emerald, ats* open in the closest current style.)
+
+* ⚡ **Instant:** the preview switches with CSS alone (≈ 50 ms, no server call). The server re-renders the saved PDF in the
+  background a moment after you stop clicking, so the stored file (and Auto-apply's attachment) matches.
+* ⬇️ **Download any style:** *Download PDF* gets the style you are looking at (`GET /api/documents/{id}/pdf?style=…`, rendered
+  once and cached). Every style still fits the one-page rules; the same fact-checked content feeds all of them.
+* 🧱 Code: `generation/styles.py` (the table; unknown ids fall back to Classic and can never reach a template path),
+  `templates/_base.css.j2`, live preview rules `.paper[data-style=…]` in `web/styles.css`.
+
+**Edit with AI** is a small chat docked beside the preview. Ask in your own words — *"make the summary shorter"*, *"put
+FAISS first"*, *"remove the weakest project"*.
+
+* 🧠 **Gemini 3.5 Flash Lite or Kilo's free models**, with thinking switched off (chain `editor`, `config/models.py`).
+* 🩹 **It cannot break your document.** The model never rewrites it. It returns a few small named operations (rewrite a
+  bullet, reorder a skill group, remove a project…). Each is checked against a whitelist and index ranges, **fact-checked**
+  (no new numbers, tools, employers or links that appear nowhere in your profile, your document or your message), and applied
+  to a *copy* that must still validate as a document. A failed operation is dropped and shown with the reason.
+* 🔒 **Never touched by chat:** contact details, links, dates, company names, degrees — there is no operation for them.
+* ✋ **You decide.** Nothing is saved by the chat. Accepted edits appear in the preview with a *snap* effect — the old text
+  disintegrates, the new text assembles (turned off by *Reduced motion*). Then **Save changes** keeps them (normal validated
+  save, PDF re-rendered) or **Undo last** takes them back.
+* 🛡️ Protected like every AI endpoint: login in prod mode, CSRF/origin guard, input caps (600 characters, 300 KB documents),
+  rate limits (10 a minute, 80 an hour per user), and untrusted-text rules in the prompt. Code: `generation/chat_edit.py`,
+  `POST /api/documents/{id}/chat`, UI `web/js/views/docchat.js`.
+
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
 <br/>
@@ -438,102 +486,154 @@ or claim that isn't in your profile is rejected and your own words are kept.
 ## 🤖 LLM Models & Provider Architecture
 
 One router (`config/llm_router.py`) sends every AI call through a **task chain**: the first usable model answers, and the
-next one takes over if it is busy, rate limited, turned off or not on your account. The model catalog, chains and free-tier
-limits live in `config/models.py`.
+next one takes over if it is busy, rate limited, turned off, rejected by your key or not on your account. The model
+catalog, chains and free-tier limits live in `config/models.py`.
 
 ```mermaid
 graph LR
     subgraph Google["☁️ Google AI Studio"]
-        G1["gemma-4-31b-it"]
-        G2["gemini-3.5-flash-lite"]
-    end
-    subgraph Groq["⚡ Groq"]
-        GR1["openai/gpt-oss-120b"]
-        GR2["moonshotai/kimi-k2-instruct-0905"]
-        GR3["qwen/qwen3.6-27b"]
-        GR4["openai/gpt-oss-20b"]
-    end
-    subgraph Mistral["🌀 Mistral"]
-        M1["mistral-medium-latest"]
-        M2["mistral-small-latest"]
+        G1["gemini-3.5-flash-lite"]
     end
     subgraph Kilo["🆓 Kilo Gateway (no key)"]
         K1["kilo-auto/free"]
         K2["nemotron-3-super-120b:free"]
-        K3["laguna-s-2.1:free"]
+        K3["dots-3-note · north-mini-code · laguna-s-2.1 · …"]
     end
-    subgraph NIM["🟩 NVIDIA NIM"]
-        N1["nemotron-nano-3-30b-a3b"]
-        N2["glm-5.3-flash"]
-        N3["deepseek-v4.1-flash"]
+    subgraph NIM["🟩 NVIDIA NIM (free key)"]
+        N1["mistral-large-4 · nemotron-3-ultra-550b"]
+        N2["nemotron-3.5-super-vl · lightning · bolt · minimax-m3.1-flash · gpt-oss-20b · muse-glimmer"]
     end
-    G2 -->|fallback| K1 -->|fallback| N1 -->|fallback| G1 -->|fallback| GR1 -->|fallback| M1
+    subgraph Groq["⚡ Groq"]
+        GR1["gpt-oss-120b / 20b"]
+        GR2["kimi-k2 · qwen3.8-27b"]
+    end
+    subgraph Mistral["🌀 Mistral"]
+        M1["medium · small · large"]
+    end
+    subgraph LLM7["🆓 LLM7 (no key, last resort)"]
+        L1["GLM-5.3-Flash · DeepSeek-V4-Flash"]
+    end
+    G1 -->|fallback| N1 -->|fallback| K1 -->|fallback| GR1 -->|fallback| M1 -->|fallback| L1
 
     classDef google fill:#4285F4,stroke:#1a73e8,color:#fff,stroke-width:2px;
     classDef groq fill:#F55036,stroke:#c9302c,color:#fff,stroke-width:2px;
     classDef mistral fill:#FF7000,stroke:#cc5a00,color:#fff,stroke-width:2px;
     classDef kilo fill:#8B5CF6,stroke:#6d28d9,color:#fff,stroke-width:2px;
     classDef nim fill:#76B900,stroke:#5a8f00,color:#fff,stroke-width:2px;
-    class K1,K2,K3 kilo;
-    class N1,N2,N3 nim;
-    class G1,G2 google;
-    class GR1,GR2,GR3,GR4 groq;
-    class M1,M2 mistral;
+    classDef llm7 fill:#64748b,stroke:#475569,color:#fff,stroke-width:2px;
+    class K1,K2,K3 kilo; class N1,N2 nim; class G1 google; class GR1,GR2 groq; class M1 mistral; class L1 llm7;
 ```
+
+> [!NOTE]
+> **Gemma 4 is gone.** The free Gemma 4 31B endpoint on Google AI Studio kept answering `500 INTERNAL` / `503 high demand`
+> or taking 12–120 s, so it was removed everywhere (catalog, chains, browser agent, settings, usage page).
+> **Gemini 3.5 Flash Lite** replaces it and is the first choice for every task (≈ 1–5 s).
 
 ### Task chains
 
-| Task (Settings label) | Chain | Model order |
+| Task (Settings label) | Chain | Model order (a model without a key / switched off / not on your account is skipped) |
 |:--|:--|:--|
-| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **Kilo** (Auto, Nemotron 3 Super, Laguna S) → **NIM** (Nemotron Nano 3, GPT-OSS 20B) → Gemma 4 31B → Groq GPT-OSS 20B / Qwen → Mistral Small |
-| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **Kilo** (Nemotron 3 Super, Auto, Ling Flash, Laguna S, Nemotron Nano Omni) → **NIM** (GLM 5.3 Flash, DeepSeek V4.1 Flash) → Gemma 4 31B → GPT-OSS 120B → Kimi K2 → Mistral Medium |
-| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **Kilo** (Nemotron 3 Super, Auto) → **NIM** (DeepSeek V4.1 Flash, GLM 5.3 Flash) → Gemma 4 31B → Kimi K2 → GPT-OSS 120B → Mistral Medium |
-| Resume reading | `extraction` | same as Matching, then Qwen3.6 27B / Qwen3 32B → Mistral Medium |
-| Browser agent | `browser` | Gemini 3.5 Flash Lite → GPT-OSS 120B → Mistral Small (→ Gemma 4 31B) |
+| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Lightning, Nemotron 3.5 Super VL, Nemotron 3.5 Bolt, GPT-OSS 20B, DiffusionGemma) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → LLM7 |
+| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3 Ultra 550B, Nemotron 3.5 Super VL, MiniMax M3.1 Flash, GPT-OSS 20B, Nemotron 3.5 Lightning, Muse Glimmer 30B, Nemotron 3 Nano Omni, DiffusionGemma) → **Kilo** → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → LLM7 |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3.5 Super VL, GPT-OSS 20B, Muse Glimmer 30B, then MiniMax M3.1 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → LLM7 |
+| Resume reading, job reading, Company Scout | `extraction` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3.5 Super VL, Nemotron 3 Ultra 550B, GPT-OSS 20B, MiniMax M3.1 Flash, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** → Groq Qwen3.8 27B → Mistral Medium → Groq GPT-OSS 120B → LLM7 |
+| **Resume chat editor** | `editor` | Gemini 3.5 Flash Lite → **Kilo** free models only — thinking off |
+| Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Super VL, Mistral Large 4, Nemotron 3 Ultra) → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
 
-**Kilo comes before NVIDIA NIM** on purpose: it needs no key and each Kilo model has its own 200 requests/hour, while NIM's
-40 requests/minute is shared by every NIM model on your account. Kilo's free models are "thinking" models; the app turns
-their thinking off (`reasoning: {enabled: false}`) — in tests that made them answer in about 1–3 s instead of running out
-of room before the answer. If a model still returns an empty answer, it gets one retry with more room and is never
-"rested" for it.
+**With a key, NVIDIA NIM leads right after Gemini.** Its free tier allows about 40 requests/minute for the whole account (≈ 2,400 an
+hour — against Kilo's 200 an hour *per model*), which is what a search with many AI reads needs. Without a NIM key those entries are skipped
+and Kilo answers. Kilo's free models are "thinking" models; the app turns
+their thinking off (`reasoning: {enabled: false}`) — in tests that made them answer in about 1–3 s. If a model still
+returns an empty answer, it gets one retry with more room and is never "rested" for it. Rejected keys are skipped for the
+whole provider (and retried when you paste a new one); a model that fails with server errors rests 2 → 4 → 8 → … 30 min.
 
 > [!WARNING]
-> **Privacy:** Kilo's free models are marked *may train on your prompts*. Your resume text and job posts are sent in those
-> prompts. If that matters to you, add any free key (Google, NVIDIA, Groq or Mistral) and turn Kilo off in
-> **Settings → AI providers**.
+> **Privacy:** Kilo's free models are marked *may train on your prompts* (LLM7 publishes no privacy terms). Your resume text
+> and job posts are sent in those prompts. If that matters to you, add any free key (Google, NVIDIA, Groq or Mistral) and turn
+> Kilo and LLM7 off in **Settings → AI providers**. In prod mode users never share the free pools: they bring their own keys.
 
 Llama models are deliberately not used. In **Settings → AI providers** you can turn any provider off, add or replace its key,
 pick the first model for each task, and press **Check available models** — the app asks each provider's `/models`
 endpoint with your key and skips models your account cannot call.
 
+### 🟩 NVIDIA NIM (free key)
+
+`https://integrate.api.nvidia.com/v1`, OpenAI-compatible, key from [build.nvidia.com](https://build.nvidia.com/settings/api-keys).
+A free key **lists 84 models but can call only some of them** — the rest answer `404 Function …: Not found for account`. The
+models below were picked from a live test with a free key (29 Oct 2026: a JSON extraction and a fact-keeping resume rewrite,
+thinking off, run through the app's own router):
+
+| Model | Seen in the tests (4 tasks × 2 runs: extraction, job-fit judgment, fact-keeping rewrite, cover-letter paragraph) | Used for |
+|:--|:--|:--|
+| **Mistral Large 4** | 8/8, 1–6 s; the only model that kept the "2,000" figure **and** invented nothing in the rewrite | 1st for matching, reading and writing |
+| **Nemotron 3 Ultra 550B** | 1–8 s, clean JSON, invented nothing | matching, reading, writing, browser agent |
+| **Nemotron 3.5 Super VL 120B** | 8/8, 0.8–2.3 s — the fastest of the strong models (dropped the figure, invented nothing) | quick tasks, matching, reading, browser agent |
+| **Nemotron 3.5 Lightning 30B** · **Nemotron 3.5 Bolt** | ~1 s, clean JSON | quick tasks |
+| **GPT-OSS 20B** | 2–6 s (reasoning effort *low*), invented nothing | all tasks |
+| **MiniMax M3.1 Flash** | 1–13 s with reasoning effort *low* (5–30 s without); the most thorough job-fit judgments, good prose, **but added the job's tools to a resume bullet** (fact-checker rejects those lines); shared endpoint often 429 | 2nd–4th for matching / reading, last for writing |
+| **Muse Glimmer 30B** (Meta) | 7/8, kept facts, but 7–21 s with one timeout | backup for matching and writing |
+| **DiffusionGemma 26B** | judged well, 3–15 s, but added the job's tools in both rewrites | late backup for quick tasks and matching — **never for writing** |
+| Nemotron 3 Nano Omni | 1.4 s when free, often "16/16 requests" busy | backup |
+
+Not used: Nemotron 3 Super, Nemotron Nano 3 and Kimi K2.6 (listed, but not callable on a free key); DeepSeek V4.1 Flash, GLM 5.3
+Flash and Step 5 (time out on every try, 45–150 s); Laguna XS 2.1 ("busy" on every call); Llama models (never used here). **Measured speed** (streaming, ~500-token answers, free key, 29 Oct 2026):
+
+| Model | First token | Generation | Note |
+|:--|:--|:--|:--|
+| DiffusionGemma 26B | 12.3 s | ~400 tok/s | writes everything at once: slow to start, then instant |
+| Mistral Large 4 | 0.6 s | 187 tok/s | its reasoning can't be switched off (`none` / `minimal` are refused; at `low` ~58 % of output is reasoning) |
+| Nemotron 3.5 Lightning · Super VL | 0.5–0.6 s | 85–86 tok/s | |
+| Nemotron 3 Nano Omni | 0.6 s | 43 tok/s | |
+| GPT-OSS 20B | 4–9 s | 30 tok/s | |
+| Nemotron 3 Ultra 550B | 2.5 s | 16–40 tok/s | fine for short JSON (1–8 s); stalled on 2,000-token prose, so not used for writing |
+| MiniMax M3.1 Flash | 1.8 s | 18 tok/s | |
+| Muse Glimmer 30B | 5.9 s | 11 tok/s | |
+
+NVIDIA publishes no tokens-per-minute limit for the free endpoints — only the ~40 requests/minute.
+
+**Sized to each call** (`call_plan` in `config/models.py`): every NIM call gets an output budget with room for that model's
+reasoning (Mistral Large 4 × 2.5, MiniMax × 1.3, Muse × 1.2 — so answers are never cut off), a timeout that grows with the
+answer it is asked for (30 s for a short verdict, up to 150 s for a long CV), and a model that clearly can't finish an answer
+that long in ~2 minutes is skipped for that call only (e.g. Muse Glimmer for a CV) without being rested.
+
+**Rate limits, handled gracefully** (tested with a burst of 60 parallel calls: 0 failed, NIM took what its budget allowed and the
+rest spilled to Kilo in 11 s):
+
+* Calls are paced to **36/min** — 10 % under NVIDIA's 40 — as one budget for every NIM model, so retries stay inside it.
+* A call that would queue more than 6 s for NIM goes straight to the next provider instead of waiting.
+* `429` from one model = that endpoint is busy: only that model rests (60 s, or as long as `Retry-After` says).
+* `429`s from several NIM models within a minute = the key itself is limited: all of NIM rests 45 s and Kilo / Groq answer.
+* `503 ResourceExhausted … request limit reached` = endpoint full: a flat 60 s rest, no growing back-off.
+* A timeout (30 s), "not found for account" (12 h) and a rejected key (30 min) each rest the right thing, and the chain moves on.
+
+A model that times out is rested, and rests a model "not found for account" for 12 hours, so a busy endpoint never
+holds a search up. NIM serves every agent that goes through a task chain — profile and job reading, matching, shortlisting, the
+Connector, resume / CV / letter writing, the Company Scout and the agents office — and drives the browser agent too. The ~40
+requests/minute is what NVIDIA's free tier is widely reported to allow per account (not an official number), so the router spaces
+calls to it as one shared budget.
+
 ### 💳 Free-tier limits the router respects
 
 Each model gets its own limiter: requests are spaced to its **RPM**, a rolling one-minute window keeps it under **TPM**, and
 daily **RPD / TPD** counters stop using it for the day once spent (the chain moves on). A 429 also puts the provider in a
-short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
-`MODEL_LIMITS_JSON={"gemini/gemma-4-31b-it": {"rpm": 30, "rpd": 14400}}` — limits differ per account and change often.
+short cooldown, and the provider's own "retry after" hint is honoured. Override any number with `MODEL_LIMITS_JSON` in `.env`,
+e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000}}` — limits differ per account and change often.
 
 | Provider | Model | RPM | Per day | TPM | Notes |
 |:--|:--|:--|:--|:--|:--|
-| Google AI Studio | `gemma-4-31b-it` | 15 | 1,500 req | — | Gemma runs on the Gemini API ([guide](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api)); no system role, so instructions are sent inline |
-| Google AI Studio | `gemini-3.5-flash-lite` | 15 | 500 req | 250K | Fast; primary for the browser agent |
+| Google AI Studio | `gemini-3.5-flash-lite` | 15 | 500 req | 250K | Fast; first choice everywhere; thinking kept at "minimal" |
 | Groq | `openai/gpt-oss-120b` | 30 | 1K req · 200K tok | 8K | Reasoning effort set to low |
-| Groq | `moonshotai/kimi-k2-instruct-0905` | 60 | 1K req · 300K tok | 10K | Strong writing |
-| Groq | `qwen/qwen3.6-27b` · `qwen/qwen3-32b` | 30 · 60 | 1K req | 8K · 6K | Reasoning trace hidden |
+| Groq | `moonshotai/kimi-k2-instruct-0905` · `kimi-k2-instruct` | 60 | 1K req · 300K tok | 10K | Strong writing |
+| Groq | `qwen/qwen3.8-27b` | 30 | 1K req | — | Reasoning off |
 | Groq | `openai/gpt-oss-20b` | 30 | 1K req · 200K tok | 8K | Light and fast |
 | Mistral | `mistral-medium-latest` | 50 | — | 25K | Free plan limits are per account (Admin console → Limits) |
 | Mistral | `mistral-small-latest` | 50 | — | 50K | |
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
-| Kilo Gateway | `kilo-auto/free` · `nvidia/nemotron-3-super-120b-a12b:free` · `poolside/laguna-s-2.1:free` · `inclusionai/ling-3.1-flash` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | — | **200 req / hour per model** | — | No key. Measured 1–4 s per answer. May train on prompts |
-| NVIDIA NIM | `nvidia/nemotron-nano-3-30b-a3b` · `openai/gpt-oss-20b` · `z-ai/glm-5.3-flash` · `deepseek-ai/deepseek-v4.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget |
+| Kilo Gateway | `kilo-auto/free` · `nvidia/nemotron-3-super-120b-a12b:free` · `nvidia/nemotron-3.5-super-vl:free` · `dots-studio/dots-3-note-preview:free` · `cohere/north-mini-code:free` · `poolside/laguna-s-2.1:free` · `xingchen-agi/xing4.0-29b-a4b:free` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | — | **200 req / hour per model** | — | No key. Measured 1–9 s per answer. May train on prompts |
+| LLM7 | `GLM-5.3-Flash` · `DeepSeek-V4-Flash-0731` | ~5 per minute (spaced) | small token quota | — | No key, one call at a time, 10–60 s: last resort |
+| NVIDIA NIM | `mistralai/mistral-large-4-1t-a52b` · `nvidia/nemotron-3.5-super-vl-120b-a12b` · `nvidia/nemotron-3.5-lightning-30b-a3b` · `nvidia/nemotron-3.5-bolt-e4b` · `nvidia/nemotron-3-ultra-550b-a55b` · `openai/gpt-oss-20b` · `minimaxai/minimax-m3.1-flash` · `meta/muse-glimmer-30b` · `google/diffusiongemma-26b-a4b-it` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | **40 per account** (paced at 36) | — | not published | Free key at build.nvidia.com; one shared budget for all NIM models. Thinking off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS, MiniMax, Mistral Large 4, Muse Glimmer); output budget and timeout sized to each call |
 
 > [!NOTE]
-> **Why you may see `500 INTERNAL` or `503 high demand` from Gemma:** those come from Google's servers. In live tests
-> (Oct 2026) the free Gemma 4 31B endpoint took 12–120 s per answer and often refused larger prompts, while
-> Gemini 3.5 Flash Lite answered in about 1–5 s. So **Flash Lite is now the first choice for every task** and Gemma 4 31B
-> is the first backup. When Gemma fails it gets one quick retry, then the app moves on and Gemma **rests for 2 minutes**
-> (4, 8… up to 30 if it keeps failing). Settings → AI providers shows "resting N min". A Gemma call never waits more
-> than `GEMMA_TIMEOUT_S` (90 s).
 > Resume upload runs in the background with live progress, so a slow free-tier call never times out the page.
 
 <br/>
@@ -545,9 +645,16 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 | Source | Trust | How it is used |
 |--------|-------|----------------|
 | **Employer ATS APIs** — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, **Workday** (most GCCs), **Oracle Recruiting** (JPMorgan and other large employers — filtered to India on the board itself), **Keka** (many Indian product companies) | First-party, **verified** | Structured postings; re-verified live by job id (a closed job disappears from the board / returns 404) |
+| **ATS index** — a daily India copy of open postings on ~28,000 employers' own boards (open-source *job-board-aggregator* data, CC BY-NC 4.0) | First-party, **verified** live | Answers a search instantly, then each hit is re-checked on the employer's board; boards with Indian postings are remembered and polled directly |
+| **LinkedIn public feed** (no login, `ENABLE_LINKEDIN_SOURCE`) | Discovery only | Newest posts first; staffing agencies and posts with 150+ applicants dropped; the role is looked up on the employer's own board and that posting wins |
+| **Companies you watch yourself** (Company Scout) | Recipe from the company's real careers site | A browser agent learns once how to list one company's jobs; after that it is checked in seconds with no browser and no AI |
 | **Company watchlist** — 130 researched Hyderabad / Bengaluru / remote-India employers | Researched, sources linked | Their boards are read on every search and every 4 hours in the background; the research card is shown on each of their jobs |
 | **schema.org JobPosting** on a page | Verified when the hiring organisation's site is the page's site; otherwise inferred | Title, company, location, dates, `validThrough`, remote eligibility, salary |
 | **Other pages** (job boards, aggregators) | Unverified | Text only; if the page links to a supported ATS posting, that posting is used instead |
+| **Adzuna** — optional, off until you add `ADZUNA_API_KEY=app_id:app_key` | Aggregated, **inferred** | Each role is first looked up on the employer's own board (first-party wins); staffing agencies are dropped. Code: `discovery/job_apis.py` |
+| **Hacker News** — optional, **off by default** (`ENABLE_HN_SOURCE=true`) | Community post, **inferred** | YC startups' job posts + monthly "Who is hiring?"; only India / your cities / India-friendly remote roles in your field are kept; the hiring email is passed to the Connector |
+| **Adzuna** *(optional, off until you add `ADZUNA_API_KEY=app_id:app_key`)* | Aggregated, **inferred** | Official India index, newest first. Each role is looked up on the employer's own board first; staffing agencies dropped. Code: `discovery/job_apis.py` |
+| **Hacker News** *(optional, **off by default** — `ENABLE_HN_SOURCE=true`)* | Community post, **inferred** | YC startups' job posts + the monthly "Who is hiring?" thread; only India / your cities / India-friendly remote roles in your field; the hiring email in the post is passed to the Connector |
 | **Web search** — TinyFish → Tavily → Exa → Brave → **Deep Search** (free) → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
 
 ### 🔎 Deep Search — good results without any search key
@@ -760,7 +867,7 @@ python -m jobhunterx.api.main
 
 <div align="center">
 
-### Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** and start hunting. 🎯
+### Open **[http://127.0.0.1:9000](http://127.0.0.1:9000)** and start hunting. 🎯
 
 </div>
 
@@ -778,9 +885,32 @@ python -m jobhunterx.api.main
 | `pip install` takes forever | Use `uv pip install -r requirements.txt` (step ④). |
 | `uv` not found | Close and reopen the terminal after installing it, or use `pip install uv`. |
 | `No module named jobhunterx` | Run the start command from inside the inner `jobhunterx` folder (`cd jobhunterx`), with the venv on. |
-| Port 8000 is busy | Set `PORT=8001` in `jobhunterx/.env` and open `http://127.0.0.1:8001`. |
+| Port 9000 is busy | Set `PORT=9001` in `jobhunterx/.env` and open `http://127.0.0.1:9001`. |
 | Auto-apply can't open a browser | Install [Google Chrome](https://www.google.com/chrome/). |
 | Searches are slow | Add a second free AI key (Groq). Free plans allow only a few calls per minute each. |
+
+### 🔐 Running it on a server for several people (`APP_ENV=prod`)
+
+Leave `APP_ENV` empty and the app works as it always did: one person, no login. Set these in `jobhunterx/.env` to turn on logins:
+
+```env
+APP_ENV=prod
+HOST=0.0.0.0
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=a-long-password
+SECRET_KEY=a-long-random-text      # encrypts users' saved keys; keep it the same
+# CORS_ORIGINS=https://your-site.example   # only if the UI is served from another address
+```
+
+* Everything (pages, API, live updates) needs a login first. The API docs (`/docs`) are switched off.
+* The admin adds people on the **Users** page (reset a password, block sign-in, delete a user and their data).
+* Every user sees only their own profiles, jobs and documents, and adds their own free AI keys. The free shared
+  models (Kilo, LLM7) stay with the admin, because their limits count per server address.
+* Logging out ends the session on the server and clears what the browser kept for the app.
+* How many searches run at once follows the free memory and CPUs (also inside a 512 MB container). The rest wait in a queue.
+* `GET /healthz` answers without a login, for the host's health check.
+* People can create their own account on `/signup` (`ALLOW_SIGNUP`); they bring their own AI keys, and Auto-apply runs only in their own Browser Use cloud browser.
+* Cookies are `HttpOnly`, `SameSite=strict`, `Secure` over https; HTTPS redirect + HSTS are on by default; `CORS_ORIGINS` is closed unless set.
 
 ### ⚙️ Handy settings (`.env` or Settings page)
 
@@ -793,6 +923,9 @@ python -m jobhunterx.api.main
 | `BROWSER_SHOW_WINDOW` | `false` | Also open a real Chrome window (debugging only) |
 | `MAX_JOBS_PER_SEARCH` | see `.env.example` | How many jobs one search analyses |
 | `MODEL_LIMITS_JSON` | — | Override any model's free-tier limits |
+| `ADZUNA_API_KEY` | — | Optional Adzuna jobs, `app_id:app_key` |
+| `ENABLE_HN_SOURCE` | `false` | Optional Hacker News jobs |
+| `ENABLE_LINKEDIN_SOURCE` · `LINKEDIN_MAX_APPLICANTS` | `true` · `150` | LinkedIn public feed and its crowd limit |
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
@@ -803,19 +936,26 @@ python -m jobhunterx.api.main
 ```
 jobhunterx/jobhunterx/
 ├── domain/          # 📦 Data contracts: profile, snapshot, job posting, match, document
-├── intelligence/    # 🧠 Understanding + judgement (candidate, job, matching, reach, policy)
-├── discovery/       # 🔎 Search, ATS adapters (incl. Workday, Keka), watchlist, page parsing, dedupe, validation, SSRF-safe fetch
+├── intelligence/    # 🧠 Understanding + judgement (candidate, job, matching, reach, connect, skill links, policy)
+├── discovery/       # 🔎 Search, ATS adapters (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, Workday,
+│                    #    Oracle, Keka), ATS index, LinkedIn feed, Adzuna / Hacker News (job_apis.py), watchlist, recipes,
+│                    #    page parsing, dedupe, validation, SSRF-safe fetch
+├── tools/           # 🛠️ Deep Search, search providers + router, zero-spend guard, usage ledger, PDF rendering
 ├── watchlist/       # 🏢 companies.json — the researched company watchlist (Hyderabad, Bengaluru, remote India)
-├── generation/      # 📝 Resume / CV / cover letter + fact-checking + one-page PDF rendering
-├── services/        # 🧩 Orchestration: search runs, watchlist watcher, jobs, documents, profiles, auto-apply kit
+├── generation/      # 📝 Resume / CV / cover letter, fact-checking, styles.py, chat_edit.py (AI editor), PDF rendering
+├── templates/       # 🧾 Jinja2 + xhtml2pdf templates shared by every style
+├── services/        # 🧩 Orchestration: search runs, watchlist watcher, company monitors, jobs, documents, profiles,
+│                    #    auto-apply kit, agents office
 ├── agents/
 │   ├── browser_agent.py   # 🤖 Auto-apply session: steps, stop / take over / continue / close
 │   ├── browser_worker.py  # 🧵 One long-lived thread that owns the browser
+│   ├── career_scout.py    # 🔭 Learns how to list one company's jobs from its real careers site
 │   └── live_view.py       # 📺 Chrome screencast → the app, your clicks → the page
 ├── storage.py       # 💾 SQLite: jobs, documents, people, search runs, apply sessions (+ migrations)
 ├── db_health.py     # 🩺 Check, repair and back up the database on every start
-├── api/             # 🔌 FastAPI routes, WebSockets (/ws events, /ws/browser live view)
-├── config/          # ⚙️ Settings, model catalog & limits, LLM router, app state
+├── auth.py          # 🔐 Login, sign-up, sessions, per-user encrypted keys (prod mode)
+├── api/             # 🔌 FastAPI routes, WebSockets (/ws events, /ws/browser live view), rate limiting
+├── config/          # ⚙️ Settings, model catalog & limits, LLM router, OpenAI-compatible client, app state
 └── web/             # 🎨 Preact + htm UI with bundled fonts — no build step
 ```
 
@@ -840,7 +980,8 @@ The full contract (REST + WebSocket) is in [`jobhunterx/docs/API.md`](jobhunterx
 | 🔎 Searches | `POST /api/searches`, `GET /api/searches/current`, `GET /api/searches/{id}`, `POST /api/searches/{id}/cancel` |
 | 🏢 Watchlist | `GET /api/watchlist?scope=mine` or `scope=all`, `POST /api/watchlist/check` |
 | 💼 Jobs | `GET /api/jobs` (views incl. `fresh`; sorts `chance` · `score` · `reach` · `recent`), `GET /api/jobs/{id}`, `PUT/DELETE /api/jobs/{id}/saved`, `PATCH /api/jobs/{id}`, `POST /api/jobs/{id}/verify`, `POST /api/jobs/{id}/rescore` |
-| 📝 Documents | `POST /api/jobs/{id}/documents`, `POST /api/documents/cv`, `GET /api/documents`, `GET /api/documents/{id}/pdf` |
+| 📝 Documents | `POST /api/jobs/{id}/documents`, `POST /api/documents/cv`, `GET /api/documents`, `GET/PATCH /api/documents/{id}`, `GET /api/documents/{id}/pdf[?style=]` |
+| 🎨 Styles & AI editor | `GET /api/document-styles`, `PATCH /api/documents/{id}/style`, `POST /api/documents/{id}/chat` (returns a proposal; nothing is saved) |
 | 🤖 Auto-apply | `POST /api/jobs/{id}/apply`, `GET /api/apply/current`, `POST /api/apply/{job_id}/stop · take-over · release · continue · close · done`, `WS /ws/browser` |
 | ⚙️ System | settings, providers, models, usage, database health / repair / backup, interventions, reset |
 | 📡 Live events (`WS /ws`) | `search.run`, `search.progress` (real done / total per stage), `search.activity`, `search.job`, `watch.status`, `watch.done`, `job.updated`, `document.status`, `profile.upload`, `apply.session` |
@@ -862,7 +1003,28 @@ python -m pytest -q tests/frontend
 
 * `tests/test_scenarios.py` — the full pipeline on a realistic candidate (fake network + fake AI, including made-up claims that must be rejected)
 * `tests/test_api_v2.py` — API contract, errors, cancellation, CSRF / WebSocket / SSRF guards
+* `tests/test_doc_styles_chat.py` — every style renders every document kind to a real PDF; the AI editor's checks (invented facts, links, bad indexes, reorder-only skills); style, download, size-limit and rate-limit endpoints
+* `tests/test_job_apis.py` — Adzuna and Hacker News parsers and the merge (fake network)
+* `tests/test_security.py`, `tests/test_zero_spend.py`, `tests/test_search_providers.py` — guards, search cost and providers
 * `tests/frontend/test_ui.py` — Playwright against the real app
+
+<br/>
+
+## 🔐 Security
+
+| Area | What protects it |
+|:--|:--|
+| Login (prod mode) | Everything — pages, API, WebSockets, docs — sits behind a login gate; salted password hashes, server-side sessions, logout clears the session; admin can block or delete users |
+| Cross-site attacks | Same-origin CORS by default, CSRF/`Origin` guard on every write, WebSocket origin check, `HttpOnly` + `SameSite=strict` cookies |
+| Secrets | Users' own API keys are saved **encrypted** (`SECRET_KEY`); keys are masked in every response; `.env` is git-ignored; keys accepted only as `[A-Za-z0-9_.:-]` |
+| Untrusted web content | SSRF-safe fetching (public addresses only, checked on every redirect, size and time limits); AI prompts treat job pages and uploads as data, never instructions |
+| AI endpoints | Input length caps, document size cap (300 KB), per-user **rate limits** (e.g. chat editor 10/min · 80/h, style PDFs 20/min) with `Retry-After`, strict JSON-schema output, whitelisted edit operations |
+| Generated text | Fact-checked against your profile; chat edits cannot touch contact details, links, dates, companies or degrees |
+| Uploads | PDF only, size-limited, parsed in the background |
+| Free shared pools | Kilo / LLM7 are IP-limited, so in prod mode only the admin uses them; users bring their own keys and have their own rate-limit slots |
+| Paid-API accidents | `STRICT_ZERO_SPEND_PROTECTION` blocks any search call that could cost money; the optional job APIs are off until you opt in |
+
+Found a problem? Open an issue — please don't post keys or resumes in it.
 
 <br/>
 

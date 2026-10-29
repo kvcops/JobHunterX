@@ -6,7 +6,9 @@ import {
 } from '../components/ui.js';
 import { normalizeProfile, setIn, getIn } from '../state/domain.js';
 import { ExperienceSummary } from '../components/experience.js';
+import { PayFields, AnswerFields } from '../components/answers.js';
 import { WORK_MODES, WORK_MODE_LABEL, SENIORITIES, YEARS_SOURCE_LABEL, humanize } from '../lib/format.js';
+import { CountryInput, CityInput, CityChips, WorkAuthInput } from '../components/places.js';
 
 function UploadButton() {
   const up = useStore((s) => s.profile.upload);
@@ -26,11 +28,12 @@ function Reading() {
     <p class="muted small">${uploadStageLabel(up.stage)}… · <${Elapsed} since=${up.startedAt} /></p></div>`;
 }
 
-function Understanding({ snap }) {
+function Understanding({ snap, pending }) {
   if (!snap) return html`<div class="understanding"><h2>How JobHunterX understands you</h2><${Skeleton} lines=${6} /></div>`;
   return html`<div class="understanding" aria-label="How JobHunterX understands you">
     <div class="dna-head"><div><h2>How JobHunterX understands you</h2><p class="muted small">Derived from your profile. Every skill is checked against what you actually wrote.</p></div>
-      <${Badge} tone=${snap.method === 'llm' ? 'success' : 'warning'}>${snap.method === 'llm' ? 'AI analysis' : 'Basic (AI unavailable)'}</${Badge}></div>
+      ${pending ? html`<${Badge} tone="info" title="Your latest changes are being analysed; this view updates by itself">Updating…</${Badge}>`
+        : html`<${Badge} tone=${snap.method === 'llm' ? 'success' : 'warning'}>${snap.method === 'llm' ? 'AI analysis' : 'Basic (AI unavailable)'}</${Badge}>`}</div>
     <div class="stats">
       <${Stat} label="Level" value=${humanize(snap.seniority)} />
       <${Stat} label="Education" value=${humanize(snap.education_level)} />
@@ -150,7 +153,11 @@ function Editor({ profile }) {
     </div>
     <div class="scroll editor-body" key=${tab}>
     ${tab === 'about' ? html`<div class="form-grid">
-      ${[['name', 'Full name'], ['email', 'Email', 'email'], ['phone', 'Phone'], ['location', 'Current location'], ['suggested_role', 'Current / target title'],
+      ${[['name', 'Full name (as printed on documents)'], ['first_name', 'First name'], ['middle_name', 'Middle name'], ['last_name', 'Last name (surname)'],
+        ['email', 'Email', 'email'], ['phone', 'Phone']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
+      <${Field} label="Current location">${(id) => html`<${CityInput} id=${id} value=${draft.location} country=${p.home_country}
+        placeholder="e.g. Hyderabad, Telangana, India" onChange=${(v) => set(['location'], v)} />`}</${Field}>
+      ${[['suggested_role', 'Current / target title'],
         ['linkedin', 'LinkedIn URL', 'url'], ['github', 'GitHub URL', 'url'], ['portfolio', 'Portfolio URL', 'url']].map(([k, l, t]) => html`<${TextField} draft=${draft} path=${[k]} label=${l} set=${set} type=${t || 'text'} />`)}
       <${Field} label="Other links" hint="Blog, Kaggle, Scholar, personal site… shown in your resume header." wide><${LinksEditor} value=${draft.links} labelHint="Blog, Kaggle…" onChange=${(v) => set(['links'], v)} /></${Field}>
       <${TextField} draft=${draft} path=${['summary']} label="Summary" set=${set} textarea wide />
@@ -158,10 +165,11 @@ function Editor({ profile }) {
     </div>` : null}
     ${tab === 'prefs' ? html`<div class="form-grid">
       <${Field} label="Target roles" hint="Titles you want. Used first in every search." wide><${ChipsInput} label="Target roles" value=${p.target_roles} onChange=${(v) => set(['preferences', 'target_roles'], v)} /></${Field}>
-      <${Field} label="Acceptable locations" hint="Cities you can work in." wide><${ChipsInput} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)} /></${Field}>
+      <${Field} label="Acceptable locations" hint="Cities you can work in — start typing for suggestions." wide><${CityChips} label="Locations" value=${p.locations}
+        country=${p.home_country} placeholder="Type a city and press Enter" onChange=${(v) => set(['preferences', 'locations'], v)} /></${Field}>
       <div class="field field-wide"><span class="field-label">Work modes you accept</span>
         <${Seg} multi label="Work modes" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${p.work_modes} onChange=${(v) => set(['preferences', 'work_modes'], v)} /></div>
-      <${TextField} draft=${draft} path=${['preferences', 'home_country']} label="Home country" set=${set} />
+      <${Field} label="Home country">${(id) => html`<${CountryInput} id=${id} value=${p.home_country} onChange=${(v) => set(['preferences', 'home_country'], v)} />`}</${Field}>
       <div class="field"><span class="field-label">Flexibility</span>
         <label class="switch"><input type="checkbox" checked=${p.willing_to_relocate} onChange=${(e) => set(['preferences', 'willing_to_relocate'], e.currentTarget.checked)} /><span class="switch-ui"></span> Willing to relocate within my country</label>
         <label class="switch"><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} /><span class="switch-ui"></span> Open to roles abroad</label></div>
@@ -192,10 +200,10 @@ function Editor({ profile }) {
         html`<${Field} label=${l} wide><${ChipsInput} label=${l} value=${draft[k]} onChange=${(v) => set([k], v)} /></${Field}>`)}
       <${Field} label="Links for certificates & achievements" hint="e.g. a credential page next to the certification." wide><${ItemLinksEditor} draft=${draft} set=${set} /></${Field}>
     </div>` : null}
-    ${tab === 'qa' ? html`<div class="form-grid">
-      <p class="muted small field-wide">Used only by the browser agent to answer application-form questions.</p>
-      ${['current_ctc', 'expected_ctc', 'expected_salary', 'notice_period', 'work_authorization', 'requires_sponsorship', 'preferred_work_mode', 'willing_to_relocate', 'years_of_experience'].map((k) =>
-        html`<${TextField} draft=${draft} path=${['qa_memory', k]} label=${humanize(k)} set=${set} />`)}
+    ${tab === 'qa' ? html`<div class="stack">
+      <p class="muted small">Used by the browser agent to answer application-form questions. Empty ones are filled from the rest of your profile.</p>
+      <${PayFields} draft=${draft} set=${set} />
+      <${AnswerFields} draft=${draft} set=${set} />
     </div>` : null}
     </div>
   </div>`;
@@ -216,7 +224,7 @@ export function ProfileView() {
         <div class="scroll pane-pad">
           ${pr.status === 'loading' && !env ? html`<${Skeleton} lines=${8} />` : null}
           ${pr.status === 'error' && !env ? html`<${ErrorBox} message=${pr.error} onRetry=${loadProfile} />` : null}
-          ${env && env.profile ? html`<${Understanding} snap=${env.snapshot} />` : null}
+          ${env && env.profile ? html`<${Understanding} snap=${env.snapshot} pending=${!!env.snapshot_pending} />` : null}
           ${env && !env.profile ? html`<${EmptyState} icon="upload" title="No resume yet">Upload a PDF, or fill in the profile on the right by hand.</${EmptyState}>` : null}
         </div>
       </section>

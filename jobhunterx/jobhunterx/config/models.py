@@ -6,7 +6,7 @@ free plan, Mistral free/Experiment plan) as of October 2026. They change often,
 so three safety nets keep the app working when they drift:
 
 * every limit can be overridden with MODEL_LIMITS_JSON in .env, e.g.
-  MODEL_LIMITS_JSON={"gemini/gemma-4-31b-it": {"rpm": 30, "rpd": 14400}}
+  MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000}}
 * the provider's own /models endpoint is queried with your key, and models the
   account cannot use are skipped instead of failing every call;
 * a 429 puts that provider in cooldown and the chain moves on.
@@ -40,32 +40,64 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Strong MoE (12B active), clean JSON, ~1-3 s. No key."},
     {"id": "kilo/poolside/laguna-s-2.1:free", "name": "Laguna S 2.1 (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
      "note": "Fast, reliable JSON, ~2.7 s. No key."},
-    {"id": "kilo/inclusionai/ling-3.1-flash", "name": "Ling 3.1 Flash (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Flash model, ~3.6 s. No key."},
+    # Added 17 Oct 2026 (live JSON test, thinking off): Nemotron 3.5 Super VL 1.2-2.6 s (first call can be a slow cold
+    # start), Dots 3 Note 2-4 s, North Mini Code 2-5 s, Xing 4.0 5-9 s. Ling 3.1 Flash was removed by Kilo. Tried and left
+    # out: Nemotron 3 Ultra (empty answers), Inkling Small (tiny daily limit), Laguna XS (thinks, rate-limited),
+    # Nemotron 3.5 Lightning (70-90 s), LFM 2.5 (400), openrouter/free (unreliable JSON).
+    {"id": "kilo/nvidia/nemotron-3.5-super-vl:free", "name": "Nemotron 3.5 Super VL (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Newest Nemotron, clean JSON, ~1-3 s. No key."},
+    {"id": "kilo/dots-studio/dots-3-note-preview:free", "name": "Dots 3 Note (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Preview model, clean JSON, ~2-4 s. No key."},
+    {"id": "kilo/cohere/north-mini-code:free", "name": "North Mini Code (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Small and quick, clean JSON, ~2-5 s. No key."},
+    {"id": "kilo/xingchen-agi/xing4.0-29b-a4b:free", "name": "Xing 4.0 29B (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Small MoE (4B active), ~5-9 s. No key."},
     {"id": "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", "name": "Nemotron 3 Nano Omni (Kilo, free)", "provider": "kilo", "rpm": None, "rph": 200, "rpd": None, "tpm": None, "tpd": None,
      "note": "Small MoE (3B active), ~3.4 s. No key."},
-    # LLM7.io free tier — no API key, no account. Limits are not published; measured Oct 2026: one request at a time
-    # per client, short per-minute caps (429 "retry after 1-13 s") and a small daily token quota per client (about ten
-    # short calls used it up): a quick backup after Kilo, not a main model. "Pro" models need payment and are not listed.
-    {"id": "llm7/deepseek-v4-pro", "name": "DeepSeek V4 Pro (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Strong all-rounder, ~1.6 s. No key."},
-    {"id": "llm7/minimax-m3", "name": "MiniMax M3 (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Fast, ~1.4 s. No key."},
+    # LLM7.io free tier — no API key, no account. Limits are not published: one request at a time per client, short
+    # per-minute caps and a small daily token quota per client. Re-measured 17 Oct 2026: DeepSeek V4 Pro and MiniMax M3
+    # became paid-only ("Missing API key"); the free ones answer in 10-60 s and sometimes wrongly — so LLM7 is the very
+    # last resort in every chain. Paid-only models are dropped automatically from LLM7's own list (usage_based_only).
     {"id": "llm7/GLM-5.3-Flash", "name": "GLM 5.3 Flash (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Good structured output, ~8 s. No key."},
-    # NVIDIA NIM (build.nvidia.com) — free key, 40 requests/minute per ACCOUNT across all models (no official increase on
-    # the free tier). Chosen for speed: small MoE / "flash" models; big dense models are slow on the shared free endpoint.
-    {"id": "nim/nvidia/nemotron-nano-3-30b-a3b", "name": "Nemotron Nano 3 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "3B active parameters — the fastest capable NIM model."},
+     "note": "Last-resort backup, ~10 s. No key."},
+    {"id": "llm7/DeepSeek-V4-Flash-0731", "name": "DeepSeek V4 Flash (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Last-resort backup, slow (30-60 s). No key."},
+    # NVIDIA NIM (build.nvidia.com) — free key, 40 requests/minute per ACCOUNT across all models. Chosen from a live test with a
+    # real free key on 29 Oct 2026 (JSON extraction + a fact-keeping rewrite, thinking off):
+    #   Nemotron 3 Ultra 550B 1-7 s, kept every fact · Nemotron 3.5 Lightning / Bolt ~1 s (fast, but dropped a number when
+    #   rewriting, so not used for writing) · GPT-OSS 20B 2-6 s (reasoning effort low) · Nemotron 3 Nano Omni 1.4 s but often
+    #   "16/16 requests" busy · MiniMax M3.1 Flash 3-25 s, always thinks a little.
+    # Left out: Nemotron 3 Super, Nemotron Nano 3, Kimi K2.6 (listed, but "Not found for account" on the free key), DeepSeek V4.1
+    # Flash, GLM 5.3 Flash, Step 5 (no answer within 150 s), Llama models (not used), Gemma (dropped app-wide).
+    {"id": "nim/nvidia/nemotron-3-ultra-550b-a55b", "name": "Nemotron 3 Ultra 550B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Strongest free NVIDIA model; 1-7 s, clean JSON, keeps facts when rewriting. Thinking off."},
+    # Second round, 29 Oct 2026 (same four tasks: extraction, fit judgment, fact-keeping rewrite, cover-letter paragraph; x2):
+    #   Mistral Large 4 8/8, 1-6 s, the only one that kept the "2,000" figure AND invented nothing — the best writer here ·
+    #   Nemotron 3.5 Super VL 8/8, 0.8-2.3 s (dropped the figure, invented nothing) · Muse Glimmer 30B 7/8, kept facts, 7-21 s ·
+    #   DiffusionGemma 26B judged well but added the job's tools in both rewrites (never used for writing), 3-15 s.
+    #   Still left out: Laguna XS 2.1 (busy 503 on every call), DeepSeek V4.1 Flash / GLM 5.3 Flash / Step 5 (45 s timeouts).
+    {"id": "nim/mistralai/mistral-large-4-1t-a52b", "name": "Mistral Large 4 (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Best writer in the tests: keeps every fact, invents nothing; 1-6 s. Reasoning effort low."},
+    {"id": "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "name": "Nemotron 3.5 Super VL 120B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Fastest of the strong models (0.8-2.3 s), clean JSON. Thinking off."},
+    {"id": "nim/meta/muse-glimmer-30b", "name": "Muse Glimmer 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Keeps facts, but slow (7-21 s). Backup. Reasoning effort low."},
+    {"id": "nim/google/diffusiongemma-26b-a4b-it", "name": "DiffusionGemma 26B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Judges well, 3-15 s; adds unused tools when rewriting, so never used for writing. Late backup."},
+    {"id": "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "name": "Nemotron 3.5 Lightning 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "3B active, ~1 s, clean JSON. Quick tasks. Thinking off."},
+    {"id": "nim/nvidia/nemotron-3.5-bolt-e4b", "name": "Nemotron 3.5 Bolt (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Tiny and ~1 s. Quick tasks only."},
     {"id": "nim/openai/gpt-oss-20b", "name": "GPT-OSS 20B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Fast and light."},
-    {"id": "nim/z-ai/glm-5.3-flash", "name": "GLM 5.3 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Flash model, good structured output."},
-    {"id": "nim/deepseek-ai/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Flash model, strong reasoning and writing."},
-    # Google AI Studio — Gemma runs on the Gemini API (no system role: instructions are sent inline).
-    {"id": "gemini/gemma-4-31b-it", "name": "Gemma 4 31B", "provider": "google", "rpm": 15, "rpd": 1500, "tpm": None, "tpd": None,
-     "note": "Dense 31B, 256K context. Strong, but slow and often overloaded on the free tier — used as a fallback."},
+     "note": "2-6 s, reliable JSON, keeps facts. Reasoning effort low."},
+    {"id": "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "name": "Nemotron 3 Nano Omni (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Fast when free, often busy (503). Backup. Thinking off."},
+    # MiniMax M3.1 Flash, tested separately (reasoning effort low): the most thorough job-fit judgments of the three and good
+    # cover-letter prose, 3-13 s; but in resume-bullet rewrites it added the job's tools the candidate never used (both runs) —
+    # the fact-checker rejects that — so it is second for analysis and third for writing. Its shared endpoint often answers 429.
+    {"id": "nim/minimaxai/minimax-m3.1-flash", "name": "MiniMax M3.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Thorough analysis and good prose, 3-13 s with reasoning effort low. Second for matching, third for writing."},
+    # Google AI Studio.
     {"id": "gemini/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "provider": "google", "rpm": 15, "rpd": 500, "tpm": 250_000, "tpd": None,
      "note": "Fast (~1 s) and reliable — first choice for every task."},
     # Groq — production/preview open models (Llama deliberately not used).
@@ -75,10 +107,8 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Strong writing and instruction following."},
     {"id": "groq/moonshotai/kimi-k2-instruct", "name": "Kimi K2", "provider": "groq", "rpm": 60, "rpd": 1000, "tpm": 10_000, "tpd": 300_000,
      "note": "Used if the 0905 build is not on your account."},
-    {"id": "groq/qwen/qwen3.6-27b", "name": "Qwen3.6 27B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200_000,
-     "note": "Newest Qwen on Groq; strong structured output."},
-    {"id": "groq/qwen/qwen3-32b", "name": "Qwen3 32B", "provider": "groq", "rpm": 60, "rpd": 1000, "tpm": 6000, "tpd": 500_000,
-     "note": "Used if Qwen3.6 is not on your account; large daily token budget."},
+    {"id": "groq/qwen/qwen3.8-27b", "name": "Qwen3.8 27B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": None, "tpd": None,
+     "note": "Newest Qwen on Groq (replaced Qwen3.6 / Qwen3 32B). Measured 17 Oct 2026: ~0.2 s, clean JSON, no thinking."},
     {"id": "groq/openai/gpt-oss-20b", "name": "GPT-OSS 20B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200_000,
      "note": "Fast and light."},
     # Mistral — free-plan limits are per model and per account (Admin console → Limits); these match the
@@ -93,36 +123,53 @@ CATALOG: list[dict[str, Any]] = [
 BY_ID = {m["id"]: m for m in CATALOG}
 
 # Task → ordered preferences. Unavailable/disabled models are skipped at call time.
-# Live tests (Oct 2026): Gemini 3.5 Flash Lite answers in ~1 s; free Gemma 4 31B takes 12-36 s and often
-# fails with 500/503 under load. So Flash Lite leads, Gemma 4 31B is the first fallback (bigger daily budget),
-# then Groq and Mistral.
-# Order: Gemini Flash Lite (fastest, if you have a key) -> Kilo free pool (no key) -> NVIDIA NIM -> Gemma -> Groq -> Mistral.
+# Live tests (Oct 2026): Gemini 3.5 Flash Lite answers in ~1 s, so it leads every chain.
+# Order: Gemini Flash Lite (fastest, if you have a key) -> Kilo free pool (no key) -> NVIDIA NIM -> Groq -> Mistral -> LLM7.
 # Kilo models are spread across chains so their 200 req/hour per-model budgets add up.
-_KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/poolside/laguna-s-2.1:free"]
-_KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "kilo/inclusionai/ling-3.1-flash",
-               "kilo/poolside/laguna-s-2.1:free", "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
+# NVIDIA NIM (free key): 40 requests/minute for the whole account — about 2,400 an hour against Kilo's 200 an hour per model —
+# so with a key NIM leads right after Gemini. Without a key these entries are skipped. Thinking is off / low on all of them.
+_NIM_FAST = ["nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b",
+             "nim/nvidia/nemotron-3.5-bolt-e4b", "nim/openai/gpt-oss-20b", "nim/google/diffusiongemma-26b-a4b-it"]
+_NIM_SMART = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b",
+              "nim/minimaxai/minimax-m3.1-flash", "nim/openai/gpt-oss-20b", "nim/nvidia/nemotron-3.5-lightning-30b-a3b",
+              "nim/meta/muse-glimmer-30b", "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "nim/google/diffusiongemma-26b-a4b-it"]
+_NIM_READ = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "nim/nvidia/nemotron-3-ultra-550b-a55b",
+             "nim/openai/gpt-oss-20b", "nim/minimaxai/minimax-m3.1-flash", "nim/nvidia/nemotron-3.5-lightning-30b-a3b",
+             "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
+# writing: only models that never invented a tool in the rewrite test lead; MiniMax (keyword-stuffs rewrites) comes last.
+# DiffusionGemma is never used for writing.
+# Long answers (resume / CV / letter): Mistral Large 4 (187 tok/s, 684 words in 16 s) then Super VL (85 tok/s, 661 words in 9 s),
+# both of which invented nothing. Ultra is left out of writing: it stalled on long prose in the live test.
+_NIM_WRITE = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "nim/openai/gpt-oss-20b",
+              "nim/meta/muse-glimmer-30b", "nim/minimaxai/minimax-m3.1-flash"]
+_KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
+              "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
+_KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemotron-3.5-super-vl:free", "kilo/kilo-auto/free",
+               "kilo/dots-studio/dots-3-note-preview:free", "kilo/poolside/laguna-s-2.1:free", "kilo/xingchen-agi/xing4.0-29b-a4b:free",
+               "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
 # No-key backup after Kilo: LLM7 (one call at a time, small daily quota).
-_LLM7 = ["llm7/deepseek-v4-pro", "llm7/minimax-m3", "llm7/GLM-5.3-Flash"]
+_LLM7 = ["llm7/GLM-5.3-Flash", "llm7/DeepSeek-V4-Flash-0731"]
 CHAINS: dict[str, list[str]] = {
-    # quick tasks want speed: Gemma (often 12-120 s on the free tier) only after the fast Groq models
-    "fast": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST, "llm7/minimax-m3", "llm7/deepseek-v4-pro", "nim/nvidia/nemotron-nano-3-30b-a3b",
-             "nim/openai/gpt-oss-20b", "groq/openai/gpt-oss-20b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b", "gemini/gemma-4-31b-it",
-             "mistral/mistral-small-latest"],
-    "reasoning": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, *_LLM7, "nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash",
-                  "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
-                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest"],
-    "tailoring": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free",
-                  "llm7/deepseek-v4-pro", "nim/deepseek-ai/deepseek-v4.1-flash", "nim/z-ai/glm-5.3-flash", "gemini/gemma-4-31b-it",
+    # quick tasks want speed; LLM7 last (slow)
+    "fast": ["gemini/gemini-3.5-flash-lite", *_NIM_FAST, *_KILO_FAST, "groq/qwen/qwen3.8-27b",
+             "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", *_LLM7],
+    "reasoning": ["gemini/gemini-3.5-flash-lite", *_NIM_SMART, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
+                  "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
+                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", *_LLM7],
+    "tailoring": ["gemini/gemini-3.5-flash-lite", *_NIM_WRITE, "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "groq/qwen/qwen3.8-27b",
                   "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b",
-                  "mistral/mistral-medium-latest"],
-    "extraction": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, *_LLM7, "nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash",
-                   "gemini/gemma-4-31b-it", "groq/openai/gpt-oss-120b", "groq/qwen/qwen3.6-27b", "groq/qwen/qwen3-32b",
-                   "mistral/mistral-medium-latest"],
-    "browser": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "llm7/deepseek-v4-pro",
-                "groq/openai/gpt-oss-120b", "mistral/mistral-small-latest"],
+                  "mistral/mistral-medium-latest", *_LLM7],
+    "extraction": ["gemini/gemini-3.5-flash-lite", *_NIM_READ, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
+                   "mistral/mistral-medium-latest", "groq/openai/gpt-oss-120b",
+                   *_LLM7],
+    # chat editor for resumes / CVs / letters: Gemini 3.5 Flash Lite or Kilo's free models only, thinking off
+    "editor": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST],
+    "browser": ["gemini/gemini-3.5-flash-lite", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "nim/mistralai/mistral-large-4-1t-a52b",
+                "nim/nvidia/nemotron-3-ultra-550b-a55b", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
+                "mistral/mistral-small-latest", "llm7/GLM-5.3-Flash"],
 }
 CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tailoring": "Resume & letter writing",
-                "extraction": "Resume reading", "browser": "Browser agent"}
+                "extraction": "Resume reading", "editor": "Resume chat editor", "browser": "Browser agent"}
 
 
 def provider_of(model: str) -> str:
@@ -131,9 +178,51 @@ def provider_of(model: str) -> str:
 
 KILO_FREE = "free"                # Kilo's free pool needs no key; a Kilo account key (optional) is used when set
 NIM_ACCOUNT = "nim/__account__"   # one shared limiter: NIM's 40 requests/minute counts across all models
+NIM_ACCOUNT_RPM = 36              # 10% under the documented 40/min, so retries and parallel searches stay inside it
 # Shared limiters for providers whose limits count per client, not per model.
 # LLM7: about one call every 5 s keeps clear of its short per-minute caps.
 ACCOUNT_LIMITERS = {"llm7": ("llm7/__account__", 12)}
+
+
+# Measured with a free NIM key (29 Oct 2026, streaming, ~500-token answers): generation speed in tokens/s, seconds to the
+# first token, and how many output tokens the model spends per answer token (its reasoning cannot be switched off — Mistral
+# Large 4 rejects reasoning_effort "none" / "minimal" and still reasons ~58% of its output at "low").
+CALL_SPEED: dict[str, tuple[float, float, float]] = {        # model -> (tokens/s, first-token s, output overhead)
+    "nim/mistralai/mistral-large-4-1t-a52b": (187, 0.6, 2.5),
+    "nim/nvidia/nemotron-3.5-super-vl-120b-a12b": (85, 0.6, 1.0),
+    "nim/nvidia/nemotron-3.5-lightning-30b-a3b": (86, 0.5, 1.0),
+    "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": (43, 0.6, 1.0),
+    "nim/nvidia/nemotron-3-ultra-550b-a55b": (12, 2.5, 1.0),       # 1-8 s for short JSON, but 16-40 tok/s on prose and a 2,000-token
+                                                                   # answer gave nothing in 138 s: sized by its slow end, so the plan
+                                                                   # skips it for very long answers instead of waiting
+    "nim/openai/gpt-oss-20b": (30, 4.0, 1.05),
+    "nim/minimaxai/minimax-m3.1-flash": (18, 1.8, 1.3),
+    "nim/meta/muse-glimmer-30b": (11, 5.9, 1.2),
+    "nim/google/diffusiongemma-26b-a4b-it": (400, 12.3, 1.0),
+}
+_DEFAULT_SPEED = {"nvidia": (40.0, 3.0, 1.0)}
+MIN_CALL_TIMEOUT_S, MAX_CALL_TIMEOUT_S = 30.0, 150.0
+SLOW_SKIP_S = 120.0          # a model that would likely need longer than this for one answer is passed over for that call
+
+
+def call_plan(model: str, max_tokens: int) -> tuple[int, Optional[float], Optional[str]]:
+    """(output token budget, timeout seconds or None for the provider default, reason to skip this model for this call).
+
+    The budget leaves room for a model's reasoning so the answer is never cut off; the timeout grows with the answer it is
+    asked for (a 2,500-token CV at 28 tokens/s needs ~90 s, a JSON verdict ~5 s); and a model that is clearly too slow for
+    this answer size is skipped for this call only — it is not rested, a short call may still go to it."""
+    speed = CALL_SPEED.get(model) or _DEFAULT_SPEED.get(provider_of(model))
+    want = max(1, int(max_tokens or 1024))
+    if not speed:
+        return max(1500, want), None, None
+    tps, first, overhead = speed
+    budget = min(8192, max(1500, int(want * overhead)))
+    likely = first + (want * overhead * 0.6) / tps          # answers usually fill ~60% of the cap they are given
+    if likely > SLOW_SKIP_S:
+        return budget, None, f"too slow for an answer this long (~{int(likely)} s at {int(tps)} tokens/s)"
+    need = min(budget, want * overhead)                        # what this call can really produce (budget only adds headroom)
+    timeout = min(MAX_CALL_TIMEOUT_S, max(MIN_CALL_TIMEOUT_S, 2 * first + 1.2 * need / tps))
+    return budget, timeout, None
 
 
 def account_limiter(model: str) -> Optional[str]:
@@ -146,7 +235,7 @@ def account_limiter(model: str) -> Optional[str]:
 
 def limits(model: str) -> dict[str, Optional[int]]:
     if model == NIM_ACCOUNT:
-        return {"rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None}
+        return {"rpm": NIM_ACCOUNT_RPM, "rph": None, "rpd": None, "tpm": None, "tpd": None}
     for lid, rpm in ACCOUNT_LIMITERS.values():
         if model == lid:
             return {"rpm": rpm, "rph": None, "rpd": None, "tpm": None, "tpd": None}
@@ -161,6 +250,9 @@ def limits(model: str) -> dict[str, Optional[int]]:
 
 
 def provider_key(provider: str) -> Optional[str]:
+    from jobhunterx.config import auth_ctx
+    if provider in auth_ctx.SHARED_POOLS and not auth_ctx.shared_pools_allowed():
+        return None                     # prod mode: the IP-limited free pools are kept for the admin
     s = get_settings()
     env = {"google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "groq": ("GROQ_API_KEY",), "mistral": ("MISTRAL_API_KEY",),
            "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"), "kilo": ("KILO_API_KEY",)}.get(provider)
@@ -168,7 +260,7 @@ def provider_key(provider: str) -> Optional[str]:
         return KILO_FREE                # used without any key
     if env is None:
         return None
-    candidates = [getattr(s, f"{provider}_api_key", None)] + [os.getenv(n) for n in env]
+    candidates = [getattr(s, f"{provider}_api_key", None)] + [auth_ctx.env_key(n) for n in env]
     real = next((k for k in candidates if is_real_key(k)), None)
     if provider == "kilo":
         return real or KILO_FREE       # works without a key
@@ -186,18 +278,30 @@ _refresh_lock: Optional[asyncio.Lock] = None
 
 async def _list_provider(provider: str, key: str) -> list[str]:
     if provider == "google":
-        from google import genai
-
-        def _sync() -> list[str]:
-            client = genai.Client(api_key=key)
-            return [m.name.split("/", 1)[-1] for m in client.models.list()]
-        return [f"gemini/{n}" for n in await asyncio.to_thread(_sync)]
+        # plain REST: listing models must not load the whole Google SDK (tens of MB) at startup
+        import httpx
+        names: list[str] = []
+        token = ""
+        async with httpx.AsyncClient(timeout=20) as client:
+            for _ in range(10):
+                r = await client.get("https://generativelanguage.googleapis.com/v1beta/models",
+                                     params={"pageSize": 1000, **({"pageToken": token} if token else {})},
+                                     headers={"x-goog-api-key": key})
+                r.raise_for_status()
+                data = r.json()
+                names += [m["name"].split("/", 1)[-1] for m in data.get("models", []) if m.get("name")]
+                token = data.get("nextPageToken") or ""
+                if not token:
+                    break
+        return [f"gemini/{n}" for n in names]
     if provider in ("kilo", "nvidia", "llm7"):
         from jobhunterx.config import openai_compat as oc
         base, prefix = {"kilo": (oc.KILO_BASE, "kilo"), "nvidia": (oc.NIM_BASE, "nim"),
                         "llm7": (oc.LLM7_BASE, "llm7")}[provider]
         data = await oc.list_models(base, None if key == KILO_FREE else key)
-        return [f"{prefix}/{m['id']}" for m in data if isinstance(m, dict) and m.get("id")]
+        # LLM7 marks paid models (usage_based_only): without a key they answer 401, so they are never "available"
+        return [f"{prefix}/{m['id']}" for m in data if isinstance(m, dict) and m.get("id")
+                and not (provider == "llm7" and m.get("usage_based_only"))]
     import httpx
     url = {"groq": "https://api.groq.com/openai/v1/models", "mistral": "https://api.mistral.ai/v1/models"}[provider]
     async with httpx.AsyncClient(timeout=15) as client:
@@ -217,6 +321,9 @@ async def _list_provider(provider: str, key: str) -> list[str]:
 async def refresh_available(force: bool = False) -> dict[str, dict[str, Any]]:
     """Ask each configured provider which models this key can use (cached for 6 h)."""
     global _refresh_lock
+    from jobhunterx.config import auth_ctx
+    if auth_ctx.restricted() is not None:
+        return _available               # the shared list is learned with the server's keys, never a user's
     if _refresh_lock is None:
         _refresh_lock = asyncio.Lock()
     async with _refresh_lock:
@@ -344,21 +451,29 @@ class _ModelBudget:
 _budgets: dict[str, _ModelBudget] = {}
 
 
+def _scope() -> str:
+    from jobhunterx.config import auth_ctx
+    return auth_ctx.scope()
+
+
 def budget(model: str) -> _ModelBudget:
-    if model not in _budgets:
-        _budgets[model] = _ModelBudget(model)
-    return _budgets[model]
+    key = model + _scope()              # a user's own key has its own limits (prod mode)
+    if key not in _budgets:
+        _budgets[key] = _ModelBudget(model)
+    return _budgets[key]
 
 
 def budgets_status() -> dict[str, dict[str, Any]]:
-    return {m: b.status() for m, b in _budgets.items()}
+    sc = _scope()
+    return {k[:len(k) - len(sc)] if sc else k: b.status() for k, b in _budgets.items()
+            if (k.endswith(sc) if sc else "@" not in k)}
 
 
 # ---------------------------------------------------------------------------
 # Model health: rest a model for a while after server errors (per model, not per provider)
 # ---------------------------------------------------------------------------
-# Google's free Gemma endpoint can answer "500 INTERNAL" for minutes at a time. Without this, every
-# call would first wait on Gemma before falling back. With it, the first failure rests only that model
+# A free endpoint can answer "500 INTERNAL" for minutes at a time. Without this, every
+# call would first wait on it before falling back. With it, the first failure rests only that model
 # (other Google models keep working), and the rest grows if it keeps failing: 2 → 4 → 8 → 16 → 30 min.
 
 _SERVER_ERR = ("500", "502", "503", "504", "internal", "unavailable", "deadline", "overloaded", "timed out", "timeout",
@@ -379,12 +494,13 @@ def _fingerprint(key: Optional[str]) -> str:
 
 
 def key_rejected(provider: str) -> bool:
-    hit = _bad_keys.get(provider)
+    slot = provider + _scope()
+    hit = _bad_keys.get(slot)
     if not hit:
         return False
     fp, until = hit
     if fp != _fingerprint(provider_key(provider)) or time.monotonic() >= until:
-        _bad_keys.pop(provider, None)        # key changed or the rest is over: try again
+        _bad_keys.pop(slot, None)            # key changed or the rest is over: try again
         return False
     return True
 
@@ -396,11 +512,39 @@ def mark_success(model: str) -> None:
 def mark_failure(model: str, error: str) -> Optional[float]:
     """Record a failed call. Returns the rest period in seconds (None if the error is not the model's fault)."""
     e = (error or "").lower()
+    if "not found for account" in e or ("404" in e and "function" in e):
+        # NIM lists models a free key cannot call ("Function …: Not found for account"): rest that model, not the provider
+        _health[model] = {"trips": 1, "until": time.monotonic() + 12 * 3600, "why": "not available on this account"}
+        log.warning("model_not_on_account", model=model)
+        return 12 * 3600.0
+    if "402" in e or "usage credits" in e or "payment required" in e or "insufficient credit" in e:
+        # a pay-per-token provider or key with no credits left: skip every model of it for a while
+        provider = provider_of(model)
+        _bad_keys[provider + _scope()] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
+        _health[model] = {"trips": 1, "until": time.monotonic() + BAD_KEY_REST_S, "why": "the account has no usage credits"}
+        log.warning("provider_needs_credits", provider=provider)
+        return BAD_KEY_REST_S
+    if any(k in e for k in _AUTH_ERR) and not any(k in e for k in _RATE_ERR) and provider_key(provider_of(model)) == KILO_FREE:
+        # a no-key pool (LLM7) answers 401 for a model that became paid: rest that model, not the whole provider
+        _health[model] = {"trips": 1, "until": time.monotonic() + 6 * 3600, "why": "now needs a paid key"}
+        log.warning("model_needs_key", model=model)
+        return 6 * 3600.0
     if any(k in e for k in _AUTH_ERR) and not any(k in e for k in _RATE_ERR):
         provider = provider_of(model)
-        _bad_keys[provider] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
+        _bad_keys[provider + _scope()] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
         log.warning("api_key_rejected", provider=provider, rest_s=int(BAD_KEY_REST_S))
         return BAD_KEY_REST_S
+    if "request limit reached" in e or "resourceexhausted" in e:
+        # NIM: "503 ResourceExhausted: Worker local total request limit reached (16/16)" — that endpoint is full right now.
+        # It frees up in seconds, so a short flat rest (no growing back-off) and the next model answers meanwhile.
+        _health[model] = {"trips": 0, "until": time.monotonic() + 60, "why": "the free endpoint is busy"}
+        log.info("model_busy", model=model)
+        return 60.0
+    if any(k in e for k in _RATE_ERR) and model.startswith("nim/") and _nim_account_limited(model):
+        # several different NIM models answered 429 within a minute: the key itself is limited, not one busy endpoint —
+        # rest all of NIM briefly so the chain moves to Kilo / Groq instead of trying every NIM model in turn
+        _provider_rest["nvidia" + _scope()] = time.monotonic() + NIM_ACCOUNT_REST_S
+        log.warning("nim_account_rate_limited", rest_s=int(NIM_ACCOUNT_REST_S))
     if any(k in e for k in _RATE_ERR):
         # the provider says how long ("retry after 86464 seconds", "retryDelay": "33s"): a used-up daily quota rests
         # for hours instead of failing once a minute; capped at 6 h so a restarted day is picked up again
@@ -415,17 +559,35 @@ def mark_failure(model: str, error: str) -> Optional[float]:
         return rest
     else:
         return None
-    _health[model] = {**_health.get(model, {}), "until": time.monotonic() + rest, "why": "rate limited"}
+    slot = model + _scope()                  # a used-up quota belongs to the key that used it
+    _health[slot] = {**_health.get(slot, {}), "until": time.monotonic() + rest, "why": "rate limited"}
     log.warning("model_resting", model=model, rest_s=int(rest), reason="rate limited")
     return rest
 
 
+_provider_rest: dict[str, float] = {}           # provider+scope -> until (a whole provider rate limited)
+_nim_429s: dict[str, deque] = {}                 # scope -> recent (time, model) NIM 429s
+NIM_ACCOUNT_REST_S = 45.0
+
+
+def _nim_account_limited(model: str) -> bool:
+    """Three 429s from at least two different NIM models inside 60 s mean the key's limit, not one busy endpoint."""
+    q = _nim_429s.setdefault(_scope(), deque(maxlen=20))
+    now = time.monotonic()
+    q.append((now, model))
+    recent = [(t, m) for t, m in q if now - t <= 60]
+    return len(recent) >= 3 and len({m for _, m in recent}) >= 2
+
+
 def resting(model: str) -> Optional[str]:
     """Why this model is being skipped right now, e.g. 'resting 3 min after Google server errors'."""
-    h = _health.get(model)
-    if not h:
-        return None
-    left = h["until"] - time.monotonic()
-    if left <= 0:
+    now = time.monotonic()
+    sc = _scope()
+    until = _provider_rest.get(provider_of(model) + sc, 0.0)
+    if until > now:
+        return f"resting {max(1, round((until - now) / 60))} min — the provider is rate limiting this key"
+    hits = [h for h in (_health.get(model), _health.get(model + sc) if sc else None) if h and h["until"] > now]
+    if not hits:
         return None          # rest is over: try it again (trips are kept, so a new failure rests it longer)
-    return f"resting {max(1, round(left / 60))} min after {h['why']}"
+    h = max(hits, key=lambda x: x["until"])
+    return f"resting {max(1, round((h['until'] - now) / 60))} min after {h['why']}"

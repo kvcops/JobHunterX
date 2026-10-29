@@ -42,24 +42,55 @@ class Settings(BaseSettings):
     mistral_api_key: Optional[str] = None
     nvidia_api_key: Optional[str] = None          # NVIDIA NIM (build.nvidia.com), free key, 40 requests/minute
     kilo_api_key: Optional[str] = None            # optional: Kilo's free pool works without any key
+    # Browser Use cloud browsers (cloud.browser-use.com): with a key, auto-apply runs in a cloud browser instead of a
+    # Chrome on this server — no server memory, and several people can apply at once
+    browser_use_api_key: Optional[str] = None
+    # Extra job APIs (discovery/job_apis.py). Adzuna is one value: app_id:app_key (free key at developer.adzuna.com).
+    adzuna_api_key: Optional[str] = None
 
     @field_validator("google_api_key", "groq_api_key", "mistral_api_key", "nvidia_api_key", "kilo_api_key", "tinyfish_api_key", "tavily_api_key",
-                     "exa_api_key", "brave_api_key", mode="before")
+                     "exa_api_key", "brave_api_key", "browser_use_api_key", "adzuna_api_key", mode="before")
     @classmethod
     def _drop_placeholder_keys(cls, v):
         # A placeholder must count as "no key": otherwise every AI call fails and retries, and the UI waits forever.
         return v.strip().strip('"').strip("'") if isinstance(v, str) and is_real_key(v) else None
 
     # --- Free-tier limits (defaults live in config/models.py; JSON overrides per model) ---
-    gemma_daily_requests: int = 1500
-    gemma_daily_tokens: int = 1500
-    gemma_rpm: int = 15
     model_limits_json: str = ""
 
     # --- Application ---
     host: str = "127.0.0.1"
-    port: int = 8000
+    port: int = 9000
     log_level: str = "INFO"
+
+    # --- Production mode (APP_ENV=prod): login page, users, per-user data and keys ---
+    # Not set (or anything else) = the local single-user app, exactly as before: no login at all.
+    app_env: str = ""
+    admin_username: str = ""            # the admin account; created / updated from these on every start
+    admin_password: str = ""
+    secret_key: str = ""                # encrypts users' saved API keys; empty = a random one kept in data/.secret_key
+    session_hours: float = 12.0         # a login lasts this long, then the user signs in again
+    cookie_samesite: str = "strict"     # strict | lax | none (none only when the UI is served from another site)
+    allow_signup: bool = True           # prod mode: people can create their own account on /signup (they bring all keys)
+    cookie_secure: str = "auto"         # auto = Secure on https (also behind a proxy that says so) | true | false
+    # CORS: empty = only this app's own address may call the API (same as before)
+    cors_origins: str = ""              # comma separated, e.g. https://jobs.example.com,https://www.example.com
+    cors_methods: str = ""              # empty = GET,POST,PUT,PATCH,DELETE
+    cors_headers: str = ""              # empty = Content-Type
+    cors_allow_credentials: Optional[bool] = None   # empty = on when CORS_ORIGINS is set and APP_ENV=prod
+    forwarded_allow_ips: str = ""       # trusted proxies for X-Forwarded-*; empty = * in prod, 127.0.0.1 otherwise
+    # HTTPS (prod mode). auto = when a proxy says the visit came over plain http, send it to https (Render, Fly, nginx…)
+    force_https: str = "auto"           # auto | true | false
+    hsts_seconds: int = 31536000        # browsers remember "https only" for this long once they saw it over https; 0 = off
+    ssl_certfile: str = ""              # serve TLS directly (no proxy in front): paths to the certificate and its key
+    ssl_keyfile: str = ""
+    # The agents office writes its break-time chats and answers with AI; false = built-in lines only, no AI calls
+    office_ai_enabled: bool = True
+
+    @field_validator("cors_allow_credentials", mode="before")
+    @classmethod
+    def _blank_is_auto(cls, v):
+        return None if isinstance(v, str) and not v.strip() else v
     browser_use_headless: bool = True   # legacy; the live view always runs headless unless BROWSER_SHOW_WINDOW=true
     browser_use_headless_original: bool = False # fallback reference
     # --- Auto-apply ---
@@ -94,6 +125,7 @@ class Settings(BaseSettings):
     max_jobs_per_search: int = 60
     enable_ats_index: bool = True           # daily India copy of ~28k employers' own boards (job-board-aggregator data)
     enable_linkedin_source: bool = True     # LinkedIn's public (logged-out) job feed: newest posts, resolved to employer boards
+    enable_hn_source: bool = False          # Hacker News: YC job posts + monthly 'Who is hiring?' (India / India-friendly remote only)
     linkedin_max_applicants: int = 150      # skip LinkedIn posts that already show this many applicants
     max_llm_jd_extractions_per_search: int = 40
     watch_interval_hours: float = 4.0            # how often watchlist boards are checked while the app runs; 0 = off
@@ -110,6 +142,10 @@ class Settings(BaseSettings):
     groq_concurrency: int = 1     # Groq free: 30 RPM, serial with 2s delay
     mistral_concurrency: int = 1  # Mistral free: ~60 RPM, serial with 1s delay
     max_job_pipelines: int = 1    # Max concurrent per-job pipelines (serial to respect rate limits)
+
+    @property
+    def prod(self) -> bool:
+        return self.app_env.strip().lower() in ("prod", "production")
 
     @property
     def available_providers(self) -> list[str]:
@@ -146,6 +182,21 @@ class Settings(BaseSettings):
 
 
 @lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Singleton settings instance."""
+def _base_settings() -> Settings:
     return Settings()
+
+
+def get_settings() -> Settings:
+    """The settings singleton — for a signed-in non-admin user (prod mode), a view with their own keys."""
+    base = _base_settings()
+    from jobhunterx.config import auth_ctx
+    user = auth_ctx.restricted()
+    return user.settings_view(base) if user is not None else base
+
+
+def server_settings() -> Settings:
+    """The server's own settings, whoever is asking (startup, admin-only paths)."""
+    return _base_settings()
+
+
+get_settings.cache_clear = _base_settings.cache_clear   # type: ignore[attr-defined]

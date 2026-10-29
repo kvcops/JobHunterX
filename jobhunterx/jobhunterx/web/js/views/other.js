@@ -4,10 +4,10 @@ import { useStore } from '../state/store.js';
 import {
   loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention, markInterventionApplied,
   applyControl, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
-  loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion,
+  loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion, changePassword, setOfficeAI,
 } from '../actions.js';
 import { PeopleManager } from './people.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice, reduced } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Field, PageHead, ScoreRing, Monogram, Seg, Select, CountUp, Orb, Spinner, Notice, reduced, usePhonePane } from '../components/ui.js';
 import { api } from '../lib/api.js';
 import { TRACKING_LABEL, DEFAULT_TRACKING, relTime, humanize, fmtNum, safeUrl } from '../lib/format.js';
 import { setTheme } from '../actions.js';
@@ -98,6 +98,7 @@ export function TrackerView() {
   const jobs = tr.ids.map((id) => byId[id]).filter(Boolean);
   const open = (id) => navigate(`#/tracker/job/${encodeURIComponent(id)}`);
   const close = () => navigate('#/tracker');
+  usePhonePane(!!route.jobId);
   useEffect(() => {
     if (!route.jobId) return undefined;
     const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.overlay, .popover, .select-list')) close(); };
@@ -262,6 +263,7 @@ function useLiveFrames(canvas) {
 
 export function BrowserView() {
   const b = useStore((s) => s.browser);
+  const br = useStore((s) => (s.meta.data || {}).browser);
   const waiting = useStore((s) => s.interventions.items.length);
   const sess = b.session;
   const canvas = useRef();
@@ -302,6 +304,9 @@ export function BrowserView() {
 
   return html`<div class="view view-browser">
     <h1 class="sr-only">Auto-apply agent</h1>
+    ${br && !br.ready ? html`<${Notice} tone="warning">Auto-apply needs your own <strong>Browser Use</strong> key on this server — the browser runs
+      in your Browser Use cloud, not here. <a href="#/settings/search">Add it in Settings</a> (new Browser Use accounts get free browser time).</${Notice}>`
+      : br && br.cloud ? html`<p class="muted small bw-note"><${Icon} name="globe" size=${13} /> Runs in your Browser Use cloud browser.</p>` : null}
     <div class="split split-browser">
       <section class=${`pane browser-window ${youDrive ? 'takeover' : ''} ${showFrame && working ? 'is-live' : ''}`} aria-label="Live browser">
         <div class="bw-chrome">
@@ -396,12 +401,12 @@ export function InterventionsView() {
 
 // ---------------------------------------------------------------------------- settings
 const LLM_META = {
-  google: { name: 'Google AI Studio', field: 'google_api_key', hint: 'Gemma 4 31B and Gemini 3.5 Flash Lite', url: 'aistudio.google.com' },
-  kilo: { name: 'Kilo Gateway', field: 'kilo_api_key', hint: 'Free models with no key — Nemotron 3 Super, Laguna S, Ling Flash · 200 requests/hour per model', url: 'kilo.ai (key optional)',
+  google: { name: 'Google AI Studio', field: 'google_api_key', hint: 'Gemini 3.5 Flash Lite — fast, the first choice for every task', url: 'aistudio.google.com' },
+  kilo: { name: 'Kilo Gateway', field: 'kilo_api_key', hint: 'Free models with no key — Nemotron 3 Super, Nemotron 3.5 Super VL, Laguna S, Dots 3 Note · 200 requests/hour per model', url: 'kilo.ai (key optional)',
     free: true, note: 'Free models may use your prompts (resume text, job posts) to train. Turn off if that matters to you.' },
   llm7: { name: 'LLM7', field: null, hint: 'Free models with no key — DeepSeek V4 Pro, MiniMax M3, GLM 5.3 Flash · one call at a time, small daily allowance, used as a backup after Kilo', url: 'llm7.io (no key)',
     free: true, note: 'Its privacy terms are not published, so treat prompts as public. When its daily allowance is used up, the next model answers instead.' },
-  nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Nemotron Nano 3, GPT-OSS 20B, GLM Flash, DeepSeek Flash · 40 requests/min', url: 'build.nvidia.com' },
+  nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Recommended · the fastest free option tested (Mistral Large 4 ~187 tokens/s, Nemotron 3.5 Super VL ~85) · also Nemotron 3.5 Lightning / Bolt, Nemotron 3 Ultra, MiniMax M3.1 Flash, GPT-OSS 20B · free key, 40 requests/min for the whole account (paced at 36) · thinking off or low · leads every task and the browser agent when a key is set; busy models hand over automatically', url: 'build.nvidia.com' },
   groq: { name: 'Groq', field: 'groq_api_key', hint: 'GPT-OSS, Kimi K2, Qwen3 — very fast', url: 'console.groq.com' },
   mistral: { name: 'Mistral', field: 'mistral_api_key', hint: 'Mistral Medium / Small / Large (latest)', url: 'console.mistral.ai' },
 };
@@ -448,41 +453,91 @@ function Toggle({ on, onChange, label }) {
 
 function AiSection({ d, models }) {
   const md = models.data;
+  const own = !!d.restricted;       // prod mode, not the admin: only their own keys, no server switches
+  const meta = Object.entries(LLM_META).filter(([, m]) => !(own && m.free));
   return html`<section class="set-section">
     <div class="row space"><h2>AI providers</h2>
-      <${Button} size="sm" icon="refresh" busy=${models.status === 'refreshing' || models.status === 'loading'} onClick=${refreshModels}>Check available models</${Button}></div>
-    <p class="muted small">Turn a provider off to never use it. Keys are read from your .env file (or system environment) and can be changed here — they are written back to .env.</p>
-    <div class="prov-list">${Object.entries(LLM_META).map(([k, m]) => {
+      ${own ? null : html`<${Button} size="sm" icon="refresh" busy=${models.status === 'refreshing' || models.status === 'loading'} onClick=${refreshModels}>Check available models</${Button}>`}</div>
+    <p class="muted small">${own
+      ? 'Add your own free keys. They are saved encrypted in your account and used only for your searches — no one else can see or use them.'
+      : 'Turn a provider off to never use it. Keys are read from your .env file (or system environment) and can be changed here — they are written back to .env.'}</p>
+    <div class="prov-list">${meta.map(([k, m]) => {
       const st = md && md.providers[k];
       const on = d.providers.llm[k] !== false;
       return html`<div class=${`prov-card ${on ? '' : 'off'}`} key=${k}>
         <div class="prov-head"><div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint} · keys at ${m.url}</div></div>
-          ${st && st.configured ? html`<span class=${`status-dot ${st.reachable === false ? 'bad' : st.reachable ? 'good' : ''}`}
+          ${st && st.configured && !own ? html`<span class=${`status-dot ${st.reachable === false ? 'bad' : st.reachable ? 'good' : ''}`}
             title=${st.error || ''}>${st.reachable === false ? 'Key rejected / unreachable' : st.reachable ? `${st.models_listed} models available` : 'Not checked yet'}</span>` : null}
-          <${Toggle} on=${on} label=${`Use ${m.name}`} onChange=${(v) => setProviders({ llm: { [k]: v } })} /></div>
+          ${own ? null : html`<${Toggle} on=${on} label=${`Use ${m.name}`} onChange=${(v) => setProviders({ llm: { [k]: v } })} />`}</div>
         ${m.free ? html`<div class="row gap small"><${Badge} tone="success">Works without a key</${Badge}><span class="muted">${m.note}</span></div>`
           : html`<${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />`}
       </div>`;
     })}</div>
+    ${own ? null : html`<${ModelChains} md=${md} models=${models} />`}
+  </section>`;
+}
+
+function ModelChains({ md, models }) {
+  return html`
     <h3 class="sub-title">Model for each task</h3>
     <p class="muted small">The chosen model is tried first; if it's busy, rate limited or unavailable the next one in the list takes over automatically. Free-tier limits are shown for each model.</p>
     ${md ? html`<div class="form-grid">${Object.entries(md.chains).map(([key, ch]) => html`<${Field} label=${ch.name}>${(id) => html`<${Select} id=${id} block label=${ch.name}
         value=${ch.selected} onChange=${(v) => setModel(key, v)}
         options=${ch.options.map((mid) => { const m = md.all_models.find((x) => x.id === mid) || { name: mid, limits: {} };
           return [mid, `${m.name}${m.reason ? ` — ${m.reason}` : ''}`, fmtLimit(m.limits || {})]; })} />`}</${Field}>`)}</div>`
-      : models.status === 'error' ? html`<${ErrorBox} message=${models.error} />` : html`<${Skeleton} lines=${3} />`}
+      : models.status === 'error' ? html`<${ErrorBox} message=${models.error} />` : html`<${Skeleton} lines=${3} />`}`;
+}
+
+/** Browser Use key: auto-apply runs in the user's own cloud browser instead of on this server. */
+function BrowserKeyCard({ d }) {
+  const b = d.browser || {};
+  return html`<section class="set-section"><h2>Auto-apply browser</h2>
+    <p class="muted small">With a <strong>Browser Use</strong> key, auto-apply opens your application in a cloud browser at Browser Use —
+      nothing runs on this server, and it starts right away even when others are applying. New Browser Use accounts get free browser time.</p>
+    ${b.cloud_required && !b.cloud ? html`<${Notice} tone="warning">Auto-apply on this server needs your own Browser Use key. Add it below to use the browser agent.</${Notice}>` : null}
+    ${b.cloud ? html`<${Notice} tone="success">Auto-apply runs in your Browser Use cloud browser.</${Notice}>`
+      : !b.cloud_required ? html`<p class="muted small">No key: the browser runs on this server (one person at a time).</p>` : null}
+    <div class="prov-card"><div class="prov-head"><div class="grow"><strong>Browser Use</strong>
+      <div class="muted small">Cloud browsers for the agent · <a href=${b.key_url || 'https://cloud.browser-use.com'} target="_blank" rel="noopener noreferrer">get a key <${Icon} name="external" size=${12} /></a></div></div></div>
+      <${KeyField} field="browser_use_api_key" label="Browser Use" configured=${d.browser_use_configured} masked=${d.browser_use_key_masked} source=${d.browser_use_source} /></div>
   </section>`;
 }
 
+function JobApisCard({ d }) {
+  const own = !!d.restricted;
+  const apis = [
+    { k: 'adzuna', name: 'Adzuna', hint: 'Official India job index, newest first. Paste both values as app_id:app_key', url: 'https://developer.adzuna.com' },
+  ];
+  return html`<section class="set-section"><h2>More job sources</h2>
+    <p class="muted small">Optional. Their postings join every search and go through the same checks as all other jobs.</p>
+    <div class="prov-list">
+      ${apis.map((m) => html`<div class="prov-card" key=${m.k}>
+        <div class="prov-head"><div class="grow"><strong>${m.name}</strong>
+          <div class="muted small">${m.hint} · <a href=${m.url} target="_blank" rel="noopener noreferrer">get a key <${Icon} name="external" size=${12} /></a></div></div></div>
+        <${KeyField} field=${`${m.k}_api_key`} label=${m.name} configured=${d[`${m.k}_configured`]} masked=${d[`${m.k}_key_masked`]} source=${d[`${m.k}_source`]} />
+      </div>`)}
+      ${own ? null : html`<div class="prov-card"><div class="prov-head"><div class="grow"><strong>Hacker News</strong>
+        <div class="muted small">No key — YC startups' job posts and the monthly "Who is hiring?" thread. Only India or India-friendly remote roles in your field are kept; many posts give a direct hiring email.</div></div>
+        <${Toggle} on=${d.enable_hn_source !== false} label="Use Hacker News jobs" onChange=${(v) => saveSettings({ enable_hn_source: v })} /></div></div>`}
+    </div></section>`;
+}
+
 function SearchSection({ d }) {
+  if (d.restricted) return html`<${BrowserKeyCard} d=${d} /><${JobApisCard} d=${d} /><section class="set-section"><h2>Web search</h2>
+    <p class="muted small">Optional. Without a key, the free Deep Search finds jobs for you. Your keys are saved encrypted in your account.</p>
+    <div class="prov-list">${Object.entries(SEARCH_META).filter(([, m]) => m.field).map(([k, m]) => html`<div class="prov-card" key=${k}>
+      <div class="prov-head"><div class="grow"><strong>${m.name}</strong><div class="muted small">${m.hint}</div></div></div>
+      <${KeyField} field=${m.field} label=${m.name} configured=${d[`${k}_configured`]} masked=${d[`${k}_key_masked`]} source=${d[`${k}_source`]} />
+    </div>`)}</div></section>`;
   const order = d.providers.search_order;
+  const browserCard = html`<${BrowserKeyCard} d=${d} /><${JobApisCard} d=${d} />`;
   const move = (p, dir) => {
     const i = order.indexOf(p); const j = i + dir;
     if (j < 0 || j >= order.length) return;
     const next = order.slice(); [next[i], next[j]] = [next[j], next[i]];
     setProviders({ search_order: next });
   };
-  return html`<section class="set-section"><h2>Web search</h2>
+  return html`${browserCard}<section class="set-section"><h2>Web search</h2>
     <p class="muted small">Providers are asked in this order. Turn any off; Deep Search and DuckDuckGo need no key and are the safety net.</p>
     <div class="field" style=${{ margin: '12px 0 16px' }}><span class="field-label">Strategy</span>
       <${Seg} label="Search strategy" options=${STRATEGIES.map(([k, l]) => [k, l])} value=${d.providers.search_strategy} onChange=${(v) => setProviders({ search_strategy: v })} />
@@ -571,8 +626,7 @@ function UsageBody({ u }) {
     <table class="checks"><thead><tr><th>Provider</th><th>Calls</th><th>This month</th><th>Last used</th></tr></thead><tbody>
       ${search.map((p) => html`<tr><td>${SEARCH_NAMES[p.name] || p.name}</td><td>${fmtNum(p.calls)}</td><td>${fmtNum(p.calls_this_month || 0)}</td>
         <td class="muted">${p.last_used ? relTime(p.last_used.replace(' ', 'T') + 'Z') : '—'}</td></tr>`)}
-      ${!search.length ? html`<tr><td colspan="4" class="muted">No web searches yet.</td></tr>` : null}</tbody></table>
-    <p class="muted small">Gemma today: ${u.gemma_budget.requests_today} / ${u.gemma_budget.requests_cap} requests (${u.gemma_budget.model}).</p>`;
+      ${!search.length ? html`<tr><td colspan="4" class="muted">No web searches yet.</td></tr>` : null}</tbody></table>`;
 }
 
 function SettingsOverview({ d }) {
@@ -588,6 +642,43 @@ function SettingsOverview({ d }) {
     ${item(searchReady > 0, 'Web search', `${searchReady}/${search.length}`)}
     ${item(true, 'Auto-apply', d.tunables && d.tunables.browser_show_window ? 'window + in-app' : 'in-app')}
   </div>`;
+}
+
+function AccountSection() {
+  const auth = useStore((s) => s.auth);
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const user = auth.user || {};
+  const save = async (e) => {
+    e.preventDefault();
+    if (!cur || next.length < 8) return;
+    setBusy(true);
+    if (await changePassword(cur, next)) { setCur(''); setNext(''); }
+    setBusy(false);
+  };
+  return html`<section class="set-section"><h2>Account</h2>
+    <p class="muted small">Signed in as <strong>${user.username}</strong>${user.is_admin ? ' (admin)' : ''}. Logging out clears everything this browser kept for the app.</p>
+    ${user.is_admin ? html`<${Notice} tone="info">The admin password is set by ADMIN_PASSWORD in the server's .env file. Change it there and restart.</${Notice}>`
+      : html`<form class="form-grid" onSubmit=${save} autocomplete="off">
+        <${Field} label="Current password">${(id) => html`<input id=${id} class="input" type="password" autocomplete="current-password" value=${cur}
+          onInput=${(e) => setCur(e.currentTarget.value)} />`}</${Field}>
+        <${Field} label="New password" hint="At least 8 characters. Other devices are signed out.">${(id) => html`<input id=${id} class="input" type="password"
+          autocomplete="new-password" value=${next} onInput=${(e) => setNext(e.currentTarget.value)} />`}</${Field}>
+        <div class="row gap"><${Button} type="submit" variant="primary" busy=${busy} disabled=${!cur || next.length < 8}>Change password</${Button}></div>
+      </form>`}
+  </section>`;
+}
+
+function OfficeSection({ d }) {
+  const on = d.office_ai_enabled !== false;
+  return html`<section class="set-section"><h2>Agents office</h2>
+    <p class="muted small">The 3D office in Discover shows the search agents at work. With AI on, their break-time chats are written by AI
+      in batches every hour or two, and you can ask an agent a question. Off = built-in lines and plain summaries: no AI calls at all.</p>
+    <div class="set-toggles"><div class="set-toggle"><div><strong>Use AI in the agents office</strong>
+      <span class="muted small">${on ? 'On — uses a few AI calls an hour (never while a search runs).' : 'Off — saves every AI call for searches.'}</span></div>
+      <${Toggle} on=${on} label="Use AI in the agents office" onChange=${setOfficeAI} /></div></div>
+  </section>`;
 }
 
 function DataSection() {
@@ -612,22 +703,30 @@ function DataSection() {
 }
 
 const SETTINGS_SECTIONS = [
-  { key: 'ai', label: 'AI providers', icon: 'spark' }, { key: 'search', label: 'Web search', icon: 'search' },
+  { key: 'ai', label: 'AI providers', icon: 'spark' }, { key: 'search', label: 'Web search & browser', icon: 'search' },
   { key: 'tuning', label: 'Search tuning', icon: 'sliders' }, { key: 'usage', label: 'Usage', icon: 'chart' },
   { key: 'profiles', label: 'Profiles', icon: 'user' }, { key: 'agent', label: 'Auto-apply', icon: 'globe' },
+  { key: 'office', label: 'Agents office', icon: 'users' }, { key: 'account', label: 'Account', icon: 'key' },
   { key: 'look', label: 'Appearance', icon: 'sun' }, { key: 'data', label: 'Data', icon: 'shield' },
 ];
+const USER_SECTIONS = ['ai', 'search', 'profiles', 'account', 'look'];
 
 export function SettingsView() {
   const st = useStore((s) => s.settings);
+  const auth = useStore((s) => s.auth);
   const models = useStore((s) => s.models);
   const usage = useStore((s) => s.usage);
   const mode = useStore((s) => s.pipelineMode);
   const theme = useStore((s) => s.theme);
   const motion = useStore((s) => s.motion);
-  const [sec, setSec] = useState('ai');
+  const route = useStore((s) => s.route);
+  const [sec, setSec] = useState(route.section || 'ai');
+  useEffect(() => { if (route.section) setSec(route.section); }, [route.section]);
   const d = st.data;
-  const needData = ['ai', 'search', 'tuning', 'agent'].includes(sec);
+  const restricted = !!(auth.enabled && auth.user && !auth.user.is_admin);
+  // prod mode: a normal user gets only their own things; the admin and the local app get everything
+  const sections = SETTINGS_SECTIONS.filter((x) => (restricted ? USER_SECTIONS.includes(x.key) : true) && (x.key !== 'account' || auth.enabled));
+  const needData = ['ai', 'search', 'tuning', 'agent', 'office'].includes(sec);
   const body = () => {
     if (needData && !d) return st.status === 'error' ? html`<${ErrorBox} message=${st.error} onRetry=${loadSettings} />` : html`<${Skeleton} lines=${6} />`;
     switch (sec) {
@@ -638,6 +737,8 @@ export function SettingsView() {
         ${usage.data ? html`<${UsageBody} u=${usage.data} />`
           : usage.status === 'error' ? html`<${ErrorBox} message=${usage.error} />` : html`<${Skeleton} lines=${3} />`}</section>`;
       case 'profiles': return html`<${PeopleManager} />`;
+      case 'account': return html`<${AccountSection} />`;
+      case 'office': return html`<${OfficeSection} d=${d} />`;
       case 'agent': return html`<${AgentSection} key=${JSON.stringify(d.tunables)} d=${d} mode=${mode} />`;
       case 'look': return html`<section class="set-section"><h2>Appearance</h2>
         <div class="field"><span class="field-label">Theme</span><${Seg} label="Theme" options=${[['light', 'Light'], ['dark', 'Dark']]} value=${theme} onChange=${setTheme} /></div>
@@ -650,9 +751,9 @@ export function SettingsView() {
     }
   };
   return html`<div class="view view-settings">
-    <${PageHead} title=${html`Settings`} sub="Providers, keys, search behaviour, profiles and data — all in one place." />
+    <${PageHead} title=${html`Settings`} sub=${restricted ? 'Your AI keys, profiles, account and look.' : 'Providers, keys, search behaviour, profiles and data — all in one place.'} />
     <div class="split split-settings">
-      <nav class="pane card set-nav" aria-label="Settings sections">${SETTINGS_SECTIONS.map((x) => html`<button type="button" key=${x.key}
+      <nav class="pane card set-nav" aria-label="Settings sections">${sections.map((x) => html`<button type="button" key=${x.key}
         class=${`set-link ${sec === x.key ? 'active' : ''}`} aria-current=${sec === x.key ? 'true' : undefined} onClick=${() => setSec(x.key)}>
         <${Icon} name=${x.icon} size=${16} />${x.label}</button>`)}<${SettingsOverview} d=${d} /></nav>
       <section class="pane card"><div class="scroll pane-pad set-body" key=${sec}>${body()}</div></section>

@@ -245,7 +245,8 @@ export function JobDetail({ jobId, onClose }) {
   return html`<div class="detail">
     <header class="detail-top">
       <div class="detail-tools">
-        <button type="button" class="icon-btn" aria-label="Close" onClick=${onClose}><${Icon} name="x" /></button>
+        <button type="button" class="icon-btn detail-x" aria-label="Close" onClick=${onClose}><${Icon} name="x" /></button>
+        <button type="button" class="btn btn-sm phone-back" onClick=${onClose}><${Icon} name="back" size=${15} />Back</button>
         <div class="row gap">
           <button type="button" class=${`icon-btn save-btn ${job.saved ? 'on' : ''}`} aria-pressed=${job.saved ? 'true' : 'false'}
             aria-label=${job.saved ? 'Unsave job' : 'Save job'} disabled=${!!pending.save[jobId]} onClick=${() => toggleSaved(jobId)}><${Icon} name="star" size=${16} /></button>

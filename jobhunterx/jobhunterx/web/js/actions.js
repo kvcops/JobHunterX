@@ -84,7 +84,11 @@ function onRoute(route) {
   if (route.page === 'tracker') loadTracker();
   if (route.page === 'interventions' || route.page === 'browser') loadInterventions();
   if (route.page === 'browser') loadApplySession();
-  if (route.page === 'settings') { loadSettings(); loadModels(); loadUsage(); loadPipelineMode(); loadPeople().catch(() => {}); }
+  if (route.page === 'settings') {
+    loadSettings(); loadModels(); loadPeople().catch(() => {});
+    if (!isRestricted()) { loadUsage(); loadPipelineMode(); }
+  }
+  if (route.page === 'users' && getState().auth.enabled && isAdmin()) loadUsers();
 }
 export function setTheme(theme) {
   setState((s) => ({ ...s, theme }));
@@ -478,6 +482,15 @@ export async function autoApply(jobId) {
     navigate('#/browser');
     return;
   }
+  const br = (getState().meta.data || {}).browser;
+  if (br && !br.ready) {                 // signed up themselves and no Browser Use key yet: explain instead of failing
+    if (await confirmAction({
+      title: 'Add your Browser Use key first',
+      body: 'On this server, auto-apply runs in your own Browser Use cloud browser (not on the server). Get a free key at cloud.browser-use.com — new accounts get free browser time — then paste it in Settings → Web search & browser.',
+      confirm: 'Open Settings',
+    })) navigate('#/settings/search');
+    return;
+  }
   if (!(await confirmAction({
     title: 'Apply with the browser agent?',
     body: 'First we check your resume, cover letter and CV for this job and write any that are missing (resume on one page). Then the agent opens the application right inside the Auto-apply tab — you can watch, stop, or take over any time.',
@@ -563,6 +576,17 @@ export async function updateDocument(docId, content) {
     return null;
   }
 }
+/** Save a document's style (the preview already switched instantly; this makes the stored PDF and later downloads match). */
+export async function saveDocumentStyle(docId, style) {
+  try {
+    const { document } = await api.setDocumentStyle(docId, style);
+    setEntry('docDetails', docId, { status: 'ready', doc: document, error: null });
+    return document;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return null;
+  }
+}
 export async function deleteDocument(docId) {
   if (!(await confirmAction({ title: 'Delete this document?', body: 'The PDF and its history will be removed.', confirm: 'Delete', tone: 'danger' }))) return;
   try {
@@ -603,11 +627,22 @@ export async function loadWatchlist(scope = 'mine') {
   try {
     const data = await api.watchlist(scope);
     if (seq !== watchSeq) return;
-    setSlice('watch', { status: 'ready', data, scope, checking: !!(data.status && data.status.checking) });
+    setSlice('watch', { status: 'ready', data, scope, stale: false, checking: !!(data.status && data.status.checking) });
   } catch (err) {
     if (seq !== watchSeq) return;
     setSlice('watch', { status: 'error', error: errorText(err) });
   }
+}
+/** Companies page: load once; after that only the Refresh button reloads (no automatic reloads). */
+export function ensureWatchlist(scope = 'mine') {
+  const w = getState().watch;
+  if (!w.data || w.scope !== scope || w.status === 'error') loadWatchlist(scope);
+}
+export function ensureMonitors() {
+  if (getState().monitors.status === 'idle') loadMonitors();
+}
+export async function refreshCompanies(scope = 'mine') {
+  await Promise.all([loadWatchlist(scope), loadMonitors()]);
 }
 export async function checkWatchlistNow() {
   setSlice('watch', { checking: true });
@@ -633,8 +668,11 @@ function isWatchEvent(msg) {
 function onWatchDone(d) {
   setSlice('watch', (w) => ({ ...w, checking: false, run: w.run ? { ...w.run, status: d.status || 'completed' } : null,
     data: w.data ? { ...w.data, status: d.status_info || w.data.status } : w.data }));
-  if (getState().route.page === 'companies') loadWatchlist(getState().watch.scope || 'mine');
-  if (d.status === 'busy' || d.status === 'already_checking') return;
+  if (d.status === 'completed') setSlice('watch', { stale: true });   // the Companies list updates when you press Refresh
+  if (d.status === 'busy') { toast('A search is running for this profile — check again when it finishes.', 'info'); return; }
+  if (d.status === 'already_checking') return;
+  if (d.status === 'no_profile') { toast('Add your profile first — the watchlist is matched to it.', 'warning'); return; }
+  if (d.status === 'no_watchlist') { toast('No watched companies in your cities yet. Add a company above, or add a covered city to your preferences.', 'info', 7000); return; }
   if (d.new_fits > 0) {
     toast(`${d.new_fits} new role${d.new_fits === 1 ? '' : 's'} at watchlist companies fit you — see the "New" tab. Apply early.`, 'success', 12000);
   } else if (d.status === 'completed') {
@@ -754,6 +792,7 @@ export async function saveSettings(body) {
     const data = await api.postSettings(body);
     setSlice('settings', { status: 'ready', data });
     toast('Settings saved.', 'success');
+    if ('browser_use_api_key' in body) refreshMeta();      // auto-apply's browser choice depends on it
     // a new key triggers a server-side model check; pick up the result shortly after
     if (Object.keys(body).some((k) => k.endsWith('_api_key'))) setTimeout(loadModels, 3000);
     return true;
@@ -802,12 +841,16 @@ export async function resetEverything() {
 // ---------------------------------------------------------------------------
 // Browser agent & interventions
 // ---------------------------------------------------------------------------
+let ivSeq = 0;      // a late answer for the previous profile never lands in the new one
 export async function loadInterventions() {
+  const seq = ++ivSeq;
   setSlice('interventions', (v) => ({ ...v, status: v.items.length ? 'refreshing' : 'loading', error: null }));
   try {
     const { interventions } = await api.interventions();
+    if (seq !== ivSeq) return;
     setSlice('interventions', { status: 'ready', items: interventions });
   } catch (err) {
+    if (seq !== ivSeq) return;
     setSlice('interventions', { status: 'error', error: errorText(err) });
   }
 }
@@ -843,12 +886,16 @@ export async function focusIntervention(item) {
   } catch { /* the browser may be closed; the Auto-apply tab still shows the saved run */ }
   navigate('#/browser');
 }
+let applySeq = 0;
 export async function loadApplySession() {
+  const seq = ++applySeq;
   setSlice('browser', (b) => ({ ...b, status: b.session ? 'refreshing' : 'loading', error: null }));
   try {
     const { session } = await api.applyCurrent();
+    if (seq !== applySeq) return;
     setSlice('browser', { status: 'ready', session: session || null });
   } catch (err) {
+    if (seq !== applySeq) return;
     setSlice('browser', { status: 'error', error: errorText(err) });
   }
 }
@@ -893,6 +940,8 @@ function handleBrowserEvent(ev) {
 let socket = null;
 function onMessage(msg) {
   const s = getState();
+  // events carry the profile they belong to: never mix another profile's jobs or runs into the open one
+  if (msg.person_id && s.people.active && msg.person_id !== s.people.active && msg.type !== 'people.changed') return;
   switch (msg.type) {
     case 'search.run': {
       const run = msg.data && msg.data.run;
@@ -1000,7 +1049,7 @@ export function connectSocket() {
     onMessage,
     onStatus: (conn) => setState((s) => ({ ...s, conn })),
     onOpen: (isReconnect) => {
-      if (isReconnect) { loadCurrentRun(); loadList(); if (getState().route.page === 'browser') loadApplySession(); }
+      if (isReconnect) resyncAfterReconnect();
     },
   });
   socket.connect();
@@ -1031,13 +1080,19 @@ export async function loadPeople() {
 /** Forget everything that belongs to the previous person (jobs, runs, documents…). */
 function resetPersonState() {
   const fresh = initialState();
-  listSeq++; docsSeq++; trackerSeq++;
+  listSeq++; docsSeq++; trackerSeq++; ivSeq++; applySeq++;
   listCtrl?.abort();
   setState((s) => ({
     ...s,
     profile: fresh.profile, search: fresh.search, jobs: fresh.jobs, details: fresh.details, list: fresh.list,
     pending: fresh.pending, gen: fresh.gen, docs: fresh.docs, docDetails: fresh.docDetails, tracker: fresh.tracker,
+    watch: fresh.watch, monitors: fresh.monitors,   // the Companies page loads again for the new profile
+    browser: fresh.browser, interventions: fresh.interventions,   // the previous profile's application is not this one's
+    activity: fresh.activity,
   }));
+  // an open job of the previous profile does not exist in this one: go to the page itself
+  const route = getState().route;
+  if (route.jobId) navigate(`#/${route.page}`);
 }
 
 async function loadSessionData() {
@@ -1047,6 +1102,8 @@ async function loadSessionData() {
   if (run && ['queued', 'running'].includes(run.status)) setSlice('list', { scope: 'run', runId: run.id });
   loadList();
   loadDocuments();
+  loadInterventions();            // the nav badge counts this profile's own, right after a switch
+  loadApplySession();
   if (getState().route.page === 'tracker') loadTracker();
 }
 
@@ -1098,6 +1155,8 @@ export async function startFree(keys = {}) {
 }
 
 async function startSession() {
+  // prod mode: the admin first chooses between managing users and their own profile (once per browser tab)
+  if (isAdminLogin() && readAdminGo() !== 'profile') { setSlice('app', { phase: 'admin', error: null }); return; }
   try {
     const setup = await loadSetup();
     if (!setup.llm_ready) { setSlice('app', { phase: 'setup', error: null }); return; }
@@ -1188,8 +1247,123 @@ export async function deletePerson(id) {
 }
 
 export async function boot() {
+  window.addEventListener('jhx:unauthorized', goToLogin);
+  // a page restored from the back/forward cache after logout must not show old data
+  window.addEventListener('pageshow', (e) => { if (e.persisted) window.location.reload(); });
+  try {
+    const me = await api.me();
+    setSlice('auth', { enabled: !!me.enabled, user: me.user || null });
+    if (me.enabled && !me.user) { goToLogin(); return; }
+    if (me.enabled) listenForLogout();
+  } catch { /* the server is down: startSession shows the error screen */ }
   connectSocket();
   initRouting();
   api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {});
   await startSession();
+}
+
+// ---------------------------------------------------------------------------
+// Login (prod mode): sign out, users (admin), own password
+// ---------------------------------------------------------------------------
+export const isRestricted = () => { const a = getState().auth; return !!(a.enabled && a.user && !a.user.is_admin); };
+export const isAdmin = () => { const a = getState().auth; return !a.enabled || !!(a.user && a.user.is_admin); };
+
+/** Forget everything this browser kept for the app (theme, picked profile, office memories…). */
+function clearBrowserData() {
+  try { localStorage.clear(); } catch { /* storage unavailable */ }
+  try { sessionStorage.clear(); } catch { /* storage unavailable */ }
+}
+let leaving = false;
+export function goToLogin() {
+  if (!getState().auth.enabled || leaving) return;
+  leaving = true;
+  clearBrowserData();
+  try { if (socket) socket.close(); } catch { /* already closed */ }
+  window.location.replace('/login');
+}
+let authChannel = null;
+function listenForLogout() {
+  try {
+    authChannel = new BroadcastChannel('jhx-auth');
+    authChannel.onmessage = (e) => { if (e.data === 'logout') goToLogin(); };   // signed out in another tab
+  } catch { /* old browser: the next request answers 401 instead */ }
+}
+export async function logout() {
+  try { await api.logout(); } catch { /* the cookie is cleared by the server anyway when it answers */ }
+  try { if (authChannel) authChannel.postMessage('logout'); } catch { /* ignore */ }
+  goToLogin();
+}
+export async function changePassword(current, next) {
+  try {
+    await api.changePassword(current, next);
+    toast('Password changed. Other devices were signed out.', 'success');
+    return true;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return false;
+  }
+}
+export const loadUsers = () => loadInto('users', () => api.users());
+async function usersCall(call, done) {
+  try {
+    setSlice('users', { status: 'ready', data: await call() });
+    if (done) toast(done, 'success');
+    return true;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return false;
+  }
+}
+export const createUser = (username, password) => usersCall(() => api.createUser(username, password), `User ${username} created.`);
+export const resetUserPassword = (u, password) => usersCall(() => api.updateUser(u.id, { password }), `New password set for ${u.username}. They were signed out.`);
+export const setUserDisabled = (u, disabled) => usersCall(() => api.updateUser(u.id, { disabled }), disabled ? `${u.username} can no longer sign in.` : `${u.username} can sign in again.`);
+export async function deleteUser(u) {
+  if (!(await confirmAction({ title: `Delete ${u.username}?`, body: 'Their account and everything they made — profiles, jobs, documents, searches and saved keys — are deleted. This cannot be undone.', confirm: 'Delete user', tone: 'danger', typeToConfirm: u.username }))) return;
+  await usersCall(() => api.deleteUser(u.id), `${u.username} was deleted.`);
+}
+export async function setOfficeAI(on) {
+  if (await saveSettings({ office_ai_enabled: on })) {
+    setSlice('meta', (m) => ({ ...m, data: m.data ? { ...m.data, office_ai: on } : m.data }));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Admin start screen (prod mode): manage users, or open my own profile
+// ---------------------------------------------------------------------------
+const ADMIN_GO = 'jhx-admin-go';
+function readAdminGo() { try { return sessionStorage.getItem(ADMIN_GO); } catch { return null; } }
+const isAdminLogin = () => { const a = getState().auth; return !!(a.enabled && a.user && a.user.is_admin); };
+export async function adminChoose(choice) {
+  if (choice === 'users') {
+    setSlice('app', { phase: 'admin-users', error: null });
+    loadUsers();
+    return;
+  }
+  try { sessionStorage.setItem(ADMIN_GO, 'profile'); } catch { /* storage off: asked again after a reload */ }
+  setSlice('app', { phase: 'booting', error: null });
+  await startSession();
+}
+
+export function refreshMeta() {
+  return api.meta().then((m) => setSlice('meta', { status: 'ready', data: m })).catch(() => {});
+}
+
+/** The live connection came back (server restart, sleep, network): events sent meanwhile were missed, so catch up —
+ *  including a profile switch made in another tab, which would otherwise leave this tab on the old profile. */
+async function resyncAfterReconnect() {
+  const s = getState();
+  refreshMeta();
+  if (s.app.phase !== 'ready') return;
+  try {
+    const { active } = await loadPeople();
+    if (active && active !== s.people.active) { choosePerson(active); return; }
+  } catch { return; }            // 401 is handled globally (goes to the login page)
+  loadProfile();
+  loadCurrentRun();
+  loadList();
+  loadInterventions();
+  const page = getState().route.page;
+  if (page === 'browser') loadApplySession();
+  if (page === 'documents') loadDocuments();
+  if (page === 'tracker') loadTracker();
 }

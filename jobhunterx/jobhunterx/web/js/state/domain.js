@@ -92,12 +92,12 @@ export function genKey(jobId, kind) { return `${jobId || 'cv'}:${kind}`; }
 
 export function emptyProfile() {
   return {
-    name: '', email: '', phone: '', location: '', present_address: '', permanent_address: '',
+    name: '', first_name: '', middle_name: '', last_name: '', email: '', phone: '', location: '', present_address: '', permanent_address: '',
     linkedin: '', github: '', portfolio: '', summary: '', suggested_role: '', relevant_experience: '',
     languages: [], skills: [], certifications: [], competitions: [], achievements: [],
     experience: [], education: [], projects: [],
     qa_memory: {
-      expected_salary: '', current_ctc: '', expected_ctc: '', notice_period: '', work_authorization: '',
+      current_fixed_lpa: null, current_variable_lpa: null, expected_ctc_lpa: null, expected_salary: '', current_ctc: '', expected_ctc: '', notice_period: '', work_authorization: '',
       requires_sponsorship: '', preferred_work_mode: '', willing_to_relocate: '', years_of_experience: '',
       custom_answers: {},
     },
@@ -108,7 +108,7 @@ export function emptyProfile() {
 export function emptyPreferences() {
   return {
     target_roles: [], locations: [], work_modes: [], willing_to_relocate: false, open_to_international: false,
-    home_country: '', min_annual_salary: null, salary_currency: 'INR', notice_period_days: null,
+    home_country: 'India', min_annual_salary: null, salary_currency: 'INR', notice_period_days: null,
     employment_types: [], excluded_companies: [], career_direction: '',
     years_experience_override: null, seniority_override: null,
   };

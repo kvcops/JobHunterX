@@ -12,7 +12,7 @@ import time
 from typing import Any, Dict, Optional
 
 import aiosqlite
-from jobhunterx.config.database import get_db_path
+from jobhunterx.config.database import get_db_path, pooled
 from jobhunterx.config.logging import get_logger
 
 log = get_logger("usage_ledger")
@@ -21,7 +21,7 @@ log = get_logger("usage_ledger")
 async def init_ledger_db():
     """Ensure search_usage_ledger table exists in database."""
     db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
+    async with pooled() as db:
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS search_usage_ledger (
@@ -71,7 +71,7 @@ async def record_ledger_attempt(
     q_hash = hash_text(search_query) if search_query else ""
     u_hash = hash_text(url) if url else ""
 
-    async with aiosqlite.connect(db_path) as db:
+    async with pooled() as db:
         await db.execute(
             """
             INSERT INTO search_usage_ledger (
@@ -102,7 +102,7 @@ async def get_monthly_usage_native(provider: str) -> float:
     """Sum native billing units used by provider in current calendar month."""
     await init_ledger_db()
     db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
+    async with pooled() as db:
         async with db.execute(
             """
             SELECT SUM(native_billing_units) FROM search_usage_ledger
@@ -123,7 +123,7 @@ async def get_usage_report() -> dict:
     """
     await init_ledger_db()
     db_path = get_db_path()
-    async with aiosqlite.connect(db_path) as db:
+    async with pooled() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """

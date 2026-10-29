@@ -21,9 +21,10 @@ from typing import Awaitable, Callable, Optional
 from pydantic import BaseModel, Field
 
 from jobhunterx import storage
+from jobhunterx.config import capacity
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import get_settings
-from jobhunterx.discovery import ats, ats_index, dedupe, linkedin, page, registry, search, validate, watchlist
+from jobhunterx.discovery import ats, ats_index, dedupe, job_apis, linkedin, page, registry, search, validate, watchlist
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
@@ -33,7 +34,7 @@ from jobhunterx.intelligence import skill_links
 from jobhunterx.intelligence.llm_structured import call_structured
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 from jobhunterx.intelligence.policy import get_policy
-from jobhunterx.intelligence.text import term_in_text, tokens
+from jobhunterx.intelligence.text import common_words, term_in_text, title_overlap, tokens
 from jobhunterx.services import profile as profile_svc
 from jobhunterx.services.jobs import summary
 
@@ -67,9 +68,7 @@ VERDICT_WORDS = {"strong": "Strong match", "good": "Good match", "stretch": "Str
                  "incompatible": "Not a fit"}
 
 CHUNK = 6
-FETCH_CONCURRENCY = 6
 BOARD_JOBS_PER_BOARD = 15
-BOARD_CONCURRENCY = 8
 WATCH_BOARDS_MAX = 80
 WATCH_NEW_PER_CHECK = 20
 REGISTRY_PER_RUN = 25         # remembered employer boards checked per run (a rotating slice, least recently checked first)
@@ -225,22 +224,51 @@ _TRIAGE_SYS = """You shortlist job postings for one candidate before a detailed 
 1 = weak link (shares a word but different work);
 0 = a different field, or two or more levels above/below their level (e.g. Senior / Lead / Principal / Staff / Manager
     titles for someone with under 3 years; intern roles for someone with 5+ years).
-Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager". Score every index."""
+Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager".
+A posting may show what it says about experience ("asks: …"). Read it against the candidate's years: asking for clearly
+more years than the candidate has (e.g. 4+ years for someone with 0-2) is out of reach → 0; asking a little more → at most 2.
+For an early-career candidate, openings meant for people at their level, in their field, are the best finds → 3.
+Score every index."""
 TRIAGE_MAX = 140
+COMPANY_CAP = 3          # jobs from one employer per search, so one big board never fills the whole list
+
+
+def _experience_lines(p: JobPosting, limit: int = 2) -> str:
+    """The posting's own words around each "N years" it mentions ("3+ years of Python experience"), cut short — the AI
+    shortlist reads them, so a role asking for 5 years is ruled out before the slow detailed read. Uses the same
+    years pattern as the no-AI requirements reader; the AI, not this code, decides what the words mean."""
+    text = re.sub(r"\s+", " ", p.description or "")
+    out, end = [], -1
+    for m in job_ai.YEARS_RE.finditer(text):
+        a, b = max(0, m.start() - 50), m.end() + 40
+        if a < end:                       # overlaps the previous piece: grow it instead of repeating the words
+            out[-1] = text[out_start: b].strip()
+        else:
+            if len(out) >= limit:
+                break
+            out.append(text[a:b].strip())
+            out_start = a
+        end = b
+    return " / ".join(out)
 
 
 async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[dict[str, int]]:
     """One AI call: job id → 0..3 fit-of-field score. None when no AI answered (callers fall back to word overlap)."""
     if not jobs:
         return {}
-    who = (f"Level: {snap.seniority.value}, about {snap.professional_years:g} years\n"
+    who = (f"Level: {snap.seniority.value}, about {snap.professional_years:g} years of full-time work"
+           f"{' (early-career)' if search.early_career(snap) else ''}\n"
            f"Target titles: {', '.join(snap.target_titles[:6])}\n"
            f"Adjacent titles: {', '.join(snap.adjacent_titles[:6])}\n"
            f"Fields: {', '.join(f.label for f in snap.role_families[:5])}\n"
            f"Strongest skills: {', '.join(s.name for s in snap.skills[:10])}")
-    lines = "\n".join(f"[{i}] {p.title[:90]} | {p.company[:40]} | {(p.location_raw or '')[:40]}" for i, p in enumerate(jobs))
+    def line(i: int, p: JobPosting) -> str:
+        asks = _experience_lines(p)
+        return (f"[{i}] {p.title[:90]} | {p.company[:40]} | {(p.location_raw or '')[:40]}"
+                + (f" | asks: {asks}" if asks else ""))
+    lines = "\n".join(line(i, p) for i, p in enumerate(jobs))
     try:
-        res, _ = await call_structured(task="search_triage", version="v2", model=_Triage, system=_TRIAGE_SYS,
+        res, _ = await call_structured(task="search_triage", version="v3", model=_Triage, system=_TRIAGE_SYS,
                                        user=f"CANDIDATE\n{who}\n\nPOSTINGS\n{lines}", chain="fast", max_tokens=3000,
                                        cache_parts=(snap.profile_hash, lines))
     except Exception as exc:
@@ -253,14 +281,25 @@ async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[d
     return out
 
 
-def _title_relevance(job: JobPosting, snap: CandidateSnapshot) -> float:
-    jt = set(tokens(job.title))
-    best = 0.0
-    for label in [*snap.target_titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]]:
-        lt = set(tokens(label))
-        if jt and lt:
-            best = max(best, len(jt & lt) / len(jt | lt))
-    return best
+def _cap_per_company(jobs: list[JobPosting], cap: Optional[int] = None) -> list[JobPosting]:
+    """Keep the order, but at most `cap` jobs per employer (the best ones, as the list is sorted best first)."""
+    cap = COMPANY_CAP if cap is None else cap
+    seen: dict[str, int] = {}
+    out = []
+    for p in jobs:
+        key = re.sub(r"[^a-z0-9]", "", (p.company or "").lower())
+        if key and key != "unknowncompany":
+            seen[key] = seen.get(key, 0) + 1
+            if seen[key] > cap:
+                continue
+        out.append(p)
+    return out
+
+
+def _title_relevance(job: JobPosting, snap: CandidateSnapshot, generic: frozenset | set = frozenset(),
+                     titles: Optional[list[str]] = None) -> float:
+    labels = [*(titles or []), *snap.target_titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]]
+    return title_overlap(job.title, labels, generic)
 
 
 async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompany]]], snap: CandidateSnapshot,
@@ -276,7 +315,7 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
     out the local roles found by web search.
     """
     out: list[JobPosting] = []
-    sem = asyncio.Semaphore(BOARD_CONCURRENCY)
+    sem = asyncio.Semaphore(_share("board_concurrency"))
 
     async def one(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
         if counts is not None:
@@ -288,14 +327,35 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
                 queries = [f"{queries[0]} {city}", *queries]     # huge global boards: ask for local roles first
             jobs = await ats.ADAPTERS[ref.kind].search_jobs(ref.token, queries)
         if not jobs:
-            return []
+            return ref, []
         jobs = [j for j in jobs if _location_prefilter(j, snap, include_remote)]
         known_name = company.name if company else (names or {}).get((ref.kind, ref.token.lower()))
         for j in jobs:
             j.id = j.id or str(uuid.uuid4())
             if company or (known_name and (not j.company or j.company.lower() == ref.token.lower())):
                 j.company = known_name            # ATS boards often carry a token or legal-entity name
-        keep = [(j, _title_relevance(j, snap)) for j in jobs]
+        return ref, jobs
+
+    async def counted(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
+        try:
+            return await one(ref, company)
+        finally:
+            if on_board_done:
+                await on_board_done()
+
+    results = await asyncio.gather(*(counted(r, c) for r, c in refs), return_exceptions=True)
+    pulled: list[tuple[AtsRef, list[JobPosting]]] = []
+    for r in results:
+        if isinstance(r, tuple):
+            pulled.append(r)
+        elif isinstance(r, Exception):
+            log.debug("board_expand_failed", error=str(r)[:120])
+    # Relevance is judged on the words that mean something in this run's titles: on an engineering company's board
+    # every title says "Engineer", which alone made its Platform / DevOps roles look relevant to an AI engineer.
+    generic = common_words(j.title for _, jobs in pulled for j in jobs)
+
+    async def pick(ref: AtsRef, jobs: list[JobPosting]) -> list[JobPosting]:
+        keep = [(j, _title_relevance(j, snap, generic, titles)) for j in jobs]
         keep = [jr for jr in keep if jr[1] > 0]
         keep.sort(key=lambda jr: (-jr[1], _age_days(jr[0])))
         picked = [j for j, _ in keep[:BOARD_JOBS_PER_BOARD]]
@@ -315,19 +375,9 @@ async def _expand_boards(refs: list[tuple[AtsRef, Optional[watchlist.WatchCompan
 
         return list(await asyncio.gather(*(hydrate(j) for j in picked)))
 
-    async def counted(ref: AtsRef, company: Optional[watchlist.WatchCompany]):
-        try:
-            return await one(ref, company)
-        finally:
-            if on_board_done:
-                await on_board_done()
-
-    results = await asyncio.gather(*(counted(r, c) for r, c in refs), return_exceptions=True)
-    for r in results:
+    for r in await asyncio.gather(*(pick(ref, jobs) for ref, jobs in pulled if jobs), return_exceptions=True):
         if isinstance(r, list):
             out += r
-        elif isinstance(r, Exception):
-            log.debug("board_expand_failed", error=str(r)[:120])
     return out
 
 
@@ -371,7 +421,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     else:
         await run.say("plan", "Deciding which titles and places to search", "work")
         max_queries = max(4, min(16, max_jobs // 4))
-        queries, plan_method = await search.plan_queries(snap, scope, max_queries)
+        real_titles = None
+        if search.early_career(snap) and settings.enable_ats_index:
+            # what entry-level openings are really called here, so the plan does not invent titles nobody posts
+            real_titles = ats_index.level_titles([*scope.titles, *snap.adjacent_titles], scope.locations or [scope.country],
+                                                 snap.seniority.value)
+        queries, plan_method = await search.plan_queries(snap, scope, max_queries, real_titles)
     c["queries"] = len(queries)
     run.data["plan"] = {"role_families": [f.label for f in snap.role_families], "titles": scope.titles,
                         "locations": scope.locations, "queries": queries, "method": plan_method,
@@ -417,7 +472,33 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         await run.say("discover", " · ".join(bits), "good" if posts else "info")
         return posts
 
+    api_on = job_apis.status(settings) if not watch_mode else {}
+
+    async def from_job_apis() -> list[JobPosting]:
+        if not any(api_on.values()):
+            return []
+        async def note(msg: str) -> None:
+            await run.say("discover", msg, "info")
+        try:
+            posts, st = await job_apis.discover(
+                settings, scope.titles, scope.locations or [scope.country or "India"],
+                labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
+                include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2), skip=already_seen, on_progress=note)
+        except Exception as exc:                  # a source that is down or out of quota never fails the search
+            log.warning("job_apis_failed", error=str(exc)[:160])
+            return []
+        bits = [f"{len(posts)} postings kept from " + ", ".join(st["enabled"])]
+        if st.get("first_party"):
+            bits.append(f"{st['first_party']} found on the employer's own job board")
+        if st.get("agencies"):
+            bits.append(f"{st['agencies']} from staffing agencies / mass recruiters dropped")
+        if st.get("seen"):
+            bits.append(f"{st['seen']} you've already seen")
+        await run.say("discover", " · ".join(bits), "good" if posts else "info")
+        return posts
+
     linkedin_task = asyncio.create_task(from_linkedin())
+    job_apis_task = asyncio.create_task(from_job_apis())
     index_leads = []
     if not watch_mode and settings.enable_ats_index:
         refresh = ats_index.ensure_background()
@@ -504,6 +585,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     if board_refs:
         await run.say("discover", f"Pulled {len(board_jobs)} relevant openings straight from employer boards", "good")
     board_jobs += await linkedin_task
+    board_jobs += await job_apis_task
     if watch_mode:
         before = len(board_jobs)
         stale_after = get_policy().stale_after_days
@@ -518,7 +600,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
 
     # 4. Normalize ------------------------------------------------------------
     await run.stage("normalize")
-    sem = asyncio.Semaphore(FETCH_CONCURRENCY)
+    sem = asyncio.Semaphore(_share("fetch_concurrency"))
     worth = [l for l in posting_leads if _lead_worth_reading(l, snap)]
     skipped = len(posting_leads) - len(worth)
     if skipped:
@@ -595,6 +677,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     if fit:
         before = len(pool)
         pool = [p for p in pool if fit.get(p.id, 1) > 0] or pool
+        # Early career: "shares a word" (1) postings crowd out the few that are really theirs — drop them while
+        # enough good ones remain.
+        if search.early_career(snap):
+            good = [p for p in pool if fit.get(p.id, 1) >= 2]
+            if len(good) >= min(12, max_jobs // 3):
+                pool = good
         unique = pool
         await run.say("dedupe", f"Shortlisted {len(pool)} of {before} postings that match your field"
                       + (f" ({before - len(pool)} are a different line of work)" if before > len(pool) else ""), "info")
@@ -602,7 +690,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         unique = pool + rest
     unique.sort(key=lambda p: (-(fit or {}).get(p.id, 0), -(p.primary_source.first_party if p.primary_source else 0),
                                -round(_title_relevance(p, snap), 1), _age_days(p)))
-    unique = unique[:max_jobs]
+    unique = _cap_per_company(unique)[:max_jobs]
     run.data["total"] = len(unique)
     await run.stage("dedupe", "done", f"{dups} duplicates merged · {len(unique)} unique")
     await run.say("dedupe", (f"Merged {dups} duplicate listings — " if dups else "No duplicates — ")
@@ -741,41 +829,89 @@ async def connect_top(run: Run, profile: CandidateProfile, snap: CandidateSnapsh
                       + " — open a job and look for “Reach a real person”", "done")
 
 
+def _share(kind: str) -> int:
+    """This search's share of the machine: the measured limit split between the searches running now."""
+    return max(2, capacity.plan()[kind] // max(1, manager.running))
+
+
 class SearchManager:
+    """One search per profile (person) at a time — people never stop each other's searches. How many run at
+    once across the server follows free memory and CPU (config/capacity.py); the rest wait as "queued"."""
+
     def __init__(self):
-        self._task: Optional[asyncio.Task] = None
-        self._run: Optional[Run] = None
+        self._runs: dict[str, tuple[Run, asyncio.Task]] = {}     # person id -> latest run and its task
+        self.running = 0
+
+    @staticmethod
+    def _key(person_id: Optional[str] = None) -> str:
+        return person_id if person_id is not None else (storage.active_person() or "")
 
     @property
     def current(self) -> Optional[dict]:
-        return self._run.data if self._run else None
+        """The open profile's latest run in this process."""
+        hit = self._runs.get(self._key())
+        return hit[0].data if hit else None
+
+    def find(self, run_id: str) -> Optional[dict]:
+        return next((run.data for run, _ in self._runs.values() if run.id == run_id), None)
 
     async def wait(self) -> None:
-        """Wait for the active run to end (completed, failed or cancelled)."""
-        if self._task and not self._task.done():
+        """Wait for the open profile's run to end (completed, failed or cancelled)."""
+        hit = self._runs.get(self._key())
+        if hit and not hit[1].done():
             try:
-                await asyncio.shield(self._task)
+                await asyncio.shield(hit[1])
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def cancel(self, run_id: Optional[str] = None) -> Optional[dict]:
-        if self._run and (run_id is None or self._run.id == run_id) and self._task and not self._task.done():
-            self._task.cancel()
+    async def _stop(self, key: str) -> None:
+        hit = self._runs.get(key)
+        if hit and not hit[1].done():
+            hit[1].cancel()
             try:
-                await asyncio.wait_for(asyncio.shield(self._task), timeout=5)
+                await asyncio.wait_for(asyncio.shield(hit[1]), timeout=5)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
-        return self.current if (run_id is None or (self._run and self._run.id == run_id)) else await storage.get_run(run_id)
+
+    async def cancel(self, run_id: Optional[str] = None) -> Optional[dict]:
+        """Stop the open profile's run (or the run with this id)."""
+        if run_id is None:
+            await self._stop(self._key())
+            return self.current
+        key = next((k for k, (run, _) in self._runs.items() if run.id == run_id), None)
+        if key is None:
+            return await storage.get_run(run_id)
+        await self._stop(key)
+        return self._runs[key][0].data
+
+    async def cancel_person(self, person_id: str) -> None:
+        await self._stop(person_id)
+
+    async def cancel_all(self) -> None:
+        for key in list(self._runs):
+            await self._stop(key)
+
+    async def _admit(self, run: Run) -> None:
+        told = False
+        while self.running >= capacity.plan()["searches"]:
+            if not told:
+                await run.say("understand", "Waiting for a free slot — other searches are running on this server", "info")
+                told = True
+            await asyncio.sleep(2)
+        self.running += 1
 
     async def start(self, profile: CandidateProfile, request: dict, emit: Emit) -> dict:
-        await self.cancel()
+        key = self._key()
+        await self._stop(key)
         run = Run(new_run(profile.content_hash()), emit)
         run.data["mode"] = "watch" if request.get("mode") == "watch" else "search"
-        self._run = run
         await run.publish()
 
         async def _go():
+            admitted = False
             try:
+                await self._admit(run)
+                admitted = True
                 await execute(run, profile, request)
             except asyncio.CancelledError:
                 await run.say(run.data.get("stage", "rank"), "Search stopped — results found so far are kept", "warn")
@@ -796,8 +932,12 @@ class SearchManager:
                     if st["status"] == "running":
                         st["status"] = "failed"
                 await run.publish()
+            finally:
+                if admitted:
+                    self.running -= 1
+                capacity.release_memory()        # pages read and parsed by this search: give the memory back
 
-        self._task = asyncio.create_task(_go())
+        self._runs[key] = (run, asyncio.create_task(_go()))
         return run.data
 
 

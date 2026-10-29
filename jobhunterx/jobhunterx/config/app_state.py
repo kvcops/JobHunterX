@@ -35,6 +35,7 @@ DEFAULTS: dict[str, Any] = {
     "search.strategy_v2": False,               # set once the old "fallback" default has been moved to "smart"
     "people.active": None,
     "setup.free_ok": False,                    # the user chose to start on the free no-key models (Kilo, LLM7)
+    "office.ai": None,                         # agents office AI: None = follow OFFICE_AI_ENABLED in .env
 }
 
 _cache: dict[str, Any] = copy.deepcopy(DEFAULTS)
@@ -96,7 +97,20 @@ async def set(key: str, value: Any) -> None:  # noqa: A001 — mirrors dict API
 
 
 def llm_provider_enabled(provider: str) -> bool:
+    from jobhunterx.config import auth_ctx
+    if auth_ctx.restricted() is not None:
+        # prod mode: a user's own keys are always theirs to use; the IP-limited free pools never are
+        return provider not in auth_ctx.SHARED_POOLS
     return bool(_cache["llm.providers"].get(provider, True))
+
+
+def office_ai_enabled() -> bool:
+    """The agents office may use AI (dialogue bank refills, answers). The Settings switch wins over OFFICE_AI_ENABLED."""
+    val = _cache.get("office.ai")
+    if val is None:
+        from jobhunterx.config.settings import server_settings
+        return bool(server_settings().office_ai_enabled)
+    return bool(val)
 
 
 def search_plan() -> tuple[list[str], str]:

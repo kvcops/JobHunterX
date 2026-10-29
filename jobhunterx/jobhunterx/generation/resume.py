@@ -40,7 +40,9 @@ VERSION = "resume-v2"
 
 # Layout budget for one page (a product decision, tune here).
 MAX_BULLETS_PER_ROLE = 4
-MAX_PROJECTS = 3
+# Projects are often the strongest proof for a fresher: keep up to this many, most relevant first. The page fitter
+# (generation/render.py) drops the least relevant ones only when the page really is full.
+MAX_PROJECTS = 6
 
 
 class _Bullet(BaseModel):

@@ -22,12 +22,16 @@ log = get_logger("live_view")
 
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
 _clients: set[Any] = set()
-_latest_frame: Optional[str] = None          # last frame message (JSON) for late joiners
+# Each user's auto-apply browser has its own picture (prod mode: several cloud browsers can run at once).
+# Key "" = the local single-user app. Late joiners get their owner's last frame.
+_latest: dict[str, str] = {}
+_frame_meta: dict[str, dict[str, float]] = {}    # owner -> deviceWidth / deviceHeight of their last frame
 # The Company Scout's browser streams on its own channel, so it never mixes with the auto-apply view.
 _scout_clients: set[Any] = set()
 _scout_latest: Optional[str] = None
-_frame_meta: dict[str, float] = {}           # deviceWidth / deviceHeight of the last frame
-_panel: tuple[int, int] = (0, 0)             # size of the live-view area in the app (CSS px)
+_scout_owner: Optional[str] = None
+_viewer: dict[Any, dict] = {}                    # websocket -> who opened it (prod mode)
+_panel: tuple[int, int] = (0, 0)                 # size of the live-view area in the app (CSS px)
 
 VIEWPORT_WIDTH = 1280                        # desktop layout for every site; the height follows the panel's shape
 
@@ -101,58 +105,89 @@ def broadcast_event(event: dict) -> None:
     _on_main(ws_manager.broadcast(event))
 
 
+# ---------------------------------------------------------------------------- who may watch
+
+def _key(owner: Optional[str]) -> str:
+    return owner or ""
+
+
+def set_owner(channel: str, user_id: Optional[str]) -> None:
+    """The Company Scout's browser now belongs to this login user (None without login: everyone may watch)."""
+    global _scout_latest, _scout_owner
+    if channel == "scout":
+        if _scout_owner != user_id:
+            _scout_latest = None               # never show the previous owner's last picture
+        _scout_owner = user_id
+
+
+def _allowed(ws: Any, owner: Optional[str]) -> bool:
+    from jobhunterx.api.ws import may_receive
+    return may_receive(_viewer.get(ws, {}), owner)
+
+
+async def close_for(user_id: Optional[str] = None, token_hash: Optional[str] = None, keep: Optional[str] = None) -> None:
+    for ws, meta in list(_viewer.items()):
+        if (token_hash and meta.get("token_hash") == token_hash) or \
+                (user_id and meta.get("user_id") == user_id and meta.get("token_hash") != keep):
+            _clients.discard(ws)
+            _scout_clients.discard(ws)
+            _viewer.pop(ws, None)
+            try:
+                await ws.close(code=4401)
+            except Exception:
+                pass
+
+
 # ---------------------------------------------------------------------------- frames
 
-async def _send_all(msg: str) -> None:
-    dead = []
-    for ws in list(_clients):
-        try:
-            await ws.send_text(msg)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _clients.discard(ws)
-
-
-def publish_frame(data_b64: str, metadata: dict, channel: str = "apply") -> None:
-    global _latest_frame, _scout_latest
+def publish_frame(data_b64: str, metadata: dict, channel: str = "apply", owner: Optional[str] = None) -> None:
+    global _scout_latest
     if channel == "scout":
         _scout_latest = json.dumps({"type": "frame", "data": data_b64, "w": metadata.get("deviceWidth"),
                                     "h": metadata.get("deviceHeight")})
         if _scout_clients:
-            _on_main(_send_to(_scout_clients, _scout_latest))
+            _on_main(_send_to(_scout_clients, _scout_latest, _scout_owner))
         return
-    _frame_meta.update({k: metadata.get(k) for k in ("deviceWidth", "deviceHeight") if metadata.get(k)})
-    msg = json.dumps({"type": "frame", "data": data_b64, "w": _frame_meta.get("deviceWidth"), "h": _frame_meta.get("deviceHeight")})
-    _latest_frame = msg
+    meta = _frame_meta.setdefault(_key(owner), {})
+    meta.update({k: metadata.get(k) for k in ("deviceWidth", "deviceHeight") if metadata.get(k)})
+    msg = json.dumps({"type": "frame", "data": data_b64, "w": meta.get("deviceWidth"), "h": meta.get("deviceHeight")})
+    _latest[_key(owner)] = msg
     if _clients:
-        _on_main(_send_all(msg))
+        _on_main(_send_to(_clients, msg, owner))
 
 
-def clear_frame(channel: str = "apply") -> None:
-    global _latest_frame, _scout_latest
+def clear_frame(channel: str = "apply", owner: Optional[str] = None) -> None:
+    global _scout_latest
+    idle = json.dumps({"type": "idle"})
     if channel == "scout":
         _scout_latest = None
         if _scout_clients:
-            _on_main(_send_to(_scout_clients, json.dumps({"type": "idle"})))
+            _on_main(_send_to(_scout_clients, idle, _scout_owner))
         return
-    _latest_frame = None
+    _latest.pop(_key(owner), None)
     if _clients:
-        _on_main(_send_all(json.dumps({"type": "idle"})))
+        _on_main(_send_to(_clients, idle, owner))
 
 
-async def _send_to(clients: set[Any], msg: str) -> None:
+async def _send_to(clients: set[Any], msg: str, owner: Optional[str]) -> None:
     for ws in list(clients):
+        if not _allowed(ws, owner):
+            continue
         try:
             await ws.send_text(msg)
         except Exception:
             clients.discard(ws)
 
 
-async def add_client(ws: Any, channel: str = "apply") -> None:
-    clients, latest = (_scout_clients, _scout_latest) if channel == "scout" else (_clients, _latest_frame)
+async def add_client(ws: Any, channel: str = "apply", meta: Optional[dict] = None) -> None:
+    _viewer[ws] = meta or {}
+    if channel == "scout":
+        clients, latest, owner = _scout_clients, _scout_latest, _scout_owner
+    else:
+        owner = (meta or {}).get("user_id")
+        clients, latest = _clients, _latest.get(_key(owner))
     clients.add(ws)
-    if latest:
+    if latest and _allowed(ws, owner):
         try:
             await ws.send_text(latest)
         except Exception:
@@ -161,10 +196,15 @@ async def add_client(ws: Any, channel: str = "apply") -> None:
 
 def remove_client(ws: Any, channel: str = "apply") -> None:
     (_scout_clients if channel == "scout" else _clients).discard(ws)
+    _viewer.pop(ws, None)
 
 
 def frame_size() -> tuple[float, float]:
-    return float(_frame_meta.get("deviceWidth") or 1280), float(_frame_meta.get("deviceHeight") or 800)
+    """Size of the signed-in user's own browser picture (for mapping clicks)."""
+    from jobhunterx.config import auth_ctx
+    user = auth_ctx.current()
+    meta = _frame_meta.get(_key(user.id if user else None), {})
+    return float(meta.get("deviceWidth") or 1280), float(meta.get("deviceHeight") or 800)
 
 
 # ---------------------------------------------------------------------------- screencast (runs on the worker loop)
@@ -174,9 +214,10 @@ class Screencast:
 
     PARAMS = {"format": "jpeg", "quality": 62, "maxWidth": 1280, "maxHeight": 1600, "everyNthFrame": 1}
 
-    def __init__(self, browser_session: Any, channel: str = "apply"):
+    def __init__(self, browser_session: Any, channel: str = "apply", owner: Optional[str] = None):
         self.session = browser_session
         self.channel = channel
+        self.owner = owner                     # the login user whose browser this is (prod mode)
         self.sid: Optional[str] = None
         self._task: Optional[asyncio.Task] = None
         self._registered = False
@@ -185,7 +226,7 @@ class Screencast:
         if self.sid and session_id and session_id != self.sid:
             return
         try:
-            publish_frame(event["data"], event.get("metadata") or {}, self.channel)
+            publish_frame(event["data"], event.get("metadata") or {}, self.channel, self.owner)
         finally:
             client = self.session.cdp_client
             asyncio.ensure_future(self._ack(client, event.get("sessionId"), session_id))

@@ -30,7 +30,7 @@ import httpx
 
 from jobhunterx.config.logging import get_logger
 from jobhunterx.domain.job import FieldCheck, JobPosting, SourceRef
-from jobhunterx.intelligence.text import tokens
+from jobhunterx.intelligence.text import common_words, title_overlap, tokens
 
 log = get_logger("linkedin")
 
@@ -162,14 +162,8 @@ async def details(card: Card) -> Optional[dict]:
             "closed": "No longer accepting applications" in page}
 
 
-def _relevance(title: str, labels: list[str]) -> float:
-    jt = set(tokens(title))
-    best = 0.0
-    for label in labels:
-        lt = set(tokens(label))
-        if jt and lt:
-            best = max(best, len(jt & lt) / len(jt | lt))
-    return best
+def _relevance(title: str, labels: list[str], common: set[str] | frozenset = frozenset()) -> float:
+    return title_overlap(title, labels, common)
 
 
 def _bad_company(name: str) -> bool:
@@ -245,9 +239,9 @@ def _rotation(key: str) -> int:
     """How many times this title × place was searched before — picks the next slice of the week's postings."""
     global _rot_store
     if _rot_store is None:
-        from diskcache import Cache
+        from jobhunterx.config import capacity
         from jobhunterx.config.settings import get_settings
-        _rot_store = Cache(str(get_settings().cache_full_path / "linkedin_rotation"))
+        _rot_store = capacity.disk_cache(get_settings().cache_full_path / "linkedin_rotation", 8)
     n = _rot_store.get(key, 0)
     _rot_store.set(key, n + 1, expire=14 * 86400)
     return n
@@ -281,14 +275,15 @@ async def discover(titles: list[str], places: list[str], *, labels: list[str], i
         for c in (b if isinstance(b, list) else []):
             cards.setdefault(c.id, c)
     stats["cards"] = len(cards)
+    common = common_words(c.title for c in cards.values())     # "engineer" alone does not make a post relevant
     kept = []
     for c in cards.values():
         if _bad_company(c.company):
             stats["agencies"] += 1
-        elif _relevance(c.title, labels) > 0:
+        elif _relevance(c.title, labels, common) > 0:
             kept.append(c)
     now = datetime.now(timezone.utc)
-    kept.sort(key=lambda c: (-round(_relevance(c.title, labels), 1), (now - c.posted).days if c.posted else 99))
+    kept.sort(key=lambda c: (-round(_relevance(c.title, labels, common), 1), (now - c.posted).days if c.posted else 99))
     if on_progress:
         await on_progress(f"LinkedIn: {len(cards)} fresh posts, {len(kept)} in your field")
 

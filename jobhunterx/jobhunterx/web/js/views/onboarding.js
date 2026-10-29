@@ -7,8 +7,10 @@ import {
   Button, Icon, ChipsInput, Field, Notice, Meter, Seg, Skeleton, ScanDoc, ErrorBox, AutoTextarea, Spinner, Elapsed, UPLOAD_STAGES,
 } from '../components/ui.js';
 import { ExperienceSummary } from '../components/experience.js';
+import { PayFields, AnswerFields } from '../components/answers.js';
 import { normalizeProfile, setIn, defaultSearchRequest } from '../state/domain.js';
 import { api } from '../lib/api.js';
+import { CountryInput, CityInput, CityChips, WorkAuthInput } from '../components/places.js';
 import { WORK_MODES, WORK_MODE_LABEL, humanize, safeUrl } from '../lib/format.js';
 
 const STEPS = [
@@ -106,11 +108,14 @@ function ReviewStep({ draft, set }) {
       <div class="stack">
         <div class="form-grid tight">
           <${Field} label="Full name">${(id) => html`<input id=${id} class="input" autocomplete="name" value=${draft.name} onInput=${(e) => set(['name'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="First name">${(id) => html`<input id=${id} class="input" autocomplete="given-name" value=${draft.first_name} onInput=${(e) => set(['first_name'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="Middle name">${(id) => html`<input id=${id} class="input" autocomplete="additional-name" value=${draft.middle_name} onInput=${(e) => set(['middle_name'], e.currentTarget.value)} />`}</${Field}>
+          <${Field} label="Last name (surname)" hint="Application forms use these exactly as written.">${(id) => html`<input id=${id} class="input" autocomplete="family-name" value=${draft.last_name} onInput=${(e) => set(['last_name'], e.currentTarget.value)} />`}</${Field}>
           <${Field} label="Email">${(id) => html`<input id=${id} class="input" type="email" autocomplete="email" value=${draft.email} onInput=${(e) => set(['email'], e.currentTarget.value)} />`}</${Field}>
           <${Field} label="Phone">${(id) => html`<input id=${id} class="input" type="tel" autocomplete="tel" value=${draft.phone} onInput=${(e) => set(['phone'], e.currentTarget.value)} />`}</${Field}>
-          <${Field} label="Current location" hint="City, state, country">${(id) => html`<input id=${id} class="input" list="ob-loc" autocomplete="address-level2" value=${draft.location}
-            placeholder="e.g. Hyderabad, Telangana, India" onInput=${(e) => set(['location'], e.currentTarget.value)} />
-            <datalist id="ob-loc">${locSugg.map((l) => html`<option value=${l} />`)}</datalist>`}</${Field}>
+          <${Field} label="Current location" hint="Start typing a city — pick from the list or keep what you typed.">${(id) => html`<${CityInput} id=${id}
+            value=${draft.location} country=${draft.preferences.home_country} placeholder="e.g. Hyderabad, Telangana, India" extra=${locSugg}
+            onChange=${(v) => set(['location'], v)} />`}</${Field}>
         </div>
         ${links.length ? html`<div class="ob-links"><span class="field-label"><${Icon} name="external" size=${13} /> Links we found · ${links.length}</span>
           <div class="chip-row">${links.map((l, i) => { const u = safeUrl(l.url); return u ? html`<a key=${i} class="chip link-chip" href=${u} target="_blank" rel="noopener noreferrer" title=${l.url}>
@@ -143,8 +148,8 @@ function PrefsStep({ draft, set }) {
     </div>
     <div class="stack">
       <${Field} label="Cities you can work in" hint="Add every city you'd move to or commute to.">
-        <${ChipsInput} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)}
-          placeholder="Type a city and press Enter" suggestions=${locSugg} /></${Field}>
+        <${CityChips} label="Locations" value=${p.locations} onChange=${(v) => set(['preferences', 'locations'], v)}
+          placeholder="Type a city and press Enter" country=${p.home_country} extra=${locSugg} /></${Field}>
       <div class="field"><span class="field-label">Work modes you accept</span>
         <${Seg} multi label="Work modes" options=${WORK_MODES.map((m) => [m, WORK_MODE_LABEL[m]])} value=${p.work_modes} onChange=${(v) => set(['preferences', 'work_modes'], v)} /></div>
       <div class="field toggles option-cards">
@@ -156,32 +161,14 @@ function PrefsStep({ draft, set }) {
         <label class=${`opt-card ${p.open_to_international ? 'on' : ''}`}><input type="checkbox" checked=${p.open_to_international} onChange=${(e) => set(['preferences', 'open_to_international'], e.currentTarget.checked)} />
           <span class="switch-ui"></span><span><strong>Roles abroad</strong><small>Remote for foreign companies or relocation</small></span></label>
       </div>
-      <${Field} label="Home country">${(id) => html`<input id=${id} class="input" autocomplete="country-name" value=${p.home_country || ''} placeholder=${(snap && snap.home_country) || 'e.g. India'}
-        onInput=${(e) => set(['preferences', 'home_country'], e.currentTarget.value)} />`}</${Field}>
+      <${Field} label="Home country" hint="Pick from the list or type it.">${(id) => html`<${CountryInput} id=${id} value=${p.home_country}
+        onChange=${(v) => set(['preferences', 'home_country'], v)} />`}</${Field}>
     </div>
   </div>`;
 }
 
 function PayStep({ draft, set }) {
-  const p = draft.preferences;
-  const q = draft.qa_memory;
-  return html`<div class="form-grid tight">
-    <${Field} label="Current CTC" hint="Annual, as you'd write it on a form (e.g. 6 LPA).">${(id) => html`<input id=${id} class="input" value=${q.current_ctc || ''}
-      onInput=${(e) => set(['qa_memory', 'current_ctc'], e.currentTarget.value)} placeholder="e.g. 6 LPA" />`}</${Field}>
-    <${Field} label="Expected CTC">${(id) => html`<input id=${id} class="input" value=${q.expected_ctc || ''}
-      onInput=${(e) => set(['qa_memory', 'expected_ctc'], e.currentTarget.value)} placeholder="e.g. 10 LPA" />`}</${Field}>
-    <${Field} label="Minimum annual salary (filter)" hint="Roles that clearly pay less are ruled out. Leave empty if flexible.">${(id) => html`<input id=${id} class="input" type="number" min="0" step="1000"
-      value=${p.min_annual_salary ?? ''} onInput=${(e) => set(['preferences', 'min_annual_salary'], e.currentTarget.value === '' ? null : Number(e.currentTarget.value))} placeholder="e.g. 800000" />`}</${Field}>
-    <${Field} label="Currency">${(id) => html`<input id=${id} class="input" value=${p.salary_currency || ''} maxlength="6" placeholder="INR"
-      onInput=${(e) => set(['preferences', 'salary_currency'], e.currentTarget.value.toUpperCase())} />`}</${Field}>
-    <${Field} label="Notice period (days)" hint="0 if you can join immediately.">${(id) => html`<input id=${id} class="input" type="number" min="0" max="365"
-      value=${p.notice_period_days ?? ''} onInput=${(e) => { const v = e.currentTarget.value === '' ? null : Number(e.currentTarget.value);
-        set(['preferences', 'notice_period_days'], v); set(['qa_memory', 'notice_period'], v == null ? '' : `${v} days`); }} />`}</${Field}>
-    <${Field} label="Work authorization">${(id) => html`<input id=${id} class="input" value=${q.work_authorization || ''}
-      onInput=${(e) => set(['qa_memory', 'work_authorization'], e.currentTarget.value)} placeholder="e.g. Indian citizen" />`}</${Field}>
-    <${Field} label="Need visa sponsorship?">${(id) => html`<${Seg} label="Sponsorship" options=${[['No', 'No'], ['Yes', 'Yes']]}
-      value=${q.requires_sponsorship || 'No'} onChange=${(v) => set(['qa_memory', 'requires_sponsorship'], v)} />`}</${Field}>
-  </div>`;
+  return html`<div class="stack"><${PayFields} draft=${draft} set=${set} /><${AnswerFields} draft=${draft} set=${set} /></div>`;
 }
 
 const lpa = (v) => (v == null || v === '' ? null : `${(Number(v) / 100000).toFixed(Number(v) % 100000 ? 1 : 0)} LPA`);
@@ -227,7 +214,9 @@ function LaunchStep({ draft, goTo }) {
       <${SummaryCard} title="Pay & notice" onEdit=${() => goTo('pay')}>
         <ul class="ob-facts">
           <li>Minimum pay: <strong>${lpa(p.min_annual_salary) || 'no minimum'}</strong>${p.min_annual_salary ? html` <span class="muted">(roles that clearly pay less are left out)</span>` : null}</li>
-          <li>Current CTC: <strong>${q.current_ctc || '—'}</strong> · Expected: <strong>${q.expected_ctc || '—'}</strong></li>
+          <li>Current CTC: <strong>${q.current_fixed_lpa != null || q.current_variable_lpa != null
+            ? `${Math.round(((q.current_fixed_lpa || 0) + (q.current_variable_lpa || 0)) * 100) / 100} LPA` : (q.current_ctc || '—')}</strong>
+            · Expected: <strong>${q.expected_ctc_lpa != null ? `${q.expected_ctc_lpa} LPA` : (q.expected_ctc || '—')}</strong></li>
           <li>Notice period: <strong>${p.notice_period_days != null ? `${p.notice_period_days} days` : 'not set'}</strong>${p.notice_period_days ? html` <span class="muted">("immediate joiner" roles get flagged)</span>` : null}</li>
         </ul>
       </${SummaryCard}>

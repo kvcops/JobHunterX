@@ -18,6 +18,7 @@ data, marked `method="fallback"` so the UI can say so.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date
 from typing import Literal, Optional
@@ -40,13 +41,15 @@ from jobhunterx.intelligence.text import any_term_in_text, merged_years, parse_m
 
 log = get_logger("candidate")
 
-VERSION = "candidate-v1"
+# v3: core facts and per-skill aliases in parallel calls. v2: level / education / places first and required (a cut-off answer is retried instead of silently becoming
+# "Unknown"), shorter skill lists, cached by the data actually sent (salary answers no longer trigger a new call).
+VERSION = "candidate-v3"
 
 
 class _SkillOut(BaseModel):
     name: str
-    aliases: list[str] = Field(default_factory=list, description="other names/abbreviations for the same skill")
-    adjacent: list[str] = Field(default_factory=list, description="closely related skills a recruiter would accept as partial evidence")
+    aliases: list[str] = Field(default_factory=list, description="at most 3 other names/abbreviations for the same skill")
+    adjacent: list[str] = Field(default_factory=list, description="at most 3 closely related skills a recruiter would accept as partial evidence")
 
 
 class _FamilyOut(BaseModel):
@@ -69,16 +72,18 @@ class _ExpOut(BaseModel):
 
 
 class CandidateUnderstanding(BaseModel):
+    # Short, essential fields come first and are required: when a free model runs out of output room in the long skills
+    # list, the answer fails validation and is asked again — instead of these silently defaulting to "unknown".
+    seniority: Seniority
+    education_level: Literal["none", "diploma", "bachelor", "master", "phd", "unknown"]
+    home_country: str
+    locations: list[_PlaceOut]
+    experiences: list[_ExpOut] = Field(default_factory=list)
     role_families: list[_FamilyOut] = Field(default_factory=list)
     target_titles: list[str] = Field(default_factory=list, description="concrete job titles to search for, realistic for this candidate's level")
     adjacent_titles: list[str] = Field(default_factory=list)
-    skills: list[_SkillOut] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list, description="problem/technology domains, short lowercase phrases")
-    seniority: Seniority = Seniority.UNKNOWN
-    education_level: Literal["none", "diploma", "bachelor", "master", "phd", "unknown"] = "unknown"
-    locations: list[_PlaceOut] = Field(default_factory=list)
-    home_country: str = ""
-    experiences: list[_ExpOut] = Field(default_factory=list)
+    skills: list[_SkillOut] = Field(default_factory=list)
 
 
 _SYSTEM = """You are a senior technical recruiter building an accurate, honest model of a candidate.
@@ -87,11 +92,12 @@ Use ONLY the profile provided. Do not invent experience, skills, employers or ac
 Produce:
 - role_families: the candidate's main career track (closeness 1.0) and 2-5 adjacent tracks they could credibly be hired into now, with closeness reflecting how transferable their actual experience is. Respect the candidate's stated preferences and career direction.
 - target_titles: 4-8 concrete job titles that employers use for roles this candidate can realistically get at their current level (do not inflate seniority). adjacent_titles: up to 6 more.
-- skills: every skill/technology/tool the profile mentions, using the name as written in the profile, plus aliases (abbreviations, alternative spellings) and adjacent skills.
 - seniority: the level this candidate can credibly be hired at today, based on the work history and its dates.
-- education_level: highest completed or in-progress degree.
+- education_level: highest completed or in-progress degree ("unknown" only when the profile lists no education at all).
 - locations: the acceptable work locations from the preferences (and the profile location if none), normalized to canonical English city/region/country names with common alternative names as aliases. home_country: the candidate's country.
-- experiences: for each experience index, whether it is an internship/trainee role and whether it is academic/volunteer work."""
+- experiences: for each experience index, whether it is an internship/trainee role and whether it is academic/volunteer work.
+- extra_skills: skills/tools named in the experience bullets or projects that are missing from the skills list (names only).
+Write the fields in the order of the schema: seniority, education_level, home_country and locations first."""
 
 
 def _profile_text(p: CandidateProfile) -> str:
@@ -170,23 +176,84 @@ def _fallback_understanding(p: CandidateProfile) -> CandidateUnderstanding:
         target_titles=titles[:6],
         skills=[_SkillOut(name=s) for s in p.skills],
         seniority=p.preferences.seniority_override or Seniority.UNKNOWN,
+        education_level="unknown",
         locations=places,
         home_country=p.preferences.home_country,
         experiences=internships,
     )
 
 
+class _CoreOut(BaseModel):
+    """Everything about the candidate except per-skill aliases (those come from small parallel calls)."""
+    seniority: Seniority
+    education_level: Literal["none", "diploma", "bachelor", "master", "phd", "unknown"]
+    home_country: str
+    locations: list[_PlaceOut]
+    experiences: list[_ExpOut] = Field(default_factory=list)
+    role_families: list[_FamilyOut] = Field(default_factory=list)
+    target_titles: list[str] = Field(default_factory=list, description="concrete job titles to search for, realistic for this candidate's level")
+    adjacent_titles: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list, description="problem/technology domains, short lowercase phrases")
+    extra_skills: list[str] = Field(default_factory=list, description="skills/tools named in experience or projects but missing from the skills list, as written")
+
+
+class _SkillsOut(BaseModel):
+    skills: list[_SkillOut]
+
+
+_SKILLS_SYSTEM = """For each skill/technology/tool given, return its name exactly as given, at most 3 aliases (abbreviations,
+alternative spellings, common other names) and at most 3 adjacent skills a technical recruiter would accept as partial
+evidence. Return every skill given, in the same order, and nothing else."""
+SKILL_CHUNK = 12            # skills per call: small answers come back fast, and the calls run side by side
+
+
+def _skill_names(p: CandidateProfile) -> list[str]:
+    seen, out = set(), []
+    for name in [*p.skills, *[t for pr in p.projects for t in pr.technologies]]:
+        k = norm_term(name)
+        if name and name.strip() and k not in seen:
+            seen.add(k)
+            out.append(name.strip())
+    return out
+
+
 async def understand_candidate(profile: CandidateProfile) -> tuple[Optional[CandidateUnderstanding], str]:
+    """One short call for the candidate's level, places, titles and tracks, and — at the same time — small calls that
+    give each skill its aliases. A skill's aliases do not depend on the person, so those answers are cached by the skill
+    names alone and reused across profile edits and across people."""
+    import asyncio
     payload = profile.model_dump(mode="json", exclude={"qa_memory"})
     for e in payload.get("experience", []):
         e["bullets"] = e.get("bullets", [])[:12]
-    user = "Candidate profile (JSON):\n" + fence(json.dumps(payload, ensure_ascii=False), max_chars=16000)
-    obj, model = await call_structured(
-        task="candidate_understanding", version=VERSION, model=CandidateUnderstanding,
-        system=_SYSTEM, user=user, chain="reasoning", max_tokens=3000,
-        cache_parts=(profile.content_hash(),),
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    core_call = call_structured(
+        task="candidate_core", version=VERSION, model=_CoreOut, system=_SYSTEM,
+        user="Candidate profile (JSON):\n" + fence(text, max_chars=16000), chain="reasoning", max_tokens=2000,
+        # keyed by what the AI reads: editing salary / notice-period answers (qa_memory) reuses the answer
+        cache_parts=(hashlib.sha256(text.encode()).hexdigest(),),
     )
-    return obj, model
+    names = _skill_names(profile)
+    chunks = [names[i:i + SKILL_CHUNK] for i in range(0, len(names), SKILL_CHUNK)]
+    skill_calls = [call_structured(task="skill_aliases", version=VERSION, model=_SkillsOut, system=_SKILLS_SYSTEM,
+                                   user="Skills:\n" + fence(json.dumps(chunk, ensure_ascii=False), max_chars=2000),
+                                   chain="fast", max_tokens=1600, cache_parts=tuple(sorted(norm_term(n) for n in chunk)))
+                   for chunk in chunks]
+    (core, model), *skill_results = await asyncio.gather(core_call, *skill_calls)
+    if core is None:
+        return None, model
+    skills: list[_SkillOut] = []
+    covered: set[str] = set()
+    for res, _ in skill_results:
+        for sk in (res.skills if res else []):
+            k = norm_term(sk.name)
+            if sk.name and k not in covered:
+                covered.add(k)
+                skills.append(_SkillOut(name=sk.name, aliases=sk.aliases[:3], adjacent=sk.adjacent[:3]))
+    for name in [*names, *core.extra_skills]:        # a batch that failed, or skills found only in the bullets
+        if name and norm_term(name) not in covered:
+            covered.add(norm_term(name))
+            skills.append(_SkillOut(name=name))
+    return CandidateUnderstanding(**core.model_dump(exclude={"extra_skills"}), skills=skills), model
 
 
 async def build_snapshot(profile: CandidateProfile, use_llm: bool = True) -> CandidateSnapshot:
@@ -242,6 +309,8 @@ async def build_snapshot(profile: CandidateProfile, use_llm: bool = True) -> Can
             families.insert(0, RoleFamilyFit(label=t, closeness=1.0, evidence="your preferences"))
 
     places = [PlaceRef(**pl.model_dump()) for pl in u.locations if pl.city or pl.country]
+    if not places:                       # the AI left them out: the person's own cities are still known
+        places = [PlaceRef(city=c) for c in (prefs.locations or ([profile.location.split(",")[0].strip()] if profile.location else [])) if c]
     snap = CandidateSnapshot(
         profile_hash=profile.content_hash(),
         total_years=total if source == "dates" else years,
@@ -270,5 +339,6 @@ async def build_snapshot(profile: CandidateProfile, use_llm: bool = True) -> Can
         method=method,
         llm_model=model,
         notes=notes,
+        understanding_version=VERSION,
     )
     return snap

@@ -14,6 +14,9 @@ The 3D office shows the pipeline agents as characters. Two things here use AI:
   agent's own work log.
 
 Both fall back gracefully: with an empty bank the office uses its scripted talk; without a model a question says it cannot answer.
+
+The whole office can run without AI (Settings → Agents office, or OFFICE_AI_ENABLED=false): no bank refills, chats use the
+scripted talk, and a question gets a plain summary built from the same real numbers — no AI call at all.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from jobhunterx import storage
+from jobhunterx.config import app_state
 from jobhunterx.config.logging import get_logger
 
 log = get_logger("office")
@@ -131,8 +135,8 @@ _NUMBER_WORDS = re.compile(r"(?i)\b(two|three|four|five|six|seven|eight|nine|ten
                            r"seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|dozen)s?\b")
 
 
-_PROGRESS = re.compile(r"(?i)(jobs?|postings?|posts|results?|matches|fits?|roles?|applications?|boards?|searches|scored|analy[sz]ed|"
-                       r"merged|duplicates|found|read|checked|binned|rejected|companies)")
+_PROGRESS = re.compile(r"(?i)\b(jobs?|postings?|posts|results?|matches|fits?|roles?|applications?|boards?|searches|scored|analy[sz]ed|"
+                       r"merged|duplicates|found|read|checked|binned|rejected|companies)\b")
 
 
 def _numbers_ok(text: str, allowed: str, loose: bool = False) -> bool:
@@ -194,9 +198,8 @@ class SceneBatch(BaseModel):
 
 
 def _db():
-    import aiosqlite
-    from jobhunterx.config.database import get_db_path
-    return aiosqlite.connect(get_db_path())
+    from jobhunterx.config.database import pooled
+    return pooled()
 
 
 async def _ensure_table(db) -> None:
@@ -228,7 +231,7 @@ async def chat(a: str, b: str, scene: str, a_knows: list[str], b_knows: list[str
                relation: str = "", recent: Optional[list[str]] = None, working: bool = False) -> Optional[dict]:
     """A break-time conversation from the dialogue bank: no AI call. None when the bank has nothing fitting yet
     (the office then uses its scripted talk)."""
-    if a not in AGENTS or b not in AGENTS or a == b:
+    if a not in AGENTS or b not in AGENTS or a == b or not app_state.office_ai_enabled():
         return None
     kind = _norm_kind(drama, working)
     heard = {_clean(x, 100).lower() for x in (recent or [])}
@@ -268,7 +271,8 @@ async def bank_status() -> dict:
     nxt = max(0.0, _state["last_refill"] + every - time.time()) if _state["last_refill"] else None
     return {"scenes": sum(v["scenes"] for v in by_kind.values()), "by_kind": by_kind, "target": TARGET,
             "refilling": _state["running"], "last_refill": _state["last_refill"] or None,
-            "next_refill_in_s": None if nxt is None else round(nxt), "refill_every_s": round(every)}
+            "next_refill_in_s": None if nxt is None else round(nxt), "refill_every_s": round(every),
+            "ai_enabled": app_state.office_ai_enabled()}
 
 
 def _refill_every_s() -> float:
@@ -370,6 +374,8 @@ async def refill(force: bool = False) -> int:
             _state["last_refill"] = (await cur.fetchone())[0] or 0.0
     if _state["running"] or (not force and time.time() - _state["last_refill"] < _refill_every_s()):
         return 0
+    if not app_state.office_ai_enabled():
+        return 0                                  # office AI is off: no AI calls for the office at all
     run = await storage.latest_run()
     if run and run.get("status") in ("queued", "running"):
         return 0                                  # a search needs the free AI limits more than the office does
@@ -432,6 +438,8 @@ async def ask(agent: str, question: str) -> dict:
               "dedupe": ["dedupe"], "validate": ["validate"], "match": ["extract", "match"], "rank": ["rank"],
               "connect": ["connect"]}[agent]
     mine = [it.get("message", "") for it in (run or {}).get("activity", []) if it.get("stage") in stages][-14:]
+    if not app_state.office_ai_enabled():
+        return _plain_answer(agent, f, mine)
     system = (f"You are the {name} in JobHunterX, an AI job-search office. Your job: {job}. Personality: {persona}. "
               "Answer the person's question in character, warm and specific, at most 70 words. Use ONLY the data given "
               "(the person's latest search and your own work log). If the data does not answer it, say so honestly and "
@@ -452,3 +460,32 @@ async def ask(agent: str, question: str) -> dict:
     if not _numbers_ok(text, json.dumps(f, default=str) + " ".join(mine) + question):
         text = re.sub(r"\d+(?:\.\d+)?", "some", text)   # a number not in the data is never shown as fact
     return {"answer": text, "emotion": res.emotion if res.emotion in EMOTIONS else "neutral", "ok": True}
+
+
+def _plain_answer(agent: str, f: dict, mine: list[str]) -> dict:
+    """Office AI off: a short summary from the real search data (no AI call)."""
+    name = AGENTS[agent][0]
+    if f.get("search") == "none yet":
+        return {"answer": f"{name} here. No search has run yet — start one in Discover and I'll have numbers for you.",
+                "emotion": "neutral", "ok": True, "source": "static"}
+    parts = []
+    if agent in ("understand", "plan"):
+        titles, cities = ", ".join(f.get("searched_titles") or []), ", ".join(f.get("searched_cities") or [])
+        parts.append(f"The last search looked for {titles or 'your target roles'}" + (f" in {cities}." if cities else "."))
+    elif agent == "discover":
+        parts.append(f"I found {f.get('search_results_found', 0)} search results last time.")
+    elif agent in ("normalize", "dedupe"):
+        parts.append(f"{f.get('postings_read', 0)} postings read, {f.get('duplicates_merged', 0)} duplicates merged.")
+    elif agent in ("validate", "match"):
+        parts.append(f"{f.get('jobs_analysed', 0)} jobs analysed: {f.get('jobs_that_fit', 0)} fit, "
+                     f"{f.get('jobs_not_a_fit', 0)} did not.")
+    top = (f.get("top_matches") or [None])[0]
+    if agent in ("rank", "connect") or not parts:
+        parts.append(f"Best match right now: {top['title']} at {top['company']} ({top['fit_score']}/100)." if top
+                     else "No strong matches yet.")
+    if agent == "connect":
+        kits = sum(1 for t in f.get("top_matches") or [] if t.get("has_referral_kit"))
+        parts.append(f"{kits} of the top matches have a referral kit ready.")
+    if mine:
+        parts.append(f"Last thing I did: {_clean(mine[-1], 160)}")
+    return {"answer": " ".join(parts), "emotion": "neutral", "ok": True, "source": "static"}

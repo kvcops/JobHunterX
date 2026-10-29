@@ -4,7 +4,7 @@ import { html, useEffect, useRef, useState } from '../lib/preact.js';
 import { ReconnectingSocket } from '../lib/ws.js';
 import { useStore } from '../state/store.js';
 import {
-  loadWatchlist, checkWatchlistNow, navigate, setList, loadMonitors, addMonitor, checkMonitor, rescoutMonitor, removeMonitor,
+  loadWatchlist, checkWatchlistNow, navigate, setList, loadMonitors, ensureWatchlist, ensureMonitors, refreshCompanies, addMonitor, checkMonitor, rescoutMonitor, removeMonitor,
 } from '../actions.js';
 import { Button, Badge, Skeleton, ErrorBox, EmptyState, PageHead, Tabs, Icon, Monogram, Notice, Spinner, Portal } from '../components/ui.js';
 import { CompanySection } from './jobdetail.js';
@@ -202,7 +202,7 @@ function MyCompanies() {
   const [location, setLocation] = useState('');
   const [keyword, setKeyword] = useState('');
   const [adding, setAdding] = useState(false);
-  useEffect(() => { loadMonitors(); }, []);
+  useEffect(() => { ensureMonitors(); }, []);
   const submit = async (e) => {
     e.preventDefault();
     if (company.trim().length < 2 || adding) return;
@@ -260,7 +260,8 @@ export function CompaniesView() {
   const [filter, setFilter] = useState('all');
   const [openName, setOpenName] = useState(null);
   const [scope, setScope] = useState('mine');
-  useEffect(() => { loadWatchlist(scope); }, [scope]);
+  const monitorsBusy = useStore((s) => s.monitors.status === 'loading' || s.monitors.status === 'refreshing');
+  useEffect(() => { ensureWatchlist(scope); }, [scope]);
   const d = w.data;
   const st = d && d.status;
   const last = st && st.last;
@@ -279,7 +280,9 @@ export function CompaniesView() {
   return html`<div class="view view-companies">
     <${PageHead} title=${html`Companies to <span class="serif">watch</span>`}
       sub="Researched companies in your cities. Their own job boards are checked every few hours, so you can apply in the first hours — not as applicant #1,500 on LinkedIn."
-      actions=${html`<${Button} icon="plus" onClick=${() => { const el = document.getElementById('add-company'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }}>Add company</${Button}>
+      actions=${html`<${Button} icon="refresh" busy=${w.status === 'refreshing' || w.status === 'loading' || monitorsBusy}
+          onClick=${() => refreshCompanies(scope)} title="Load the latest companies and openings">Refresh</${Button}>
+        <${Button} icon="plus" onClick=${() => { const el = document.getElementById('add-company'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }}>Add company</${Button}>
         <${Button} variant="primary" icon="refresh" busy=${checking} onClick=${checkWatchlistNow}>${checking ? 'Checking…' : 'Check for new roles now'}</${Button}>`} />
     <${MyCompanies} />
     <div class="card pad stack">
@@ -295,6 +298,8 @@ export function CompaniesView() {
         Add one of them under Profile → preferences to use the watchlist.</${Notice}>` : null}
     </div>
     ${liveRun ? html`<${LiveCheck} run=${liveRun} feed=${w.feed} />` : null}
+    ${w.stale && !liveRun ? html`<${Notice} tone="info">The watchlist check finished — new results are ready.
+      <button type="button" class="link-btn" onClick=${() => refreshCompanies(scope)}>Refresh</button></${Notice}>` : null}
     <${Tabs} label="Filter companies" size="sm" value=${filter} onChange=${setFilter} tabs=${tabs} />
     <div class="company-list">
       ${w.status === 'error' ? html`<${ErrorBox} message=${w.error} onRetry=${() => loadWatchlist(scope)} />` : null}

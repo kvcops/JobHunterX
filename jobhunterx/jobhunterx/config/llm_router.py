@@ -42,10 +42,11 @@ import re as _re
 from jobhunterx.config import app_state
 from jobhunterx.config import models as M
 
-# Groq GPT-OSS models take a reasoning_effort parameter; keep it low for free-tier latency.
+# Thinking is kept as small as each model allows: it costs tokens and seconds and these tasks don't need it.
+# Groq GPT-OSS can't turn it off; "low" is its minimum (measured: 61 -> 10 reasoning tokens).
 REASONING_EFFORT_MODELS = {"groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b"}
-# Qwen3 on Groq: hide the reasoning trace so callers only see the answer.
-HIDDEN_REASONING_MODELS = {"groq/qwen/qwen3-32b", "groq/qwen/qwen3.6-27b"}
+# Qwen on Groq: thinking off entirely (reasoning_effort "none").
+HIDDEN_REASONING_MODELS = {"groq/qwen/qwen3.8-27b"}
 THINKING_MODELS = REASONING_EFFORT_MODELS | HIDDEN_REASONING_MODELS
 THINKING_PARAM_MODELS: set[str] = set()
 
@@ -61,7 +62,10 @@ def get_model_config() -> Dict[str, Any]:
     """Model config for the UI: providers (configured/enabled/reachable), chains and every model with its limits."""
     avail = M.availability()
     providers = {}
+    from jobhunterx.config import auth_ctx
     for p in app_state.LLM_PROVIDERS:
+        if p in auth_ctx.SHARED_POOLS and not auth_ctx.shared_pools_allowed():
+            continue                    # prod mode: not offered to users (IP-limited free pools)
         info = avail.get(p)
         providers[p] = {"configured": bool(M.provider_key(p)), "enabled": app_state.llm_provider_enabled(p),
                         "reachable": None if info is None else info["ok"], "error": info and info["error"],
@@ -104,6 +108,9 @@ def _effective_chain(chain_name: str) -> List[str]:
 # A model that would make a call wait longer than this is passed over for the next free model in the chain:
 # one busy free tier (e.g. Flash Lite at 15 requests/minute) must not queue every call while Kilo, NIM and Groq sit idle.
 SPILL_WAIT_S = 2.0
+# NVIDIA NIM paces calls to one 36/min budget (≈1.7 s apart) and its best models answer in 1-5 s (Mistral Large 4 ~187 tokens/s),
+# so a few calls may queue for it before the overflow spills to the free Kilo / LLM7 pools (which may train on prompts).
+SPILL_WAIT_BY_PROVIDER = {"nvidia": 6.0}
 MAX_INFLIGHT = 3          # calls one model handles at once before the next free model takes the overflow
 _inflight: Dict[str, int] = {}
 
@@ -186,6 +193,8 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
         key = "default"
         limit = 5
 
+    from jobhunterx.config import auth_ctx
+    key += auth_ctx.scope()             # users with their own keys don't queue behind each other
     loop_key = id(asyncio.get_running_loop())
     sem_map = _semaphores.setdefault(loop_key, {})
     if key not in sem_map:
@@ -193,21 +202,34 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
     return sem_map[key]
 
 
-def _llm7_gate() -> asyncio.Semaphore:
-    """One LLM7 call at a time (per event loop): a second parallel call from the same client gets a 429."""
+class TooSlowForThisCall(RuntimeError):
+    """This model would need too long for the answer size asked; the next model takes the call (no rest — see call_plan)."""
+
+
+def _single_gate(provider: str) -> asyncio.Semaphore:
+    """One call at a time (per event loop and, in prod mode, per user): LLM7 answers 429 to a 2nd parallel call from one
+    client."""
+    from jobhunterx.config import auth_ctx
     loop_key = id(asyncio.get_running_loop())
     sem_map = _semaphores.setdefault(loop_key, {})
-    if "llm7" not in sem_map:
-        sem_map["llm7"] = asyncio.Semaphore(1)
-    return sem_map["llm7"]
+    slot = provider + auth_ctx.scope()
+    if slot not in sem_map:
+        sem_map[slot] = asyncio.Semaphore(1)
+    return sem_map[slot]
 
 
 def _get_provider_key(model: str) -> str:
-    """Extract provider key from model name."""
+    """Provider cooldown slot for a model (a signed-in user's own key gets its own slot, prod mode)."""
+    from jobhunterx.config import auth_ctx
+    return _provider_slot(model) + auth_ctx.scope()
+
+
+def _provider_slot(model: str) -> str:
     if model.startswith("kilo/"):
         return model                    # Kilo limits are per model: a busy one hands over to the next free model
     if model.startswith("nim/"):
-        return "nvidia"
+        return model                    # a 429 from NIM is usually that model's shared endpoint being busy; the account's
+                                        # 40/min is kept by its own limiter (config/models.py NIM_ACCOUNT)
     if model.startswith("llm7/"):
         return "llm7"                   # limits count per client: a 429 rests every LLM7 model
     if model.startswith("gemini/"):
@@ -233,7 +255,7 @@ def _record_rate_limit(model: str) -> None:
     """Mark a provider as rate-limited with a cooldown period."""
     import time as _time
     provider = _get_provider_key(model)
-    cooldown = _PROVIDER_COOLDOWN.get(provider, 30.0)
+    cooldown = _PROVIDER_COOLDOWN.get(_provider_slot(model), 30.0)
     _provider_rate_limited_until[provider] = _time.monotonic() + cooldown
     _provider_error_counts[provider] = _provider_error_counts.get(provider, 0) + 1
     log.warning(
@@ -268,10 +290,10 @@ def _get_cache():
     """Lazy-initialise disk cache."""
     global _cache
     if _cache is None:
-        from diskcache import Cache
+        from jobhunterx.config import capacity
 
         settings = get_settings()
-        _cache = Cache(str(settings.cache_full_path / "llm_cache"))
+        _cache = capacity.disk_cache(settings.cache_full_path / "llm_cache", 256)
     return _cache
 
 
@@ -314,7 +336,7 @@ def get_llm_params(model_name: str) -> Dict[str, Any]:
     if model_name in REASONING_EFFORT_MODELS:
         params["reasoning_effort"] = "low"  # Keep fast for free tier
     elif model_name in HIDDEN_REASONING_MODELS:
-        params["reasoning_format"] = "hidden"
+        params["reasoning_effort"] = "none"
     elif model_name in THINKING_PARAM_MODELS:
         params["thinking"] = {"type": "enabled", "budget_tokens": 2048}
 
@@ -372,9 +394,10 @@ async def _call_google_genai(
     messages: List[Dict[str, str]],
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Direct Google GenAI SDK call for all Gemini & Gemma models (bypasses LiteLLM completely)."""
+    """Direct Google GenAI SDK call for all Gemini models (bypasses LiteLLM completely)."""
+    from jobhunterx.config import auth_ctx
     settings = get_settings()
-    api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = settings.google_api_key or auth_ctx.env_key("GOOGLE_API_KEY", "GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("No Google API key configured")
 
@@ -393,7 +416,8 @@ async def _call_google_genai(
     contents.append(f"USER:\n{user_content}")
     prompt_str = "\n\n".join(contents)
 
-    cfg: Dict[str, Any] = {"automatic_function_calling": {"disable": True}}   # no tools; also stops the "AFC is enabled" log
+    cfg: Dict[str, Any] = {"automatic_function_calling": {"disable": True},   # no tools; also stops the "AFC is enabled" log
+                           "thinking_config": {"thinking_level": "minimal"}}    # Gemini 3 Flash thinks by default: keep it minimal
     max_tokens = kwargs.get("max_tokens") or kwargs.get("max_output_tokens")
     if max_tokens:
         cfg["max_output_tokens"] = max_tokens
@@ -407,7 +431,13 @@ async def _call_google_genai(
             config=cfg,
         )
 
-    response = await asyncio.to_thread(_sync_generate)
+    try:
+        response = await asyncio.to_thread(_sync_generate)
+    except Exception as exc:
+        if "think" not in str(exc).lower():
+            raise
+        cfg.pop("thinking_config", None)        # a model that takes no thinking level: ask again without it
+        response = await asyncio.to_thread(_sync_generate)
     latency_ms = (time.monotonic() - t0) * 1000
 
     content = getattr(response, "text", "") or ""
@@ -439,7 +469,7 @@ async def call_llm(
     """High-level async LLM call with all infrastructure:
 
     1. Check disk cache
-    2. Direct Google GenAI SDK for Gemini/Gemma models
+    2. Direct Google GenAI SDK for Gemini models
     3. Acquire provider semaphore for LiteLLM models (Groq, Mistral)
     4. Call litellm.acompletion with retry
     5. Log token usage
@@ -485,15 +515,19 @@ async def call_llm(
         provider = M.provider_of(model)
         key = M.provider_key(provider)
         base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE}[provider]
+        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.nim_extra(model.split("/", 1)[1]), "llm7": oc.LLM7_EXTRA}[provider]
         json_mode = any("JSON object" in (m.get("content") or "") for m in messages if m.get("role") == "system")
         est = sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024)
+        # room for the model's reasoning, and a wait that matches the answer size (config/models.py call_plan)
+        budget_out, call_timeout, too_slow = M.call_plan(model, int(kwargs.get("max_tokens") or 1024))
+        if too_slow:
+            raise TooSlowForThisCall(f"{model} skipped: {too_slow}")
+        call_timeout = call_timeout or 75.0
         shared = M.account_limiter(model)
         if shared:
             await M.budget(shared).acquire(0)             # NIM 40/min and LLM7: shared by all their models
         await _enforce_rate_limit(model, est)
-        # thinking models need room: a tiny budget can end before the answer starts
-        budget_out = max(1500, int(kwargs.get("max_tokens") or 1024))
-        one_at_a_time = _llm7_gate() if provider == "llm7" else None   # LLM7 refuses a 2nd parallel call from one client
+        one_at_a_time = _single_gate(provider) if provider == "llm7" else None   # LLM7 refuses a 2nd parallel call from one client
         try:
             if one_at_a_time:
                 await one_at_a_time.acquire()
@@ -501,12 +535,13 @@ async def call_llm(
                 try:
                     out = await oc.chat(base, model.split("/", 1)[1], messages, key=None if key == M.KILO_FREE else key,
                                         max_tokens=budget_out, temperature=kwargs.get("temperature"), json_mode=json_mode,
-                                        timeout=75, extra=oc.KILO_EXTRA if provider == "kilo" else None)
+                                        timeout=call_timeout, extra=no_think)
                     break
                 except oc.EmptyAnswer:
                     if attempt:
                         raise
                     budget_out = min(8192, budget_out * 3)      # one retry with more room before moving on
+                    call_timeout = min(M.MAX_CALL_TIMEOUT_S, call_timeout * 2)
         except oc.ChatError as exc:
             if exc.status == 429:
                 _record_rate_limit(model)
@@ -531,33 +566,10 @@ async def call_llm(
             _get_cache().set(ck, result, expire=cache_ttl)
         return result
 
-    # --- Direct Google GenAI SDK routing for ALL Gemini & Gemma models ---
-    if model.startswith("gemini/") or model.startswith("google/") or "gemma" in model:
-        if "gemma" in model:
-            from jobhunterx.config.gemma import call_gemma
-            system_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
-            user_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") != "system")
-            t0 = time.monotonic()
-            await _enforce_rate_limit(model, (len(system_content) + len(user_content)) // 4 + int(kwargs.get("max_tokens", 1024)))
-            content = await call_gemma(
-                model=model.split("/", 1)[-1],
-                system=system_content,
-                user=user_content,
-                max_tokens=kwargs.get("max_tokens", 1024),
-                temperature=kwargs.get("temperature"),
-            )
-            latency_ms = (time.monotonic() - t0) * 1000
-            result = {
-                "content": content,
-                "tokens_in": max(1, (len(system_content) + len(user_content)) // 4),
-                "tokens_out": max(1, len(content) // 4),
-                "model": model,
-                "latency_ms": round(latency_ms, 1),
-                "cache_hit": False,
-            }
-        else:
-            await _enforce_rate_limit(model, sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024))
-            result = await _call_google_genai(model, messages, **kwargs)
+    # --- Direct Google GenAI SDK routing for ALL Gemini models ---
+    if model.startswith("gemini/") or model.startswith("google/"):
+        await _enforce_rate_limit(model, sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024))
+        result = await _call_google_genai(model, messages, **kwargs)
         M.budget(model).record(result["tokens_in"] + result["tokens_out"])
 
         # Log token usage to database
@@ -596,6 +608,12 @@ async def call_llm(
         params.pop("top_p", None)
         params.pop("top_k", None)
     params.setdefault("max_tokens", 768)
+    # the key is passed with every call: in prod mode it is the signed-in user's own key, never the server's
+    if model.startswith(("groq/", "mistral/")):
+        key = M.provider_key(M.provider_of(model))
+        if not key:
+            raise RuntimeError(f"No API key for {M.provider_of(model)}")
+        params["api_key"] = key
 
     # --- Semaphore + call ---
     sem = _get_semaphore(model)
@@ -709,7 +727,7 @@ async def call_llm_with_fallback(
     # Chain order among models that can answer now; busy ones go last, least busy first.
     etas = {m: _eta(m) for m in usable}
     llm7_busy = any(n > 0 for k, n in _inflight.items() if k.startswith("llm7/"))   # LLM7 takes one call at a time
-    ready = [m for m in usable if etas[m] <= SPILL_WAIT_S and _inflight.get(m, 0) < MAX_INFLIGHT
+    ready = [m for m in usable if etas[m] <= SPILL_WAIT_BY_PROVIDER.get(M.provider_of(m), SPILL_WAIT_S) and _inflight.get(m, 0) < MAX_INFLIGHT
              and not (llm7_busy and m.startswith("llm7/"))]
     order = ready + sorted((m for m in usable if m not in ready), key=lambda m: (etas[m], _inflight.get(m, 0)))
     if order and usable and order[0] != usable[0]:
@@ -722,8 +740,9 @@ async def call_llm_with_fallback(
             M.mark_success(model)
             return result
         except Exception as exc:
-            rest = M.mark_failure(model, str(exc))
-            log.warning("llm_fallback", model=model, error=str(exc)[:200], next_try_in_s=int(rest) if rest else None)
+            err = str(exc) or type(exc).__name__          # httpx timeouts carry no message: "ReadTimeout" still says "timeout"
+            rest = M.mark_failure(model, err)
+            log.warning("llm_fallback", model=model, error=err[:200], next_try_in_s=int(rest) if rest else None)
             last_err = exc
         finally:
             _inflight[model] -= 1

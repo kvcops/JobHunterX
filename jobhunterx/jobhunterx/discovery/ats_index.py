@@ -21,27 +21,28 @@ import asyncio
 import gzip
 import json
 import re
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from jobhunterx.config.logging import get_logger
-from jobhunterx.intelligence.text import tokens
+from jobhunterx.intelligence.text import common_words, tokens
 
 log = get_logger("ats_index")
 
 SOURCE = "https://raw.githubusercontent.com/Feashliaa/job-board-data/main/data"
 REFRESH_S = 20 * 3600               # a copy younger than this is used as is
-CHUNK_CONCURRENCY = 3                # each chunk is ~25k rows; three at a time keeps memory small
+CHUNK_CONCURRENCY = 3                # each chunk is ~25k rows (~60 MB while parsed); fewer on a small server, see _chunk_slots
 INDIA = re.compile(r"(?i)\bindia\b|\b(bengaluru|bangalore|hyderabad|secunderabad|chennai|pune|mumbai|navi mumbai|gurugram|gurgaon|"
                    r"noida|new delhi|delhi|kolkata|kochi|cochin|coimbatore|trivandrum|thiruvananthapuram|ahmedabad|jaipur|"
                    r"chandigarh|indore|visakhapatnam|vizag|mysore|mysuru|mangalore|madurai|nagpur|bhubaneswar|vadodara)\b")
 LEVELS = {"intern": 0, "entry": 1, "junior": 1, "mid": 2, "senior": 3, "staff": 4, "principal": 4, "lead": 3, "manager": 3, "director": 5}
 
 
-@dataclass
+@dataclass(slots=True)                  # tens of thousands of rows: no per-row __dict__
 class Row:
     url: str
     company: str
@@ -71,10 +72,23 @@ def _load() -> list[Row]:
             with gzip.open(_dir() / "india.json.gz", "rt", encoding="utf-8") as f:
                 data = json.load(f)
             _meta = data.get("meta", {})
-            _rows = [Row(**r) for r in data.get("rows", [])]
+            _rows = [_row(r) for r in data.get("rows", [])]
+            del data
         except (OSError, ValueError, TypeError):
             _rows, _meta = [], {}
     return _rows
+
+
+_common_cache: tuple[int, set[str]] = (0, set())
+
+
+def _common() -> set[str]:
+    """Words in many of the index's titles ("engineer", "senior"): ignored when matching titles."""
+    global _common_cache
+    rows = _rows or []
+    if _common_cache[0] != id(rows):
+        _common_cache = (id(rows), common_words((r.title for r in rows), share=0.05))
+    return _common_cache[1]
 
 
 def status() -> dict:
@@ -122,7 +136,7 @@ async def sync(force: bool = False) -> dict:
             return status()
         total = int(meta.get("total_jobs") or 0)
         n_chunks = max(1, -(-total // 25000)) if total else 80
-        sem = asyncio.Semaphore(CHUNK_CONCURRENCY)
+        sem = asyncio.Semaphore(_chunk_slots())
         kept: dict[str, Row] = {}
         misses = 0
 
@@ -146,8 +160,28 @@ async def sync(force: bool = False) -> dict:
     _meta = {"source_updated": meta.get("last_updated"), "synced_at": time.time(), "boards": boards, "source_jobs": total}
     _rows = rows
     _save(rows, _meta)
+    del kept
+    from jobhunterx.config import capacity
+    capacity.release_memory()            # the downloaded chunks are gone: give their memory back
     log.info("ats_index_synced", india=len(rows), boards=boards, source_jobs=total, ms=int((time.monotonic() - t0) * 1000))
     return status()
+
+
+def _chunk_slots() -> int:
+    """Chunks parsed at once: one on a small server (each is ~60 MB while parsed), up to three with room to spare."""
+    from jobhunterx.config import capacity
+    free = capacity.plan().get("memory_available_mb") or 0
+    return 1 if free < 900 else 2 if free < 1500 else CHUNK_CONCURRENCY
+
+
+_intern = sys.intern
+
+
+def _row(r: dict) -> Row:
+    # company, place, level and ATS repeat across thousands of rows: one shared copy of each string
+    return Row(url=r["url"], company=_intern(r.get("company") or ""), title=r.get("title") or "",
+               location=_intern(r.get("location") or ""), level=_intern(r.get("level") or ""),
+               first_seen=r.get("first_seen") or "", ats=_intern(r.get("ats") or ""))
 
 
 def _india_rows(body: bytes) -> list[Row]:
@@ -156,9 +190,9 @@ def _india_rows(body: bytes) -> list[Row]:
         loc = r.get("location") or ""
         if not r.get("url") or not INDIA.search(loc) or r.get("is_recruiter"):
             continue
-        out.append(Row(url=r["url"], company=(r.get("company") or "").strip(), title=(r.get("title") or "").strip(),
-                       location=loc.strip(), level=(r.get("skill_level") or "").lower(),
-                       first_seen=r.get("first_seen") or r.get("scraped_at") or "", ats=(r.get("ats") or "").lower()))
+        out.append(_row({"url": r["url"], "company": (r.get("company") or "").strip(), "title": (r.get("title") or "").strip(),
+                         "location": loc.strip(), "level": (r.get("skill_level") or "").lower(),
+                         "first_seen": r.get("first_seen") or r.get("scraped_at") or "", "ats": (r.get("ats") or "").lower()}))
     return out
 
 
@@ -166,7 +200,7 @@ def _save(rows: list[Row], meta: dict) -> None:
     path = _dir() / "india.json.gz"
     tmp = path.with_suffix(".tmp")
     with gzip.open(tmp, "wt", encoding="utf-8") as f:
-        json.dump({"meta": meta, "rows": [r.__dict__ for r in rows]}, f)
+        json.dump({"meta": meta, "rows": [asdict(r) for r in rows]}, f)
     tmp.replace(path)
 
 
@@ -218,29 +252,82 @@ def search(labels: list[str], places: list[str], *, level: Optional[str] = None,
     want = [w for w in want if w]
     if not want:
         return []
-    forms = {p.lower() for p in places if p}
-    if forms & {"bengaluru", "bangalore"}:
-        forms |= {"bengaluru", "bangalore"}
-    if forms & {"hyderabad", "secunderabad"}:
-        forms |= {"hyderabad", "secunderabad"}
+    local_place = _local(places)
     me = LEVELS.get((level or "").lower())
+    common = _common()
+    want_pairs = [(w, w - common) for w in want]
     out = []
     for r in rows:
-        loc = r.location.lower()
-        local = any(f in loc for f in forms) if forms else True
-        remote = include_remote and "remote" in loc
+        local = local_place(r.location)
+        remote = include_remote and "remote" in r.location.lower()
         if not (local or remote):
             continue
         age = _age_days(r)
         if age > max_age_days:
             continue
-        jt = set(tokens(r.title))
-        rel = max((len(jt & w) / len(jt | w) for w in want), default=0.0) if jt else 0.0
+        # meaning-bearing words only: "Platform Engineer" is not an "AI Engineer" match through "Engineer"
+        full = set(tokens(r.title))
+        rel = 0.0
+        for w_full, w_core in want_pairs:
+            jt, w = full - common, w_core
+            if not w:                   # the candidate's own title is all common words ("Software Engineer")
+                jt, w = full, w_full
+            if jt and w:
+                rel = max(rel, len(jt & w) / len(jt | w))
         if rel < 0.25:
             continue
         lv = LEVELS.get(r.level)
-        fit = 1.0 if me is None or lv is None else (1.0 if abs(lv - me) <= 1 else 0.35)     # far above or below: sinks
+        # the candidate's own level first, one step away next, far above or below sinks
+        fit = 1.0 if me is None or lv is None else {0: 1.0, 1: 0.8}.get(abs(lv - me), 0.35)
         score = rel * fit * (1.25 if age <= 3 else 1.1 if age <= 7 else 1.0 if age <= 14 else 0.8)
         out.append((r, score))
     out.sort(key=lambda x: -x[1])
-    return out[:limit]
+    # one employer's ten copies of "Storage AI Engineer" must not take ten of the slots
+    per: dict[str, int] = {}
+    capped = []
+    for r, sc in out:
+        per[r.company] = per.get(r.company, 0) + 1
+        if per[r.company] <= PER_COMPANY:
+            capped.append((r, sc))
+    return capped[:limit]
+
+
+PER_COMPANY = 2
+
+
+def _local(places: list[str]):
+    forms = {p.lower() for p in places if p}
+    if forms & {"bengaluru", "bangalore"}:
+        forms |= {"bengaluru", "bangalore"}
+    if forms & {"hyderabad", "secunderabad"}:
+        forms |= {"hyderabad", "secunderabad"}
+    return lambda loc: any(f in loc.lower() for f in forms) if forms else True
+
+
+def level_titles(labels: list[str], places: list[str], level: str, *, max_age_days: int = 45, limit: int = 40) -> list[tuple[str, int]]:
+    """Real titles of openings at this level in these places, from employers' own boards: [(title, employers)].
+
+    The search plan picks its wording from these instead of inventing titles nobody uses ("RAG Engineer Junior"):
+    for a fresher they are what entry-level openings are really called here ("Associate Data Scientist",
+    "Data Scientist 1", "Graduate Engineer Trainee"). Kept: titles sharing a meaningful word with the candidate's
+    titles, and titles made only of common words ("Associate Software Engineer"), which fit any field."""
+    rows = _load()
+    me = LEVELS.get((level or "").lower())
+    if not rows or me is None:
+        return []
+    common = _common()
+    want = set().union(*[set(tokens(l)) - common for l in labels if l]) if labels else set()
+    local = _local(places)
+    seen: dict[str, tuple[str, set[str]]] = {}
+    for r in rows:
+        lv = LEVELS.get(r.level)
+        if lv is None or abs(lv - me) > 0 or _age_days(r) > max_age_days or not local(r.location):
+            continue
+        title = re.sub(r"\s+", " ", r.title).strip()[:80]
+        core = set(tokens(title)) - common
+        if core and not (core & want):
+            continue
+        key = title.lower()
+        seen.setdefault(key, (title, set()))[1].add(r.company)
+    ranked = sorted(seen.values(), key=lambda x: -len(x[1]))
+    return [(t, len(cos)) for t, cos in ranked[:limit]]
