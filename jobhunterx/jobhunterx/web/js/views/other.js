@@ -402,11 +402,11 @@ export function InterventionsView() {
 // ---------------------------------------------------------------------------- settings
 const LLM_META = {
   google: { name: 'Google AI Studio', field: 'google_api_key', hint: 'Gemini 3.5 Flash Lite — fast, the first choice for every task', url: 'aistudio.google.com' },
-  kilo: { name: 'Kilo Gateway', field: 'kilo_api_key', hint: 'Free models with no key — Nemotron 3 Super, Laguna S, Ling Flash · 200 requests/hour per model', url: 'kilo.ai (key optional)',
+  kilo: { name: 'Kilo Gateway', field: 'kilo_api_key', hint: 'Free models with no key — Nemotron 3 Super, Nemotron 3.5 Super VL, Laguna S, Dots 3 Note · 200 requests/hour per model', url: 'kilo.ai (key optional)',
     free: true, note: 'Free models may use your prompts (resume text, job posts) to train. Turn off if that matters to you.' },
   llm7: { name: 'LLM7', field: null, hint: 'Free models with no key — DeepSeek V4 Pro, MiniMax M3, GLM 5.3 Flash · one call at a time, small daily allowance, used as a backup after Kilo', url: 'llm7.io (no key)',
     free: true, note: 'Its privacy terms are not published, so treat prompts as public. When its daily allowance is used up, the next model answers instead.' },
-  nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Nemotron 3 Ultra 550B, Nemotron 3.5 Lightning / Bolt, GPT-OSS 20B · free key · 40 requests/min for the whole account · thinking off — leads every task when a key is set, and drives the browser agent', url: 'build.nvidia.com' },
+  nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Recommended · the fastest free option tested (Mistral Large 4 ~187 tokens/s, Nemotron 3.5 Super VL ~85) · also Nemotron 3.5 Lightning / Bolt, Nemotron 3 Ultra, MiniMax M3.1 Flash, GPT-OSS 20B · free key, 40 requests/min for the whole account (paced at 36) · thinking off or low · leads every task and the browser agent when a key is set; busy models hand over automatically', url: 'build.nvidia.com' },
   groq: { name: 'Groq', field: 'groq_api_key', hint: 'GPT-OSS, Kimi K2, Qwen3 — very fast', url: 'console.groq.com' },
   mistral: { name: 'Mistral', field: 'mistral_api_key', hint: 'Mistral Medium / Small / Large (latest)', url: 'console.mistral.ai' },
 };

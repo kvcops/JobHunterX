@@ -28,6 +28,17 @@ def _no_lifespan_db(monkeypatch):
     monkeypatch.setattr(main, "set_db_path", lambda p: db.set_db_path(path))
 
 
+def _wait_snapshot(client, timeout=20):
+    """The profile once its AI understanding is ready (what the UI gets from the profile.updated event)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        env = client.get("/api/profile").json()
+        if env.get("snapshot") and not env.get("snapshot_pending"):
+            return env
+        time.sleep(0.1)
+    raise AssertionError("profile understanding was not built")
+
+
 def _wait_run(client, run_id, timeout=20):
     end = time.time() + timeout
     while time.time() < end:
@@ -60,7 +71,10 @@ def test_full_flow_search_save_track_generate(client):
     r = client.put("/api/profile", json=scenario.PROFILE)
     assert r.status_code == 200
     env = r.json()
-    assert env["snapshot"]["method"] == "llm" and env["profile_hash"]
+    # saving answers at once; the AI understanding is built in the background (snapshot_pending → profile.updated)
+    assert env["profile_hash"] and (env["snapshot"] or env.get("snapshot_pending"))
+    env = _wait_snapshot(client)
+    assert env["snapshot"]["method"] == "llm" and not env.get("snapshot_pending")
 
     run = client.post("/api/searches", json={}).json()["run"]
     run = _wait_run(client, run["id"])

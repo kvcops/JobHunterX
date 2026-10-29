@@ -108,8 +108,8 @@ def _effective_chain(chain_name: str) -> List[str]:
 # A model that would make a call wait longer than this is passed over for the next free model in the chain:
 # one busy free tier (e.g. Flash Lite at 15 requests/minute) must not queue every call while Kilo, NIM and Groq sit idle.
 SPILL_WAIT_S = 2.0
-# NVIDIA NIM paces calls to one 36/min budget (≈1.7 s apart) and answers in 1-5 s, and — unlike the free Kilo / LLM7 pools —
-# does not use prompts for training, so a few calls may queue for it before the overflow spills to the next provider.
+# NVIDIA NIM paces calls to one 36/min budget (≈1.7 s apart) and its best models answer in 1-5 s (Mistral Large 4 ~187 tokens/s),
+# so a few calls may queue for it before the overflow spills to the free Kilo / LLM7 pools (which may train on prompts).
 SPILL_WAIT_BY_PROVIDER = {"nvidia": 6.0}
 MAX_INFLIGHT = 3          # calls one model handles at once before the next free model takes the overflow
 _inflight: Dict[str, int] = {}

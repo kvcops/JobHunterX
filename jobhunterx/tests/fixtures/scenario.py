@@ -284,4 +284,8 @@ def install(monkeypatch) -> dict:
     monkeypatch.setattr(registry, "pick", lambda *a, **kw: [])
     monkeypatch.setattr(registry, "remember", lambda *a, **kw: 0)
     monkeypatch.setattr(registry, "polled", lambda *a, **kw: None)
+    # every posting in this fake world is at one employer (Acme), so the real search's "3 jobs per company" cap would hide
+    # the very jobs the scenario checks the reasons for
+    from jobhunterx.services import search as search_svc
+    monkeypatch.setattr(search_svc, "COMPANY_CAP", 99)
     return calls

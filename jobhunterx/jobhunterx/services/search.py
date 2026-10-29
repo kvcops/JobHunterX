@@ -281,8 +281,9 @@ async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[d
     return out
 
 
-def _cap_per_company(jobs: list[JobPosting], cap: int = COMPANY_CAP) -> list[JobPosting]:
+def _cap_per_company(jobs: list[JobPosting], cap: Optional[int] = None) -> list[JobPosting]:
     """Keep the order, but at most `cap` jobs per employer (the best ones, as the list is sorted best first)."""
+    cap = COMPANY_CAP if cap is None else cap
     seen: dict[str, int] = {}
     out = []
     for p in jobs:
