@@ -185,7 +185,7 @@ function DocumentDetail({ docId }) {
   const editing = tab === 'edit';
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(d.content);
   dirtyRef.current = dirty;
-  const shown = style || d.style || 'classic';
+  const shown = style || d.style || 'classic';   // d.style is already normalised by the server
   const save = async () => {
     setSaving(true);
     const updated = await updateDocument(docId, draft);

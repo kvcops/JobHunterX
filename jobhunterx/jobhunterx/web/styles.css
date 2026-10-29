@@ -1907,30 +1907,28 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 
 /* -------------------------------------------------------------------------- document styles (live preview)
    Same content, different look: switching is CSS only, so it is instant. The PDF templates mirror these
-   (generation/styles.py). */
-.paper { --p-accent: #111827; --p-ink: #111; --p-muted: #71717a; transition: font-family .2s, color .25s; }
-.paper h2, .paper h3, .paper a, .paper-sub, .paper-head { transition: color .25s, background-color .25s, border-color .25s, padding .25s, letter-spacing .25s; }
-.paper[data-style="classic"] h3 { color: var(--p-muted); }
-.paper[data-style="modern"] { --p-accent: #2563eb; }
-.paper[data-style="modern"] h2 { color: var(--p-accent); }
-.paper[data-style="modern"] h3 { color: var(--p-accent); border-bottom: 0; border-left: 3px solid var(--p-accent); padding: 0 0 0 8px; }
-.paper[data-style="modern"] a, .paper[data-style="modern"] .paper-links a { color: var(--p-accent); }
-.paper[data-style="elegant"] { font-family: Georgia, "Times New Roman", serif; --p-accent: #44403c; }
-.paper[data-style="elegant"] .paper-head { text-align: center; }
-.paper[data-style="elegant"] h2 { letter-spacing: 0; font-weight: 600; }
-.paper[data-style="elegant"] h3 { text-align: center; color: var(--p-accent); border-bottom: .5px solid #a8a29e; letter-spacing: .2em; }
-.paper[data-style="elegant"] .paper-item .row.space { flex-wrap: wrap; }
-.paper[data-style="minimal"] h3 { border-bottom: 0; color: #a1a1aa; margin-top: 26px; letter-spacing: .22em; }
-.paper[data-style="minimal"] h2 { font-weight: 500; }
-.paper[data-style="bold"] h3 { background: #1f2937; color: #fff; padding: 4px 9px; border-bottom: 0; border-radius: 3px; letter-spacing: .14em; }
-.paper[data-style="emerald"] { --p-accent: #047857; }
-.paper[data-style="emerald"] h2 { color: #064e3b; }
-.paper[data-style="emerald"] h3 { color: var(--p-accent); border-bottom: 2px solid var(--p-accent); }
-.paper[data-style="emerald"] a, .paper[data-style="emerald"] .paper-links a { color: var(--p-accent); }
-.paper[data-style="ats"] { font-family: Arial, Helvetica, sans-serif; color: #000; }
-.paper[data-style="ats"] h2, .paper[data-style="ats"] .paper-sub, .paper[data-style="ats"] .paper-contact, .paper[data-style="ats"] .muted { color: #000; }
-.paper[data-style="ats"] h3 { color: #000; border-bottom: 1px solid #000; }
-.paper[data-style="ats"] a, .paper[data-style="ats"] .paper-links a { color: #000; text-decoration: underline; }
+   (generation/styles.py). All styles are single-column, plain text, ATS-safe. */
+.paper { --p-name: #111; --p-accent: #71717a; --p-rule: #e4e4e7; transition: font-family .2s, color .25s; }
+.paper h2, .paper h3, .paper a, .paper-sub, .paper-head { transition: color .25s, border-color .25s, letter-spacing .25s, text-align .25s; }
+.paper h2 { color: var(--p-name); }
+.paper h3 { color: var(--p-accent); border-bottom-color: var(--p-rule); }
+.paper[data-style="classic"] h3 { text-transform: none; letter-spacing: .02em; font-size: .8rem; color: #111827; border-bottom: 1px solid #111827; }
+.paper[data-style="professional"] { --p-name: #1e3a5f; --p-accent: #1e3a5f; --p-rule: #1e3a5f; }
+.paper[data-style="professional"] .paper-head { text-align: center; border-bottom: 2px solid #1e3a5f; padding-bottom: 8px; }
+.paper[data-style="professional"] h3 { letter-spacing: .12em; border-bottom: 1px solid #1e3a5f; }
+.paper[data-style="professional"] a, .paper[data-style="professional"] .paper-links a { color: #1e3a5f; }
+.paper[data-style="harvard"] { font-family: "Times New Roman", Times, serif; --p-name: #000; --p-accent: #000; --p-rule: #000; color: #111; }
+.paper[data-style="harvard"] .paper-head { text-align: center; }
+.paper[data-style="harvard"] h2 { letter-spacing: 0; font-weight: 700; }
+.paper[data-style="harvard"] h3 { letter-spacing: .1em; border-bottom: 1px solid #000; font-weight: 700; }
+.paper[data-style="harvard"] a, .paper[data-style="harvard"] .paper-links a { color: #000; }
+.paper[data-style="modern"] { --p-name: #0f172a; --p-accent: #0369a1; --p-rule: #0369a1; }
+.paper[data-style="modern"] .paper-head { border-bottom: 2px solid #0369a1; padding-bottom: 8px; }
+.paper[data-style="modern"] h3 { letter-spacing: .12em; border-bottom: 1.5px solid #0369a1; }
+.paper[data-style="modern"] a, .paper[data-style="modern"] .paper-links a { color: #0369a1; }
+.paper[data-style="slate"] { --p-name: #0f172a; --p-accent: #475569; --p-rule: #cbd5e1; }
+.paper[data-style="slate"] h3 { letter-spacing: .14em; border-bottom: 1px solid #cbd5e1; }
+.paper[data-style="slate"] a, .paper[data-style="slate"] .paper-links a { color: #334155; }
 
 .style-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; }
 .style-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border-radius: 99px; border: 1px solid var(--line); background: var(--card-solid);
@@ -1940,11 +1938,9 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .style-swatch { --sw: #111; width: 26px; height: 32px; flex: none; border-radius: 4px; background: #fff; border: 1px solid rgba(17,17,17,.14); padding: 5px 4px; display: flex; flex-direction: column; gap: 3px; }
 .style-swatch i { display: block; height: 2px; border-radius: 2px; background: #d4d4d8; }
 .style-swatch i:first-child { height: 3px; width: 70%; background: var(--sw); }
-.style-swatch.sw-bar i:nth-child(2) { border-left: 3px solid var(--sw); height: 4px; background: transparent; margin-left: -1px; }
-.style-swatch.sw-band i:nth-child(2) { background: var(--sw); height: 4px; }
-.style-swatch.sw-rule i:nth-child(2) { background: var(--sw); height: 1px; }
-.style-swatch.sw-center i:first-child { margin: 0 auto; }
-.style-swatch.sw-plain i:nth-child(2) { background: #a1a1aa; width: 50%; }
+.style-swatch i:nth-child(2) { height: 1px; background: var(--sw); }
+.style-swatch.is-center i:first-child { margin: 0 auto; }
+.style-swatch.is-serif i:first-child { width: 55%; }
 .style-busy { margin-left: 4px; }
 
 /* -------------------------------------------------------------------------- AI editor dock + snap effect */

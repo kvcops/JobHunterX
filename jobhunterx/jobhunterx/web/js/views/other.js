@@ -406,7 +406,7 @@ const LLM_META = {
     free: true, note: 'Free models may use your prompts (resume text, job posts) to train. Turn off if that matters to you.' },
   llm7: { name: 'LLM7', field: null, hint: 'Free models with no key — DeepSeek V4 Pro, MiniMax M3, GLM 5.3 Flash · one call at a time, small daily allowance, used as a backup after Kilo', url: 'llm7.io (no key)',
     free: true, note: 'Its privacy terms are not published, so treat prompts as public. When its daily allowance is used up, the next model answers instead.' },
-  nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Nemotron Nano 3, GPT-OSS 20B, GLM Flash, DeepSeek Flash · 40 requests/min', url: 'build.nvidia.com' },
+  nvidia: { name: 'NVIDIA NIM', field: 'nvidia_api_key', hint: 'Nemotron 3 Super / Nano, GLM 5.3 Flash, DeepSeek V4.1 Flash, GPT-OSS 20B · free key · 40 requests/min for the whole account · thinking off — leads every task when a key is set, and drives the browser agent', url: 'build.nvidia.com' },
   groq: { name: 'Groq', field: 'groq_api_key', hint: 'GPT-OSS, Kimi K2, Qwen3 — very fast', url: 'console.groq.com' },
   mistral: { name: 'Mistral', field: 'mistral_api_key', hint: 'Mistral Medium / Small / Large (latest)', url: 'console.mistral.ai' },
   ollama: { name: 'Ollama Cloud', field: 'ollama_api_key', hint: 'Open-weight models (GPT-OSS 120B / 20B) · one request at a time · free plan is small and changes often — off until you turn it on', url: 'ollama.com/settings/keys',

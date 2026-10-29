@@ -55,8 +55,39 @@ def test_unknown_style_falls_back_and_cannot_pick_a_path():
 
 def test_styles_change_the_look_not_the_content():
     a, _ = render.render_resume(CONTENT, "classic")
-    b, _ = render.render_resume(CONTENT, "bold")
+    b, _ = render.render_resume(CONTENT, "professional")
     assert a != b
+
+
+def test_old_style_ids_land_on_a_current_style():
+    assert styles.normalize("bold") == "professional" and styles.normalize("emerald") == "modern"
+    assert styles.normalize("elegant") == "harvard" and styles.normalize("ats") == "classic" and styles.normalize("zzz") == "classic"
+    assert not styles.valid("bold")                  # a new request can only name a current style
+
+
+def test_styles_stay_ats_safe():
+    """One column, plain section titles, real text, no dark fills: checked on the HTML every style produces."""
+    for sid in styles.STYLES:
+        html = render._render("resume.html", doc=CONTENT, s=styles.get(sid), **render.SHRINK_PROFILES[0])
+        assert "background" not in html.split("</style>")[0].replace("background-color: #fff", ""), sid
+        assert "<img" not in html and "float:" not in html and "column-count" not in html, sid
+        for title in ("Summary", "Skills", "Experience", "Education"):
+            assert title.lower() in html.lower(), (sid, title)
+    caps = render._render("resume.html", doc=CONTENT, s=styles.get("professional"), **render.SHRINK_PROFILES[0])
+    assert ">EXPERIENCE<" in caps
+    assert ">Experience<" in render._render("resume.html", doc=CONTENT, s=styles.get("classic"), **render.SHRINK_PROFILES[0])
+
+
+def test_pdf_text_is_selectable_in_every_style():
+    import shutil, subprocess, tempfile
+    if not shutil.which("pdftotext"):
+        pytest.skip("pdftotext not installed")
+    for sid in styles.STYLES:
+        pdf, _ = render.render_resume(CONTENT, sid)
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(pdf); f.flush()
+            text = subprocess.run(["pdftotext", "-layout", f.name, "-"], capture_output=True, text=True).stdout
+        assert "Asha Rao" in text and "RAG assistant" in text and "FAISS" in text, sid
 
 
 # ---------------------------------------------------------------- chat editor
@@ -156,8 +187,9 @@ def test_styles_endpoint_and_style_switch_and_styled_download(client):
     assert client.patch("/api/documents/doc1/style", json={"style": "bogus"}).status_code == 422
     r = client.patch("/api/documents/doc1/style", json={"style": "modern"})
     assert r.status_code == 200 and r.json()["document"]["style"] == "modern"
+    assert client.patch("/api/documents/doc1/style", json={"style": "bold"}).status_code == 422       # retired id
     plain = client.get("/api/documents/doc1/pdf")
-    bold = client.get("/api/documents/doc1/pdf", params={"style": "bold"})
+    bold = client.get("/api/documents/doc1/pdf", params={"style": "harvard"})
     assert plain.content.startswith(b"%PDF") and bold.content.startswith(b"%PDF") and plain.content != bold.content
     assert client.get("/api/documents/doc1/pdf", params={"style": "../x"}).status_code == 422
 

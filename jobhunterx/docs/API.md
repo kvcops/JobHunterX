@@ -320,7 +320,7 @@ updates, downloads, and deletes are scoped to the active profile.
 
 ```ts
 type DocumentSummary = {
-  style: string;                                 // visual style id (classic, modern, elegant, minimal, bold, emerald, ats)
+  style: string;                                 // visual style id (classic, professional, harvard, modern, slate)
   id: string; kind: "resume"|"cv"|"cover_letter"; job_id: string|null;
   title: string; focus: string; created_at: string; updated_at: string;
   profile_hash: string; stale: boolean;          // profile changed since generation

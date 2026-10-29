@@ -509,7 +509,7 @@ async def call_llm(
         provider = M.provider_of(model)
         key = M.provider_key(provider)
         base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE, "ollama": oc.OLLAMA_BASE}[provider]
-        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.NIM_EXTRA, "llm7": oc.LLM7_EXTRA, "ollama": oc.OLLAMA_EXTRA}[provider]
+        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.nim_extra(model.split("/", 1)[1]), "llm7": oc.LLM7_EXTRA, "ollama": oc.OLLAMA_EXTRA}[provider]
         json_mode = any("JSON object" in (m.get("content") or "") for m in messages if m.get("role") == "system")
         est = sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024)
         shared = M.account_limiter(model)

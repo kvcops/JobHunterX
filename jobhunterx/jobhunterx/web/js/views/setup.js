@@ -9,7 +9,7 @@ import { Button, Icon, Notice, Badge } from '../components/ui.js';
 const AI = [
   { id: 'google', field: 'google_api_key', name: 'Google AI Studio', sub: 'Gemini 3.5 Flash Lite', url: 'https://aistudio.google.com/apikey', best: true,
     how: 'Sign in with Google → “Create API key” → copy. Free, no card.' },
-  { id: 'nvidia', field: 'nvidia_api_key', name: 'NVIDIA NIM', sub: '40 requests/min', url: 'https://build.nvidia.com/settings/api-keys',
+  { id: 'nvidia', field: 'nvidia_api_key', name: 'NVIDIA NIM', sub: '40 requests/min · Nemotron, GLM, DeepSeek', url: 'https://build.nvidia.com/settings/api-keys',
     how: 'Sign in at build.nvidia.com → “Generate API Key” → copy. Free, no card.' },
   { id: 'groq', field: 'groq_api_key', name: 'Groq', sub: 'very fast', url: 'https://console.groq.com/keys',
     how: 'Sign up → “Create API Key” → copy (shown only once).' },

@@ -593,6 +593,7 @@ def _actions_of(model_output: Any, state: Any) -> list[str]:
 _KILO_BROWSER = ["nvidia/nemotron-3-super-120b-a12b:free", "kilo-auto/free", "nvidia/nemotron-3.5-super-vl:free", "poolside/laguna-s-2.1:free"]
 # LLM7 free model (no key): last resort only — measured 17 Oct 2026 at 10-60 s per answer.
 _LLM7_BROWSER = ["GLM-5.3-Flash"]
+_NIM_BROWSER = ["nvidia/nemotron-3-super-120b-a12b"]      # NVIDIA NIM: 40 requests/minute on a free key, thinking off
 
 
 def _json_only(text: str) -> str:
@@ -602,7 +603,7 @@ def _json_only(text: str) -> str:
 
 
 def _free_llm(provider: str, model: str, key: str) -> Any:
-    """A no-key pool (Kilo, LLM7) through browser-use's OpenAI client. Kilo's free pool rejects any Authorization header
+    """An OpenAI-compatible pool (Kilo / LLM7 without a key, NVIDIA NIM with one) through browser-use's OpenAI client. Kilo's free pool rejects any Authorization header
     and most free models refuse strict JSON-schema output, so: no auth header, the schema goes in the prompt, Kilo's
     reasoning is off (see openai_compat.KILO_EXTRA), and screenshots are dropped (text models; the page text is still sent)."""
     import openai
@@ -622,7 +623,8 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
             create = client.chat.completions.create
 
             async def create_free(*, messages: list, **kw: Any) -> Any:
-                kw["extra_body"] = oc.KILO_EXTRA if provider == "kilo" else oc.LLM7_EXTRA   # thinking off
+                kw["extra_body"] = (oc.KILO_EXTRA if provider == "kilo" else oc.nim_extra(model) if provider == "nvidia"
+                                    else oc.LLM7_EXTRA)   # thinking off
                 resp = await create(messages=[text_only(m) for m in messages], **kw)
                 for choice in resp.choices or []:
                     if choice.message.content:
@@ -633,7 +635,7 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
             return client
 
     free = key == M.KILO_FREE
-    base = oc.KILO_BASE if provider == "kilo" else oc.LLM7_BASE
+    base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE}.get(provider, oc.LLM7_BASE)
     return FreeChat(model=model, api_key="no-key" if free else key, base_url=base,
                     default_headers={"Authorization": openai.Omit()} if free else None,
                     temperature=0.2, frequency_penalty=None, max_retries=0, timeout=90,
@@ -643,7 +645,7 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
 class _LLMChain:
     """Many models behind one. browser-use switches to its fallback_llm only once per run and then stops, so a
     Gemini "RESOURCE_EXHAUSTED" followed by one busy fallback ended the whole run. Here every call walks the list
-    (Gemini → Kilo free models → LLM7 → Groq → Mistral) and skips models the app's AI router already knows are
+    (Gemini → NVIDIA NIM → Kilo free models → Groq → Mistral → LLM7) and skips models the app's AI router already knows are
     resting or rate limited (shared state in config.models), so the browser agent and the rest of the app agree."""
 
     def __init__(self, links: list[tuple[str, Any]]):
@@ -703,6 +705,7 @@ def _build_llms() -> tuple[Any, Any]:
     groq_key = M.provider_key("groq") if _app_state.llm_provider_enabled("groq") else None
     mistral_key = M.provider_key("mistral") if _app_state.llm_provider_enabled("mistral") else None
     kilo_key = M.provider_key("kilo") if _app_state.llm_provider_enabled("kilo") else None
+    nim_key = M.provider_key("nvidia") if _app_state.llm_provider_enabled("nvidia") else None
     llm7_on = _app_state.llm_provider_enabled("llm7") and bool(M.provider_key("llm7"))
     links: list[tuple[str, Any]] = []
     if google_key:
@@ -711,6 +714,8 @@ def _build_llms() -> tuple[Any, Any]:
             model="gemini-3.5-flash-lite", api_key=google_key, temperature=0.2, max_retries=3,
             config={"thinking_config": {"thinking_level": "MINIMAL"}},   # browser-use only knows Gemini 3 / 3.1 by name
             retry_base_delay=2.0, retry_max_delay=10.0, retryable_status_codes=[500, 502, 503, 504])))
+    if nim_key:                          # a keyed 40 requests/minute pool: ahead of the shared free ones
+        links += [(f"nim/{m}", _free_llm("nvidia", m, nim_key)) for m in _NIM_BROWSER]
     if kilo_key:
         links += [(f"kilo/{m}", _free_llm("kilo", m, kilo_key)) for m in _KILO_BROWSER]
     if groq_key and ChatGroq is not None:

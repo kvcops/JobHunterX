@@ -154,7 +154,7 @@ flowchart LR
 | 4️⃣ | Press **Search now** | Finds postings (web + your watchlist companies' own boards), checks they are real and open, reads each one, scores fit **and** chance to be seen — live |
 | ⏱️ | Nothing — it runs by itself | Every 4 hours it checks the watchlist companies again; new matches appear in the **New** tab |
 | 5️⃣ | Open a job | Explains the score (what fits, what's missing, what's unknown), the chance a person reads your application, and what the company is like |
-| 5️⃣b | Open **Documents** | Pick a **style** (7 looks, instant preview, PDF in that style) and use **Edit with AI** to reword — the AI proposes small fact-checked edits you keep or undo |
+| 5️⃣b | Open **Documents** | Pick a **style** (5 ATS-safe looks, instant preview, PDF in that style) and use **Edit with AI** to reword — the AI proposes small fact-checked edits you keep or undo |
 | 6️⃣ | Press **Auto-apply** | Checks your documents → writes the missing ones → opens the browser agent **inside the app** |
 | 7️⃣ | Watch (or take over) | The agent fills the form; you can stop, take over, continue or finish it yourself |
 | 8️⃣ | Relax 😌 | The job moves to **Applied** in your tracker |
@@ -434,7 +434,7 @@ clickable labels next to the right project or entry — nothing extra, no long r
 ✅ **Nothing invented:** every AI-written line is fact-checked (`generation/evidence.py`). A new number, tool, employer
 or claim that isn't in your profile is rejected and your own words are kept.
 
-🎨 Each document can be shown and downloaded in 7 styles, and reworded through a small chat — see
+🎨 Each document can be shown and downloaded in 5 ATS-safe styles, and reworded through a small chat — see
 [Resume styles & the AI editor](#-resume-styles--the-ai-editor).
 
 <br/>
@@ -443,17 +443,19 @@ or claim that isn't in your profile is rejected and your own words are kept.
 
 ## 🎨 Resume styles & the AI editor
 
-**Styles** change how a document looks, never what it says. Open any resume, CV or cover letter and pick one:
+**Styles** change how a document looks, never what it says. Every style is **ATS-safe by construction**: one column, real
+selectable text in a built-in font, standard section titles, no icons, images, tables-as-layout tricks or text on dark
+backgrounds. Open any resume, CV or cover letter and pick one:
 
 | Style | Look |
 |:--|:--|
-| **Classic** | Black headings with a thin rule — the safe default |
-| **Modern** | Blue accent, a bar beside each heading |
-| **Elegant** | Serif type, centred header, quiet hairlines |
-| **Minimal** | No rules, soft grey headings, lots of air |
-| **Bold** | Dark filled heading strips |
-| **Emerald** | Green accent, underlined headings |
-| **ATS plain** | Pure black on white — easiest for résumé-parsing software |
+| **Classic** *(default)* | The original: black headings with a thin rule, name left, contact right |
+| **Professional** | Navy name and capital section titles, centred header with a fine navy rule |
+| **Harvard** | Serif type, all black, centred — the traditional academic / finance format |
+| **Modern** | Left-aligned, one blue accent under the header and each section title |
+| **Slate** | Quiet slate capitals over a hairline; calm and compact |
+
+(Documents saved with the retired ids *elegant, minimal, bold, emerald, ats* open in the closest current style.)
 
 * ⚡ **Instant:** the preview switches with CSS alone (≈ 50 ms, no server call). The server re-renders the saved PDF in the
   background a moment after you stop clicking, so the stored file (and Auto-apply's attachment) matches.
@@ -536,15 +538,16 @@ graph LR
 
 | Task (Settings label) | Chain | Model order (a model without a key / switched off / not on your account is skipped) |
 |:--|:--|:--|
-| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → **NIM** (Nemotron Nano 3, GPT-OSS 20B) → Groq GPT-OSS 20B → Mistral Small → Ollama GPT-OSS 20B *(opt-in)* → LLM7 |
-| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **Kilo** (Nemotron 3 Super, Nemotron 3.5 Super VL, Auto, Dots 3 Note, Laguna S, Xing 4.0, Nemotron 3 Nano Omni) → Groq Qwen3.8 27B → **NIM** (GLM 5.3 Flash, DeepSeek V4.1 Flash) → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → Ollama *(opt-in)* → LLM7 |
-| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **Kilo** (Nemotron 3 Super, Auto) → **NIM** (DeepSeek V4.1 Flash, GLM 5.3 Flash) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → Ollama *(opt-in)* → LLM7 |
-| Resume reading | `extraction` | same as Matching & analysis (Mistral Medium before Groq GPT-OSS 120B) |
+| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron Nano 3, GPT-OSS 20B) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → Ollama GPT-OSS 20B *(opt-in)* → LLM7 |
+| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (GLM 5.3 Flash, DeepSeek V4.1 Flash, Nemotron 3 Super, Nemotron 3 Nano Omni) → **Kilo** (Nemotron 3 Super, Nemotron 3.5 Super VL, Auto, Dots 3 Note, Laguna S, Xing 4.0, Nemotron 3 Nano Omni) → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → Ollama *(opt-in)* → LLM7 |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (DeepSeek V4.1 Flash, Nemotron 3 Super, GLM 5.3 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → Ollama *(opt-in)* → LLM7 |
+| Resume reading, job reading, Company Scout | `extraction` | same as Matching & analysis (Mistral Medium before Groq GPT-OSS 120B) |
 | **Resume chat editor** | `editor` | Gemini 3.5 Flash Lite → **Kilo** free models only — thinking off |
-| Browser agent | `browser` | Gemini 3.5 Flash Lite → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
+| Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** Nemotron 3 Super → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
 
-**Kilo comes before NVIDIA NIM** on purpose: it needs no key and each Kilo model has its own 200 requests/hour, while NIM's
-40 requests/minute is shared by every NIM model on your account. Kilo's free models are "thinking" models; the app turns
+**With a key, NVIDIA NIM leads right after Gemini.** Its free tier allows about 40 requests/minute for the whole account (≈ 2,400 an
+hour — against Kilo's 200 an hour *per model*), which is what a search with many AI reads needs. Without a NIM key those entries are skipped
+and Kilo answers. Kilo's free models are "thinking" models; the app turns
 their thinking off (`reasoning: {enabled: false}`) — in tests that made them answer in about 1–3 s. If a model still
 returns an empty answer, it gets one retry with more room and is never "rested" for it. Rejected keys are skipped for the
 whole provider (and retried when you paste a new one); a model that fails with server errors rests 2 → 4 → 8 → … 30 min.
@@ -573,6 +576,18 @@ Ollama Cloud runs **open-weight models only** (no proprietary models) behind `ht
 * **Thinking** is switched off with `reasoning_effort: "none"` (asked again without it if a model rejects the parameter).
 * The key test (`POST /api/setup/test-key`) only lists models, which runs no model.
 
+### 🟩 NVIDIA NIM (free key)
+
+`https://integrate.api.nvidia.com/v1`, OpenAI-compatible, key from [build.nvidia.com](https://build.nvidia.com/settings/api-keys).
+Only the hosted free-endpoint catalog is used (no paid or self-hosted endpoints); the app asks your key's `/v1/models` list and
+skips any model your account cannot call. Chosen for speed and low thinking: small or mixture-of-experts "flash" / "nano" models
+first, **Nemotron 3 Super 120B** for the harder reasoning and writing. Thinking is switched off through the chat template
+(Nemotron / GLM / DeepSeek) or set to `low` (GPT-OSS); a model that rejects the setting is asked again without it. NIM serves
+every agent that goes through a task chain — profile and job reading, matching, shortlisting, the Connector, resume / CV /
+letter writing, the Company Scout and the agents office — and drives the browser agent too. The 40 requests/minute figure is
+what NVIDIA's free tier is widely reported to allow per account (not an official guarantee), so the router spaces calls to it
+as one shared budget.
+
 ### 💳 Free-tier limits the router respects
 
 Each model gets its own limiter: requests are spaced to its **RPM**, a rolling one-minute window keeps it under **TPM**, and
@@ -592,7 +607,7 @@ e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
 | Kilo Gateway | `kilo-auto/free` · `nvidia/nemotron-3-super-120b-a12b:free` · `nvidia/nemotron-3.5-super-vl:free` · `dots-studio/dots-3-note-preview:free` · `cohere/north-mini-code:free` · `poolside/laguna-s-2.1:free` · `xingchen-agi/xing4.0-29b-a4b:free` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | — | **200 req / hour per model** | — | No key. Measured 1–9 s per answer. May train on prompts |
 | LLM7 | `GLM-5.3-Flash` · `DeepSeek-V4-Flash-0731` | ~5 per minute (spaced) | small token quota | — | No key, one call at a time, 10–60 s: last resort |
-| NVIDIA NIM | `nvidia/nemotron-nano-3-30b-a3b` · `openai/gpt-oss-20b` · `z-ai/glm-5.3-flash` · `deepseek-ai/deepseek-v4.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget |
+| NVIDIA NIM | `nvidia/nemotron-3-super-120b-a12b` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` · `nvidia/nemotron-nano-3-30b-a3b` · `openai/gpt-oss-20b` · `z-ai/glm-5.3-flash` · `deepseek-ai/deepseek-v4.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget. Thinking is off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS) |
 | Ollama Cloud | `gpt-oss:120b` · `gpt-oss:20b` | unpublished (spaced, 1 at a time) | plan-dependent | — | **Opt-in**; see above |
 
 > [!NOTE]

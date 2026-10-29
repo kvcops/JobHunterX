@@ -40,6 +40,15 @@ class EmptyAnswer(ChatError):
 KILO_EXTRA = {"reasoning": {"enabled": False}}
 # NVIDIA NIM: thinking models (Nemotron, GLM, DeepSeek) read these chat-template switches.
 NIM_EXTRA = {"chat_template_kwargs": {"enable_thinking": False, "thinking": False}}
+def nim_extra(model: str) -> dict:
+    """Thinking off or lowest for one NIM model. The chat-template switches cover Nemotron / GLM / DeepSeek; GPT-OSS has
+    no off switch, only an effort level, so it gets "low". A model that rejects any of this is asked again without (chat())."""
+    extra = {**NIM_EXTRA}
+    if "gpt-oss" in model:
+        extra["reasoning_effort"] = "low"
+    return extra
+
+
 # LLM7 (measured 17 Oct 2026): reasoning_effort "none" gives shorter, faster answers.
 LLM7_EXTRA = {"reasoning_effort": "none"}
 # Ollama Cloud: OpenAI-compatible endpoint takes reasoning_effort; a model that rejects it is asked again without (see chat()).

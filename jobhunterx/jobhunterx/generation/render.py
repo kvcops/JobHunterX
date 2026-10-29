@@ -33,8 +33,9 @@ _CV_LAYOUT = {**SHRINK_PROFILES[0], "font_size_body": "9.5pt", "font_size_bullet
 
 @lru_cache(maxsize=1)
 def _env() -> Environment:
-    return Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)),
-                       autoescape=select_autoescape(["html", "j2"]))
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=select_autoescape(["html", "j2"]))
+    env.filters["cap"] = lambda text, st: str(text).upper() if st.get("caps") else str(text)   # xhtml2pdf ignores text-transform
+    return env
 
 
 def _render(template: str, **ctx) -> str:

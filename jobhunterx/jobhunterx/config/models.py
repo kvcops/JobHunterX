@@ -70,6 +70,12 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Fast and light."},
     {"id": "nim/z-ai/glm-5.3-flash", "name": "GLM 5.3 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "Flash model, good structured output."},
+    # Added Oct 2026 from NVIDIA's own model pages (build.nvidia.com): Nemotron 3 Super (strongest free NVIDIA model) and
+    # Nemotron 3 Nano Omni. Ids are checked against your key's /v1/models list; a name not on your account is skipped.
+    {"id": "nim/nvidia/nemotron-3-super-120b-a12b", "name": "Nemotron 3 Super 120B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "120B MoE (12B active): the strongest free NVIDIA model here. Thinking off."},
+    {"id": "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "name": "Nemotron 3 Nano Omni (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "3B active parameters, fast. Thinking off."},
     {"id": "nim/deepseek-ai/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "Flash model, strong reasoning and writing."},
     # Google AI Studio.
@@ -109,6 +115,11 @@ BY_ID = {m["id"]: m for m in CATALOG}
 # Live tests (Oct 2026): Gemini 3.5 Flash Lite answers in ~1 s, so it leads every chain.
 # Order: Gemini Flash Lite (fastest, if you have a key) -> Kilo free pool (no key) -> NVIDIA NIM -> Groq -> Mistral -> LLM7.
 # Kilo models are spread across chains so their 200 req/hour per-model budgets add up.
+# NVIDIA NIM (free key): 40 requests/minute for the whole account — about 2,400 an hour against Kilo's 200 an hour per model —
+# so with a key NIM leads right after Gemini. Without a key these entries are skipped. Thinking is off / low on all of them.
+_NIM_FAST = ["nim/nvidia/nemotron-nano-3-30b-a3b", "nim/openai/gpt-oss-20b"]
+_NIM_SMART = ["nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash", "nim/nvidia/nemotron-3-super-120b-a12b",
+              "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
 _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
               "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
 _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemotron-3.5-super-vl:free", "kilo/kilo-auto/free",
@@ -121,21 +132,21 @@ _OLLAMA_FAST = ["ollama/gpt-oss:20b"]
 _OLLAMA_SMART = ["ollama/gpt-oss:120b", "ollama/gpt-oss:20b"]
 CHAINS: dict[str, list[str]] = {
     # quick tasks want speed; LLM7 last (slow)
-    "fast": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST, "groq/qwen/qwen3.8-27b", "nim/nvidia/nemotron-nano-3-30b-a3b",
-             "nim/openai/gpt-oss-20b", "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", *_OLLAMA_FAST, *_LLM7],
-    "reasoning": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "groq/qwen/qwen3.8-27b", "nim/z-ai/glm-5.3-flash",
-                  "nim/deepseek-ai/deepseek-v4.1-flash", "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
+    "fast": ["gemini/gemini-3.5-flash-lite", *_NIM_FAST, *_KILO_FAST, "groq/qwen/qwen3.8-27b",
+             "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", *_OLLAMA_FAST, *_LLM7],
+    "reasoning": ["gemini/gemini-3.5-flash-lite", *_NIM_SMART, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
+                  "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
                   "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", *_OLLAMA_SMART, *_LLM7],
-    "tailoring": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free",
-                  "nim/deepseek-ai/deepseek-v4.1-flash", "nim/z-ai/glm-5.3-flash", "groq/qwen/qwen3.8-27b",
+    "tailoring": ["gemini/gemini-3.5-flash-lite", "nim/deepseek-ai/deepseek-v4.1-flash", "nim/nvidia/nemotron-3-super-120b-a12b",
+                  "nim/z-ai/glm-5.3-flash", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "groq/qwen/qwen3.8-27b",
                   "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b",
                   "mistral/mistral-medium-latest", *_OLLAMA_SMART, *_LLM7],
-    "extraction": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "groq/qwen/qwen3.8-27b", "nim/z-ai/glm-5.3-flash",
-                   "nim/deepseek-ai/deepseek-v4.1-flash", "mistral/mistral-medium-latest", "groq/openai/gpt-oss-120b",
+    "extraction": ["gemini/gemini-3.5-flash-lite", *_NIM_SMART, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
+                   "mistral/mistral-medium-latest", "groq/openai/gpt-oss-120b",
                    *_OLLAMA_SMART, *_LLM7],
     # chat editor for resumes / CVs / letters: Gemini 3.5 Flash Lite or Kilo's free models only, thinking off
     "editor": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST],
-    "browser": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
+    "browser": ["gemini/gemini-3.5-flash-lite", "nim/nvidia/nemotron-3-super-120b-a12b", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
                 "mistral/mistral-small-latest", "llm7/GLM-5.3-Flash"],
 }
 CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tailoring": "Resume & letter writing",

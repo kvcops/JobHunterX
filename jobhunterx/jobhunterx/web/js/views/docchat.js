@@ -11,13 +11,11 @@ import { errorText, toast } from '../actions.js';
 
 // ---------------------------------------------------------------------------------------------- styles
 export const FALLBACK_STYLES = [
-  { id: 'classic', label: 'Classic', accent: '#111827', heading: 'rule' },
-  { id: 'modern', label: 'Modern', accent: '#2563eb', heading: 'bar' },
-  { id: 'elegant', label: 'Elegant', accent: '#44403c', heading: 'center' },
-  { id: 'minimal', label: 'Minimal', accent: '#71717a', heading: 'plain' },
-  { id: 'bold', label: 'Bold', accent: '#1f2937', heading: 'band' },
-  { id: 'emerald', label: 'Emerald', accent: '#047857', heading: 'rule' },
-  { id: 'ats', label: 'ATS plain', accent: '#000000', heading: 'rule' },
+  { id: 'classic', label: 'Classic', accent: '#111827', align: 'left', font: 'Helvetica' },
+  { id: 'professional', label: 'Professional', accent: '#1e3a5f', align: 'center', font: 'Helvetica' },
+  { id: 'harvard', label: 'Harvard', accent: '#000000', align: 'center', font: 'Times-Roman' },
+  { id: 'modern', label: 'Modern', accent: '#0369a1', align: 'left', font: 'Helvetica' },
+  { id: 'slate', label: 'Slate', accent: '#475569', align: 'left', font: 'Helvetica' },
 ];
 let stylesPromise = null;
 export function useStyles() {
@@ -33,7 +31,7 @@ export function StylePicker({ styles, value, onChange, busy }) {
   return html`<div class="style-picker" role="radiogroup" aria-label="Document style">
     ${styles.map((s) => html`<button type="button" role="radio" aria-checked=${value === s.id} key=${s.id}
         class=${`style-chip ${value === s.id ? 'is-on' : ''}`} title=${s.description || s.label} onClick=${() => onChange(s.id)}>
-      <span class=${`style-swatch sw-${s.heading}`} style=${{ '--sw': s.accent }} aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class=${`style-swatch ${s.align === 'center' ? 'is-center' : ''} ${s.font === 'Times-Roman' ? 'is-serif' : ''}`} style=${{ '--sw': s.accent }} aria-hidden="true"><i></i><i></i><i></i></span>
       <span>${s.label}</span></button>`)}
     ${busy ? html`<span class="muted small style-busy" aria-live="polite">Updating PDF…</span>` : null}
   </div>`;
