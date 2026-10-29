@@ -391,10 +391,11 @@ textarea.input { resize: vertical; line-height: 1.6; min-height: 92px; }
 /* job list tabs: always one row of six equal tabs, label on top and count below, so the bar keeps its size when
    counts grow (9 -> 145) and never scrolls or wraps; only a very narrow column switches to a 3 x 2 grid */
 .results { container-type: inline-size; }
-.results > .tabs-sm { width: 100%; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; overflow: visible; }
+/* one row, columns sized to their labels — the tab count changes (Safety net shows only when it has jobs) */
+.results > .tabs-sm { width: 100%; display: grid; grid-auto-flow: column; grid-auto-columns: auto; gap: 2px; overflow: visible; }
 .results > .tabs-sm .tab { flex-direction: column; justify-content: center; gap: 1px; min-width: 0; padding: 5px 2px; font-size: .76rem; line-height: 1.15; }
 .results > .tabs-sm .tab-count { font-size: .66rem; }
-@container (max-width: 330px) { .results > .tabs-sm { grid-template-columns: repeat(3, minmax(0, 1fr)); border-radius: 18px; } }
+@container (max-width: 330px) { .results > .tabs-sm { grid-auto-flow: row; grid-template-columns: repeat(4, minmax(0, 1fr)); border-radius: 18px; } }
 .tab-count { font-family: var(--mono); font-size: .7rem; color: var(--text-3); }
 .tab.active .tab-count { color: var(--accent); }
 
