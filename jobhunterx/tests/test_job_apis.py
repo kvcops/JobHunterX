@@ -1,4 +1,4 @@
-"""Adzuna, JSearch and Hacker News parsers + orchestration (fake network, no keys needed)."""
+"""Adzuna and Hacker News parsers + orchestration (fake network, no keys needed)."""
 
 import asyncio
 from types import SimpleNamespace
@@ -31,19 +31,6 @@ def test_parse_adzuna():
     assert b.salary is None                         # predicted salaries are not shown as facts
 
 
-def test_parse_jsearch_prefers_direct_link():
-    data = {"data": [{
-        "job_title": "AI Engineer", "employer_name": "Gamma", "job_city": "Bengaluru", "job_state": "Karnataka", "job_country": "IN",
-        "job_posted_at_datetime_utc": "2026-10-28T00:00:00.000Z", "job_apply_link": "https://in.linkedin.com/jobs/view/9",
-        "job_description": "Full text", "job_is_remote": False, "job_employment_type": "FULLTIME",
-        "apply_options": [{"publisher": "LinkedIn", "apply_link": "https://in.linkedin.com/jobs/view/9", "is_direct": False},
-                          {"publisher": "Gamma", "apply_link": "https://jobs.gamma.com/ai", "is_direct": True}],
-        "job_min_salary": 15, "job_max_salary": 25, "job_salary_currency": "INR", "job_salary_period": "YEAR"}]}
-    (p,) = job_apis.parse_jsearch(data)
-    assert p.apply_url == "https://jobs.gamma.com/ai" and p.sources[0].kind == "job_board"
-    assert p.location_raw == "Bengaluru, Karnataka, IN" and p.employment_type == "full_time" and p.description == "Full text"
-
-
 def _hit(text, oid="1"):
     return {"objectID": oid, "comment_text": text, "created_at": "2026-10-25T10:00:00Z", "parent_id": 100}
 
@@ -71,12 +58,13 @@ def test_hn_job_story():
 
 
 def test_status_flags():
-    s = SimpleNamespace(adzuna_api_key="a:b", jsearch_api_key=None, enable_hn_source=True)
-    assert job_apis.status(s) == {"adzuna": True, "jsearch": False, "hackernews": True}
+    s = SimpleNamespace(adzuna_api_key="a:b", enable_hn_source=False)
+    assert job_apis.status(s) == {"adzuna": True, "hackernews": False}
+    assert job_apis.status(SimpleNamespace(adzuna_api_key=None, enable_hn_source=False)) == {"adzuna": False, "hackernews": False}
 
 
 def test_discover_merges_and_survives_failures(monkeypatch):
-    s = SimpleNamespace(adzuna_api_key="a:b", jsearch_api_key="k" * 20, enable_hn_source=True)
+    s = SimpleNamespace(adzuna_api_key="a:b", enable_hn_source=True)
     adz = job_apis.parse_adzuna({"results": [
         {"title": "AI Engineer", "company": {"display_name": "Acme AI"}, "redirect_url": "https://www.adzuna.in/land/ad/1",
          "location": {"display_name": "Hyderabad"}, "created": "2026-10-27T09:00:00Z"},
@@ -85,13 +73,11 @@ def test_discover_merges_and_survives_failures(monkeypatch):
 
     async def fake_adzuna(*a, **k): return adz
     async def boom(*a, **k): raise RuntimeError("quota")
-    async def hn(*a, **k): return []
     async def first_party(p): return p
     monkeypatch.setattr(job_apis, "adzuna_search", fake_adzuna)
-    monkeypatch.setattr(job_apis, "jsearch_search", boom)
-    monkeypatch.setattr(job_apis, "hackernews_search", hn)
+    monkeypatch.setattr(job_apis, "hackernews_search", boom)
     monkeypatch.setattr(job_apis, "_prefer_first_party", first_party)
     posts, st = asyncio.new_event_loop().run_until_complete(
         job_apis.discover(s, ["AI Engineer"], ["Hyderabad"], labels=LABELS, max_postings=10))
     assert [p.company for p in posts] == ["Acme AI"]            # recruiter dropped, failing source skipped
-    assert st["agencies"] == 1 and st["adzuna"] >= 1 and st["jsearch"] == 0
+    assert st["agencies"] == 1 and st["adzuna"] >= 1 and st["hackernews"] == 0

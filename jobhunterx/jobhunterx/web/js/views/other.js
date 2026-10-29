@@ -507,7 +507,6 @@ function JobApisCard({ d }) {
   const own = !!d.restricted;
   const apis = [
     { k: 'adzuna', name: 'Adzuna', hint: 'Official India job index, newest first. Paste both values as app_id:app_key', url: 'https://developer.adzuna.com' },
-    { k: 'jsearch', name: 'JSearch', hint: 'Google for Jobs (LinkedIn, Indeed, Naukri, direct employer links) via RapidAPI · about 200 free calls a month', url: 'https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch' },
   ];
   return html`<section class="set-section"><h2>More job sources</h2>
     <p class="muted small">Optional. Their postings join every search and go through the same checks as all other jobs.</p>

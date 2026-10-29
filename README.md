@@ -548,8 +548,8 @@ short cooldown. Override any number with `MODEL_LIMITS_JSON` in `.env`, e.g.
 | **Company watchlist** — 130 researched Hyderabad / Bengaluru / remote-India employers | Researched, sources linked | Their boards are read on every search and every 4 hours in the background; the research card is shown on each of their jobs |
 | **schema.org JobPosting** on a page | Verified when the hiring organisation's site is the page's site; otherwise inferred | Title, company, location, dates, `validThrough`, remote eligibility, salary |
 | **Other pages** (job boards, aggregators) | Unverified | Text only; if the page links to a supported ATS posting, that posting is used instead |
-| **Adzuna** (India index, key `ADZUNA_API_KEY=app_id:app_key`) · **JSearch** (Google for Jobs via RapidAPI, key `JSEARCH_API_KEY`, at most 4 calls per search, cached 12 h) | Aggregated, **inferred** | Optional. Each role is first looked up on the employer's own board (first-party wins); otherwise kept as an aggregator posting. Staffing agencies are dropped. Code: `discovery/job_apis.py` |
-| **Hacker News** — YC startups' job posts + monthly "Who is hiring?" (no key, `ENABLE_HN_SOURCE`) | Community post, **inferred** | Only India / your cities / India-friendly remote roles in your field are kept; the hiring email in the post is passed on to the Connector |
+| **Adzuna** — optional, off until you add `ADZUNA_API_KEY=app_id:app_key` | Aggregated, **inferred** | Each role is first looked up on the employer's own board (first-party wins); staffing agencies are dropped. Code: `discovery/job_apis.py` |
+| **Hacker News** — optional, **off by default** (`ENABLE_HN_SOURCE=true`) | Community post, **inferred** | YC startups' job posts + monthly "Who is hiring?"; only India / your cities / India-friendly remote roles in your field are kept; the hiring email is passed to the Connector |
 | **Web search** — TinyFish → Tavily → Exa → Brave → **Deep Search** (free) → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
 
 ### 🔎 Deep Search — good results without any search key

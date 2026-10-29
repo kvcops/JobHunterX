@@ -1,13 +1,10 @@
 """
-Extra job sources: Adzuna (India), JSearch (Google for Jobs) and Hacker News (YC jobs + "Who is hiring?").
+Optional extra job sources: Adzuna (India, needs a free key) and Hacker News (YC jobs + "Who is hiring?", opt-in).
 
 Why these three, and how each is used (see README "Job Sources"):
 
 * Adzuna — official API with an India index, newest-first, filterable by age. Needs a free key (`app_id:app_key`).
   Its listings are aggregated, so the same role is looked up on the employer's own job board first.
-* JSearch — Google for Jobs through RapidAPI (LinkedIn, Indeed, Naukri… and many direct employer links). Free plan is
-  small (about 200 calls a month), so each search makes at most a few calls and answers are cached for hours.
-  The direct employer apply link is preferred over a job-board link.
 * Hacker News — no key. YC startups' job posts and the monthly "Who is hiring?" thread, read through the public
   Algolia/Firebase APIs. Only posts that name India, one of your cities, or an India-friendly remote role are kept.
   Posts often carry a direct hiring email, which the Connector can use.
@@ -38,10 +35,6 @@ CONCURRENCY = 3
 BUDGET_S = 40.0
 FIRST_PARTY_TIMEOUT_S = 10
 ADZUNA_URL = "https://api.adzuna.com/v1/api/jobs/in/search/{page}"
-JSEARCH_URL = "https://jsearch.p.rapidapi.com/search"
-JSEARCH_HOST = "jsearch.p.rapidapi.com"
-JSEARCH_MAX_CALLS = 4            # per search: the free plan is about 200 calls a month
-JSEARCH_CACHE_HOURS = 12
 HN_JOBS_URL = "https://hacker-news.firebaseio.com/v0/jobstories.json"
 HN_ITEM_URL = "https://hacker-news.firebaseio.com/v0/item/{id}.json"
 HN_ALGOLIA = "https://hn.algolia.com/api/v1/search_by_date"
@@ -148,71 +141,6 @@ async def adzuna_search(creds: tuple[str, str], what: str, where: str, *, days: 
     if where and where.lower() != "india":
         params["where"] = where
     return parse_adzuna(await _json(ADZUNA_URL.format(page=1), params=params) or {}, query=f"{what} · {where or 'India'}")
-
-
-# ------------------------------------------------------------------ JSearch
-def parse_jsearch(data: dict, query: str = "") -> list[JobPosting]:
-    out = []
-    for r in (data or {}).get("data") or []:
-        title, company = _clean(r.get("job_title", "")), _clean(r.get("employer_name", ""))
-        if not (title and company):
-            continue
-        options = r.get("apply_options") or []
-        direct = next((o.get("apply_link") for o in options if o.get("is_direct") and o.get("apply_link")), "")
-        link = direct or r.get("job_apply_link") or (options[0].get("apply_link") if options else "") or r.get("job_google_link") or ""
-        if not link:
-            continue
-        where = ", ".join(x for x in (r.get("job_city"), r.get("job_state"), r.get("job_country")) if x)
-        publisher = r.get("job_publisher") or "Google for Jobs"
-        p = JobPosting(title=title, company=company, location_raw=where, posted_at=_when(r.get("job_posted_at_datetime_utc")),
-                       description=(r.get("job_description") or "").strip()[:20000], canonical_url=link, apply_url=link,
-                       work_mode=WorkMode.REMOTE if r.get("job_is_remote") else WorkMode.UNKNOWN,
-                       employment_type={"FULLTIME": "full_time", "PARTTIME": "part_time", "CONTRACTOR": "contract",
-                                        "INTERN": "internship"}.get(str(r.get("job_employment_type") or "").upper(), ""),
-                       discovered_by_query=query,
-                       sources=[SourceRef(name="jsearch", kind="job_board" if direct else "aggregator", url=link,
-                                          first_party=False, confidence=0.7 if direct else 0.5)])
-        lo, hi = r.get("job_min_salary"), r.get("job_max_salary")
-        if lo or hi:
-            p.salary = Salary(min=lo, max=hi, currency=r.get("job_salary_currency") or "",
-                              period={"YEAR": "year", "MONTH": "month", "HOUR": "hour"}.get(str(r.get("job_salary_period") or "").upper(), "year"))
-        p.validation.checks["title"] = FieldCheck(status="inferred", value=title, evidence=f"Google for Jobs via {publisher}")
-        if p.posted_at:
-            p.validation.checks["posted_at"] = FieldCheck(status="inferred", value=p.posted_at.date().isoformat(), evidence=f"Google for Jobs via {publisher}")
-        out.append(p)
-    return out
-
-
-_jsearch_cache = None
-
-
-def _cache():
-    global _jsearch_cache
-    if _jsearch_cache is None:
-        from jobhunterx.config import capacity
-        from jobhunterx.config.settings import get_settings
-        _jsearch_cache = capacity.disk_cache(get_settings().cache_full_path / "jsearch", 16)
-    return _jsearch_cache
-
-
-async def jsearch_search(key: str, what: str, where: str, *, remote: bool = False) -> list[JobPosting]:
-    q = f"{what} in {where}, India" if where and where.lower() != "india" else f"{what} in India"
-    cache_key = f"{q}|{remote}"
-    try:
-        raw = _cache().get(cache_key)
-    except Exception:
-        raw = None
-    if raw is None:
-        params = {"query": q, "page": "1", "num_pages": "1", "country": "in", "date_posted": "week"}
-        if remote:
-            params["work_from_home"] = "true"
-        raw = await _json(JSEARCH_URL, params=params, headers={"X-RapidAPI-Key": key, "X-RapidAPI-Host": JSEARCH_HOST})
-        if raw is not None:
-            try:
-                _cache().set(cache_key, raw, expire=JSEARCH_CACHE_HOURS * 3600)
-            except Exception:
-                pass
-    return parse_jsearch(raw or {}, query=q)
 
 
 # ------------------------------------------------------------------ Hacker News
@@ -337,7 +265,6 @@ async def _prefer_first_party(p: JobPosting) -> JobPosting:
 def status(settings) -> dict:
     """Which of these sources are on (for the UI and for the search's own log)."""
     return {"adzuna": adzuna_credentials(getattr(settings, "adzuna_api_key", None)) is not None,
-            "jsearch": bool(getattr(settings, "jsearch_api_key", None)),
             "hackernews": bool(getattr(settings, "enable_hn_source", False))}
 
 
@@ -348,7 +275,7 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
     from jobhunterx.discovery import linkedin
     t0 = time.monotonic()
     on = status(settings)
-    stats: dict = {"enabled": [k for k, v in on.items() if v], "adzuna": 0, "jsearch": 0, "hackernews": 0,
+    stats: dict = {"enabled": [k for k, v in on.items() if v], "adzuna": 0, "hackernews": 0,
                    "agencies": 0, "seen": 0, "first_party": 0}
     if not stats["enabled"]:
         return [], stats
@@ -370,21 +297,9 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
         batches = await asyncio.gather(*(one(t, w) for t in titles[:3] for w in places[:3]))
         return [p for b in batches for p in b]
 
-    async def jsearch() -> list[JobPosting]:
-        combos = [(t, w, False) for t in titles[:2] for w in places[:2]]
-        if include_remote:
-            combos.append((titles[0], "India", True))
-        async def one(t: str, w: str, r: bool):
-            async with sem:
-                return await jsearch_search(settings.jsearch_api_key, t, w, remote=r)
-        batches = await asyncio.gather(*(one(*c) for c in combos[:JSEARCH_MAX_CALLS]))
-        return [p for b in batches for p in b]
-
     jobs: list[tuple[str, Awaitable]] = []
     if on["adzuna"] and titles:
         jobs.append(("adzuna", guarded("adzuna", adzuna())))
-    if on["jsearch"] and titles:
-        jobs.append(("jsearch", guarded("jsearch", jsearch())))
     if on["hackernews"]:
         jobs.append(("hackernews", guarded("hackernews", hackernews_search(labels, places, include_remote=include_remote))))
     results = await asyncio.gather(*(j for _, j in jobs))
@@ -393,7 +308,7 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
         stats[name] = len(res)
         found += res
     if on_progress and found:
-        await on_progress("Job APIs: " + ", ".join(f"{n} {stats[n]}" for n in ("adzuna", "jsearch", "hackernews") if on[n]) + " leads")
+        await on_progress("Job APIs: " + ", ".join(f"{n} {stats[n]}" for n in ("adzuna", "hackernews") if on[n]) + " leads")
 
     common = common_words(p.title for p in found)
     kept: list[JobPosting] = []
@@ -415,7 +330,7 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
         if skip and await skip(p):
             stats["seen"] += 1
             return
-        if p.sources[0].name in ("adzuna", "jsearch"):
+        if p.sources[0].name == "adzuna":
             async with sem:
                 better = await _prefer_first_party(p)
             if better is not p:
