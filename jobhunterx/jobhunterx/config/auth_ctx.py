@@ -19,7 +19,7 @@ from typing import Any, Optional
 # Providers whose free pools are limited per server IP: one user would use up everyone's share.
 SHARED_POOLS = ("kilo", "llm7")
 # Keys a non-admin user brings themselves (BYOK). Kilo is not here: its free pool is IP-limited.
-USER_KEY_PROVIDERS = ("google", "nvidia", "groq", "mistral", "tinyfish", "tavily", "exa", "brave", "browser_use", "adzuna")
+USER_KEY_PROVIDERS = ("google", "nvidia", "groq", "mistral", "tinyfish", "tavily", "exa", "brave", "browser_use", "adzuna", "ollama")
 
 
 @dataclass

@@ -576,6 +576,17 @@ export async function updateDocument(docId, content) {
     return null;
   }
 }
+/** Save a document's style (the preview already switched instantly; this makes the stored PDF and later downloads match). */
+export async function saveDocumentStyle(docId, style) {
+  try {
+    const { document } = await api.setDocumentStyle(docId, style);
+    setEntry('docDetails', docId, { status: 'ready', doc: document, error: null });
+    return document;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return null;
+  }
+}
 export async function deleteDocument(docId) {
   if (!(await confirmAction({ title: 'Delete this document?', body: 'The PDF and its history will be removed.', confirm: 'Delete', tone: 'danger' }))) return;
   try {

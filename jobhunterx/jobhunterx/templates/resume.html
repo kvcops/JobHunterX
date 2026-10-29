@@ -2,6 +2,12 @@
 <html><head><meta charset="utf-8"><style>{% include "_base.css.j2" %}</style></head>
 <body>
 {% set c = doc %}
+{% if s.align == 'center' %}
+<div class="name" style="text-align:center">{{ c.header.name }}</div>
+{% if c.headline %}<div class="headline" style="text-align:center">{{ c.headline }}</div>{% endif %}
+<div class="contact" style="text-align:center">{{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}
+{% if c.header.links %}<br>{% for l in c.header.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}{% endif %}</div>
+{% else %}
 <table><tr>
   <td><div class="name">{{ c.header.name }}</div>{% if c.headline %}<div class="headline">{{ c.headline }}</div>{% endif %}</td>
   <td class="contact" style="text-align:right">
@@ -9,6 +15,7 @@
     {% for l in c.header.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
   </td>
 </tr></table>
+{% endif %}
 {% if c.summary %}<div class="section"><div class="section-title">Summary</div><div>{{ c.summary }}</div></div>{% endif %}
 {% if c.skills %}<div class="section"><div class="section-title">Skills</div>
 <table class="skills">{% for g in c.skills %}<tr><td class="skill-cat">{{ g.category }}</td><td>{{ g["items"] | join(', ') }}</td></tr>{% endfor %}</table></div>{% endif %}

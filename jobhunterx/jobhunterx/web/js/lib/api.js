@@ -199,7 +199,10 @@ export const api = {
   getDocument: (id, o) => request(`/documents/${enc(id)}`, o),
   updateDocument: (id, content, o) => request(`/documents/${enc(id)}`, { method: 'PATCH', body: { content }, ...o }),
   deleteDocument: (id, o) => request(`/documents/${enc(id)}`, { method: 'DELETE', ...o }),
-  documentPdfUrl: (id) => `/api/documents/${enc(id)}/pdf`,
+  documentPdfUrl: (id, style) => `/api/documents/${enc(id)}/pdf${style ? `?style=${encodeURIComponent(style)}` : ''}`,
+  documentStyles: (o) => request('/document-styles', o),
+  setDocumentStyle: (id, style, o) => request(`/documents/${enc(id)}/style`, { method: 'PATCH', body: { style }, ...o }),
+  chatDocument: (id, body, o) => request(`/documents/${enc(id)}/chat`, { method: 'POST', body, timeout: 90_000, ...o }),
 
   // system
   status: (o) => request('/status', o),

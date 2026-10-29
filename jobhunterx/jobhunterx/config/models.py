@@ -6,7 +6,7 @@ free plan, Mistral free/Experiment plan) as of October 2026. They change often,
 so three safety nets keep the app working when they drift:
 
 * every limit can be overridden with MODEL_LIMITS_JSON in .env, e.g.
-  MODEL_LIMITS_JSON={"gemini/gemma-4-31b-it": {"rpm": 30, "rpd": 14400}}
+  MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000}}
 * the provider's own /models endpoint is queried with your key, and models the
   account cannot use are skipped instead of failing every call;
 * a 429 puts that provider in cooldown and the chain moves on.
@@ -72,11 +72,17 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Flash model, good structured output."},
     {"id": "nim/deepseek-ai/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "Flash model, strong reasoning and writing."},
-    # Google AI Studio — Gemma runs on the Gemini API (no system role: instructions are sent inline).
-    {"id": "gemini/gemma-4-31b-it", "name": "Gemma 4 31B", "provider": "google", "rpm": 15, "rpd": 1500, "tpm": None, "tpd": None,
-     "note": "Dense 31B, 256K context. Strong, but slow and often overloaded on the free tier — used as a fallback."},
+    # Google AI Studio.
     {"id": "gemini/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "provider": "google", "rpm": 15, "rpd": 500, "tpm": 250_000, "tpd": None,
      "note": "Fast (~1 s) and reliable — first choice for every task."},
+    # Ollama Cloud (ollama.com) — OPT-IN, off by default. Open-weight models only. The free plan is small and changed in
+    # Oct 2026 (third-party reports: monthly starter allowance or a $0 pay-per-token plan; one request at a time), so it
+    # sits near the end of every chain and its published numbers are NOT assumed: calls are spaced and one at a time.
+    # Names come from public model lists and are checked against the account's own /v1/models before use.
+    {"id": "ollama/gpt-oss:120b", "name": "GPT-OSS 120B (Ollama Cloud)", "provider": "ollama", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Open-weight reasoning model. Opt-in; one request at a time."},
+    {"id": "ollama/gpt-oss:20b", "name": "GPT-OSS 20B (Ollama Cloud)", "provider": "ollama", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Light and fast. Opt-in; one request at a time."},
     # Groq — production/preview open models (Llama deliberately not used).
     {"id": "groq/openai/gpt-oss-120b", "name": "GPT-OSS 120B", "provider": "groq", "rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200_000,
      "note": "Best open reasoning model on Groq; low TPM on the free plan."},
@@ -100,10 +106,8 @@ CATALOG: list[dict[str, Any]] = [
 BY_ID = {m["id"]: m for m in CATALOG}
 
 # Task → ordered preferences. Unavailable/disabled models are skipped at call time.
-# Live tests (Oct 2026): Gemini 3.5 Flash Lite answers in ~1 s; free Gemma 4 31B takes 12-36 s and often
-# fails with 500/503 under load. So Flash Lite leads, Gemma 4 31B is the first fallback (bigger daily budget),
-# then Groq and Mistral.
-# Order: Gemini Flash Lite (fastest, if you have a key) -> Kilo free pool (no key) -> NVIDIA NIM -> Gemma -> Groq -> Mistral.
+# Live tests (Oct 2026): Gemini 3.5 Flash Lite answers in ~1 s, so it leads every chain.
+# Order: Gemini Flash Lite (fastest, if you have a key) -> Kilo free pool (no key) -> NVIDIA NIM -> Groq -> Mistral -> LLM7.
 # Kilo models are spread across chains so their 200 req/hour per-model budgets add up.
 _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
               "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
@@ -112,36 +116,42 @@ _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemot
                "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"]
 # No-key backup after Kilo: LLM7 (one call at a time, small daily quota).
 _LLM7 = ["llm7/GLM-5.3-Flash", "llm7/DeepSeek-V4-Flash-0731"]
+# Opt-in (Settings → AI providers): used only when turned on and a key is set; after the other keyed providers.
+_OLLAMA_FAST = ["ollama/gpt-oss:20b"]
+_OLLAMA_SMART = ["ollama/gpt-oss:120b", "ollama/gpt-oss:20b"]
 CHAINS: dict[str, list[str]] = {
-    # quick tasks want speed: Gemma (often 12-120 s on the free tier) only after the fast Groq models; LLM7 last (slow)
+    # quick tasks want speed; LLM7 last (slow)
     "fast": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST, "groq/qwen/qwen3.8-27b", "nim/nvidia/nemotron-nano-3-30b-a3b",
-             "nim/openai/gpt-oss-20b", "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", "gemini/gemma-4-31b-it", *_LLM7],
+             "nim/openai/gpt-oss-20b", "groq/openai/gpt-oss-20b", "mistral/mistral-small-latest", *_OLLAMA_FAST, *_LLM7],
     "reasoning": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "groq/qwen/qwen3.8-27b", "nim/z-ai/glm-5.3-flash",
                   "nim/deepseek-ai/deepseek-v4.1-flash", "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
-                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", "gemini/gemma-4-31b-it", *_LLM7],
+                  "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", *_OLLAMA_SMART, *_LLM7],
     "tailoring": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free",
                   "nim/deepseek-ai/deepseek-v4.1-flash", "nim/z-ai/glm-5.3-flash", "groq/qwen/qwen3.8-27b",
                   "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b",
-                  "mistral/mistral-medium-latest", "gemini/gemma-4-31b-it", *_LLM7],
+                  "mistral/mistral-medium-latest", *_OLLAMA_SMART, *_LLM7],
     "extraction": ["gemini/gemini-3.5-flash-lite", *_KILO_SMART, "groq/qwen/qwen3.8-27b", "nim/z-ai/glm-5.3-flash",
                    "nim/deepseek-ai/deepseek-v4.1-flash", "mistral/mistral-medium-latest", "groq/openai/gpt-oss-120b",
-                   "gemini/gemma-4-31b-it", *_LLM7],
+                   *_OLLAMA_SMART, *_LLM7],
+    # chat editor for resumes / CVs / letters: Gemini 3.5 Flash Lite or Kilo's free models only, thinking off
+    "editor": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST],
     "browser": ["gemini/gemini-3.5-flash-lite", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
                 "mistral/mistral-small-latest", "llm7/GLM-5.3-Flash"],
 }
 CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tailoring": "Resume & letter writing",
-                "extraction": "Resume reading", "browser": "Browser agent"}
+                "extraction": "Resume reading", "editor": "Resume chat editor", "browser": "Browser agent"}
 
 
 def provider_of(model: str) -> str:
-    return {"gemini": "google", "groq": "groq", "mistral": "mistral", "kilo": "kilo", "nim": "nvidia", "llm7": "llm7"}.get(model.split("/", 1)[0], "other")
+    return {"gemini": "google", "groq": "groq", "mistral": "mistral", "kilo": "kilo", "nim": "nvidia", "llm7": "llm7", "ollama": "ollama"}.get(model.split("/", 1)[0], "other")
 
 
 KILO_FREE = "free"                # Kilo's free pool needs no key; a Kilo account key (optional) is used when set
 NIM_ACCOUNT = "nim/__account__"   # one shared limiter: NIM's 40 requests/minute counts across all models
 # Shared limiters for providers whose limits count per client, not per model.
 # LLM7: about one call every 5 s keeps clear of its short per-minute caps.
-ACCOUNT_LIMITERS = {"llm7": ("llm7/__account__", 12)}
+ACCOUNT_LIMITERS = {"llm7": ("llm7/__account__", 12),
+                    "ollama": ("ollama/__account__", 20)}   # unpublished: spaced conservatively, plus one call at a time
 
 
 def account_limiter(model: str) -> Optional[str]:
@@ -174,7 +184,7 @@ def provider_key(provider: str) -> Optional[str]:
         return None                     # prod mode: the IP-limited free pools are kept for the admin
     s = get_settings()
     env = {"google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "groq": ("GROQ_API_KEY",), "mistral": ("MISTRAL_API_KEY",),
-           "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"), "kilo": ("KILO_API_KEY",)}.get(provider)
+           "nvidia": ("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"), "kilo": ("KILO_API_KEY",), "ollama": ("OLLAMA_API_KEY",)}.get(provider)
     if provider == "llm7":
         return KILO_FREE                # used without any key
     if env is None:
@@ -213,10 +223,10 @@ async def _list_provider(provider: str, key: str) -> list[str]:
                 if not token:
                     break
         return [f"gemini/{n}" for n in names]
-    if provider in ("kilo", "nvidia", "llm7"):
+    if provider in ("kilo", "nvidia", "llm7", "ollama"):
         from jobhunterx.config import openai_compat as oc
         base, prefix = {"kilo": (oc.KILO_BASE, "kilo"), "nvidia": (oc.NIM_BASE, "nim"),
-                        "llm7": (oc.LLM7_BASE, "llm7")}[provider]
+                        "llm7": (oc.LLM7_BASE, "llm7"), "ollama": (oc.OLLAMA_BASE, "ollama")}[provider]
         data = await oc.list_models(base, None if key == KILO_FREE else key)
         # LLM7 marks paid models (usage_based_only): without a key they answer 401, so they are never "available"
         return [f"{prefix}/{m['id']}" for m in data if isinstance(m, dict) and m.get("id")
@@ -247,7 +257,7 @@ async def refresh_available(force: bool = False) -> dict[str, dict[str, Any]]:
         _refresh_lock = asyncio.Lock()
     async with _refresh_lock:
         now = time.monotonic()
-        for provider in ("google", "groq", "mistral", "kilo", "nvidia", "llm7"):
+        for provider in ("google", "groq", "mistral", "kilo", "nvidia", "llm7", "ollama"):
             key = provider_key(provider)
             if not key:
                 _available.pop(provider, None)
@@ -391,8 +401,8 @@ def budgets_status() -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Model health: rest a model for a while after server errors (per model, not per provider)
 # ---------------------------------------------------------------------------
-# Google's free Gemma endpoint can answer "500 INTERNAL" for minutes at a time. Without this, every
-# call would first wait on Gemma before falling back. With it, the first failure rests only that model
+# A free endpoint can answer "500 INTERNAL" for minutes at a time. Without this, every
+# call would first wait on it before falling back. With it, the first failure rests only that model
 # (other Google models keep working), and the rest grows if it keeps failing: 2 → 4 → 8 → 16 → 30 min.
 
 _SERVER_ERR = ("500", "502", "503", "504", "internal", "unavailable", "deadline", "overloaded", "timed out", "timeout",

@@ -199,13 +199,16 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
     return sem_map[key]
 
 
-def _llm7_gate() -> asyncio.Semaphore:
-    """One LLM7 call at a time (per event loop): a second parallel call from the same client gets a 429."""
+def _single_gate(provider: str) -> asyncio.Semaphore:
+    """One call at a time (per event loop and, in prod mode, per user): LLM7 answers 429 to a 2nd parallel call from one
+    client, and the free Ollama Cloud plan allows one concurrent request."""
+    from jobhunterx.config import auth_ctx
     loop_key = id(asyncio.get_running_loop())
     sem_map = _semaphores.setdefault(loop_key, {})
-    if "llm7" not in sem_map:
-        sem_map["llm7"] = asyncio.Semaphore(1)
-    return sem_map["llm7"]
+    slot = provider + auth_ctx.scope()
+    if slot not in sem_map:
+        sem_map[slot] = asyncio.Semaphore(1)
+    return sem_map[slot]
 
 
 def _get_provider_key(model: str) -> str:
@@ -221,6 +224,8 @@ def _provider_slot(model: str) -> str:
         return "nvidia"
     if model.startswith("llm7/"):
         return "llm7"                   # limits count per client: a 429 rests every LLM7 model
+    if model.startswith("ollama/"):
+        return "ollama"                 # one account budget for all its models
     if model.startswith("gemini/"):
         return "gemini"
     elif model.startswith("groq/"):
@@ -383,7 +388,7 @@ async def _call_google_genai(
     messages: List[Dict[str, str]],
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Direct Google GenAI SDK call for all Gemini & Gemma models (bypasses LiteLLM completely)."""
+    """Direct Google GenAI SDK call for all Gemini models (bypasses LiteLLM completely)."""
     from jobhunterx.config import auth_ctx
     settings = get_settings()
     api_key = settings.google_api_key or auth_ctx.env_key("GOOGLE_API_KEY", "GEMINI_API_KEY")
@@ -458,7 +463,7 @@ async def call_llm(
     """High-level async LLM call with all infrastructure:
 
     1. Check disk cache
-    2. Direct Google GenAI SDK for Gemini/Gemma models
+    2. Direct Google GenAI SDK for Gemini models
     3. Acquire provider semaphore for LiteLLM models (Groq, Mistral)
     4. Call litellm.acompletion with retry
     5. Log token usage
@@ -499,12 +504,12 @@ async def call_llm(
             return {**cached, "cache_hit": True}
 
     # --- Kilo / LLM7 / NVIDIA NIM: direct OpenAI-compatible calls (no-key pools must get no auth header) ---
-    if model.startswith(("kilo/", "nim/", "llm7/")):
+    if model.startswith(("kilo/", "nim/", "llm7/", "ollama/")):
         from jobhunterx.config import openai_compat as oc
         provider = M.provider_of(model)
         key = M.provider_key(provider)
-        base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE}[provider]
-        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.NIM_EXTRA, "llm7": oc.LLM7_EXTRA}[provider]
+        base = {"kilo": oc.KILO_BASE, "nvidia": oc.NIM_BASE, "llm7": oc.LLM7_BASE, "ollama": oc.OLLAMA_BASE}[provider]
+        no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.NIM_EXTRA, "llm7": oc.LLM7_EXTRA, "ollama": oc.OLLAMA_EXTRA}[provider]
         json_mode = any("JSON object" in (m.get("content") or "") for m in messages if m.get("role") == "system")
         est = sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024)
         shared = M.account_limiter(model)
@@ -513,7 +518,7 @@ async def call_llm(
         await _enforce_rate_limit(model, est)
         # thinking models need room: a tiny budget can end before the answer starts
         budget_out = max(1500, int(kwargs.get("max_tokens") or 1024))
-        one_at_a_time = _llm7_gate() if provider == "llm7" else None   # LLM7 refuses a 2nd parallel call from one client
+        one_at_a_time = _single_gate(provider) if provider in ("llm7", "ollama") else None   # one call at a time per client (LLM7 refuses a 2nd; Ollama free allows 1)
         try:
             if one_at_a_time:
                 await one_at_a_time.acquire()
@@ -551,33 +556,10 @@ async def call_llm(
             _get_cache().set(ck, result, expire=cache_ttl)
         return result
 
-    # --- Direct Google GenAI SDK routing for ALL Gemini & Gemma models ---
-    if model.startswith("gemini/") or model.startswith("google/") or "gemma" in model:
-        if "gemma" in model:
-            from jobhunterx.config.gemma import call_gemma
-            system_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
-            user_content = "\n\n".join(m.get("content", "") for m in messages if m.get("role") != "system")
-            t0 = time.monotonic()
-            await _enforce_rate_limit(model, (len(system_content) + len(user_content)) // 4 + int(kwargs.get("max_tokens", 1024)))
-            content = await call_gemma(
-                model=model.split("/", 1)[-1],
-                system=system_content,
-                user=user_content,
-                max_tokens=kwargs.get("max_tokens", 1024),
-                temperature=kwargs.get("temperature"),
-            )
-            latency_ms = (time.monotonic() - t0) * 1000
-            result = {
-                "content": content,
-                "tokens_in": max(1, (len(system_content) + len(user_content)) // 4),
-                "tokens_out": max(1, len(content) // 4),
-                "model": model,
-                "latency_ms": round(latency_ms, 1),
-                "cache_hit": False,
-            }
-        else:
-            await _enforce_rate_limit(model, sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024))
-            result = await _call_google_genai(model, messages, **kwargs)
+    # --- Direct Google GenAI SDK routing for ALL Gemini models ---
+    if model.startswith("gemini/") or model.startswith("google/"):
+        await _enforce_rate_limit(model, sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024))
+        result = await _call_google_genai(model, messages, **kwargs)
         M.budget(model).record(result["tokens_in"] + result["tokens_out"])
 
         # Log token usage to database

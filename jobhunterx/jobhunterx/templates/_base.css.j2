@@ -1,16 +1,26 @@
 @page { size: A4; margin: {{ margin_y }} {{ margin_x }}; }
-body { font-family: Helvetica, Arial, sans-serif; font-size: {{ font_size_body }}; color: #1f2937; line-height: {{ line_height }}; }
-.name { font-size: {{ font_size_name }}; font-weight: bold; color: #111827; }
-.headline { font-size: {{ font_size_section }}; color: #374151; }
-.contact { font-size: {{ font_size_small }}; color: #4b5563; }
-.contact a, a { color: #1d4ed8; text-decoration: none; }
+body { font-family: {{ s.font }}; font-size: {{ font_size_body }}; color: {{ s.text }}; line-height: {{ line_height }}; }
+.name { font-size: {{ font_size_name }}; font-weight: bold; color: {{ s.ink if s.heading != 'bar' else s.accent }}; }
+.headline { font-size: {{ font_size_section }}; color: {{ s.muted }}; }
+.contact { font-size: {{ font_size_small }}; color: {{ s.muted }}; }
+.contact a, a { color: {{ s.link }}; text-decoration: none; }
 .contact a { white-space: nowrap; }   /* a long address moves to the next line whole, never split mid-URL */
 .section { margin-top: {{ margin_section }}; }
 .section-title { font-size: {{ font_size_section }}; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
-  color: #111827; border-bottom: 1px solid #111827; padding-bottom: 1px; margin-bottom: 3px; }
-.row-title { font-weight: bold; color: #111827; }
-.row-sub { color: #4b5563; font-size: {{ font_size_small }}; }
-.right { text-align: right; color: #4b5563; font-size: {{ font_size_small }}; }
+{%- if s.heading == 'rule' %}
+  color: {{ s.accent }}; border-bottom: 1px solid {{ s.accent }}; padding-bottom: 1px; margin-bottom: 3px; }
+{%- elif s.heading == 'bar' %}
+  color: {{ s.accent }}; border-left: 3px solid {{ s.accent }}; padding-left: 5px; margin-bottom: 3px; }
+{%- elif s.heading == 'band' %}
+  color: #ffffff; background-color: {{ s.accent }}; padding: 2px 5px; margin-bottom: 4px; }
+{%- elif s.heading == 'center' %}
+  color: {{ s.accent }}; text-align: center; border-bottom: 0.5px solid {{ s.muted }}; padding-bottom: 1px; margin-bottom: 4px; }
+{%- else %}
+  color: {{ s.accent }}; margin-bottom: 3px; }
+{%- endif %}
+.row-title { font-weight: bold; color: {{ s.ink }}; }
+.row-sub { color: {{ s.muted }}; font-size: {{ font_size_small }}; }
+.right { text-align: right; color: {{ s.muted }}; font-size: {{ font_size_small }}; }
 ul { margin: 1px 0 {{ margin_exp }} 0; padding-left: 12px; }
 li { margin-bottom: {{ margin_bullet }}; font-size: {{ font_size_bullet }}; }
 .skills td { padding: 0 0 1px 0; vertical-align: top; font-size: {{ font_size_skill }}; }

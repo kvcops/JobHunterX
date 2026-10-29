@@ -8,6 +8,7 @@ logic lives in jobhunterx.services.*.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import uuid
@@ -17,16 +18,19 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from jobhunterx import auth, storage
 from jobhunterx.agents import extractor
+from jobhunterx.api import ratelimit
 from jobhunterx.api.ws import manager as ws_manager
 from jobhunterx.config import auth_ctx
 from jobhunterx.config import database as db
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config.settings import is_real_key
 from jobhunterx.domain.candidate import CandidateProfile
+from jobhunterx.generation import chat_edit
+from jobhunterx.generation import styles as gen_styles
 from jobhunterx.generation.cover_letter import GenerationUnavailable
 from jobhunterx.services import apply as apply_svc
 from jobhunterx.services import documents as docs_svc
@@ -142,7 +146,7 @@ async def setup_free():
 
 
 class KeyTest(BaseModel):
-    provider: Literal["google", "nvidia", "groq", "mistral", "tavily", "exa", "tinyfish", "brave", "browser_use"]
+    provider: Literal["google", "nvidia", "groq", "mistral", "tavily", "exa", "tinyfish", "brave", "browser_use", "ollama"]
     key: str = Field(..., max_length=256)
 
 
@@ -160,6 +164,8 @@ async def test_key(body: KeyTest):
         "google": ("https://generativelanguage.googleapis.com/v1beta/models", {"x-goog-api-key": key}),
         "groq": ("https://api.groq.com/openai/v1/models", {"Authorization": f"Bearer {key}"}),
         "mistral": ("https://api.mistral.ai/v1/models", {"Authorization": f"Bearer {key}"}),
+        # Ollama Cloud: listing models runs no model, so it costs no usage
+        "ollama": ("https://ollama.com/v1/models", {"Authorization": f"Bearer {key}"}),
     }
     if body.provider == "nvidia":           # NIM lists models without a key, so check with a one-token answer
         from jobhunterx.config import openai_compat as oc
@@ -802,8 +808,42 @@ class CvRequest(BaseModel):
     focus: str = Field("", max_length=120)
 
 
+MAX_DOC_BYTES = 300_000          # a resume is a few KB; this only stops abuse
+
+
+def _doc_size_ok(content: dict) -> dict:
+    if len(json.dumps(content, ensure_ascii=False)) > MAX_DOC_BYTES:
+        raise ValueError("The document is too large.")
+    return content
+
+
 class DocumentUpdateRequest(BaseModel):
     content: dict
+
+    @field_validator("content")
+    @classmethod
+    def _small(cls, v):
+        return _doc_size_ok(v)
+
+
+class StyleRequest(BaseModel):
+    style: str = Field(..., max_length=32)
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field("", max_length=600)
+
+
+class ChatRequest(BaseModel):
+    instruction: str = Field(..., min_length=3, max_length=600)
+    content: Optional[dict] = None            # the draft the user is looking at (unsaved edits included)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
+
+    @field_validator("content")
+    @classmethod
+    def _small(cls, v):
+        return _doc_size_ok(v) if v is not None else v
 
 
 async def _doc_detail(doc) -> dict:
@@ -881,13 +921,60 @@ def _slug(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_\-]", "", (s or "").strip().replace(" ", "_"))[:40]
 
 
+@router.get("/document-styles")
+async def document_styles():
+    """The visual styles a resume / CV / cover letter can be shown and downloaded in (same content, different look)."""
+    return {"default": gen_styles.DEFAULT_STYLE, "styles": gen_styles.listing()}
+
+
+@router.patch("/documents/{doc_id}/style")
+async def set_document_style(doc_id: str, body: StyleRequest, request: Request):
+    """Save the chosen style and re-render the stored PDF in it. The preview switches instantly in the browser; this is
+    what makes a later plain download (and Auto-apply's attachment) use the same style."""
+    ratelimit.check(request, "doc-style", limit=30, per_s=60)
+    if not gen_styles.valid(body.style):
+        raise HTTPException(422, "Unknown style")
+    doc = await storage.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    profile = await _profile_or_400()
+    try:
+        updated = await docs_svc.set_style(doc, body.style, profile)
+    except LookupError:
+        raise HTTPException(404, "Document not found")
+    return {"document": await _doc_detail(updated)}
+
+
+@router.post("/documents/{doc_id}/chat")
+async def chat_edit_document(doc_id: str, body: ChatRequest, request: Request):
+    """Ask the AI for a change to this document. Returns a PROPOSAL (small fact-checked edits applied to a copy);
+    nothing is saved until the user keeps it, which goes through PATCH /documents/{id}."""
+    ratelimit.check(request, "doc-chat-min", limit=10, per_s=60)
+    ratelimit.check(request, "doc-chat-hour", limit=80, per_s=3600)
+    doc = await storage.get_document(doc_id)
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    profile = await _profile_or_400()
+    try:
+        out = await chat_edit.chat_edit(doc.kind, body.content if body.content is not None else doc.content, body.instruction,
+                                        profile, [t.model_dump() for t in body.history])
+    except chat_edit.ChatEditError as exc:
+        raise HTTPException(422, str(exc))
+    return out.model_dump(mode="json")
+
+
 @router.get("/documents/{doc_id}/pdf")
-async def get_document_pdf(doc_id: str):
+async def get_document_pdf(doc_id: str, request: Request, style: str = ""):
     doc = await storage.get_document(doc_id)
     pdf = await storage.get_document_pdf(doc_id) if doc else None
     if not doc or not pdf:
         raise HTTPException(404, "Document not found")
     profile = await profile_svc.get_profile()
+    if style and style != doc.style:
+        if not gen_styles.valid(style):
+            raise HTTPException(422, "Unknown style")
+        ratelimit.check(request, "doc-pdf-style", limit=20, per_s=60)       # a re-render costs CPU
+        pdf = await docs_svc.pdf_in_style(doc, profile, style)
     parts = [_slug(profile.name if profile else ""), {"resume": "Resume", "cv": "CV", "cover_letter": "Cover_Letter"}[doc.kind]]
     if doc.job_id:
         row = await storage.get_row(doc.job_id)
@@ -929,6 +1016,7 @@ _KEY_FIELDS = {  # payload key → (settings attr, env var names)
     "kilo_api_key": ("kilo_api_key", ["KILO_API_KEY"]),
     "browser_use_api_key": ("browser_use_api_key", ["BROWSER_USE_API_KEY"]),
     "adzuna_api_key": ("adzuna_api_key", ["ADZUNA_API_KEY"]),
+    "ollama_api_key": ("ollama_api_key", ["OLLAMA_API_KEY"]),
 }
 _BOOL_FIELDS = {"enable_web_search_apis": "ENABLE_WEB_SEARCH_APIS", "brave_enabled": "BRAVE_ENABLED",
                 "strict_zero_spend_protection": "STRICT_ZERO_SPEND_PROTECTION", "enable_hn_source": "ENABLE_HN_SOURCE"}
@@ -983,7 +1071,7 @@ async def get_settings_masked():
     out["search_providers"] = list(_SEARCH_PROVIDERS)
     names = {"google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"], "groq": ["GROQ_API_KEY"], "mistral": ["MISTRAL_API_KEY"],
              "nvidia": ["NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY"], "kilo": ["KILO_API_KEY"], "tinyfish": ["TINYFISH_API_KEY"], "tavily": ["TAVILY_API_KEY"], "exa": ["EXA_API_KEY"], "brave": ["BRAVE_API_KEY"],
-             "browser_use": ["BROWSER_USE_API_KEY"], "adzuna": ["ADZUNA_API_KEY"]}
+             "browser_use": ["BROWSER_USE_API_KEY"], "adzuna": ["ADZUNA_API_KEY"], "ollama": ["OLLAMA_API_KEY"]}
     for name, env_names in names.items():
         val = getattr(s, f"{name}_api_key")
         out[f"{name}_configured"] = bool(val)
@@ -1178,7 +1266,6 @@ async def system_backup():
 
 @router.get("/usage")
 async def usage():
-    from jobhunterx.config import gemma
     from jobhunterx.config.llm_router import get_model_config
     from jobhunterx.tools.usage_ledger import get_usage_report
     auth.require_admin()                      # server-wide numbers
@@ -1194,7 +1281,6 @@ async def usage():
         "web_search": {"providers": [{"name": n, **search_report.get(n, {})} for n in _SEARCH_PROVIDERS]},
         "llm": {"rows": rows, "totals": {"calls": llm.get("total_calls", 0), "tokens_in": llm.get("total_in", 0),
                                          "tokens_out": llm.get("total_out", 0), "total_tokens": llm.get("grand_total", 0)}},
-        "gemma_budget": gemma.budget_status(),
         "now": datetime.now(timezone.utc).isoformat(),
     }
 

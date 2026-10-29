@@ -643,7 +643,7 @@ def _free_llm(provider: str, model: str, key: str) -> Any:
 class _LLMChain:
     """Many models behind one. browser-use switches to its fallback_llm only once per run and then stops, so a
     Gemini "RESOURCE_EXHAUSTED" followed by one busy fallback ended the whole run. Here every call walks the list
-    (Gemini → Kilo free models → LLM7 → Groq → Mistral → Gemma) and skips models the app's AI router already knows are
+    (Gemini → Kilo free models → LLM7 → Groq → Mistral) and skips models the app's AI router already knows are
     resting or rate limited (shared state in config.models), so the browser agent and the rest of the app agree."""
 
     def __init__(self, links: list[tuple[str, Any]]):
@@ -717,11 +717,6 @@ def _build_llms() -> tuple[Any, Any]:
         links.append(("groq/openai/gpt-oss-120b", ChatGroq(model="openai/gpt-oss-120b", api_key=groq_key, temperature=0.2, max_retries=1)))
     if mistral_key and ChatMistral is not None:
         links.append(("mistral/mistral-small-latest", ChatMistral(model="mistral-small-latest", api_key=mistral_key, temperature=0.2, max_retries=1)))
-    if google_key:
-        # last resort only: free Gemma is slow and often overloaded, so don't sit in long retry loops on it
-        links.append(("gemini/gemma-4-31b-it", ChatGoogle(model="gemma-4-31b-it", api_key=google_key, temperature=0.2, max_retries=1,
-                                                          retry_base_delay=2.0, retry_max_delay=5.0,
-                                                          config={"thinking_config": {"thinking_level": "MINIMAL"}})))
     if llm7_on:                          # slowest of all (10-60 s an answer): only when everything else said no
         links += [(f"llm7/{m}", _free_llm("llm7", m, M.KILO_FREE)) for m in _LLM7_BROWSER]
     if not links:

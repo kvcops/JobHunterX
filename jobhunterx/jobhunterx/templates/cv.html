@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>{% include "_base.css.j2" %}
-.section-title { font-size: {{ font_size_section }}; border-bottom: 2px solid #1e3a8a; color: #1e3a8a; margin-bottom: 5px; }
+{% if s.id == 'classic' %}.section-title { font-size: {{ font_size_section }}; border-bottom: 2px solid #1e3a8a; color: #1e3a8a; margin-bottom: 5px; }{% endif %}
 .section { margin-top: {{ margin_section | default('10px') }}; }
 </style></head>
 <body>
 {% set c = doc %}
-<div class="name" style="text-align:center">{{ c.header.name }}</div>
-{% if c.headline %}<div class="headline" style="text-align:center">{{ c.headline }}</div>{% endif %}
-<div class="contact" style="text-align:center">{{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}
+<div class="name" style="text-align:{{ s.align }}">{{ c.header.name }}</div>
+{% if c.headline %}<div class="headline" style="text-align:{{ s.align }}">{{ c.headline }}</div>{% endif %}
+<div class="contact" style="text-align:{{ s.align }}">{{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}
 {% if c.header.links %}<br>{% for l in c.header.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}{% endif %}</div>
 {% if c.summary %}<div class="section"><div class="section-title">Profile</div><div>{{ c.summary }}</div></div>{% endif %}
 {% if c.experience %}<div class="section"><div class="section-title">Professional Experience</div>

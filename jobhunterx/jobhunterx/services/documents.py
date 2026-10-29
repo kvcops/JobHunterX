@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Optional
 from jobhunterx import storage
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
 from jobhunterx.domain.documents import GeneratedDocument
-from jobhunterx.generation import render
+from jobhunterx.generation import render, styles
 from jobhunterx.generation.content import header_for
 from jobhunterx.generation.cover_letter import generate_cover_letter
 from jobhunterx.generation.cv import generate_cv
@@ -82,25 +82,52 @@ async def generate_cv_doc(profile: CandidateProfile, snapshot: CandidateSnapshot
     return await _with_guard(("profile", "cv"), emit, None, "cv", work)
 
 
-async def update_document(doc: GeneratedDocument, content: dict[str, Any], profile: CandidateProfile) -> GeneratedDocument:
+async def update_document(doc: GeneratedDocument, content: dict[str, Any], profile: CandidateProfile,
+                          *, manual: bool = True) -> GeneratedDocument:
     """Validate user-authored structured content, render it, and replace the saved artifact."""
     if doc.kind in ("resume", "cv"):
         validated = ResumeContent.model_validate(content)
         normalized = validated.model_dump(mode="json")
         pdf, pages = await asyncio.to_thread(
-            render.render_resume if doc.kind == "resume" else render.render_cv, normalized)
+            render.render_resume if doc.kind == "resume" else render.render_cv, normalized, doc.style)
     elif doc.kind == "cover_letter":
         validated = CoverLetterContent.model_validate(content)
         normalized = validated.model_dump(mode="json")
         pdf, pages = await asyncio.to_thread(
-            render.render_cover_letter, normalized, header_for(profile).model_dump(mode="json"))
+            render.render_cover_letter, normalized, header_for(profile).model_dump(mode="json"), doc.style)
     else:
         raise ValueError(f"Unsupported document kind: {doc.kind}")
     doc.content = normalized
     doc.page_count = pages
     doc.has_pdf = bool(pdf)
     doc.updated_at = datetime.now(timezone.utc)
-    doc.manually_edited = True
+    doc.manually_edited = doc.manually_edited or manual
     if not await storage.update_document(doc, pdf):
         raise LookupError(doc.id)
     return doc
+
+
+# Rendered PDFs in a style other than the saved one (a download that picks a style). Small and in memory: a style
+# switch is a re-render of the same content, so the key is (document, its last change, style).
+_pdf_cache: "dict[tuple[str, str, str], bytes]" = {}
+_PDF_CACHE_MAX = 24
+
+
+async def pdf_in_style(doc: GeneratedDocument, profile: CandidateProfile, style: str) -> bytes:
+    key = (doc.id, doc.updated_at.isoformat(), style)
+    hit = _pdf_cache.get(key)
+    if hit is not None:
+        return hit
+    pdf, _ = await asyncio.to_thread(render.render_document, doc.kind, doc.content, header_for(profile).model_dump(mode="json"), style)
+    while len(_pdf_cache) >= _PDF_CACHE_MAX:
+        _pdf_cache.pop(next(iter(_pdf_cache)))
+    _pdf_cache[key] = pdf
+    return pdf
+
+
+async def set_style(doc: GeneratedDocument, style: str, profile: CandidateProfile) -> GeneratedDocument:
+    """Save the document's style and re-render its stored PDF (content untouched)."""
+    if not styles.valid(style):
+        raise ValueError("Unknown style")
+    doc.style = style
+    return await update_document(doc, doc.content, profile, manual=False)

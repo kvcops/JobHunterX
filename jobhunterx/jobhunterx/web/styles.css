@@ -1904,3 +1904,82 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .pay-total strong { font-size: 1.05rem; font-weight: 600; color: var(--ink); }
 .pay-note { margin: 0; }
 .pay-note code { font-size: .9em; color: var(--ink); }
+
+/* -------------------------------------------------------------------------- document styles (live preview)
+   Same content, different look: switching is CSS only, so it is instant. The PDF templates mirror these
+   (generation/styles.py). */
+.paper { --p-accent: #111827; --p-ink: #111; --p-muted: #71717a; transition: font-family .2s, color .25s; }
+.paper h2, .paper h3, .paper a, .paper-sub, .paper-head { transition: color .25s, background-color .25s, border-color .25s, padding .25s, letter-spacing .25s; }
+.paper[data-style="classic"] h3 { color: var(--p-muted); }
+.paper[data-style="modern"] { --p-accent: #2563eb; }
+.paper[data-style="modern"] h2 { color: var(--p-accent); }
+.paper[data-style="modern"] h3 { color: var(--p-accent); border-bottom: 0; border-left: 3px solid var(--p-accent); padding: 0 0 0 8px; }
+.paper[data-style="modern"] a, .paper[data-style="modern"] .paper-links a { color: var(--p-accent); }
+.paper[data-style="elegant"] { font-family: Georgia, "Times New Roman", serif; --p-accent: #44403c; }
+.paper[data-style="elegant"] .paper-head { text-align: center; }
+.paper[data-style="elegant"] h2 { letter-spacing: 0; font-weight: 600; }
+.paper[data-style="elegant"] h3 { text-align: center; color: var(--p-accent); border-bottom: .5px solid #a8a29e; letter-spacing: .2em; }
+.paper[data-style="elegant"] .paper-item .row.space { flex-wrap: wrap; }
+.paper[data-style="minimal"] h3 { border-bottom: 0; color: #a1a1aa; margin-top: 26px; letter-spacing: .22em; }
+.paper[data-style="minimal"] h2 { font-weight: 500; }
+.paper[data-style="bold"] h3 { background: #1f2937; color: #fff; padding: 4px 9px; border-bottom: 0; border-radius: 3px; letter-spacing: .14em; }
+.paper[data-style="emerald"] { --p-accent: #047857; }
+.paper[data-style="emerald"] h2 { color: #064e3b; }
+.paper[data-style="emerald"] h3 { color: var(--p-accent); border-bottom: 2px solid var(--p-accent); }
+.paper[data-style="emerald"] a, .paper[data-style="emerald"] .paper-links a { color: var(--p-accent); }
+.paper[data-style="ats"] { font-family: Arial, Helvetica, sans-serif; color: #000; }
+.paper[data-style="ats"] h2, .paper[data-style="ats"] .paper-sub, .paper[data-style="ats"] .paper-contact, .paper[data-style="ats"] .muted { color: #000; }
+.paper[data-style="ats"] h3 { color: #000; border-bottom: 1px solid #000; }
+.paper[data-style="ats"] a, .paper[data-style="ats"] .paper-links a { color: #000; text-decoration: underline; }
+
+.style-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; }
+.style-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border-radius: 99px; border: 1px solid var(--line); background: var(--card-solid);
+  color: var(--text-2, var(--text)); font: inherit; font-size: .8rem; cursor: pointer; transition: transform .25s var(--spring), border-color .2s, box-shadow .25s, background .2s; }
+.style-chip:hover { transform: translateY(-1px); border-color: var(--line-strong); }
+.style-chip.is-on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink) inset; font-weight: 600; background: var(--accent-soft); }
+.style-swatch { --sw: #111; width: 26px; height: 32px; flex: none; border-radius: 4px; background: #fff; border: 1px solid rgba(17,17,17,.14); padding: 5px 4px; display: flex; flex-direction: column; gap: 3px; }
+.style-swatch i { display: block; height: 2px; border-radius: 2px; background: #d4d4d8; }
+.style-swatch i:first-child { height: 3px; width: 70%; background: var(--sw); }
+.style-swatch.sw-bar i:nth-child(2) { border-left: 3px solid var(--sw); height: 4px; background: transparent; margin-left: -1px; }
+.style-swatch.sw-band i:nth-child(2) { background: var(--sw); height: 4px; }
+.style-swatch.sw-rule i:nth-child(2) { background: var(--sw); height: 1px; }
+.style-swatch.sw-center i:first-child { margin: 0 auto; }
+.style-swatch.sw-plain i:nth-child(2) { background: #a1a1aa; width: 50%; }
+.style-busy { margin-left: 4px; }
+
+/* -------------------------------------------------------------------------- AI editor dock + snap effect */
+.detail-main { position: relative; display: flex; flex: 1 1 auto; min-height: 0; }
+.detail-main > .detail-body { flex: 1 1 auto; min-width: 0; overflow-y: auto; }
+.snap-defs { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.paper.whoosh { position: relative; overflow: hidden; }
+.paper.whoosh::after { content: ""; position: absolute; inset: 0; pointer-events: none; transform: translateX(-120%);
+  background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--accent) 22%, transparent) 50%, transparent 70%); animation: whoosh 1.35s var(--ease) forwards; }
+@keyframes whoosh { to { transform: translateX(120%); } }
+.chat-fab { position: absolute; right: 22px; bottom: 20px; z-index: 6; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 99px; border: 0; cursor: pointer;
+  background: var(--ink); color: var(--on-ink, #fff); font: inherit; font-weight: 600; font-size: .85rem; box-shadow: var(--shadow-lg); transition: transform .3s var(--spring); animation: pop .5s var(--spring) both; }
+.chat-fab:hover { transform: translateY(-2px) scale(1.03); }
+.chat-dock { flex: none; width: 340px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--card-solid); border-left: 1px solid var(--line-strong); overflow: hidden; animation: slideDock .4s var(--ease) both; }
+@keyframes slideDock { from { opacity: 0; transform: translateX(24px); } }
+.chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); font-size: .85rem; }
+.chat-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.chat-log { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 120px; flex: 1; }
+.chat-sugs { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-sugs .chip { cursor: pointer; font: inherit; font-size: .76rem; }
+.chat-msg { max-width: 92%; font-size: .84rem; animation: rise .35s var(--ease) both; }
+.chat-msg p { margin: 0; padding: 8px 11px; border-radius: 14px; line-height: 1.45; }
+.chat-msg.user { align-self: flex-end; } .chat-msg.user p { background: var(--ink); color: var(--on-ink, #fff); border-bottom-right-radius: 4px; }
+.chat-msg.assistant { align-self: flex-start; } .chat-msg.assistant p { background: var(--field); border-bottom-left-radius: 4px; }
+.chat-msg.err p { background: color-mix(in srgb, var(--danger) 10%, var(--card-solid)); color: var(--danger); }
+.chat-changes { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.chat-changes li { display: flex; flex-direction: column; gap: 2px; font-size: .76rem; padding: 7px 9px; border-radius: 10px; border: 1px solid var(--line); background: var(--card-solid); }
+.chat-changes li.ok { border-color: color-mix(in srgb, var(--success) 35%, transparent); } .chat-changes li.no { opacity: .85; }
+.chat-chg-label { font-weight: 600; } .chat-changes .diff-new { color: var(--text); }
+.chat-form { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.chat-form .input { flex: 1; min-width: 0; }
+.chat-typing { display: inline-flex; gap: 4px; padding: 10px 12px; border-radius: 14px; background: var(--field); }
+.chat-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); animation: chatdot 1s infinite ease-in-out; }
+.chat-typing i:nth-child(2) { animation-delay: .15s; } .chat-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes chatdot { 0%, 80%, 100% { transform: translateY(0); opacity: .4; } 40% { transform: translateY(-4px); opacity: 1; } }
+:root[data-motion="reduced"] .paper.whoosh::after { display: none; }
+@media (max-width: 900px) { .chat-dock { position: absolute; inset: 8px; width: auto; border: 1px solid var(--line-strong); border-radius: 18px; z-index: 7; box-shadow: var(--shadow-lg); } .chat-fab { right: 12px; bottom: 12px; } }

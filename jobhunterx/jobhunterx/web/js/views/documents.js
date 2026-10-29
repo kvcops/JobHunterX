@@ -1,6 +1,7 @@
-import { html, useState, useEffect } from '../lib/preact.js';
+import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
-import { generateCv, loadDocuments, loadDocument, updateDocument, deleteDocument } from '../actions.js';
+import { generateCv, loadDocuments, loadDocument, updateDocument, deleteDocument, saveDocumentStyle } from '../actions.js';
+import { StylePicker, ChatDock, SnapFilter, useStyles } from './docchat.js';
 import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Tabs, ComboInput } from '../components/ui.js';
 import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
 import { api } from '../lib/api.js';
@@ -9,27 +10,27 @@ import { genKey } from '../state/domain.js';
 const ext = (l) => { const u = safeUrl(l.url); return u ? html`<a href=${u} target="_blank" rel="noopener noreferrer">${l.text || l.label}</a>` : null; };
 const linkRow = (links) => (links && links.length ? html`<span class="paper-links">${links.map((l, i) => html`${i ? ' · ' : ''}${ext(l)}`)}</span>` : null);
 
-function ResumePreview({ c }) {
+function ResumePreview({ c, style = 'classic' }) {
   const il = c.item_links || {};
-  return html`<article class="paper">
-    <header class="paper-head"><h2>${c.header.name}</h2>${c.headline ? html`<div class="paper-sub">${c.headline}</div>` : null}
+  return html`<article class="paper" data-style=${style}>
+    <header class="paper-head"><h2 data-p="header.name">${c.header.name}</h2>${c.headline ? html`<div class="paper-sub" data-p="headline">${c.headline}</div>` : null}
       <div class="paper-contact">${[c.header.email, c.header.phone, c.header.location].filter(Boolean).join(' · ')}
         ${c.header.links.length ? html`<br />${linkRow(c.header.links)}` : null}</div></header>
-    ${c.summary ? html`<section><h3>Summary</h3><p>${c.summary}</p></section>` : null}
-    ${c.skills.length ? html`<section><h3>Skills</h3>${c.skills.map((g) => html`<p><strong>${g.category}:</strong> ${g.items.join(', ')}</p>`)}</section>` : null}
-    ${c.experience.length ? html`<section><h3>Experience</h3>${c.experience.map((e) => html`<div class="paper-item">
+    ${c.summary ? html`<section><h3>Summary</h3><p data-p="summary">${c.summary}</p></section>` : null}
+    ${c.skills.length ? html`<section><h3>Skills</h3>${c.skills.map((g, i) => html`<p data-p=${`skills.${i}`}><strong>${g.category}:</strong> ${g.items.join(', ')}</p>`)}</section>` : null}
+    ${c.experience.length ? html`<section><h3>Experience</h3>${c.experience.map((e, i) => html`<div class="paper-item">
       <div class="row space"><strong>${e.role}${e.company ? ` — ${e.company}` : ''}</strong><span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}</span></div>
-      <ul>${e.bullets.map((b) => html`<li>${b}</li>`)}</ul></div>`)}</section>` : null}
-    ${c.projects.length ? html`<section><h3>Projects</h3>${c.projects.map((p) => html`<div class="paper-item">
+      <ul>${e.bullets.map((b, j) => html`<li data-p=${`experience.${i}.bullets.${j}`}>${b}</li>`)}</ul></div>`)}</section>` : null}
+    ${c.projects.length ? html`<section><h3>Projects</h3>${c.projects.map((p, i) => html`<div class="paper-item">
       <div class="row space"><span><strong>${p.title}</strong>${p.technologies.length ? html` <span class="muted small">· ${p.technologies.join(', ')}</span>` : null}</span>
-        ${linkRow(p.links && p.links.length ? p.links : p.url ? [{ url: p.url, label: 'Link' }] : [])}</div><p>${p.description}</p></div>`)}</section>` : null}
+        ${linkRow(p.links && p.links.length ? p.links : p.url ? [{ url: p.url, label: 'Link' }] : [])}</div><p data-p=${`projects.${i}.description`}>${p.description}</p></div>`)}</section>` : null}
     ${c.education.length ? html`<section><h3>Education</h3>${c.education.map((e) => html`<p><strong>${e.degree}</strong>${e.institution ? ` — ${e.institution}` : ''} <span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}${e.grade ? ` · ${e.grade}` : ''}</span></p>`)}</section>` : null}
-    ${['certifications', 'achievements', 'competitions', 'languages'].map((k) => c[k] && c[k].length ? html`<section><h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${c[k].map((x) => html`<li>${x}${il[x] ? html` · ${linkRow(il[x])}` : null}</li>`)}</ul></section>` : null)}
+    ${['certifications', 'achievements', 'competitions', 'languages'].map((k) => c[k] && c[k].length ? html`<section><h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${c[k].map((x, i) => html`<li data-p=${`${k}.${i}`}>${x}${il[x] ? html` · ${linkRow(il[x])}` : null}</li>`)}</ul></section>` : null)}
   </article>`;
 }
 
-function LetterPreview({ c }) {
-  return html`<article class="paper"><p>${c.greeting}</p>${c.paragraphs.map((p) => html`<p>${p}</p>`)}<p>${c.closing}<br />${c.signature}</p></article>`;
+function LetterPreview({ c, style = 'classic' }) {
+  return html`<article class="paper" data-style=${style}><p data-p="greeting">${c.greeting}</p>${c.paragraphs.map((p, i) => html`<p data-p=${`paragraphs.${i}`}>${p}</p>`)}<p data-p="closing">${c.closing}</p><p>${c.signature}</p></article>`;
 }
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -164,40 +165,70 @@ function Provenance({ doc }) {
 
 function DocumentDetail({ docId }) {
   const entry = useStore((s) => s.docDetails[docId]);
+  const styles = useStyles();
   const [tab, setTab] = useState('preview');
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [style, setStyle] = useState(null);            // the style being looked at (instant); the saved one follows in the background
+  const [styleBusy, setStyleBusy] = useState(false);
+  const [undo, setUndo] = useState([]);                // earlier drafts, for "Undo last"
+  const dirtyRef = useRef(false);
+  const paperRef = useRef(null);
+  const styleTimer = useRef(0);
   useEffect(() => { loadDocument(docId); }, [docId]);
-  useEffect(() => { if (entry?.doc) setDraft(clone(entry.doc.content)); }, [entry?.doc]);
+  useEffect(() => { if (entry?.doc && !dirtyRef.current) setDraft(clone(entry.doc.content)); }, [entry?.doc]);
+  useEffect(() => { if (entry?.doc && style === null) setStyle(entry.doc.style || 'classic'); }, [entry?.doc]);
+  useEffect(() => () => clearTimeout(styleTimer.current), []);
   if (!entry || entry.status === 'loading') return html`<div class="pane-pad"><${Skeleton} lines=${10} /></div>`;
   if (entry.status === 'error') return html`<div class="pane-pad"><${ErrorBox} message=${entry.error} onRetry=${() => loadDocument(docId)} /></div>`;
   const d = entry.doc;
   const editing = tab === 'edit';
-  const dirty = draft && JSON.stringify(draft) !== JSON.stringify(d.content);
+  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(d.content);
+  dirtyRef.current = dirty;
+  const shown = style || d.style || 'classic';
   const save = async () => {
     setSaving(true);
     const updated = await updateDocument(docId, draft);
     setSaving(false);
-    if (updated) { setDraft(clone(updated.content)); setTab('preview'); }
+    if (updated) { dirtyRef.current = false; setDraft(clone(updated.content)); setUndo([]); setTab('preview'); }
   };
+  const pickStyle = (id) => {
+    setStyle(id);                                     // the preview changes right now: it is only CSS
+    clearTimeout(styleTimer.current);
+    styleTimer.current = setTimeout(async () => {     // the stored PDF follows once the user stops clicking
+      setStyleBusy(true);
+      await saveDocumentStyle(docId, id);
+      setStyleBusy(false);
+    }, 500);
+  };
+  const propose = (content) => { setUndo((u) => [...u.slice(-9), draft]); setDraft(content); };
+  const undoLast = () => { setUndo((u) => { if (!u.length) return u; setDraft(u[u.length - 1]); return u.slice(0, -1); }); };
+  const body = draft || d.content;
   return html`<div class="detail">
     <header class="detail-top doc-top">
       <div class="row space wrap">
         <div class="grow"><span class="doc-kind">${DOC_KIND_LABEL[d.kind]}</span><h2>${d.title}</h2>
           <div class="muted small">${relTime(d.created_at)} · ${d.page_count} page(s)
             ${d.job ? html` · for <a href=${`#/discover/job/${d.job_id}`}>${d.job.title} @ ${d.job.company}</a>` : ''}</div></div>
-        <div class="row gap">${d.has_pdf ? html`<a class="btn btn-primary btn-sm" href=${api.documentPdfUrl(d.id)} download><${Icon} name="download" size=${15} /><span>Download PDF</span></a>` : null}
-          <button type="button" class="btn btn-secondary btn-sm" onClick=${() => { setDraft(clone(d.content)); setTab(editing ? 'preview' : 'edit'); }}>${editing ? 'Cancel' : 'Edit'}</button>
-          ${editing ? html`<button type="button" class="btn btn-primary btn-sm" disabled=${!dirty || saving} onClick=${save}>${saving ? 'Saving…' : 'Save changes'}</button>` : null}
+        <div class="row gap">${d.has_pdf ? html`<a class="btn btn-primary btn-sm" href=${api.documentPdfUrl(d.id, shown === (d.style || 'classic') ? '' : shown)} download title="Downloads the PDF in the selected style"><${Icon} name="download" size=${15} /><span>Download PDF</span></a>` : null}
+          <button type="button" class="btn btn-secondary btn-sm" onClick=${() => { setDraft(clone(d.content)); dirtyRef.current = false; setUndo([]); setTab(editing ? 'preview' : 'edit'); }}>${editing ? 'Cancel' : 'Edit'}</button>
+          ${editing || dirty ? html`<button type="button" class="btn btn-primary btn-sm" disabled=${!dirty || saving} onClick=${save}>${saving ? 'Saving…' : 'Save changes'}</button>` : null}
           <button type="button" class="icon-btn" aria-label="Delete document" onClick=${() => deleteDocument(d.id)}><${Icon} name="trash" size=${16} /></button></div>
       </div>
+      <${StylePicker} styles=${styles} value=${shown} onChange=${pickStyle} busy=${styleBusy} />
       ${d.manually_edited ? html`<${Notice} tone="info">Manually edited · saved ${relTime(d.updated_at)}</${Notice}>` : null}
+      ${dirty && !editing ? html`<${Notice} tone="warning">You have unsaved changes. “Save changes” keeps them and updates the PDF; “Edit” → “Cancel” discards them.</${Notice}>` : null}
       ${d.stale ? html`<${Notice} tone="warning">Your profile changed after this was generated. Regenerate it to include the latest information.</${Notice}>` : null}
       <${Tabs} size="sm" label="Document sections" value=${tab} onChange=${setTab}
         tabs=${[{ key: 'preview', label: 'Preview' }, { key: 'edit', label: 'Edit' }, { key: 'prov', label: 'What changed', count: d.provenance.rewrites.length }]} />
     </header>
-    <div class="detail-body scroll paper-stage" key=${tab}>
-      ${tab === 'preview' ? (d.kind === 'cover_letter' ? html`<${LetterPreview} c=${d.content} />` : html`<${ResumePreview} c=${d.content} />`) : tab === 'edit' ? html`<${DocumentEditor} key=${`${d.id}:${d.updated_at}`} doc=${d} value=${draft || d.content} onChange=${setDraft} />` : html`<${Provenance} doc=${d} />`}
+    <div class="detail-main">
+    <div class="detail-body scroll paper-stage" key=${tab} ref=${paperRef}>
+      <${SnapFilter} />
+      ${tab === 'preview' ? (d.kind === 'cover_letter' ? html`<${LetterPreview} c=${body} style=${shown} />` : html`<${ResumePreview} c=${body} style=${shown} />`) : tab === 'edit' ? html`<${DocumentEditor} key=${`${d.id}:${d.updated_at}`} doc=${d} value=${draft || d.content} onChange=${setDraft} />` : html`<${Provenance} doc=${d} />`}
+    </div>
+    ${tab === 'preview' ? html`<${ChatDock} doc=${d} draft=${body} onProposal=${propose} onUndo=${undoLast} canUndo=${undo.length > 0}
+      getPaper=${() => paperRef.current && paperRef.current.querySelector('.paper')} />` : null}
     </div>
   </div>`;
 }

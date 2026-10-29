@@ -16,6 +16,7 @@ import httpx
 
 KILO_BASE = "https://api.kilo.ai/api/gateway"
 NIM_BASE = "https://integrate.api.nvidia.com/v1"
+OLLAMA_BASE = "https://ollama.com/v1"   # Ollama Cloud, Bearer key; open-weight models only (no proprietary ones)
 LLM7_BASE = "https://api.llm7.io/v1"     # no key: one request at a time per client, small daily token quota
 
 
@@ -41,6 +42,8 @@ KILO_EXTRA = {"reasoning": {"enabled": False}}
 NIM_EXTRA = {"chat_template_kwargs": {"enable_thinking": False, "thinking": False}}
 # LLM7 (measured 17 Oct 2026): reasoning_effort "none" gives shorter, faster answers.
 LLM7_EXTRA = {"reasoning_effort": "none"}
+# Ollama Cloud: OpenAI-compatible endpoint takes reasoning_effort; a model that rejects it is asked again without (see chat()).
+OLLAMA_EXTRA = {"reasoning_effort": "none"}
 
 
 _pool: Optional[tuple[Any, httpx.AsyncClient]] = None

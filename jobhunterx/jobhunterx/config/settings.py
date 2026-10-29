@@ -45,20 +45,18 @@ class Settings(BaseSettings):
     # Browser Use cloud browsers (cloud.browser-use.com): with a key, auto-apply runs in a cloud browser instead of a
     # Chrome on this server — no server memory, and several people can apply at once
     browser_use_api_key: Optional[str] = None
+    ollama_api_key: Optional[str] = None          # Ollama Cloud (ollama.com), opt-in: open-weight models only
     # Extra job APIs (discovery/job_apis.py). Adzuna is one value: app_id:app_key (free key at developer.adzuna.com).
     adzuna_api_key: Optional[str] = None
 
     @field_validator("google_api_key", "groq_api_key", "mistral_api_key", "nvidia_api_key", "kilo_api_key", "tinyfish_api_key", "tavily_api_key",
-                     "exa_api_key", "brave_api_key", "browser_use_api_key", "adzuna_api_key", mode="before")
+                     "exa_api_key", "brave_api_key", "browser_use_api_key", "adzuna_api_key", "ollama_api_key", mode="before")
     @classmethod
     def _drop_placeholder_keys(cls, v):
         # A placeholder must count as "no key": otherwise every AI call fails and retries, and the UI waits forever.
         return v.strip().strip('"').strip("'") if isinstance(v, str) and is_real_key(v) else None
 
     # --- Free-tier limits (defaults live in config/models.py; JSON overrides per model) ---
-    gemma_daily_requests: int = 1500
-    gemma_daily_tokens: int = 1500
-    gemma_rpm: int = 15
     model_limits_json: str = ""
 
     # --- Application ---
