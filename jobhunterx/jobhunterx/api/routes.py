@@ -164,24 +164,45 @@ async def test_key(body: KeyTest):
         "google": ("https://generativelanguage.googleapis.com/v1beta/models", {"x-goog-api-key": key}),
         "groq": ("https://api.groq.com/openai/v1/models", {"Authorization": f"Bearer {key}"}),
         "mistral": ("https://api.mistral.ai/v1/models", {"Authorization": f"Bearer {key}"}),
-        # Ollama Cloud: listing models runs no model, so it costs no usage
-        "ollama": ("https://ollama.com/v1/models", {"Authorization": f"Bearer {key}"}),
     }
     if body.provider == "nvidia":           # NIM lists models without a key, so check with a one-token answer
         from jobhunterx.config import openai_compat as oc
+        last = "unreachable"
+        for model in ("nvidia/nemotron-3.5-bolt-e4b", "nvidia/nemotron-3.5-lightning-30b-a3b"):   # two fast free endpoints
+            try:
+                await oc.chat(oc.NIM_BASE, model, [{"role": "user", "content": "hi"}], key=key, max_tokens=16, timeout=25,
+                              extra=oc.nim_extra(model))
+                return {"ok": True, "message": "Key works."}
+            except oc.EmptyAnswer:
+                return {"ok": True, "message": "Key works."}
+            except oc.ChatError as exc:
+                if exc.status in (401, 403):
+                    return {"ok": False, "message": "NVIDIA rejected this key. Create a new key and paste it again."}
+                if exc.status == 429:
+                    return {"ok": True, "message": "Key accepted (NVIDIA is rate-limiting right now, that's fine)."}
+                last = f"error {exc.status}"
+            except Exception:
+                last = "busy"
+        return {"ok": False, "message": f"NVIDIA did not answer ({last}). Its free endpoints get busy — try again in a minute."}
+    if body.provider == "ollama":           # listing models is free, so also read the balance: the $0 plan is pay-per-token
         try:
-            await oc.chat(oc.NIM_BASE, "nvidia/nemotron-nano-3-30b-a3b", [{"role": "user", "content": "hi"}], key=key,
-                          max_tokens=16, timeout=20)
-        except oc.EmptyAnswer:
-            pass
-        except oc.ChatError as exc:
-            if exc.status in (401, 403):
-                return {"ok": False, "message": "NVIDIA rejected this key. Create a new key and paste it again."}
-            if exc.status == 429:
-                return {"ok": True, "message": "Key accepted (NVIDIA is rate-limiting right now, that's fine)."}
-            return {"ok": False, "message": f"NVIDIA answered with an error ({exc.status}). Try again in a minute."}
-        except Exception:
-            return {"ok": False, "message": "Could not reach NVIDIA — check your internet connection and try again."}
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get("https://ollama.com/api/balance", headers={"Authorization": f"Bearer {key}"})
+        except httpx.HTTPError:
+            return {"ok": False, "message": "Could not reach Ollama — check your internet connection and try again."}
+        if r.status_code in (401, 403):
+            return {"ok": False, "message": "Ollama rejected this key. Create a new key and paste it again."}
+        if r.status_code == 200:
+            try:
+                bal = r.json()
+                left = float((bal.get("included") or {}).get("balance_usd") or 0) + float((bal.get("purchased") or {}).get("balance_usd") or 0)
+            except (ValueError, TypeError, AttributeError):
+                left = None
+            if left == 0:
+                return {"ok": True, "message": "Key works, but this account has no usage credits. Ollama Cloud is pay-per-token, "
+                                               "so its models answer only after you add credits at ollama.com/plans."}
+            if left is not None:
+                return {"ok": True, "message": f"Key works · ${left:.2f} of usage credits left."}
         return {"ok": True, "message": "Key works."}
     if body.provider not in checks:
         return {"ok": True, "message": "Saved format looks right — it is checked on the first search."}

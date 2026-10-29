@@ -173,7 +173,7 @@ def parse_hn_comment(hit: dict, labels: list[str], places: list[str], include_re
     remote_open = include_remote and bool(_REMOTE_OPEN.search(head)) and not re.search(r"(?i)\b(us|usa|u\.s\.)\s*(only|based)\b", head)
     if not (named or in_india or remote_open):
         return None
-    if title_overlap(head, labels) <= 0:
+    if title_overlap(_hn_role(header, body, labels), labels) <= 0:     # the role the post names, not any word in it
         return None
     company = re.sub(r"\s*\(.*?\)", "", header.split("|")[0]).strip()[:80] or "Hacker News employer"
     if not company or len(company) < 2:

@@ -62,29 +62,32 @@ CATALOG: list[dict[str, Any]] = [
      "note": "Last-resort backup, ~10 s. No key."},
     {"id": "llm7/DeepSeek-V4-Flash-0731", "name": "DeepSeek V4 Flash (LLM7, free)", "provider": "llm7", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "Last-resort backup, slow (30-60 s). No key."},
-    # NVIDIA NIM (build.nvidia.com) — free key, 40 requests/minute per ACCOUNT across all models (no official increase on
-    # the free tier). Chosen for speed: small MoE / "flash" models; big dense models are slow on the shared free endpoint.
-    {"id": "nim/nvidia/nemotron-nano-3-30b-a3b", "name": "Nemotron Nano 3 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "3B active parameters — the fastest capable NIM model."},
+    # NVIDIA NIM (build.nvidia.com) — free key, 40 requests/minute per ACCOUNT across all models. Chosen from a live test with a
+    # real free key on 29 Oct 2026 (JSON extraction + a fact-keeping rewrite, thinking off):
+    #   Nemotron 3 Ultra 550B 1-7 s, kept every fact · Nemotron 3.5 Lightning / Bolt ~1 s (fast, but dropped a number when
+    #   rewriting, so not used for writing) · GPT-OSS 20B 2-6 s (reasoning effort low) · Nemotron 3 Nano Omni 1.4 s but often
+    #   "16/16 requests" busy · MiniMax M3.1 Flash 3-25 s, always thinks a little.
+    # Left out: Nemotron 3 Super, Nemotron Nano 3, Kimi K2.6 (listed, but "Not found for account" on the free key), DeepSeek V4.1
+    # Flash, GLM 5.3 Flash, Step 5 (no answer within 150 s), Llama models (not used), Gemma (dropped app-wide).
+    {"id": "nim/nvidia/nemotron-3-ultra-550b-a55b", "name": "Nemotron 3 Ultra 550B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Strongest free NVIDIA model; 1-7 s, clean JSON, keeps facts when rewriting. Thinking off."},
+    {"id": "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "name": "Nemotron 3.5 Lightning 30B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "3B active, ~1 s, clean JSON. Quick tasks. Thinking off."},
+    {"id": "nim/nvidia/nemotron-3.5-bolt-e4b", "name": "Nemotron 3.5 Bolt (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Tiny and ~1 s. Quick tasks only."},
     {"id": "nim/openai/gpt-oss-20b", "name": "GPT-OSS 20B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Fast and light."},
-    {"id": "nim/z-ai/glm-5.3-flash", "name": "GLM 5.3 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Flash model, good structured output."},
-    # Added Oct 2026 from NVIDIA's own model pages (build.nvidia.com): Nemotron 3 Super (strongest free NVIDIA model) and
-    # Nemotron 3 Nano Omni. Ids are checked against your key's /v1/models list; a name not on your account is skipped.
-    {"id": "nim/nvidia/nemotron-3-super-120b-a12b", "name": "Nemotron 3 Super 120B (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "120B MoE (12B active): the strongest free NVIDIA model here. Thinking off."},
+     "note": "2-6 s, reliable JSON, keeps facts. Reasoning effort low."},
     {"id": "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning", "name": "Nemotron 3 Nano Omni (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "3B active parameters, fast. Thinking off."},
-    {"id": "nim/deepseek-ai/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
-     "note": "Flash model, strong reasoning and writing."},
+     "note": "Fast when free, often busy (503). Backup. Thinking off."},
+    {"id": "nim/minimaxai/minimax-m3.1-flash", "name": "MiniMax M3.1 Flash (NIM)", "provider": "nvidia", "rpm": 40, "rph": None, "rpd": None, "tpm": None, "tpd": None,
+     "note": "Good writing but always thinks a little (3-25 s). Late backup."},
     # Google AI Studio.
     {"id": "gemini/gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "provider": "google", "rpm": 15, "rpd": 500, "tpm": 250_000, "tpd": None,
      "note": "Fast (~1 s) and reliable — first choice for every task."},
-    # Ollama Cloud (ollama.com) — OPT-IN, off by default. Open-weight models only. The free plan is small and changed in
-    # Oct 2026 (third-party reports: monthly starter allowance or a $0 pay-per-token plan; one request at a time), so it
-    # sits near the end of every chain and its published numbers are NOT assumed: calls are spaced and one at a time.
-    # Names come from public model lists and are checked against the account's own /v1/models before use.
+    # Ollama Cloud (ollama.com) — OPT-IN, off by default, and NOT FREE: since Oct 2026 the $0 plan is pay-per-token
+    # (ollama.com/pricing, checked 29 Oct 2026; gpt-oss:20b $0.07 / $0.30 per million tokens in / out, 3 concurrent requests).
+    # An account without credits gets "402 Add usage credits" — the router then skips Ollama for 30 minutes. Open-weight
+    # models only; names are the ones /api/tags lists. Calls are spaced and one at a time.
     {"id": "ollama/gpt-oss:120b", "name": "GPT-OSS 120B (Ollama Cloud)", "provider": "ollama", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
      "note": "Open-weight reasoning model. Opt-in; one request at a time."},
     {"id": "ollama/gpt-oss:20b", "name": "GPT-OSS 20B (Ollama Cloud)", "provider": "ollama", "rpm": None, "rph": None, "rpd": None, "tpm": None, "tpd": None,
@@ -117,9 +120,10 @@ BY_ID = {m["id"]: m for m in CATALOG}
 # Kilo models are spread across chains so their 200 req/hour per-model budgets add up.
 # NVIDIA NIM (free key): 40 requests/minute for the whole account — about 2,400 an hour against Kilo's 200 an hour per model —
 # so with a key NIM leads right after Gemini. Without a key these entries are skipped. Thinking is off / low on all of them.
-_NIM_FAST = ["nim/nvidia/nemotron-nano-3-30b-a3b", "nim/openai/gpt-oss-20b"]
-_NIM_SMART = ["nim/z-ai/glm-5.3-flash", "nim/deepseek-ai/deepseek-v4.1-flash", "nim/nvidia/nemotron-3-super-120b-a12b",
+_NIM_FAST = ["nim/nvidia/nemotron-3.5-lightning-30b-a3b", "nim/nvidia/nemotron-3.5-bolt-e4b", "nim/openai/gpt-oss-20b"]
+_NIM_SMART = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b", "nim/nvidia/nemotron-3.5-lightning-30b-a3b",
               "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
+_NIM_WRITE = ["nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b"]     # the two that kept every fact in the rewrite test
 _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
               "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
 _KILO_SMART = ["kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/nvidia/nemotron-3.5-super-vl:free", "kilo/kilo-auto/free",
@@ -137,16 +141,15 @@ CHAINS: dict[str, list[str]] = {
     "reasoning": ["gemini/gemini-3.5-flash-lite", *_NIM_SMART, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
                   "groq/openai/gpt-oss-120b", "groq/moonshotai/kimi-k2-instruct-0905",
                   "groq/moonshotai/kimi-k2-instruct", "mistral/mistral-medium-latest", *_OLLAMA_SMART, *_LLM7],
-    "tailoring": ["gemini/gemini-3.5-flash-lite", "nim/deepseek-ai/deepseek-v4.1-flash", "nim/nvidia/nemotron-3-super-120b-a12b",
-                  "nim/z-ai/glm-5.3-flash", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "groq/qwen/qwen3.8-27b",
+    "tailoring": ["gemini/gemini-3.5-flash-lite", *_NIM_WRITE, "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/kilo-auto/free", "groq/qwen/qwen3.8-27b",
                   "groq/moonshotai/kimi-k2-instruct-0905", "groq/moonshotai/kimi-k2-instruct", "groq/openai/gpt-oss-120b",
-                  "mistral/mistral-medium-latest", *_OLLAMA_SMART, *_LLM7],
+                  "mistral/mistral-medium-latest", "nim/minimaxai/minimax-m3.1-flash", *_OLLAMA_SMART, *_LLM7],
     "extraction": ["gemini/gemini-3.5-flash-lite", *_NIM_SMART, *_KILO_SMART, "groq/qwen/qwen3.8-27b",
                    "mistral/mistral-medium-latest", "groq/openai/gpt-oss-120b",
                    *_OLLAMA_SMART, *_LLM7],
     # chat editor for resumes / CVs / letters: Gemini 3.5 Flash Lite or Kilo's free models only, thinking off
     "editor": ["gemini/gemini-3.5-flash-lite", *_KILO_FAST],
-    "browser": ["gemini/gemini-3.5-flash-lite", "nim/nvidia/nemotron-3-super-120b-a12b", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
+    "browser": ["gemini/gemini-3.5-flash-lite", "nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/nvidia/nemotron-3.5-lightning-30b-a3b", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "groq/openai/gpt-oss-120b",
                 "mistral/mistral-small-latest", "llm7/GLM-5.3-Flash"],
 }
 CHAIN_LABELS = {"fast": "Quick tasks", "reasoning": "Matching & analysis", "tailoring": "Resume & letter writing",
@@ -452,6 +455,18 @@ def mark_success(model: str) -> None:
 def mark_failure(model: str, error: str) -> Optional[float]:
     """Record a failed call. Returns the rest period in seconds (None if the error is not the model's fault)."""
     e = (error or "").lower()
+    if "not found for account" in e or ("404" in e and "function" in e):
+        # NIM lists models a free key cannot call ("Function …: Not found for account"): rest that model, not the provider
+        _health[model] = {"trips": 1, "until": time.monotonic() + 12 * 3600, "why": "not available on this account"}
+        log.warning("model_not_on_account", model=model)
+        return 12 * 3600.0
+    if "402" in e or "usage credits" in e or "payment required" in e or "insufficient credit" in e:
+        # pay-per-token provider with no credits (Ollama Cloud's $0 plan): skip every model of it for a while
+        provider = provider_of(model)
+        _bad_keys[provider + _scope()] = (_fingerprint(provider_key(provider)), time.monotonic() + BAD_KEY_REST_S)
+        _health[model] = {"trips": 1, "until": time.monotonic() + BAD_KEY_REST_S, "why": "the account has no usage credits"}
+        log.warning("provider_needs_credits", provider=provider)
+        return BAD_KEY_REST_S
     if any(k in e for k in _AUTH_ERR) and not any(k in e for k in _RATE_ERR) and provider_key(provider_of(model)) == KILO_FREE:
         # a no-key pool (LLM7) answers 401 for a model that became paid: rest that model, not the whole provider
         _health[model] = {"trips": 1, "until": time.monotonic() + 6 * 3600, "why": "now needs a paid key"}

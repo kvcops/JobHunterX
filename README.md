@@ -538,12 +538,12 @@ graph LR
 
 | Task (Settings label) | Chain | Model order (a model without a key / switched off / not on your account is skipped) |
 |:--|:--|:--|
-| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron Nano 3, GPT-OSS 20B) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → Ollama GPT-OSS 20B *(opt-in)* → LLM7 |
-| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (GLM 5.3 Flash, DeepSeek V4.1 Flash, Nemotron 3 Super, Nemotron 3 Nano Omni) → **Kilo** (Nemotron 3 Super, Nemotron 3.5 Super VL, Auto, Dots 3 Note, Laguna S, Xing 4.0, Nemotron 3 Nano Omni) → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → Ollama *(opt-in)* → LLM7 |
-| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (DeepSeek V4.1 Flash, Nemotron 3 Super, GLM 5.3 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → Ollama *(opt-in)* → LLM7 |
+| Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Lightning, Nemotron 3.5 Bolt, GPT-OSS 20B) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → Ollama GPT-OSS 20B *(opt-in, paid)* → LLM7 |
+| Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** (Nemotron 3 Super, Nemotron 3.5 Super VL, Auto, Dots 3 Note, Laguna S, Xing 4.0, Nemotron 3 Nano Omni) → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → Ollama *(opt-in, paid)* → LLM7 |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra 550B, GPT-OSS 20B — the two that kept every fact in the rewrite test) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → NIM MiniMax M3.1 Flash → Ollama *(opt-in, paid)* → LLM7 |
 | Resume reading, job reading, Company Scout | `extraction` | same as Matching & analysis (Mistral Medium before Groq GPT-OSS 120B) |
 | **Resume chat editor** | `editor` | Gemini 3.5 Flash Lite → **Kilo** free models only — thinking off |
-| Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** Nemotron 3 Super → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
+| Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3 Ultra, Nemotron 3.5 Lightning) → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
 
 **With a key, NVIDIA NIM leads right after Gemini.** Its free tier allows about 40 requests/minute for the whole account (≈ 2,400 an
 hour — against Kilo's 200 an hour *per model*), which is what a search with many AI reads needs. Without a NIM key those entries are skipped
@@ -561,32 +561,44 @@ Llama models are deliberately not used. In **Settings → AI providers** you can
 pick the first model for each task, and press **Check available models** — the app asks each provider's `/models`
 endpoint with your key and skips models your account cannot call.
 
-### 🦙 Ollama Cloud (optional, off by default)
+### 🦙 Ollama Cloud (optional, off by default — **not free**)
 
-Ollama Cloud runs **open-weight models only** (no proprietary models) behind `https://ollama.com/v1` (OpenAI-compatible,
-`Authorization: Bearer <key>`; direct calls use the plain model name, e.g. `gpt-oss:120b`).
+Ollama Cloud runs **open-weight models only** behind `https://ollama.com/v1` (OpenAI-compatible, `Authorization: Bearer <key>`;
+model names are the ones `https://ollama.com/api/tags` lists, e.g. `gpt-oss:120b`).
 
-* **Why it is opt-in:** its free plan is small, uses no published request-per-minute number, and **changed in October 2026** —
-  third-party reports describe either a monthly starter allowance or a $0 pay-per-token plan, with one concurrent request on
-  the free tier. Because of that the app assumes nothing: one call at a time, spaced requests, placed after every other keyed
-  provider, and **never used until you turn it on** (Settings → AI providers → Ollama Cloud, plus a key from
-  [ollama.com/settings/keys](https://ollama.com/settings/keys)). Check your usage on ollama.com before relying on it.
-* **Models in the catalog:** `gpt-oss:120b` and `gpt-oss:20b`. Add more by editing `CATALOG` in `config/models.py`; the app
-  checks every name against your key's own `/v1/models` list and skips the ones your account cannot call.
-* **Thinking** is switched off with `reasoning_effort: "none"` (asked again without it if a model rejects the parameter).
-* The key test (`POST /api/setup/test-key`) only lists models, which runs no model.
+* **It costs money.** Since October 2026 its `$0` plan is *pay as you go* — every cloud model is billed per token
+  ([ollama.com/pricing](https://ollama.com/pricing): e.g. `gpt-oss:20b` $0.07 in / $0.30 out per million tokens, 3 concurrent
+  requests; Pro $20/month includes $60 of usage). An account without credits gets `402 Add usage credits` — checked live with a
+  free account on 29 Oct 2026. The app then skips Ollama for 30 minutes instead of retrying.
+* So it stays **off until you turn it on** (Settings → AI providers → Ollama Cloud, plus a key from
+  [ollama.com/settings/keys](https://ollama.com/settings/keys)) and sits after every free provider. The key test reads your
+  balance (`/api/balance`, free) and tells you when the account has no credits.
+* **Models in the catalog:** `gpt-oss:120b` and `gpt-oss:20b` (both on Ollama's cloud list). Thinking is set to the lowest level
+  (`reasoning_effort`); a model that rejects it is asked again without it. Ollama says it does not train on cloud prompts.
 
 ### 🟩 NVIDIA NIM (free key)
 
 `https://integrate.api.nvidia.com/v1`, OpenAI-compatible, key from [build.nvidia.com](https://build.nvidia.com/settings/api-keys).
-Only the hosted free-endpoint catalog is used (no paid or self-hosted endpoints); the app asks your key's `/v1/models` list and
-skips any model your account cannot call. Chosen for speed and low thinking: small or mixture-of-experts "flash" / "nano" models
-first, **Nemotron 3 Super 120B** for the harder reasoning and writing. Thinking is switched off through the chat template
-(Nemotron / GLM / DeepSeek) or set to `low` (GPT-OSS); a model that rejects the setting is asked again without it. NIM serves
-every agent that goes through a task chain — profile and job reading, matching, shortlisting, the Connector, resume / CV /
-letter writing, the Company Scout and the agents office — and drives the browser agent too. The 40 requests/minute figure is
-what NVIDIA's free tier is widely reported to allow per account (not an official guarantee), so the router spaces calls to it
-as one shared budget.
+A free key **lists 84 models but can call only some of them** — the rest answer `404 Function …: Not found for account`. The
+models below were picked from a live test with a free key (29 Oct 2026: a JSON extraction and a fact-keeping resume rewrite,
+thinking off, run through the app's own router):
+
+| Model | Seen in the test | Used for |
+|:--|:--|:--|
+| **Nemotron 3 Ultra 550B** | 1–8 s (sometimes slower under load), clean JSON, kept every fact when rewriting | matching, reading, writing, browser agent |
+| **Nemotron 3.5 Lightning 30B** | ~1 s, clean JSON | quick tasks, browser agent backup |
+| **Nemotron 3.5 Bolt** | ~1 s | quick tasks |
+| **GPT-OSS 20B** | 2–6 s (reasoning effort *low*), kept every fact | all tasks, writing backup |
+| Nemotron 3 Nano Omni | 1.4 s when free, often "16/16 requests" busy | backup |
+| MiniMax M3.1 Flash | 3–25 s, always thinks a little | late writing backup |
+
+Not used: Nemotron 3 Super, Nemotron Nano 3 and Kimi K2.6 (listed, but not callable on a free key), DeepSeek V4.1 Flash, GLM 5.3
+Flash and Step 5 (no answer within 150 s), Llama models (never used here), Gemma (dropped app-wide). The router waits at most 30 s
+for a NIM answer, rests a model that times out, and rests a model "not found for account" for 12 hours, so a busy endpoint never
+holds a search up. NIM serves every agent that goes through a task chain — profile and job reading, matching, shortlisting, the
+Connector, resume / CV / letter writing, the Company Scout and the agents office — and drives the browser agent too. The ~40
+requests/minute is what NVIDIA's free tier is widely reported to allow per account (not an official number), so the router spaces
+calls to it as one shared budget.
 
 ### 💳 Free-tier limits the router respects
 
@@ -607,8 +619,8 @@ e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
 | Kilo Gateway | `kilo-auto/free` · `nvidia/nemotron-3-super-120b-a12b:free` · `nvidia/nemotron-3.5-super-vl:free` · `dots-studio/dots-3-note-preview:free` · `cohere/north-mini-code:free` · `poolside/laguna-s-2.1:free` · `xingchen-agi/xing4.0-29b-a4b:free` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | — | **200 req / hour per model** | — | No key. Measured 1–9 s per answer. May train on prompts |
 | LLM7 | `GLM-5.3-Flash` · `DeepSeek-V4-Flash-0731` | ~5 per minute (spaced) | small token quota | — | No key, one call at a time, 10–60 s: last resort |
-| NVIDIA NIM | `nvidia/nemotron-3-super-120b-a12b` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` · `nvidia/nemotron-nano-3-30b-a3b` · `openai/gpt-oss-20b` · `z-ai/glm-5.3-flash` · `deepseek-ai/deepseek-v4.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget. Thinking is off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS) |
-| Ollama Cloud | `gpt-oss:120b` · `gpt-oss:20b` | unpublished (spaced, 1 at a time) | plan-dependent | — | **Opt-in**; see above |
+| NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` · `nvidia/nemotron-3.5-lightning-30b-a3b` · `nvidia/nemotron-3.5-bolt-e4b` · `openai/gpt-oss-20b` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` · `minimaxai/minimax-m3.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget. Thinking off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS); a call waits at most 30 s before the next model takes over |
+| Ollama Cloud | `gpt-oss:120b` · `gpt-oss:20b` | 3 concurrent (spaced, 1 at a time here) | pay-per-token | — | **Opt-in and not free** — see above |
 
 > [!NOTE]
 > Resume upload runs in the background with live progress, so a slow free-tier call never times out the page.

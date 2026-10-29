@@ -199,6 +199,11 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
     return sem_map[key]
 
 
+# NIM's free endpoints answer in 1-7 s when they answer at all; one that is queued can hang for minutes (live test, Oct 2026).
+# A short wait hands over to the next model quickly, and the timeout rests that model (server-error rule in config/models.py).
+_OC_TIMEOUT = {"nvidia": 30}
+
+
 def _single_gate(provider: str) -> asyncio.Semaphore:
     """One call at a time (per event loop and, in prod mode, per user): LLM7 answers 429 to a 2nd parallel call from one
     client, and the free Ollama Cloud plan allows one concurrent request."""
@@ -526,7 +531,7 @@ async def call_llm(
                 try:
                     out = await oc.chat(base, model.split("/", 1)[1], messages, key=None if key == M.KILO_FREE else key,
                                         max_tokens=budget_out, temperature=kwargs.get("temperature"), json_mode=json_mode,
-                                        timeout=75, extra=no_think)
+                                        timeout=_OC_TIMEOUT.get(provider, 75), extra=no_think)
                     break
                 except oc.EmptyAnswer:
                     if attempt:
@@ -730,8 +735,9 @@ async def call_llm_with_fallback(
             M.mark_success(model)
             return result
         except Exception as exc:
-            rest = M.mark_failure(model, str(exc))
-            log.warning("llm_fallback", model=model, error=str(exc)[:200], next_try_in_s=int(rest) if rest else None)
+            err = str(exc) or type(exc).__name__          # httpx timeouts carry no message: "ReadTimeout" still says "timeout"
+            rest = M.mark_failure(model, err)
+            log.warning("llm_fallback", model=model, error=err[:200], next_try_in_s=int(rest) if rest else None)
             last_err = exc
         finally:
             _inflight[model] -= 1
