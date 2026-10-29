@@ -535,7 +535,7 @@ graph LR
 |:--|:--|:--|
 | Quick tasks | `fast` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Lightning, Nemotron 3.5 Super VL, Nemotron 3.5 Bolt, GPT-OSS 20B, DiffusionGemma) → **Kilo** (Auto, Nemotron 3 Super, Dots 3 Note, North Mini Code, Laguna S) → Groq Qwen3.8 27B → Groq GPT-OSS 20B → Mistral Small → LLM7 |
 | Matching & analysis | `reasoning` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3 Ultra 550B, Nemotron 3.5 Super VL, MiniMax M3.1 Flash, GPT-OSS 20B, Nemotron 3.5 Lightning, Muse Glimmer 30B, Nemotron 3 Nano Omni, DiffusionGemma) → **Kilo** → Groq Qwen3.8 27B → Groq GPT-OSS 120B → Kimi K2 → Mistral Medium → LLM7 |
-| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3 Ultra 550B, GPT-OSS 20B, Muse Glimmer 30B, then MiniMax M3.1 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → LLM7 |
+| Resume & letter writing | `tailoring` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3.5 Super VL, GPT-OSS 20B, Muse Glimmer 30B, then MiniMax M3.1 Flash) → **Kilo** (Nemotron 3 Super, Auto) → Groq (Qwen3.8 27B, Kimi K2, GPT-OSS 120B) → Mistral Medium → LLM7 |
 | Resume reading, job reading, Company Scout | `extraction` | Gemini 3.5 Flash Lite → **NIM** (Mistral Large 4, Nemotron 3.5 Super VL, Nemotron 3 Ultra 550B, GPT-OSS 20B, MiniMax M3.1 Flash, Nemotron 3.5 Lightning, Nemotron 3 Nano Omni) → **Kilo** → Groq Qwen3.8 27B → Mistral Medium → Groq GPT-OSS 120B → LLM7 |
 | **Resume chat editor** | `editor` | Gemini 3.5 Flash Lite → **Kilo** free models only — thinking off |
 | Browser agent | `browser` | Gemini 3.5 Flash Lite → **NIM** (Nemotron 3.5 Super VL, Mistral Large 4, Nemotron 3 Ultra) → Kilo → Groq GPT-OSS 120B → Mistral Small → LLM7 |
@@ -576,7 +576,27 @@ thinking off, run through the app's own router):
 | Nemotron 3 Nano Omni | 1.4 s when free, often "16/16 requests" busy | backup |
 
 Not used: Nemotron 3 Super, Nemotron Nano 3 and Kimi K2.6 (listed, but not callable on a free key); DeepSeek V4.1 Flash, GLM 5.3
-Flash and Step 5 (time out on every try, 45–150 s); Laguna XS 2.1 ("busy" on every call); Llama models (never used here). **Rate limits, handled gracefully** (tested with a burst of 60 parallel calls: 0 failed, NIM took what its budget allowed and the
+Flash and Step 5 (time out on every try, 45–150 s); Laguna XS 2.1 ("busy" on every call); Llama models (never used here). **Measured speed** (streaming, ~500-token answers, free key, 29 Oct 2026):
+
+| Model | First token | Generation | Note |
+|:--|:--|:--|:--|
+| DiffusionGemma 26B | 12.3 s | ~400 tok/s | writes everything at once: slow to start, then instant |
+| Mistral Large 4 | 0.6 s | 187 tok/s | its reasoning can't be switched off (`none` / `minimal` are refused; at `low` ~58 % of output is reasoning) |
+| Nemotron 3.5 Lightning · Super VL | 0.5–0.6 s | 85–86 tok/s | |
+| Nemotron 3 Nano Omni | 0.6 s | 43 tok/s | |
+| GPT-OSS 20B | 4–9 s | 30 tok/s | |
+| Nemotron 3 Ultra 550B | 2.5 s | 16–40 tok/s | fine for short JSON (1–8 s); stalled on 2,000-token prose, so not used for writing |
+| MiniMax M3.1 Flash | 1.8 s | 18 tok/s | |
+| Muse Glimmer 30B | 5.9 s | 11 tok/s | |
+
+NVIDIA publishes no tokens-per-minute limit for the free endpoints — only the ~40 requests/minute.
+
+**Sized to each call** (`call_plan` in `config/models.py`): every NIM call gets an output budget with room for that model's
+reasoning (Mistral Large 4 × 2.5, MiniMax × 1.3, Muse × 1.2 — so answers are never cut off), a timeout that grows with the
+answer it is asked for (30 s for a short verdict, up to 150 s for a long CV), and a model that clearly can't finish an answer
+that long in ~2 minutes is skipped for that call only (e.g. Muse Glimmer for a CV) without being rested.
+
+**Rate limits, handled gracefully** (tested with a burst of 60 parallel calls: 0 failed, NIM took what its budget allowed and the
 rest spilled to Kilo in 11 s):
 
 * Calls are paced to **36/min** — 10 % under NVIDIA's 40 — as one budget for every NIM model, so retries stay inside it.
@@ -586,7 +606,7 @@ rest spilled to Kilo in 11 s):
 * `503 ResourceExhausted … request limit reached` = endpoint full: a flat 60 s rest, no growing back-off.
 * A timeout (30 s), "not found for account" (12 h) and a rejected key (30 min) each rest the right thing, and the chain moves on.
 
-The router waits at most 30 s for a NIM answer, rests a model that times out, and rests a model "not found for account" for 12 hours, so a busy endpoint never
+A model that times out is rested, and rests a model "not found for account" for 12 hours, so a busy endpoint never
 holds a search up. NIM serves every agent that goes through a task chain — profile and job reading, matching, shortlisting, the
 Connector, resume / CV / letter writing, the Company Scout and the agents office — and drives the browser agent too. The ~40
 requests/minute is what NVIDIA's free tier is widely reported to allow per account (not an official number), so the router spaces
@@ -611,7 +631,7 @@ e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000
 | Mistral | `mistral-large-latest` | 4 | — | 250K | Very low request rate on the free plan |
 | Kilo Gateway | `kilo-auto/free` · `nvidia/nemotron-3-super-120b-a12b:free` · `nvidia/nemotron-3.5-super-vl:free` · `dots-studio/dots-3-note-preview:free` · `cohere/north-mini-code:free` · `poolside/laguna-s-2.1:free` · `xingchen-agi/xing4.0-29b-a4b:free` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | — | **200 req / hour per model** | — | No key. Measured 1–9 s per answer. May train on prompts |
 | LLM7 | `GLM-5.3-Flash` · `DeepSeek-V4-Flash-0731` | ~5 per minute (spaced) | small token quota | — | No key, one call at a time, 10–60 s: last resort |
-| NVIDIA NIM | `nvidia/nemotron-3-ultra-550b-a55b` · `nvidia/nemotron-3.5-lightning-30b-a3b` · `nvidia/nemotron-3.5-bolt-e4b` · `openai/gpt-oss-20b` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` · `minimaxai/minimax-m3.1-flash` | **40 per account** | — | — | Free key at build.nvidia.com; the 40/min is shared by all NIM models, so the router counts it as one budget. Thinking off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS and MiniMax); a call waits at most 30 s before the next model takes over |
+| NVIDIA NIM | `mistralai/mistral-large-4-1t-a52b` · `nvidia/nemotron-3.5-super-vl-120b-a12b` · `nvidia/nemotron-3.5-lightning-30b-a3b` · `nvidia/nemotron-3.5-bolt-e4b` · `nvidia/nemotron-3-ultra-550b-a55b` · `openai/gpt-oss-20b` · `minimaxai/minimax-m3.1-flash` · `meta/muse-glimmer-30b` · `google/diffusiongemma-26b-a4b-it` · `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` | **40 per account** (paced at 36) | — | not published | Free key at build.nvidia.com; one shared budget for all NIM models. Thinking off (`enable_thinking: false`) or lowest (`reasoning_effort: low` for GPT-OSS, MiniMax, Mistral Large 4, Muse Glimmer); output budget and timeout sized to each call |
 
 > [!NOTE]
 > Resume upload runs in the background with live progress, so a slow free-tier call never times out the page.

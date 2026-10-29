@@ -202,9 +202,8 @@ def _get_semaphore(model: str) -> asyncio.Semaphore:
     return sem_map[key]
 
 
-# NIM's free endpoints answer in 1-7 s when they answer at all; one that is queued can hang for minutes (live test, Oct 2026).
-# A short wait hands over to the next model quickly, and the timeout rests that model (server-error rule in config/models.py).
-_OC_TIMEOUT = {"nvidia": 30}
+class TooSlowForThisCall(RuntimeError):
+    """This model would need too long for the answer size asked; the next model takes the call (no rest — see call_plan)."""
 
 
 def _single_gate(provider: str) -> asyncio.Semaphore:
@@ -519,12 +518,15 @@ async def call_llm(
         no_think = {"kilo": oc.KILO_EXTRA, "nvidia": oc.nim_extra(model.split("/", 1)[1]), "llm7": oc.LLM7_EXTRA}[provider]
         json_mode = any("JSON object" in (m.get("content") or "") for m in messages if m.get("role") == "system")
         est = sum(len(m.get("content", "")) for m in messages) // 4 + int(kwargs.get("max_tokens") or 1024)
+        # room for the model's reasoning, and a wait that matches the answer size (config/models.py call_plan)
+        budget_out, call_timeout, too_slow = M.call_plan(model, int(kwargs.get("max_tokens") or 1024))
+        if too_slow:
+            raise TooSlowForThisCall(f"{model} skipped: {too_slow}")
+        call_timeout = call_timeout or 75.0
         shared = M.account_limiter(model)
         if shared:
             await M.budget(shared).acquire(0)             # NIM 40/min and LLM7: shared by all their models
         await _enforce_rate_limit(model, est)
-        # thinking models need room: a tiny budget can end before the answer starts
-        budget_out = max(1500, int(kwargs.get("max_tokens") or 1024))
         one_at_a_time = _single_gate(provider) if provider == "llm7" else None   # LLM7 refuses a 2nd parallel call from one client
         try:
             if one_at_a_time:
@@ -533,12 +535,13 @@ async def call_llm(
                 try:
                     out = await oc.chat(base, model.split("/", 1)[1], messages, key=None if key == M.KILO_FREE else key,
                                         max_tokens=budget_out, temperature=kwargs.get("temperature"), json_mode=json_mode,
-                                        timeout=_OC_TIMEOUT.get(provider, 75), extra=no_think)
+                                        timeout=call_timeout, extra=no_think)
                     break
                 except oc.EmptyAnswer:
                     if attempt:
                         raise
                     budget_out = min(8192, budget_out * 3)      # one retry with more room before moving on
+                    call_timeout = min(M.MAX_CALL_TIMEOUT_S, call_timeout * 2)
         except oc.ChatError as exc:
             if exc.status == 429:
                 _record_rate_limit(model)

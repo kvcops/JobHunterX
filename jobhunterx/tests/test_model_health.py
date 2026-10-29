@@ -64,3 +64,26 @@ def test_one_busy_nim_model_does_not_rest_the_others():
 
 def test_nim_account_limiter_keeps_headroom():
     assert M.limits(M.NIM_ACCOUNT)["rpm"] == 36
+
+
+def test_call_plan_gives_reasoning_room_and_size_based_waits():
+    budget, wait, skip = M.call_plan("nim/mistralai/mistral-large-4-1t-a52b", 2000)
+    assert budget == 5000 and skip is None                   # 2.5x: its reasoning can't be switched off
+    assert M.call_plan("nim/nvidia/nemotron-3.5-lightning-30b-a3b", 400)[1] == M.MIN_CALL_TIMEOUT_S
+    short, long = M.call_plan("nim/openai/gpt-oss-20b", 400)[1], M.call_plan("nim/openai/gpt-oss-20b", 2000)[1]
+    assert short < long <= M.MAX_CALL_TIMEOUT_S              # the wait grows with the answer asked for
+    assert M.call_plan("nim/meta/muse-glimmer-30b", 2500)[2]  # too slow for a CV: skipped for that call
+    assert M.call_plan("nim/meta/muse-glimmer-30b", 300)[2] is None
+    assert M.call_plan("kilo/kilo-auto/free", 2500) == (2500, None, None)   # no measurements: provider defaults
+
+
+def test_skipping_a_slow_model_does_not_rest_it():
+    assert M.mark_failure("nim/meta/muse-glimmer-30b", "nim/meta/muse-glimmer-30b skipped: too slow for an answer this long (~136 s at 11 tokens/s)") is None
+    assert M.resting("nim/meta/muse-glimmer-30b") is None
+
+
+def test_writing_chain_leads_with_models_that_never_invented_tools():
+    write = [m for m in M.CHAINS["tailoring"] if m.startswith("nim/")]
+    assert write[:2] == ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b"]
+    assert "nim/google/diffusiongemma-26b-a4b-it" not in write and "nim/nvidia/nemotron-3-ultra-550b-a55b" not in write
+    assert write[-1] == "nim/minimaxai/minimax-m3.1-flash"

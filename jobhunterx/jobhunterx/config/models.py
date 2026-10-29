@@ -138,7 +138,9 @@ _NIM_READ = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3.5-s
              "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
 # writing: only models that never invented a tool in the rewrite test lead; MiniMax (keyword-stuffs rewrites) comes last.
 # DiffusionGemma is never used for writing.
-_NIM_WRITE = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3-ultra-550b-a55b", "nim/openai/gpt-oss-20b",
+# Long answers (resume / CV / letter): Mistral Large 4 (187 tok/s, 684 words in 16 s) then Super VL (85 tok/s, 661 words in 9 s),
+# both of which invented nothing. Ultra is left out of writing: it stalled on long prose in the live test.
+_NIM_WRITE = ["nim/mistralai/mistral-large-4-1t-a52b", "nim/nvidia/nemotron-3.5-super-vl-120b-a12b", "nim/openai/gpt-oss-20b",
               "nim/meta/muse-glimmer-30b", "nim/minimaxai/minimax-m3.1-flash"]
 _KILO_FAST = ["kilo/kilo-auto/free", "kilo/nvidia/nemotron-3-super-120b-a12b:free", "kilo/dots-studio/dots-3-note-preview:free",
               "kilo/cohere/north-mini-code:free", "kilo/poolside/laguna-s-2.1:free"]
@@ -180,6 +182,47 @@ NIM_ACCOUNT_RPM = 36              # 10% under the documented 40/min, so retries 
 # Shared limiters for providers whose limits count per client, not per model.
 # LLM7: about one call every 5 s keeps clear of its short per-minute caps.
 ACCOUNT_LIMITERS = {"llm7": ("llm7/__account__", 12)}
+
+
+# Measured with a free NIM key (29 Oct 2026, streaming, ~500-token answers): generation speed in tokens/s, seconds to the
+# first token, and how many output tokens the model spends per answer token (its reasoning cannot be switched off — Mistral
+# Large 4 rejects reasoning_effort "none" / "minimal" and still reasons ~58% of its output at "low").
+CALL_SPEED: dict[str, tuple[float, float, float]] = {        # model -> (tokens/s, first-token s, output overhead)
+    "nim/mistralai/mistral-large-4-1t-a52b": (187, 0.6, 2.5),
+    "nim/nvidia/nemotron-3.5-super-vl-120b-a12b": (85, 0.6, 1.0),
+    "nim/nvidia/nemotron-3.5-lightning-30b-a3b": (86, 0.5, 1.0),
+    "nim/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": (43, 0.6, 1.0),
+    "nim/nvidia/nemotron-3-ultra-550b-a55b": (12, 2.5, 1.0),       # 1-8 s for short JSON, but 16-40 tok/s on prose and a 2,000-token
+                                                                   # answer gave nothing in 138 s: sized by its slow end, so the plan
+                                                                   # skips it for very long answers instead of waiting
+    "nim/openai/gpt-oss-20b": (30, 4.0, 1.05),
+    "nim/minimaxai/minimax-m3.1-flash": (18, 1.8, 1.3),
+    "nim/meta/muse-glimmer-30b": (11, 5.9, 1.2),
+    "nim/google/diffusiongemma-26b-a4b-it": (400, 12.3, 1.0),
+}
+_DEFAULT_SPEED = {"nvidia": (40.0, 3.0, 1.0)}
+MIN_CALL_TIMEOUT_S, MAX_CALL_TIMEOUT_S = 30.0, 150.0
+SLOW_SKIP_S = 120.0          # a model that would likely need longer than this for one answer is passed over for that call
+
+
+def call_plan(model: str, max_tokens: int) -> tuple[int, Optional[float], Optional[str]]:
+    """(output token budget, timeout seconds or None for the provider default, reason to skip this model for this call).
+
+    The budget leaves room for a model's reasoning so the answer is never cut off; the timeout grows with the answer it is
+    asked for (a 2,500-token CV at 28 tokens/s needs ~90 s, a JSON verdict ~5 s); and a model that is clearly too slow for
+    this answer size is skipped for this call only — it is not rested, a short call may still go to it."""
+    speed = CALL_SPEED.get(model) or _DEFAULT_SPEED.get(provider_of(model))
+    want = max(1, int(max_tokens or 1024))
+    if not speed:
+        return max(1500, want), None, None
+    tps, first, overhead = speed
+    budget = min(8192, max(1500, int(want * overhead)))
+    likely = first + (want * overhead * 0.6) / tps          # answers usually fill ~60% of the cap they are given
+    if likely > SLOW_SKIP_S:
+        return budget, None, f"too slow for an answer this long (~{int(likely)} s at {int(tps)} tokens/s)"
+    need = min(budget, want * overhead)                        # what this call can really produce (budget only adds headroom)
+    timeout = min(MAX_CALL_TIMEOUT_S, max(MIN_CALL_TIMEOUT_S, 2 * first + 1.2 * need / tps))
+    return budget, timeout, None
 
 
 def account_limiter(model: str) -> Optional[str]:
