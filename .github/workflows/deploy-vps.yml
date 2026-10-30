@@ -1,12 +1,17 @@
-# Deploy to the VPS from GitHub's own servers (useful when your own network blocks SSH).
+# Deploy to the VPS from GitHub's own servers (for networks that block SSH).
 #
-# Run it from Actions → "Deploy to VPS" → Run workflow:
-#   inspect — read-only: where the JobHunterX checkout is, which branch, how it runs (service / pm2 / docker / process)
-#   deploy  — pull the latest commits on the server's branch, install new Python packages if requirements changed,
-#             restart the app the same way it already runs, and check that it answers again
+# Credentials, either:
+#   * repository secrets VPS_HOST, VPS_PORT, VPS_USER, VPS_PASSWORD (Settings → Secrets and variables → Actions), or
+#   * a sealed one-time hand-over, when nobody can open the secrets page:
+#       1. Run with action=keygen. The run makes a key pair, keeps the private key in this repository's Actions cache
+#          (not publicly downloadable) and prints the public key.
+#       2. Encrypt {"host","port","user","password"} as JSON with that public key (RSA-OAEP, SHA-256) and base64 it:
+#          openssl pkeyutl -encrypt -pubin -inkey pub.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | base64 -w0
+#       3. Run with action=inspect or deploy, sealed=<that base64>, key_run=<the keygen run id>. The private key is
+#          deleted from the cache when that run ends, so the sealed text can't be opened again.
 #
-# Repository secrets (Settings → Secrets and variables → Actions): VPS_HOST, VPS_PORT, VPS_USER, VPS_PASSWORD.
-# Logs of a public repository are public: the script prints paths, branches and service names, never secrets or .env.
+# inspect — read-only (where the checkout is, its branch, how it runs). deploy — pull, install, restart, check.
+# Both run deploy/vps-update.sh on the server. Logs are public: credentials are masked and never printed.
 
 name: Deploy to VPS
 
@@ -14,10 +19,18 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: inspect (read-only) or deploy
+        description: keygen (step 1 of a sealed hand-over), inspect (read-only) or deploy
         type: choice
-        options: [inspect, deploy]
+        options: [inspect, deploy, keygen]
         default: inspect
+      sealed:
+        description: Sealed credentials (only for the hand-over; leave empty when the VPS_* secrets are set)
+        type: string
+        default: ""
+      key_run:
+        description: Run id of the keygen run that made the key for `sealed`
+        type: string
+        default: ""
       repo_dir:
         description: Path of the checkout on the server (leave empty to find it)
         type: string
@@ -29,104 +42,72 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write          # to delete the one-time private key from the cache
 
 jobs:
+  keygen:
+    name: Make a one-time key
+    if: inputs.action == 'keygen'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Key pair (private half stays in the cache, public half printed)
+        run: |
+          mkdir -p vpskey
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out vpskey/private.pem 2>/dev/null
+          echo "Public key for run ${{ github.run_id }}:"
+          openssl pkey -in vpskey/private.pem -pubout | base64 -w0; echo
+      - uses: actions/cache/save@v4
+        with:
+          path: vpskey
+          key: vps-key-${{ github.run_id }}
+
   vps:
     name: ${{ inputs.action }} on the VPS
+    if: inputs.action != 'keygen'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check the secrets are set
+      - uses: actions/checkout@v4
+
+      - name: Restore the one-time key
+        if: inputs.sealed != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: vpskey
+          key: vps-key-${{ inputs.key_run }}
+          fail-on-cache-miss: true
+
+      - name: Credentials (masked)
         env:
-          HOST: ${{ secrets.VPS_HOST }}
-          PASS: ${{ secrets.VPS_PASSWORD }}
+          SEALED: ${{ inputs.sealed }}
+          S_HOST: ${{ secrets.VPS_HOST }}
+          S_PORT: ${{ secrets.VPS_PORT }}
+          S_USER: ${{ secrets.VPS_USER }}
+          S_PASS: ${{ secrets.VPS_PASSWORD }}
         run: |
-          [ -n "$HOST" ] && [ -n "$PASS" ] || { echo "::error::Add VPS_HOST, VPS_PORT, VPS_USER and VPS_PASSWORD as repository secrets."; exit 1; }
+          if [ -n "$SEALED" ]; then
+            json=$(printf '%s' "$SEALED" | base64 -d | openssl pkeyutl -decrypt -inkey vpskey/private.pem \
+                     -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256) || { echo "::error::Could not open the sealed credentials"; exit 1; }
+            rm -rf vpskey
+            get() { printf '%s' "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('$1') or '')"; }
+            S_HOST=$(get host); S_PORT=$(get port); S_USER=$(get user); S_PASS=$(get password)
+          fi
+          [ -n "$S_HOST" ] && [ -n "$S_PASS" ] || { echo "::error::No credentials: set the VPS_* secrets or use a sealed hand-over."; exit 1; }
+          for v in "$S_HOST" "$S_PORT" "$S_PASS"; do [ -n "$v" ] && echo "::add-mask::$v"; done
+          { echo "VPS_HOST=$S_HOST"; echo "VPS_PORT=${S_PORT:-22}"; echo "VPS_USER=${S_USER:-root}"; echo "SSHPASS=$S_PASS"; } >> "$GITHUB_ENV"
           sudo apt-get install -y -qq sshpass > /dev/null
 
       - name: Run on the server
         env:
-          SSHPASS: ${{ secrets.VPS_PASSWORD }}
-          HOST: ${{ secrets.VPS_HOST }}
-          PORT: ${{ secrets.VPS_PORT }}
-          USER_NAME: ${{ secrets.VPS_USER }}
           ACTION: ${{ inputs.action }}
           REPO_DIR: ${{ inputs.repo_dir }}
         run: |
-          cat > remote.sh <<'SCRIPT'
-          set -u
-          ACTION="$1"; REPO_DIR="${2:-}"
-          say() { printf '\n== %s\n' "$*"; }
+          sshpass -e ssh -p "$VPS_PORT" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o LogLevel=ERROR \
+            "$VPS_USER@$VPS_HOST" "bash -s -- '$ACTION' '$REPO_DIR'" < deploy/vps-update.sh
 
-          say "Server"
-          uname -sr; uptime -p 2>/dev/null || true
-
-          say "JobHunterX checkouts"
-          mapfile -t REPOS < <(for g in $(find / -xdev -maxdepth 5 -type d -name .git -not -path '*/node_modules/*' 2>/dev/null); do
-            d=$(dirname "$g"); u=$(git -C "$d" remote get-url origin 2>/dev/null || true)
-            case "${u,,}" in *jobhunterx*) echo "$d";; esac; done)
-          for d in "${REPOS[@]}"; do
-            echo "$d  branch=$(git -C "$d" rev-parse --abbrev-ref HEAD)  at=$(git -C "$d" log -1 --format='%h %cs %s' | cut -c1-90)"
-          done
-          [ -n "$REPO_DIR" ] || { [ "${#REPOS[@]}" -eq 1 ] && REPO_DIR="${REPOS[0]}"; }
-
-          say "How it runs"
-          systemctl list-units --type=service --all --no-legend 2>/dev/null | awk '{print $1, $3, $4}' | grep -Ei 'job|hunter|uvicorn|creat|app|api|web' || echo "(no matching systemd services)"
-          command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | python3 -c "import sys,json; [print('pm2:', p['name'], p['pm2_env'].get('status'), p['pm2_env'].get('pm_cwd')) for p in json.load(sys.stdin)]" 2>/dev/null || true
-          command -v docker >/dev/null && docker ps --format 'docker: {{.Names}}  {{.Image}}  {{.Status}}  {{.Ports}}' 2>/dev/null || true
-          ps -eo pid,args --no-headers | grep -Ei 'uvicorn|jobhunterx|gunicorn' | grep -v grep | cut -c1-160 || true
-          say "Listening ports"
-          ss -ltnp 2>/dev/null | awk 'NR>1 {print $4, $6}' | sed 's/users:((//; s/,fd=[0-9]*//g' | sort -u | head -25
-
-          if [ "$ACTION" != "deploy" ]; then say "Inspect only — nothing changed"; exit 0; fi
-          [ -n "$REPO_DIR" ] && [ -d "$REPO_DIR/.git" ] || { echo "Could not pick the checkout (found ${#REPOS[@]}). Run again with repo_dir set."; exit 1; }
-
-          say "Pull in $REPO_DIR"
-          cd "$REPO_DIR"
-          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-            echo "The server has local edits to tracked files — not pulling over them:"; git status --short --untracked-files=no; exit 1
-          fi
-          BRANCH=$(git rev-parse --abbrev-ref HEAD); BEFORE=$(git rev-parse HEAD)
-          git fetch --quiet origin "$BRANCH" && git merge --ff-only "origin/$BRANCH" || { echo "Fast-forward of $BRANCH failed"; exit 1; }
-          AFTER=$(git rev-parse HEAD)
-          echo "$BRANCH: ${BEFORE:0:7} -> ${AFTER:0:7}"; git log --oneline "$BEFORE..$AFTER" | head -20
-
-          # the Python that runs the app: from the running process, else a venv in the checkout
-          PID=$(pgrep -f "uvicorn.*jobhunterx|jobhunterx.api.main|python.*jobhunterx" | head -1 || true)
-          PY=""; [ -n "$PID" ] && PY=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
-          for v in .venv venv jobhunterx/.venv jobhunterx/venv; do [ -z "$PY" ] && [ -x "$REPO_DIR/$v/bin/python" ] && PY="$REPO_DIR/$v/bin/python"; done
-          REQ=$(git ls-files | grep -E '(^|/)requirements\.txt$' | head -1)
-          if [ -n "$REQ" ] && [ -n "$PY" ] && ! git diff --quiet "$BEFORE" "$AFTER" -- "$REQ"; then
-            say "requirements changed: installing with $PY"; "$PY" -m pip install -q -r "$REQ" || { echo "pip install failed"; exit 1; }
-          fi
-
-          say "Restart"
-          UNIT=$(systemctl list-units --type=service --all --no-legend 2>/dev/null | awk '{print $1}' | while read -r u; do
-            systemctl cat "$u" 2>/dev/null | grep -qE "$REPO_DIR|jobhunterx" && echo "$u"; done | head -1)
-          if [ -n "$UNIT" ]; then
-            systemctl restart "$UNIT" && echo "restarted systemd service $UNIT"; sleep 4; systemctl is-active "$UNIT"
-          elif command -v pm2 >/dev/null && pm2 jlist 2>/dev/null | grep -q "$REPO_DIR"; then
-            NAME=$(pm2 jlist | python3 -c "import sys,json; print(next(p['name'] for p in json.load(sys.stdin) if p['pm2_env'].get('pm_cwd','').startswith('$REPO_DIR')))")
-            pm2 restart "$NAME" --update-env && echo "restarted pm2 app $NAME"
-          elif ls "$REPO_DIR"/docker-compose.y*ml "$REPO_DIR"/compose.y*ml >/dev/null 2>&1; then
-            docker compose up -d --build && echo "rebuilt docker compose services"
-          elif [ -n "$PID" ]; then
-            # same command, same working folder, same environment (copied byte for byte before stopping it)
-            CWD=$(readlink -f "/proc/$PID/cwd")
-            mapfile -d '' CMD < "/proc/$PID/cmdline"; mapfile -d '' ENVS < "/proc/$PID/environ"
-            kill "$PID"; for i in $(seq 1 20); do kill -0 "$PID" 2>/dev/null || break; sleep 0.5; done
-            (cd "$CWD" && setsid nohup env -i "${ENVS[@]}" "${CMD[@]}" >> "$CWD/jobhunterx-server.log" 2>&1 < /dev/null &)
-            echo "restarted the process in $CWD (log: $CWD/jobhunterx-server.log)"
-          else
-            echo "Found no running JobHunterX to restart"; exit 1
-          fi
-
-          say "Health"
-          sleep 6
-          PORTS=$(ss -ltnp 2>/dev/null | grep -Ei 'python|uvicorn' | awk '{print $4}' | sed 's/.*://' | sort -u)
-          ok=0; for p in $PORTS; do c=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$p/" || true); echo "port $p -> HTTP $c"; [ "$c" = 200 ] && ok=1; done
-          [ "$ok" = 1 ] || { echo "The app did not answer with HTTP 200"; exit 1; }
-          say "Deployed ${AFTER:0:7}"
-          SCRIPT
-          sshpass -e ssh -p "${PORT:-22}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 \
-            "${USER_NAME:-root}@$HOST" "bash -s -- '$ACTION' '$REPO_DIR'" < remote.sh
+      - name: Delete the one-time key
+        if: always() && inputs.key_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEY_RUN: ${{ inputs.key_run }}
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches?key=vps-key-$KEY_RUN" > /dev/null && echo "one-time key deleted" || true
