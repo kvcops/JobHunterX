@@ -557,6 +557,23 @@ export async function generateCv(focus) {
     setEntry('gen', key, { status: 'failed', error: errorText(err), documentId: null, focus });
   }
 }
+/** A one-page resume for a job the user brings (pasted description and/or link). Returns the document or null. */
+export async function generateCustomResume(body) {
+  const key = genKey(null, 'custom');
+  if (getState().gen[key]?.status === 'generating') return null;
+  setEntry('gen', key, { status: 'generating', error: null, documentId: null, startedAt: Date.now() });
+  try {
+    const { document } = await api.generateCustomResume(body);
+    setEntry('gen', key, { status: 'ready', error: null, documentId: document.id });
+    setEntry('docDetails', document.id, { status: 'ready', doc: document, error: null });
+    loadDocuments();
+    navigate(`#/documents/${document.id}`);
+    return document;
+  } catch (err) {
+    setEntry('gen', key, { status: 'failed', error: errorText(err), documentId: null });
+    return null;
+  }
+}
 let docsSeq = 0;
 export async function loadDocuments() {
   const seq = ++docsSeq;

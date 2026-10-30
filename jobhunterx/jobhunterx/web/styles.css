@@ -2005,3 +2005,65 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .funded-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }
 .funded-row:first-child { border-top: 0; }
 .funded-head a { color: inherit; }
+
+/* ── edit on the page (views/doceditor.js) ─────────────────────────────────────────── */
+.ed-toolbar { position: sticky; top: 0; z-index: 5; max-width: 760px; margin: 0 auto 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  padding: 8px 10px; background: var(--card-solid); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-sm); }
+.ed-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ed-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 32px; height: 32px; padding: 0 8px; border: 1px solid transparent;
+  border-radius: 9px; background: transparent; color: var(--text); font: inherit; font-size: .85rem; cursor: pointer; transition: background .15s, border-color .15s; }
+.ed-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--line); }
+.ed-btn:disabled { opacity: .38; cursor: default; }
+.ed-btn b, .ed-btn i { font-size: .95rem; font-family: Georgia, serif; }
+.ed-sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+.ed-status { margin-left: auto; white-space: nowrap; }
+.ed-seg { display: inline-flex; align-self: flex-start; width: fit-content; border: 1px solid var(--line); border-radius: 10px; padding: 2px; gap: 2px; background: var(--field); }
+.ed-seg button { border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: .8rem; padding: 5px 10px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; }
+.ed-seg button.is-on { background: var(--card-solid); color: var(--text); box-shadow: var(--shadow-sm); }
+.ed-linkbox { flex-basis: 100%; display: flex; gap: 6px; }
+.ed-linkbox .input { flex: 1; min-width: 0; }
+
+.paper .ed { outline: none; border-radius: 3px; transition: background .15s, box-shadow .15s; cursor: text; }
+.paper.is-editing .ed:hover { background: rgba(37, 99, 235, .06); }
+.paper.is-editing .ed:focus { background: rgba(37, 99, 235, .08); box-shadow: 0 0 0 2px rgba(37, 99, 235, .35); }
+.paper .ed-block { display: inline-block; min-width: 40%; }
+.paper p > .ed-block, .paper li > .ed-block { display: block; }
+.paper .ed:empty::before { content: attr(data-ph); color: #a1a1aa; font-style: italic; pointer-events: none; }
+.paper .ed a { color: #1d4ed8; text-decoration: underline; text-decoration-color: rgba(29, 78, 216, .35); }
+.paper .ed-link { color: #1d4ed8; }
+.paper .ed-row { position: relative; }
+.paper .ed-x { position: absolute; top: -2px; right: -26px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid #e4e4e7; background: #fff;
+  color: #71717a; display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.paper .ed-row:hover > .ed-x, .paper .ed-row:focus-within > .ed-x { opacity: 1; }
+.paper .ed-x:hover { color: #b91c1c; border-color: #fecaca; }
+.paper .ed-add { display: inline-flex; align-items: center; gap: 4px; margin: 2px 0 6px; padding: 2px 8px; border: 1px dashed #d4d4d8; border-radius: 8px;
+  background: transparent; color: #71717a; font: inherit; font-size: .75rem; cursor: pointer; }
+.paper .ed-add:hover { color: #1d4ed8; border-color: #93c5fd; }
+.paper .ed-add-inline { border: 0; background: transparent; color: #a1a1aa; font: inherit; font-size: .72rem; cursor: pointer; margin-left: 6px; }
+.paper .ed-add-inline:hover { color: #1d4ed8; }
+.paper:not(.is-editing) .ed-add, .paper:not(.is-editing) .ed-x { display: none; }
+
+/* what the one-page PDF leaves out: still editable, clearly not on the page */
+.paper .fit-cut { opacity: .38; position: relative; }
+.paper .fit-cut::after { content: "not in PDF"; position: absolute; right: 0; top: 0; font-size: .6rem; letter-spacing: .08em; text-transform: uppercase; color: #b45309;
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 0 5px; }
+.paper li.fit-cut::after { top: 1px; }
+.fit-note { max-width: 760px; margin: 0 auto 10px; display: flex; gap: 8px; align-items: flex-start; font-size: .82rem; color: var(--text-2);
+  background: color-mix(in srgb, var(--warning) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); border-radius: 12px; padding: 8px 12px; }
+
+/* two-column page (matches templates/resume.html) */
+.paper[data-layout="two_column"] .paper-cols { display: grid; grid-template-columns: minmax(0, 29%) minmax(0, 1fr); gap: 26px; }
+.paper[data-layout="two_column"] .paper-side { font-size: .86em; }
+.paper[data-layout="two_column"] .paper-side .paper-skill strong { display: block; }
+.paper[data-layout="two_column"] .paper-side h3:first-child, .paper[data-layout="two_column"] .paper-main section:first-child h3 { margin-top: 14px; }
+@media (max-width: 700px) { .paper[data-layout="two_column"] .paper-cols { grid-template-columns: 1fr; gap: 0; } .paper .ed-x { right: -4px; top: -10px; opacity: 1; } }
+
+/* tailored-to panel + "resume for a job" */
+.target-panel { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--field); font-size: .88rem; }
+.target-panel .kw-miss { color: var(--text); font-weight: 500; }
+.custom-resume { display: flex; flex-direction: column; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; }
+.custom-resume .dlg-h { font-size: 1.2rem; margin: 0; }
+.custom-resume .dialog-actions { align-items: center; margin-top: 6px; }
+.custom-resume textarea { resize: vertical; min-height: 120px; }
+.btn.is-on { background: var(--accent-soft); }

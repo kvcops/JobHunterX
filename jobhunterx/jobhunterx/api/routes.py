@@ -932,6 +932,16 @@ class CvRequest(BaseModel):
     focus: str = Field("", max_length=120)
 
 
+class CustomResumeRequest(BaseModel):
+    """A resume for a job the user brings: the pasted description, a link to it, or both."""
+    jd_text: str = Field("", max_length=20000)
+    url: str = Field("", max_length=2000)
+    title: str = Field("", max_length=120)
+    company: str = Field("", max_length=120)
+    layout: Literal["single", "two_column"] = "single"
+    style: str = Field("classic", max_length=32)
+
+
 MAX_DOC_BYTES = 300_000          # a resume is a few KB; this only stops abuse
 
 
@@ -1005,6 +1015,26 @@ async def create_cv(body: CvRequest):
         doc = await docs_svc.generate_cv_doc(profile, snap, body.focus.strip(), emit)
     except docs_svc.AlreadyGenerating as exc:
         raise HTTPException(409, str(exc))
+    return {"document": await _doc_detail(doc)}
+
+
+@router.post("/documents/custom")
+async def create_custom_resume(body: CustomResumeRequest, request: Request):
+    """Tailored one-page resume for a pasted job description or a job link (not one of the found jobs)."""
+    ratelimit.check(request, "doc-custom", limit=12, per_s=300)
+    if not body.jd_text.strip() and not body.url.strip():
+        raise HTTPException(422, "Paste the job description or give a link to the posting.")
+    profile = await _profile_or_400()
+    snap = await profile_svc.get_snapshot(profile)
+    try:
+        doc = await docs_svc.generate_custom(profile, snap, jd_text=body.jd_text, url=body.url, title=body.title,
+                                             company=body.company, layout=body.layout, style=body.style, emit=emit)
+    except docs_svc.BadTarget as exc:
+        raise HTTPException(422, str(exc))
+    except docs_svc.AlreadyGenerating as exc:
+        raise HTTPException(409, str(exc))
+    except GenerationUnavailable as exc:
+        raise HTTPException(502, str(exc))
     return {"document": await _doc_detail(doc)}
 
 
