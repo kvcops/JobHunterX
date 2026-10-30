@@ -112,7 +112,7 @@ def test_megathread_skips_questions_bots_and_other_countries():
 def test_founder_posts_come_only_from_search_results():
     qs = community.founder_queries(["AI Engineer"], ["Hyderabad"], fresher=True)
     assert any(q.startswith("site:x.com") for q in qs) and all("Hyderabad" in q for q in qs)
-    assert any(q.startswith("site:linkedin.com/posts") and q.endswith("fresher") for q in qs)
+    assert any(q.endswith("fresher") for q in qs) and not any("linkedin" in q for q in qs)
     p = community.parse_founder_lead("https://x.com/asha_builds/status/123", "Asha on X: \"We're hiring an AI Engineer in Hyderabad\"",
                                      "We're hiring an AI Engineer (0-1 yrs) at Medly. DM me your GitHub.", LABELS)
     assert p and p.company.startswith("Medly") and p.apply_url == "https://x.com/asha_builds/status/123"

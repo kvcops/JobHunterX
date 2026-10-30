@@ -511,7 +511,7 @@ const FREE_SOURCES = [
   { k: 'enable_reddit_source', name: 'r/developersIndia', label: 'Use Reddit hiring posts',
     hint: 'No key — the monthly \u201cWho\u2019s hiring?\u201d thread, where small teams post roles with pay and experience. Reddit blocks some cloud servers; from a home connection it works.' },
   { k: 'enable_founder_posts', name: 'Founder hiring posts', label: 'Find founder posts',
-    hint: '\u201cWe\u2019re hiring\u201d posts on X and LinkedIn, found through your web search providers. JobHunterX never opens or logs in to X or LinkedIn — you open the post yourself.' },
+    hint: '\u201cWe\u2019re hiring\u201d posts on X, found through your web search providers. JobHunterX never opens or logs in to X — you open the post yourself. (LinkedIn postings are never shown.)' },
   { k: 'enable_funding_signals', name: 'Funding news', label: 'Use funding news',
     hint: 'No key — startups that just raised money (Inc42, Entrackr, YourStory, Google News). Their openings come first and they get listed under Recently funded.' },
   { k: 'enable_domain_age_check', name: 'Website age check', label: 'Check website age',

@@ -131,6 +131,48 @@ async def setup_status():
     return _setup_status()
 
 
+class OpenRequest(BaseModel):
+    url: str = Field(max_length=2048)
+
+
+def _open_outside(url: str) -> None:
+    """Open a link in the computer's default browser / mail app (desktop app only)."""
+    import subprocess
+    import sys as _sys
+    if _sys.platform == "win32":
+        os.startfile(url)                     # noqa: S606 — the URL was checked to be http(s)/mailto
+        return
+    env = dict(os.environ)
+    # a frozen (PyInstaller) app points LD_LIBRARY_PATH at its own libraries; the browser must get the original
+    if "LD_LIBRARY_PATH_ORIG" in env:
+        env["LD_LIBRARY_PATH"] = env.pop("LD_LIBRARY_PATH_ORIG")
+    elif getattr(_sys, "frozen", False):
+        env.pop("LD_LIBRARY_PATH", None)
+    cmd = ["open", url] if _sys.platform == "darwin" else ["xdg-open", url]
+    subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+@router.post("/desktop/open")
+async def desktop_open(body: OpenRequest):
+    """Desktop app: the window can't show other sites, so links to them (job postings, company pages, mail drafts)
+    open in the default browser or mail app. Not available in the web app."""
+    from urllib.parse import urlparse
+    from jobhunterx.config.settings import get_settings
+    if not get_settings().desktop:
+        raise HTTPException(404, "Not found")
+    u = body.url.strip()
+    p = urlparse(u)
+    if p.scheme not in ("http", "https", "mailto") or (p.scheme != "mailto" and not p.netloc) or any(c in u for c in "\r\n\x00"):
+        raise HTTPException(422, "Only web and mail links can be opened")
+    try:
+        await asyncio.to_thread(_open_outside, u)
+    except Exception as exc:
+        log.warning("desktop_open_failed", error=str(exc)[:120])
+        raise HTTPException(502, "Couldn't open the link in your browser")
+    return {"ok": True}
+
+
 @router.post("/setup/free")
 async def setup_free():
     """Start without any key: free no-key models (Kilo, LLM7) do the AI work (they may use prompts for training — the UI says so)."""

@@ -3,6 +3,7 @@
 import { html, render, useEffect, useLayoutEffect, useRef, useState } from './lib/preact.js';
 import { useStore } from './state/store.js';
 import { boot, navigate, setTheme, retryBoot, logout } from './actions.js';
+import { initDesktopLinks } from './lib/desktop.js';
 import { Icon, ConfirmDialog, Toasts, Button } from './components/ui.js';
 import { DiscoverView } from './views/discover.js';
 import { CompaniesView } from './views/companies.js';
@@ -159,3 +160,4 @@ function Root() {
 if (document.startViewTransition) document.documentElement.classList.add('vt');
 render(html`<${Root} />`, document.getElementById('app'));
 boot();
+initDesktopLinks();

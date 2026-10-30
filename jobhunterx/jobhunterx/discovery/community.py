@@ -7,8 +7,9 @@ Community and startup sources — where early-career roles show up before (or in
 * r/developersIndia — the monthly "Who's hiring?" megathread, where each top-level comment fills a fixed template
   (company, link, location, role, experience, pay). Read through Reddit's public JSON, with the RSS feeds as a
   fallback (Reddit refuses JSON from many cloud addresses, and rate-limits). A refused source is skipped.
-* Founder hiring posts — "we're hiring" posts on X / LinkedIn, found only through the web search providers you already
-  use. JobHunterX never opens or logs in to X or LinkedIn: it keeps the search result's title and snippet, and you open
+* Founder hiring posts — "we're hiring" posts on X, found only through the web search providers you already use (no
+  LinkedIn: its postings are never shown). JobHunterX never opens or logs in to X: it keeps the search result's title
+  and snippet, and you open
   the post yourself.
 
 Everything here is discovery only: each lead becomes a JobPosting and goes through the same dedupe, validation, scam
@@ -386,8 +387,8 @@ def founder_queries(titles: list[str], places: list[str], fresher: bool, limit: 
     place = next((p for p in places if p and p.lower() != "india"), "India")
     out = []
     for t in titles[:2]:
-        out.append(f'site:linkedin.com/posts hiring "{t}" {place}' + (" fresher" if fresher else ""))
-        out.append(f'site:x.com "hiring" "{t}" {place}')
+        out.append(f'site:x.com "hiring" "{t}" {place}' + (" fresher" if fresher else ""))
+        out.append(f'site:x.com "we\'re hiring" "{t}" {place}')
     return out[:limit]
 
 
