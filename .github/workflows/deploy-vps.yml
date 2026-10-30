@@ -19,9 +19,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: keygen (step 1 of a sealed hand-over), inspect (read-only) or deploy
+        description: keygen (step 1 of a sealed hand-over), inspect (read-only), deploy, or repair (restart services that are failed)
         type: choice
-        options: [inspect, deploy, keygen]
+        options: [inspect, deploy, repair, keygen]
         default: inspect
       sealed:
         description: Sealed credentials (only for the hand-over; leave empty when the VPS_* secrets are set)
