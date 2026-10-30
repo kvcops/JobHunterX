@@ -82,20 +82,21 @@ The workflow file must also be on `main`: GitHub only runs a "push to main" work
 
 ### One-time setup for auto-update
 
-Updates are signed, and the app only installs updates signed with your key.
+Updates are signed, and the app only installs updates signed with the project's key. The public half is already in
+`desktop/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`); the private half must exist only as GitHub secrets.
 
-1. Make a key pair (keep the private key secret; anyone with it can ship updates to your users):
+In GitHub → repository **Settings → Secrets and variables → Actions → New repository secret**:
 
-   ```bash
-   cd desktop && npx tauri signer generate -w ~/.tauri/jobhunterx.key
-   ```
+* `TAURI_SIGNING_PRIVATE_KEY`: the whole private key file
+* `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
 
-2. In GitHub → repository **Settings → Secrets and variables → Actions**:
-   * **Secret** `TAURI_SIGNING_PRIVATE_KEY`: the contents of `~/.tauri/jobhunterx.key`
-   * **Secret** `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the password you chose (skip if none)
-   * **Variable** `TAURI_UPDATER_PUBKEY`: the contents of `~/.tauri/jobhunterx.key.pub`
+Never commit the private key: anyone with it can ship updates to every installed copy. Lost or leaked key: make a new
+pair (`cd desktop && npx tauri signer generate -w ~/.tauri/jobhunterx.key`), put the new public key in
+`tauri.conf.json` and the new private key in the secrets; copies installed before the switch then need one manual
+reinstall.
 
-Without these, releases are still built and published, but apps won't update themselves (a warning shows in the run).
+Without the secrets, releases are still built and published, but they can't update themselves (a warning shows in the
+run).
 
 ### Not done yet
 

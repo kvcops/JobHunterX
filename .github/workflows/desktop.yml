@@ -7,9 +7,9 @@
 # push to jobhunterx-desktop → build and self-test (no release unless the commit message says [release])
 # Run workflow (manual)      → the same, with a "publish a release" switch
 #
-# One-time setup for auto-update (see desktop/README.md): repository secret TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD if
-# the key has one) and repository variable TAURI_UPDATER_PUBKEY. Without them releases are still published, but the
-# apps can't verify — and so won't install — updates by themselves.
+# One-time setup for auto-update (see desktop/README.md): repository secrets TAURI_SIGNING_PRIVATE_KEY and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD (the matching public key is in desktop/src-tauri/tauri.conf.json). Without them
+# releases are still published, but those builds can't update themselves.
 #
 # This file must also be on main: GitHub only runs a push-to-main workflow from main's own copy.
 
@@ -174,18 +174,17 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
           HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
+          # the public key is in tauri.conf.json (it is public by design); the private key is the repository secret
           python3 - <<'PY'
           import json, os
           cfg = {"version": os.environ["VERSION"]}
-          if os.environ.get("PUBKEY") and os.environ.get("HAS_KEY") == "true":
-              cfg["plugins"] = {"updater": {"pubkey": os.environ["PUBKEY"]}}
+          if os.environ.get("HAS_KEY") == "true":
               cfg["bundle"] = {"createUpdaterArtifacts": True}
           json.dump(cfg, open("desktop/src-tauri/tauri.ci.json", "w"))
           PY
-          if [ -n "$PUBKEY" ] && [ "$HAS_KEY" = "true" ]; then
+          if [ "$HAS_KEY" = "true" ]; then
             echo "args=--config src-tauri/tauri.ci.json --features updater" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::No updater signing key set up — this build can't update itself. See desktop/README.md."
