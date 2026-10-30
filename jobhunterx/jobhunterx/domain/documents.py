@@ -55,3 +55,8 @@ class GeneratedDocument(BaseModel):
     updated_at: datetime = Field(default_factory=utcnow)
     manually_edited: bool = False
     style: str = "classic"                # visual style id (generation/styles.py); content is the same in every style
+    # What the one-page fitter hid in the stored PDF (e.g. {"max_bullets_per_exp": 2}); empty = everything shows.
+    fit: dict[str, Any] = Field(default_factory=dict)
+    # A resume made for a job description the user brought (pasted text or a link), not a saved job:
+    # {"title", "company", "url", "keywords": [...], "matched": [...]}. Empty for every other document.
+    target: dict[str, Any] = Field(default_factory=dict)

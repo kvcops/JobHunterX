@@ -219,6 +219,56 @@ def test_cv_is_separate_from_resume(page, server):
     expect(page.locator(".doc-library")).to_contain_text("CVs")
 
 
+JD_TEXT = ("AI Engineer at Zeta Labs, Hyderabad. You will build retrieval-augmented generation (RAG) assistants and LLM "
+           "features in Python with LangChain and PyTorch, ship APIs with FastAPI and Docker, and evaluate models. "
+           "Requirements: Python, LangChain, RAG, PyTorch, FastAPI, Docker; 0-2 years of experience.")
+
+
+def test_resume_for_a_pasted_job_edits_on_the_page(page, server):
+    page.goto(f"{server}/#/documents")
+    page.get_by_role("button", name="Resume for a job").click()
+    dlg = page.get_by_role("dialog", name="Resume for a job")
+    dlg.get_by_placeholder("Paste the full description").fill(JD_TEXT)
+    dlg.get_by_label("Job title").fill("AI Engineer")
+    dlg.get_by_label("Company").fill("Zeta Labs")
+    dlg.get_by_role("radio", name="Two columns").click()
+    dlg.get_by_role("button", name="Create resume").click()
+    paper = page.locator(".paper")
+    expect(paper).to_contain_text("Asha Rao", timeout=30000)
+    expect(paper).to_have_attribute("data-layout", "two_column")
+    expect(page.locator(".target-panel")).to_contain_text("AI Engineer")
+    expect(page.locator(".doc-library")).to_contain_text("Zeta Labs")
+
+    # edit right on the page: bold a word in the summary, then it saves (no separate edit form)
+    summary = paper.locator('[data-p="summary"]')
+    summary.click()
+    page.keyboard.press("Control+A")
+    page.keyboard.type("Builds RAG assistants in Python.")
+    page.keyboard.press("Home")
+    page.keyboard.press("Shift+End")
+    page.locator(".ed-toolbar").get_by_role("button", name="Bold").click()
+    paper.locator('[data-p="headline"]').click()                      # leaving the field commits it
+    expect(page.locator(".ed-status")).to_contain_text("Saved", timeout=20000)
+    doc_id = page.url.rsplit("/", 1)[-1]
+    doc = json.loads(urllib.request.urlopen(f"{server}/api/documents/{doc_id}", timeout=10).read())["document"]
+    assert doc["content"]["summary"] == "**Builds RAG assistants in Python.**"
+    assert doc["content"]["layout"] == "two_column" and doc["page_count"] == 1
+
+    # Enter in a bullet starts the next one; the layout switch saves too
+    first = paper.locator('[data-p="experience.0.bullets.0"]')
+    first.click()
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Wrote evaluation scripts")
+    page.locator(".ed-toolbar").get_by_role("radio", name="One column").click()
+    expect(paper).to_have_attribute("data-layout", "single")
+    expect(page.locator(".ed-status")).to_contain_text("Saved", timeout=20000)
+    doc = json.loads(urllib.request.urlopen(f"{server}/api/documents/{doc_id}", timeout=10).read())["document"]
+    assert doc["content"]["experience"][0]["bullets"][1] == "Wrote evaluation scripts"
+    assert doc["content"]["layout"] == "single"
+    assert not page.errors, page.errors
+
+
 def test_untrusted_text_is_rendered_as_text(page, server):
     page.route("**/api/jobs?*", lambda r: r.fulfill(json={"jobs": [{
         "id": "x1", "run_id": None, "title": "<img src=x onerror=window.__pwned=1>", "company": "<b>Evil</b>",

@@ -63,7 +63,11 @@ Rules:
 - Start bullets with a strong action verb in the SAME tense as the original bullet (past tense for finished work,
   e.g. "Built", never "Build"); keep each under 35 words.
 - Write names, degrees, titles and numbers exactly as the candidate wrote them (do not expand abbreviations).
-- The summary may only use facts present in the candidate material. No salary, no pronouns, no buzzword stuffing.
+- Summary (2-3 sentences, under 60 words): open with the candidate's own title and level exactly as given, then the
+  2-3 strengths from the candidate material that matter most for THIS job (the skills and kinds of work the job asks
+  for that the candidate really has), then one concrete proof point (a project, result or scope from the material).
+  It may only use facts present in the candidate material. No salary, no pronouns, no buzzword stuffing, never
+  "passionate", "hard-working", "results-driven" or similar filler.
 - Return every bullet id you were given."""
 
 
@@ -94,7 +98,9 @@ def _select(profile: CandidateProfile, job: JobPosting, snapshot: CandidateSnaps
     exp_sel: dict[int, list[int]] = {}
     for i, e in enumerate(profile.experience):
         ranked = sorted(range(len(e.bullets)), key=lambda k: -cosine(e.bullets[k], jt, idf))
-        exp_sel[i] = sorted(ranked[:MAX_BULLETS_PER_ROLE])
+        # Most relevant first: a recruiter reads the top line of each role, and when the page is full the one-page
+        # fitter hides bullets from the END — so it must be the least relevant ones that go.
+        exp_sel[i] = ranked[:MAX_BULLETS_PER_ROLE]
     proj_rank = sorted(range(len(profile.projects)),
                        key=lambda k: -cosine(docs[len(docs) - len(profile.projects) + k], jt, idf))
     projects = proj_rank[:MAX_PROJECTS]

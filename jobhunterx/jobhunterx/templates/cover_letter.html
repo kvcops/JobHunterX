@@ -4,7 +4,7 @@
 <div class="name">{{ header.name }}</div>
 <div class="contact">{{ [header.email, header.phone, header.location] | select | join(' · ') }}</div>
 <div style="height:16px"></div>
-<p>{{ doc.greeting }}</p>
-{% for para in doc.paragraphs %}<p>{{ para }}</p>{% endfor %}
+<p>{{ doc.greeting|rich }}</p>
+{% for para in doc.paragraphs %}<p>{{ para|rich }}</p>{% endfor %}
 <p>{{ doc.closing }}<br>{{ doc.signature }}</p>
 </body></html>

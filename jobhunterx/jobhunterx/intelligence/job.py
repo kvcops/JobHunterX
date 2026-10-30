@@ -177,6 +177,11 @@ def apply_understanding(job: JobPosting, u: JobUnderstanding, model: str) -> Non
             if job.salary.currency == "INR" and top is not None and top < 50_000:
                 job.salary = None              # "12" from "12 LPA" read as rupees — unusable, not a real figure
 
+    # A pasted description has no source fields: take the model's title, and its company only when the posting names it.
+    if not job.title and u.normalized_title:
+        job.title = u.normalized_title.strip()[:120]
+    if not job.company and u.company and u.company.lower() in text.lower():
+        job.company = u.company.strip()[:120]
     if job.seniority == Seniority.UNKNOWN:
         job.seniority = u.seniority
     if not job.role_family:
