@@ -117,3 +117,30 @@ def deduplicate(jobs: Iterable[JobPosting]) -> tuple[list[JobPosting], int]:
         if sh:
             shingles.append((sh, job))
     return kept, dups
+
+
+# ---------------------------------------------------------------- LinkedIn-hosted postings are never shown
+_LINKEDIN_HOST = re.compile(r"(?i)(^|\.)(linkedin\.com|lnkd\.in)$")
+
+
+def is_linkedin_url(url: str) -> bool:
+    return bool(url) and bool(_LINKEDIN_HOST.search(urlparse(url).hostname or ""))
+
+
+def drop_linkedin(jobs: Iterable[JobPosting]) -> tuple[list[JobPosting], int]:
+    """Postings whose every link is a LinkedIn page are dropped: applications should go to the employer's own site.
+    A merged posting that also has another link keeps that link as the one to open. Returns (kept, dropped)."""
+    kept, dropped = [], 0
+    for job in jobs:
+        others = [u for u in (job.apply_url, job.canonical_url, *(s.url for s in job.sources)) if u and not is_linkedin_url(u)]
+        if not others:
+            dropped += 1
+            continue
+        first_party = next((s.url for s in job.sources if s.first_party and s.url and not is_linkedin_url(s.url)), "")
+        if is_linkedin_url(job.apply_url):
+            job.apply_url = first_party or others[0]
+        if is_linkedin_url(job.canonical_url):
+            job.canonical_url = first_party or others[0]
+        job.sources = [s for s in job.sources if not is_linkedin_url(s.url)] or job.sources
+        kept.append(job)
+    return kept, dropped

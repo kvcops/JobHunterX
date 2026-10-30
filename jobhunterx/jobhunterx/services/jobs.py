@@ -14,19 +14,22 @@ from jobhunterx.intelligence import domain_age, skill_links
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 
 _MAIN = "COALESCE(json_extract(match_json, '$.track'), 'main') != 'floor'"   # safety-net jobs have their own view
+# Jobs saved before LinkedIn postings were left out stay in Saved / Applied, but no longer appear in the discovery views.
+_NO_LINKEDIN = ("COALESCE(json_extract(posting_json, '$.apply_url'), '') NOT LIKE '%linkedin.com/%' "
+                "AND COALESCE(json_extract(posting_json, '$.apply_url'), '') NOT LIKE '%lnkd.in/%'")
 VIEWS = {
     "recommended": "verdict IN ('strong','good','stretch') AND COALESCE(validation_status,'') NOT IN ('closed','invalid') "
-                   f"AND {_MAIN}",
-    "all": "",
-    "rejected": "(verdict = 'incompatible' OR validation_status IN ('closed','invalid'))",
+                   f"AND {_MAIN} AND {_NO_LINKEDIN}",
+    "all": _NO_LINKEDIN,
+    "rejected": f"(verdict = 'incompatible' OR validation_status IN ('closed','invalid')) AND {_NO_LINKEDIN}",
     "saved": "saved_at IS NOT NULL",
     "applied": "tracking_status IN ('applied','interviewing','offer')",
     # first seen in the last 48 hours and worth a look — new watchlist postings land here
     "fresh": "created_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-2 days') AND verdict IN ('strong','good','stretch') "
-             f"AND COALESCE(validation_status,'') NOT IN ('closed','invalid') AND {_MAIN}",
+             f"AND COALESCE(validation_status,'') NOT IN ('closed','invalid') AND {_MAIN} AND {_NO_LINKEDIN}",
     # early career: large IT-services fresher programmes (national tests, off-campus drives), kept apart from the main list
     "safety_net": "json_extract(match_json, '$.track') = 'floor' AND verdict != 'incompatible' "
-                  "AND COALESCE(validation_status,'') NOT IN ('closed','invalid')",
+                  f"AND COALESCE(validation_status,'') NOT IN ('closed','invalid') AND {_NO_LINKEDIN}",
 }
 
 SORTS = {

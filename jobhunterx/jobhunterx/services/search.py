@@ -197,6 +197,8 @@ _FOREIGN = re.compile(r"(?i)\b(united states|u\.s\.a?|usa|canada|united kingdom|
 
 def _lead_worth_reading(lead, snap: CandidateSnapshot) -> bool:
     """Cheap checks on a search result before spending a page fetch on it."""
+    if dedupe.is_linkedin_url(lead.url):          # LinkedIn pages are never read or shown
+        return False
     title = lead.title or ""
     if _LISTING_TITLE.search(title):
         return False
@@ -690,6 +692,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     await run.say("dedupe", "Looking for the same job posted on several sites", "work")
     unique, dups = dedupe.deduplicate(candidates)
     c["duplicates"] = dups
+    unique, from_linkedin = dedupe.drop_linkedin(unique)
+    if from_linkedin:
+        await run.say("dedupe", f"Left out {from_linkedin} postings that only exist on LinkedIn — apply on the employer's own site", "info")
     for p in unique:
         p.id = p.id or str(uuid.uuid4())
     if not watch_mode and unique:
