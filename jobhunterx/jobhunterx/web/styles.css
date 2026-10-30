@@ -1972,6 +1972,15 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .chat-changes li { display: flex; flex-direction: column; gap: 2px; font-size: .76rem; padding: 7px 9px; border-radius: 10px; border: 1px solid var(--line); background: var(--card-solid); }
 .chat-changes li.ok { border-color: color-mix(in srgb, var(--success) 35%, transparent); } .chat-changes li.no { opacity: .85; }
 .chat-chg-label { font-weight: 600; } .chat-changes .diff-new { color: var(--text); }
+.chat-diff summary { cursor: pointer; color: var(--text-3); font-size: .72rem; }
+.chat-diff[open] { display: flex; flex-direction: column; gap: 2px; }
+.chat-saved { margin: 6px 0 0; font-size: .74rem; color: var(--text-3); }
+.chat-saved.is-saved { color: var(--success); } .chat-saved.is-failed { color: var(--warning, #b45309); }
+/* the line the AI just changed glows briefly on the page */
+.paper .snap-flash { animation: snap-flash 2.1s ease-out; border-radius: 4px; }
+@keyframes snap-flash { 0%, 35% { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+  100% { background: transparent; box-shadow: 0 0 0 3px transparent; } }
+@media (prefers-reduced-motion: reduce) { .paper .snap-flash { animation-duration: .01s; } }
 .chat-form { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .chat-form .input { flex: 1; min-width: 0; }
 .chat-typing { display: inline-flex; gap: 4px; padding: 10px 12px; border-radius: 14px; background: var(--field); }

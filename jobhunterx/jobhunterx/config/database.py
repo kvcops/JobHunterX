@@ -716,14 +716,14 @@ async def clear_database() -> None:
 
     import shutil
     import os
-    from jobhunterx.config.settings import get_settings
+    from jobhunterx.config.settings import _BASE_DIR, get_settings
     
     settings = get_settings()
     
     # Directories to delete
     dirs_to_delete = [
-        Path("./data/browser_profile"),
-        Path("./data/browser_profile_test"),
+        _BASE_DIR / "data" / "browser_profile",
+        _BASE_DIR / "data" / "browser_profile_test",
         Path(settings.cache_dir),
         Path(settings.screenshots_dir),
     ]
