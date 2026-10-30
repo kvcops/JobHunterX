@@ -208,6 +208,8 @@ jobs:
           args: ${{ steps.cfg.outputs.args }}
           releaseId: ${{ needs.prepare.outputs.release_id }}
           updaterJsonPreferNsis: true
+          # no version in the file names, so .../releases/latest/download/<name> links in the README never go stale
+          assetNamePattern: "[name]_[platform]_[arch][setup][ext]"
 
       - name: Keep the installers with this run
         uses: actions/upload-artifact@v4
