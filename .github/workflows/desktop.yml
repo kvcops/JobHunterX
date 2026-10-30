@@ -18,7 +18,7 @@ name: Desktop app
 on:
   push:
     branches: [main, jobhunterx-desktop]
-    paths-ignore: ["**/*.md", "reports/**", "research_notes/**"]
+    paths-ignore: ["**/*.md", "reports/**", "research_notes/**", ".github/workflows/deploy-vps.yml"]
   workflow_dispatch:
     inputs:
       release:
