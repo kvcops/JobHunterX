@@ -83,9 +83,29 @@ writes an honest one-page resume, a cover letter and a CV for you — and then a
 | 🗺️ [The whole journey](#️-the-whole-journey) | 📄 [Resume vs CV vs cover letter](#-resume-vs-cv-vs-cover-letter) | 🧪 [Testing](#-testing) |
 | 📸 [A tour, step by step](#-a-tour-step-by-step) | 🤖 [AI models & free limits](#-llm-models--provider-architecture) | 🎨 [Design: fonts & themes](#-design-fonts--themes) |
 | 🤖 [Auto-apply](#-auto-apply--the-browser-agent) | 🌐 [Job sources](#-job-sources--verification) | 🔐 [Security](#-security) |
-| 🎨 [Resume styles & AI editor](#-resume-styles--the-ai-editor) | | |
+| 🎨 [Resume styles & AI editor](#-resume-styles--the-ai-editor) | 🖥️ [Download the desktop app](#️-download-the-desktop-app) | |
 
 </details>
+
+<br/>
+<div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
+<br/>
+
+## 🖥️ Download the desktop app
+
+JobHunterX also comes as a normal app: install it, double-click, and it opens in its own window. Everything runs on
+your computer, your data stays in your own app folder, and new versions install themselves ("Install and restart").
+
+| System | Download | Notes |
+|:--|:--|:--|
+| 🪟 **Windows 10 / 11** | [**Installer (.exe)**](https://github.com/kvcops/JobHunterX/releases/latest/download/JobHunterX_windows_x64-setup.exe) · [.msi](https://github.com/kvcops/JobHunterX/releases/latest/download/JobHunterX_windows_x64.msi) | No admin needed. If Windows says "Windows protected your PC": **More info → Run anyway** (the app isn't code-signed yet). |
+| 🍎 **macOS 11+ (Apple Silicon)** | [**Disk image (.dmg)**](https://github.com/kvcops/JobHunterX/releases/latest/download/JobHunterX_darwin_aarch64.dmg) | Drag to Applications. First launch: right-click → **Open** (not notarized yet). |
+| 🐧 **Linux** | [**AppImage**](https://github.com/kvcops/JobHunterX/releases/latest/download/JobHunterX_linux_amd64.AppImage) · [.deb](https://github.com/kvcops/JobHunterX/releases/latest/download/JobHunterX_linux_amd64.deb) · [.rpm](https://github.com/kvcops/JobHunterX/releases/latest/download/JobHunterX_linux_x86_64.rpm) | AppImage: `chmod +x` it and run. |
+
+These links always give the newest version. All versions and release notes:
+[releases](https://github.com/kvcops/JobHunterX/releases?q=desktop&expanded=true). Prefer running from source? See
+[Quickstart](#-quickstart). How the app is built and kept in step with `main`: the
+[`jobhunterx-desktop`](https://github.com/kvcops/JobHunterX/tree/jobhunterx-desktop/desktop) branch.
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
