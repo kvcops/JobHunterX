@@ -688,7 +688,7 @@ e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000
 |--------|-------|----------------|
 | **Employer ATS APIs** — Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Workable, **Workday** (most GCCs), **Oracle Recruiting** (JPMorgan and other large employers — filtered to India on the board itself), **Keka** (many Indian product companies) | First-party, **verified** | Structured postings; re-verified live by job id (a closed job disappears from the board / returns 404) |
 | **ATS index** — a daily India copy of open postings on ~28,000 employers' own boards (open-source *job-board-aggregator* data, CC BY-NC 4.0) | First-party, **verified** live | Answers a search instantly, then each hit is re-checked on the employer's board; boards with Indian postings are remembered and polled directly |
-| **LinkedIn public feed** (no login, `ENABLE_LINKEDIN_SOURCE`) | Discovery only | Newest posts first; staffing agencies and posts with 150+ applicants dropped; the role is looked up on the employer's own board and that posting wins |
+| **LinkedIn** | **Never shown** | LinkedIn postings are left out: a job is kept only when it can be opened on the employer's own site (a merged duplicate opens that page instead). LinkedIn search results aren't read. The old public-feed source (`ENABLE_LINKEDIN_SOURCE`) is off by default and, even when on, is only used to find the same role on the employer's board |
 | **Companies you watch yourself** (Company Scout) | Recipe from the company's real careers site | A browser agent learns once how to list one company's jobs; after that it is checked in seconds with no browser and no AI |
 | **Company watchlist** — 130 researched Hyderabad / Bengaluru / remote-India employers | Researched, sources linked | Their boards are read on every search and every 4 hours in the background; the research card is shown on each of their jobs |
 | **schema.org JobPosting** on a page | Verified when the hiring organisation's site is the page's site; otherwise inferred | Title, company, location, dates, `validThrough`, remote eligibility, salary |
@@ -697,7 +697,7 @@ e.g. `MODEL_LIMITS_JSON={"gemini/gemini-3.5-flash-lite": {"rpm": 30, "rpd": 1000
 | **Hacker News** — optional, **off by default** (`ENABLE_HN_SOURCE=true`) | Community post, **inferred** | YC startups' job posts + monthly "Who is hiring?"; only India / your cities / India-friendly remote roles in your field are kept; the hiring email is passed to the Connector |
 | **YC Work at a Startup** — on by default (`ENABLE_YC_SOURCE`), no key | Job board, **verified** title and minimum experience | Public ycombinator.com/jobs pages for India, your city and remote; US-only remote roles and listings older than 120 days dropped; the job page adds the description, the hiring founder and the company site. Code: `discovery/community.py` |
 | **r/developersIndia "Who's hiring?"** — on by default (`ENABLE_REDDIT_SOURCE`), no key | Community post, **inferred** | Top-level comments of the monthly megathread, read from their fixed template (company, link, location, role, experience, pay); questions and other countries skipped. Public JSON with RSS fallback; Reddit refuses some cloud addresses and rate-limits, so it may give nothing on a server |
-| **Founder hiring posts** — on by default (`ENABLE_FOUNDER_POSTS`) | Search result, **inferred** | "We're hiring" posts on X / LinkedIn found through your web search providers only. JobHunterX never opens or logs in to X or LinkedIn; the post's date is read from its id and posts older than 60 days dropped. Free search engines rarely surface fresh posts, so expect few |
+| **Founder hiring posts** — on by default (`ENABLE_FOUNDER_POSTS`) | Search result, **inferred** | "We're hiring" posts on X found through your web search providers only. JobHunterX never opens or logs in to X; the post's date is read from its id and posts older than 60 days dropped. Free search engines rarely surface fresh posts, so expect few |
 | **Funding news** — on by default (`ENABLE_FUNDING_SIGNALS`), no key | News headline | Inc42, Entrackr, YourStory and Google News RSS, refreshed at most every 6 hours, kept 6 months. Used to rank, not as job postings. Code: `discovery/funding.py` |
 | **Web search** — TinyFish → Tavily → Exa → Brave → **Deep Search** (free) → DuckDuckGo | Leads only | Never shown as jobs until resolved by one of the above |
 
@@ -978,7 +978,7 @@ SECRET_KEY=a-long-random-text      # encrypts users' saved keys; keep it the sam
 | `ENABLE_HN_SOURCE` | `false` | Optional Hacker News jobs |
 | `ENABLE_YC_SOURCE` · `ENABLE_REDDIT_SOURCE` · `ENABLE_FOUNDER_POSTS` | `true` | YC startup jobs, r/developersIndia hiring thread, founder hiring posts |
 | `ENABLE_FUNDING_SIGNALS` · `ENABLE_DOMAIN_AGE_CHECK` | `true` | Funding news (ranking + Recently funded) and the website-age scam check |
-| `ENABLE_LINKEDIN_SOURCE` · `LINKEDIN_MAX_APPLICANTS` | `true` · `150` | LinkedIn public feed and its crowd limit |
+| `ENABLE_LINKEDIN_SOURCE` · `LINKEDIN_MAX_APPLICANTS` | `false` · `150` | LinkedIn public feed (only to find roles on employer boards; LinkedIn postings are never shown) |
 
 <br/>
 <div align="center"><img src="https://raw.githubusercontent.com/andreasbm/readme/master/assets/lines/rainbow.gif" width="100%" height="4px"/></div>
