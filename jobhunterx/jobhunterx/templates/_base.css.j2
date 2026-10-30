@@ -1,4 +1,4 @@
-@page { size: A4; margin: {{ margin_y }} {{ margin_x }}; }
+{% if not two %}@page { size: A4; margin: {{ margin_y }} {{ margin_x }}; }{% endif %}
 body { font-family: {{ s.font }}; font-size: {{ font_size_body }}; color: {{ s.text }}; line-height: {{ line_height }}; }
 .name { font-size: {{ font_size_name }}; font-weight: bold; color: {{ s.name }}; }
 .headline { font-size: {{ font_size_section }}; color: {{ s.muted }}; }

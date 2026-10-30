@@ -49,6 +49,10 @@ const ICONS = {
   eye: 'M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7zm9.5 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
   scroll: 'M12 4v16m-4-4 4 4 4-4M8 8l4-4 4 4',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2',
+  unlink: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7M4 4l16 16',
+  undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
+  columns: 'M4 5h16v14H4zM10 5v14',
 };
 
 export function Icon({ name, size = 18, label }) {
@@ -335,7 +339,7 @@ export function uploadStageLabel(stage) {
 }
 
 // ---------------------------------------------------------------------------- overlays
-function useFocusTrap(ref, onClose) {
+export function useFocusTrap(ref, onClose) {
   useEffect(() => {
     const prev = document.activeElement;
     const el = ref.current;

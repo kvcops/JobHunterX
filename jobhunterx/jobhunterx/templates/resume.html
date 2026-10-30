@@ -1,43 +1,87 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>{% include "_base.css.j2" %}</style></head>
+{% set two = (doc.layout or 'single') == 'two_column' %}
+<html><head><meta charset="utf-8"><style>{% include "_base.css.j2" %}
+{% if two %}
+/* Two columns as PDF frames: a fixed header band and a side column; the page body (its margins) IS the main column.
+   xhtml2pdf always adds that body frame after the declared ones, so overflow makes a real second page — which the
+   one-page fitter sees and trims — instead of a table cell squeezed to tiny type. */
+@page { size: A4; margin: {{ g.top }}mm {{ g.mx }}mm {{ g.my }}mm {{ g.main_x }}mm;
+  @frame hdr { -pdf-frame-content: hdr; left: {{ g.mx }}mm; width: {{ g.w }}mm; top: {{ g.my }}mm; height: {{ g.hh }}mm; }
+  @frame side { left: {{ g.mx }}mm; width: {{ g.sw }}mm; top: {{ g.top }}mm; height: {{ g.h }}mm; }
+}
+.skill-block { margin-bottom: 3px; font-size: {{ font_size_skill }}; }
+.side ul { padding-left: 10px; }
+{% endif %}
+</style></head>
 <body>
 {% set c = doc %}
+{% set il = c.item_links or {} %}
+
+{% macro links(ls) %}{% for l in ls %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}{% endmacro %}
+
+{% macro summary() %}{% if doc.summary and not hide_summary %}<div class="section"><div class="section-title">{{ "Summary"|cap(s) }}</div><div>{{ doc.summary|rich }}</div></div>{% endif %}{% endmacro %}
+
+{% macro skills(stacked) %}{% if doc.skills %}<div class="section"><div class="section-title">{{ "Skills"|cap(s) }}</div>
+{% if stacked %}{% for g in doc.skills[:max_skill_groups] %}<div class="skill-block"><span class="row-title">{{ g.category|rich }}</span><br>{{ g["items"] | map("rich") | join(', ') }}</div>{% endfor %}
+{% else %}<table class="skills">{% for g in doc.skills[:max_skill_groups] %}<tr><td class="skill-cat">{{ g.category|rich }}</td><td>{{ g["items"] | map("rich") | join(', ') }}</td></tr>{% endfor %}</table>{% endif %}
+</div>{% endif %}{% endmacro %}
+
+{% macro experience() %}{% if doc.experience %}<div class="section"><div class="section-title">{{ "Experience"|cap(s) }}</div>
+{% for e in doc.experience[:max_experience] %}
+<table><tr><td class="row-title">{{ e.role|rich }}{% if e.company %} — {{ e.company|rich }}{% endif %}</td>
+<td class="right">{{ e.start }}{% if e.start or e.end %} – {% endif %}{{ e.end }}</td></tr></table>
+{% if e.bullets %}<ul>{% for b in e.bullets[:max_bullets_per_exp] %}<li>{{ b|rich }}</li>{% endfor %}</ul>{% endif %}
+{% endfor %}</div>{% endif %}{% endmacro %}
+
+{% macro projects() %}{% if doc.projects and max_projects > 0 %}<div class="section"><div class="section-title">{{ "Projects"|cap(s) }}</div>
+{% for p in doc.projects[:max_projects] %}
+<table><tr><td><span class="row-title">{{ p.title|rich }}</span>{% if p.technologies %} <span class="row-sub">· {{ p.technologies | join(', ') }}</span>{% endif %}</td>
+{% if p.links %}<td class="right links">{{ links(p.links) }}</td>{% endif %}</tr></table>
+{% if p.description %}<div style="margin-bottom: {{ margin_exp }}">{{ p.description|rich }}</div>{% endif %}
+{% endfor %}</div>{% endif %}{% endmacro %}
+
+{% macro education(stacked) %}{% if doc.education %}<div class="section"><div class="section-title">{{ "Education"|cap(s) }}</div>
+{% for e in doc.education[:max_education] %}
+{% if stacked %}<div class="skill-block"><span class="row-title">{{ e.degree|rich }}</span>{% if e.institution %}<br>{{ e.institution|rich }}{% endif %}{% if e.university %} <span class="row-sub">({{ e.university }})</span>{% endif %}
+<br><span class="row-sub">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}{% if e.grade %} · {{ e.grade }}{% endif %}</span></div>
+{% else %}<table><tr><td><span class="row-title">{{ e.degree|rich }}</span>{% if e.institution %} — {{ e.institution|rich }}{% endif %}{% if e.university %} <span class="row-sub">({{ e.university }})</span>{% endif %}{% if e.grade %} <span class="row-sub">({{ e.grade }})</span>{% endif %}</td>
+<td class="right">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}</td></tr></table>{% endif %}
+{% endfor %}</div>{% endif %}{% endmacro %}
+
+{% macro certifications(stacked) %}{% if doc.certifications and max_certs > 0 %}<div class="section"><div class="section-title">{{ "Certifications"|cap(s) }}</div>
+{% if stacked %}<ul>{% for x in doc.certifications[:max_certs] %}<li>{% if il.get(x) %}<a href="{{ il[x][0].url }}">{{ x|rich }}</a>{% else %}{{ x|rich }}{% endif %}</li>{% endfor %}</ul>
+{% else %}<div>{% for x in doc.certifications[:max_certs] %}{% if il.get(x) %}<a href="{{ il[x][0].url }}">{{ x|rich }}</a>{% else %}{{ x|rich }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+</div>{% endif %}{% endmacro %}
+
+{% macro achievements() %}{% if doc.achievements and max_achievements > 0 %}<div class="section"><div class="section-title">{{ "Achievements"|cap(s) }}</div><ul>{% for a in doc.achievements[:max_achievements] %}<li>{{ a|rich }}{% for l in il.get(a, [])[:1] %} · <a href="{{ l.url }}">{{ l.text or l.label }}</a>{% endfor %}</li>{% endfor %}</ul></div>{% endif %}{% endmacro %}
+
+{% macro simple_list(key, title) %}{% if doc[key] and max_extras > 0 %}<div class="section"><div class="section-title">{{ title|cap(s) }}</div><div>{{ doc[key][:max_extras] | map("rich") | join(' · ') }}</div></div>{% endif %}{% endmacro %}
+
+{% macro header() %}
 {% if s.align == 'center' %}
 <div class="name" style="text-align:center">{{ c.header.name }}</div>
-{% if c.headline %}<div class="headline" style="text-align:center">{{ c.headline }}</div>{% endif %}
+{% if c.headline %}<div class="headline" style="text-align:center">{{ c.headline|rich }}</div>{% endif %}
 <div class="contact" style="text-align:center">{{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}
-{% if c.header.links %}<br>{% for l in c.header.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}{% endif %}</div>
+{% if c.header.links %}<br>{{ links(c.header.links) }}{% endif %}</div>
 {% else %}
 <table><tr>
-  <td><div class="name">{{ c.header.name }}</div>{% if c.headline %}<div class="headline">{{ c.headline }}</div>{% endif %}</td>
+  <td><div class="name">{{ c.header.name }}</div>{% if c.headline %}<div class="headline">{{ c.headline|rich }}</div>{% endif %}</td>
   <td class="contact" style="text-align:right">
-    {{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}<br>
-    {% for l in c.header.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+    {{ [c.header.email, c.header.phone, c.header.location] | select | join(' · ') }}<br>{{ links(c.header.links) }}
   </td>
 </tr></table>
 {% endif %}
 {% if s.hdr %}<div class="hdr-rule">&nbsp;</div>{% endif %}
-{% if c.summary %}<div class="section"><div class="section-title">{{ "Summary"|cap(s) }}</div><div>{{ c.summary }}</div></div>{% endif %}
-{% if c.skills %}<div class="section"><div class="section-title">{{ "Skills"|cap(s) }}</div>
-<table class="skills">{% for g in c.skills %}<tr><td class="skill-cat">{{ g.category }}</td><td>{{ g["items"] | join(', ') }}</td></tr>{% endfor %}</table></div>{% endif %}
-{% if c.experience %}<div class="section"><div class="section-title">{{ "Experience"|cap(s) }}</div>
-{% for e in c.experience %}
-<table><tr><td class="row-title">{{ e.role }}{% if e.company %} — {{ e.company }}{% endif %}</td>
-<td class="right">{{ e.start }}{% if e.start or e.end %} – {% endif %}{{ e.end }}</td></tr></table>
-{% if e.bullets %}<ul>{% for b in e.bullets[:max_bullets_per_exp] %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
-{% endfor %}</div>{% endif %}
-{% if c.projects %}<div class="section"><div class="section-title">{{ "Projects"|cap(s) }}</div>
-{% for p in c.projects[:max_projects] %}
-<table><tr><td><span class="row-title">{{ p.title }}</span>{% if p.technologies %} <span class="row-sub">· {{ p.technologies | join(', ') }}</span>{% endif %}</td>
-{% if p.links %}<td class="right links">{% for l in p.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</td>{% endif %}</tr></table>
-{% if p.description %}<div style="margin-bottom: {{ margin_exp }}">{{ p.description }}</div>{% endif %}
-{% endfor %}</div>{% endif %}
-{% if c.education %}<div class="section"><div class="section-title">{{ "Education"|cap(s) }}</div>
-{% for e in c.education[:max_education] %}
-<table><tr><td><span class="row-title">{{ e.degree }}</span>{% if e.institution %} — {{ e.institution }}{% endif %}{% if e.university %} <span class="row-sub">({{ e.university }})</span>{% endif %}{% if e.grade %} <span class="row-sub">({{ e.grade }})</span>{% endif %}</td>
-<td class="right">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}</td></tr></table>
-{% endfor %}</div>{% endif %}
-{% set il = c.item_links or {} %}
-{% if c.certifications %}<div class="section"><div class="section-title">{{ "Certifications"|cap(s) }}</div><div>{% for x in c.certifications %}{% if il.get(x) %}<a href="{{ il[x][0].url }}">{{ x }}</a>{% else %}{{ x }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div></div>{% endif %}
-{% if c.achievements %}<div class="section"><div class="section-title">{{ "Achievements"|cap(s) }}</div><ul>{% for a in c.achievements[:max_achievements] %}<li>{{ a }}{% for l in il.get(a, [])[:1] %} · <a href="{{ l.url }}">{{ l.text or l.label }}</a>{% endfor %}</li>{% endfor %}</ul></div>{% endif %}
+{% endmacro %}
+
+{% if two %}
+<div id="hdr">{{ header() }}</div>
+<div class="side">{{ skills(true) }}{{ education(true) }}{{ certifications(true) }}{{ simple_list('languages', 'Languages') }}{{ simple_list('competitions', 'Competitions') }}</div>
+<pdf:nextframe />
+{{ summary() }}{{ experience() }}{{ projects() }}{{ achievements() }}
+{% else %}
+{{ header() }}
+{{ summary() }}{{ skills(false) }}{{ experience() }}{{ projects() }}{{ education(false) }}{{ certifications(false) }}{{ achievements() }}
+{{ simple_list('competitions', 'Competitions') }}{{ simple_list('languages', 'Languages') }}
+{% endif %}
 </body></html>

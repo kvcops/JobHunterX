@@ -196,6 +196,7 @@ export const api = {
 
   // documents
   generateDocument: (jobId, kind, o) => request(`/jobs/${enc(jobId)}/documents`, { method: 'POST', body: { kind }, timeout: 120_000, ...o }),
+  generateCustomResume: (body, o) => request('/documents/custom', { method: 'POST', body, timeout: 150_000, ...o }),
   generateCv: (focus, o) => request('/documents/cv', { method: 'POST', body: focus ? { focus } : {}, timeout: 120_000, ...o }),
   listDocuments: (query, o) => request('/documents', { query, ...o }),
   getDocument: (id, o) => request(`/documents/${enc(id)}`, o),

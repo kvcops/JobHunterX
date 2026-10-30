@@ -1,150 +1,12 @@
 import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
-import { generateCv, loadDocuments, loadDocument, updateDocument, deleteDocument, saveDocumentStyle, toast } from '../actions.js';
+import { generateCv, generateCustomResume, loadDocuments, loadDocument, updateDocument, deleteDocument, saveDocumentStyle } from '../actions.js';
 import { StylePicker, ChatDock, SnapFilter, useStyles } from './docchat.js';
-import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Tabs, ComboInput } from '../components/ui.js';
+import { Button, Badge, Skeleton, ErrorBox, EmptyState, Icon, Notice, PageHead, Popover, Portal, Tabs, ComboInput, useFocusTrap } from '../components/ui.js';
 import { DOC_KIND_LABEL, relTime, safeUrl } from '../lib/format.js';
+import { ResumePaper, LetterPaper, EditToolbar, clone, commitValue, commitActive, insertAt, removeAt, setPath, focusLater, fitSummary } from './doceditor.js';
 import { api } from '../lib/api.js';
 import { genKey } from '../state/domain.js';
-
-const ext = (l) => { const u = safeUrl(l.url); return u ? html`<a href=${u} target="_blank" rel="noopener noreferrer">${l.text || l.label}</a>` : null; };
-const linkRow = (links) => (links && links.length ? html`<span class="paper-links">${links.map((l, i) => html`${i ? ' · ' : ''}${ext(l)}`)}</span>` : null);
-
-function ResumePreview({ c, style = 'classic' }) {
-  const il = c.item_links || {};
-  return html`<article class="paper" data-style=${style}>
-    <header class="paper-head"><h2 data-p="header.name">${c.header.name}</h2>${c.headline ? html`<div class="paper-sub" data-p="headline">${c.headline}</div>` : null}
-      <div class="paper-contact">${[c.header.email, c.header.phone, c.header.location].filter(Boolean).join(' · ')}
-        ${c.header.links.length ? html`<br />${linkRow(c.header.links)}` : null}</div></header>
-    ${c.summary ? html`<section><h3>Summary</h3><p data-p="summary">${c.summary}</p></section>` : null}
-    ${c.skills.length ? html`<section><h3>Skills</h3>${c.skills.map((g, i) => html`<p data-p=${`skills.${i}`}><strong>${g.category}:</strong> ${g.items.join(', ')}</p>`)}</section>` : null}
-    ${c.experience.length ? html`<section><h3>Experience</h3>${c.experience.map((e, i) => html`<div class="paper-item">
-      <div class="row space"><strong>${e.role}${e.company ? ` — ${e.company}` : ''}</strong><span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}</span></div>
-      <ul>${e.bullets.map((b, j) => html`<li data-p=${`experience.${i}.bullets.${j}`}>${b}</li>`)}</ul></div>`)}</section>` : null}
-    ${c.projects.length ? html`<section><h3>Projects</h3>${c.projects.map((p, i) => html`<div class="paper-item">
-      <div class="row space"><span><strong>${p.title}</strong>${p.technologies.length ? html` <span class="muted small">· ${p.technologies.join(', ')}</span>` : null}</span>
-        ${linkRow(p.links && p.links.length ? p.links : p.url ? [{ url: p.url, label: 'Link' }] : [])}</div><p data-p=${`projects.${i}.description`}>${p.description}</p></div>`)}</section>` : null}
-    ${c.education.length ? html`<section><h3>Education</h3>${c.education.map((e) => html`<p><strong>${e.degree}</strong>${e.institution ? ` — ${e.institution}` : ''} <span class="muted small">${[e.start, e.end].filter(Boolean).join(' – ')}${e.grade ? ` · ${e.grade}` : ''}</span></p>`)}</section>` : null}
-    ${['certifications', 'achievements', 'competitions', 'languages'].map((k) => c[k] && c[k].length ? html`<section><h3>${k[0].toUpperCase() + k.slice(1)}</h3><ul>${c[k].map((x, i) => html`<li data-p=${`${k}.${i}`}>${x}${il[x] ? html` · ${linkRow(il[x])}` : null}</li>`)}</ul></section>` : null)}
-  </article>`;
-}
-
-function LetterPreview({ c, style = 'classic' }) {
-  return html`<article class="paper" data-style=${style}><p data-p="greeting">${c.greeting}</p>${c.paragraphs.map((p, i) => html`<p data-p=${`paragraphs.${i}`}>${p}</p>`)}<p data-p="closing">${c.closing}</p><p>${c.signature}</p></article>`;
-}
-
-const clone = (value) => JSON.parse(JSON.stringify(value));
-const lines = (value) => (value || []).join('\n');
-const fromLines = (value) => value.split('\n').map((x) => x.trim()).filter(Boolean);
-
-function JsonField({ label, value, onChange }) {
-  const [text, setText] = useState(() => JSON.stringify(value || [], null, 2));
-  const [error, setError] = useState('');
-  return html`<label class="field"><span class="field-label">${label}</span>
-    <textarea class="input" rows="7" value=${text} onInput=${(e) => {
-      setText(e.currentTarget.value);
-      try { onChange(JSON.parse(e.currentTarget.value)); setError(''); } catch { setError('Use valid JSON for this section.'); }
-    }}></textarea>
-    ${error ? html`<span class="error-text small">${error}</span>` : null}</label>`;
-}
-
-function LinkEditor({ links = [], onChange }) {
-  const update = (index, key, next) => {
-    const nextLinks = links.map((link, i) => {
-      if (i !== index) return link;
-      return key === 'url' ? { ...link, url: next } : { ...link, label: next, text: next };
-    });
-    onChange(nextLinks);
-  };
-  const remove = (index) => onChange(links.filter((_, i) => i !== index));
-  return html`<div class="field">
-    <span class="field-label">Links</span>
-    <div class="stack">
-      ${links.map((link, i) => html`<div class="link-row" key=${i}>
-        <input class="input link-label" aria-label=${`Link ${i + 1} label`} placeholder="Label" value=${link.label || ''}
-          onInput=${(e) => update(i, 'label', e.currentTarget.value)} />
-        <input class="input" aria-label=${`Link ${i + 1} URL`} placeholder="https://…" value=${link.url || ''}
-          onInput=${(e) => update(i, 'url', e.currentTarget.value)} />
-        <button type="button" class="icon-btn" aria-label=${`Remove link ${i + 1}`} onClick=${() => remove(i)}>
-          <${Icon} name="trash" size=${15} />
-        </button>
-      </div>`)}
-      <button type="button" class="btn btn-secondary btn-sm" onClick=${() => onChange([...links, { label: '', url: '', text: '' }])}>
-        Add link
-      </button>
-    </div>
-    <span class="muted small">Edit the label and destination shown in the resume.</span>
-  </div>`;
-}
-
-function LinkedItemsEditor({ label, items = [], itemLinks = {}, onChange }) {
-  const updateItem = (index, nextText) => {
-    const previous = items[index] || '';
-    const nextItems = items.map((item, i) => i === index ? nextText : item);
-    const nextLinks = { ...itemLinks };
-    if (previous !== nextText && Object.prototype.hasOwnProperty.call(nextLinks, previous)) {
-      nextLinks[nextText] = nextLinks[previous];
-      delete nextLinks[previous];
-    }
-    onChange(nextItems, nextLinks);
-  };
-  const updateLinks = (item, links) => onChange(items, { ...itemLinks, [item]: links });
-  const removeItem = (index) => {
-    const item = items[index];
-    const nextLinks = { ...itemLinks };
-    delete nextLinks[item];
-    onChange(items.filter((_, i) => i !== index), nextLinks);
-  };
-  return html`<div class="field">
-    <span class="field-label">${label}</span>
-    <div class="stack">
-      ${items.map((item, i) => html`<div class="linked-item" key=${`${item}-${i}`}>
-        <div class="row gap">
-          <input class="input" value=${item} aria-label=${`${label} ${i + 1}`}
-            onInput=${(e) => updateItem(i, e.currentTarget.value)} />
-          <button type="button" class="icon-btn" aria-label=${`Remove ${label.toLowerCase()} ${i + 1}`} onClick=${() => removeItem(i)}>
-            <${Icon} name="trash" size=${15} />
-          </button>
-        </div>
-        <${LinkEditor} links=${itemLinks[item] || []} onChange=${(links) => updateLinks(item, links)} />
-      </div>`)}
-      <button type="button" class="btn btn-secondary btn-sm" onClick=${() => onChange([...items, ''], itemLinks)}>
-        Add ${label.toLowerCase().replace(/s$/, '')}
-      </button>
-    </div>
-    <span class="muted small">Attach credential or evidence links to each item.</span>
-  </div>`;
-}
-
-function DocumentEditor({ doc, value, onChange }) {
-  const set = (key, next) => onChange({ ...value, [key]: next });
-  const setHeader = (key, next) => set('header', { ...value.header, [key]: next });
-  if (doc.kind === 'cover_letter') return html`<div class="editor-form">
-    ${[['greeting', 'Greeting'], ['closing', 'Closing'], ['signature', 'Signature']].map(([k, label]) => html`
-      <label class="field"><span class="field-label">${label}</span><input class="input" value=${value[k] || ''} onInput=${(e) => set(k, e.currentTarget.value)} /></label>`)}
-    <label class="field"><span class="field-label">Paragraphs</span><textarea class="input" rows="12" value=${lines(value.paragraphs)} onInput=${(e) => set('paragraphs', fromLines(e.currentTarget.value))}></textarea><span class="muted small">One paragraph per line.</span></label>
-  </div>`;
-  return html`<div class="editor-form">
-    <div class="editor-grid">${[['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location']].map(([k, label]) => html`
-      <label class="field"><span class="field-label">${label}</span><input class="input" value=${value.header?.[k] || ''} onInput=${(e) => setHeader(k, e.currentTarget.value)} /></label>`)}</div>
-    <label class="field"><span class="field-label">Headline</span><input class="input" value=${value.headline || ''} onInput=${(e) => set('headline', e.currentTarget.value)} /></label>
-    <${LinkEditor} links=${value.header?.links || []} onChange=${(next) => setHeader('links', next)} />
-
-    <label class="field"><span class="field-label">Summary</span><textarea class="input" rows="6" value=${value.summary || ''} onInput=${(e) => set('summary', e.currentTarget.value)}></textarea></label>
-    <${LinkedItemsEditor} label="Certifications" items=${value.certifications} itemLinks=${value.item_links || {}}
-      onChange=${(items, itemLinks) => onChange({ ...value, certifications: items, item_links: itemLinks })} />
-    <${LinkedItemsEditor} label="Achievements" items=${value.achievements} itemLinks=${value.item_links || {}}
-      onChange=${(items, itemLinks) => onChange({ ...value, achievements: items, item_links: itemLinks })} />
-    <${LinkedItemsEditor} label="Competitions" items=${value.competitions} itemLinks=${value.item_links || {}}
-      onChange=${(items, itemLinks) => onChange({ ...value, competitions: items, item_links: itemLinks })} />
-    <${LinkedItemsEditor} label="Languages" items=${value.languages} itemLinks=${value.item_links || {}}
-      onChange=${(items, itemLinks) => onChange({ ...value, languages: items, item_links: itemLinks })} />
-    <${JsonField} label="Skills (JSON)" value=${value.skills} onChange=${(v) => set('skills', v)} />
-    <${JsonField} label="Experience (JSON)" value=${value.experience} onChange=${(v) => set('experience', v)} />
-    <${JsonField} label="Projects (JSON)" value=${value.projects} onChange=${(v) => set('projects', v)} />
-    <${JsonField} label="Education (JSON)" value=${value.education} onChange=${(v) => set('education', v)} />
-  </div>`;
-}
 
 function Provenance({ doc }) {
   const p = doc.provenance;
@@ -163,34 +25,85 @@ function Provenance({ doc }) {
   </section>`;
 }
 
+function TargetPanel({ t }) {
+  const kw = t.keywords || [];
+  const hit = new Set(t.matched || []);
+  const missing = kw.filter((k) => !hit.has(k));
+  return html`<div class="target-panel">
+    <div class="row space wrap"><span><span class="muted small">Tailored to</span> <strong>${t.title}</strong>${t.company ? html` <span class="muted">@ ${t.company}</span>` : null}
+      ${safeUrl(t.url) ? html` · <a href=${safeUrl(t.url)} target="_blank" rel="noopener noreferrer" class="small">posting</a>` : null}</span>
+      ${kw.length ? html`<${Badge} tone=${hit.size / kw.length >= 0.7 ? 'success' : hit.size / kw.length >= 0.4 ? 'warning' : 'danger'}>${hit.size}/${kw.length} job keywords</${Badge}>` : null}</div>
+    ${missing.length ? html`<p class="muted small">Not on the page yet: ${missing.map((k, i) => html`${i ? ', ' : ''}<span class="kw-miss">${k}</span>`)}. Add one only where you really used it.</p>` : null}
+  </div>`;
+}
+
 function DocumentDetail({ docId }) {
   const entry = useStore((s) => s.docDetails[docId]);
   const styles = useStyles();
-  const [tab, setTab] = useState('preview');
+  const [tab, setTab] = useState('page');
   const [draft, setDraft] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [clean, setClean] = useState(false);           // "clean view": the page without editing affordances
   const [style, setStyle] = useState(null);            // the style being looked at (instant); the saved one follows in the background
   const [styleBusy, setStyleBusy] = useState(false);
-  const [undo, setUndo] = useState([]);                // earlier drafts, for "Undo last"
-  const dirtyRef = useRef(false);
+  const [undo, setUndo] = useState([]);                // earlier drafts, for "Undo"
+  const [save, setSave] = useState({ state: 'idle' }); // idle | pending | saving | saved | failed
+  const draftRef = useRef(null);
+  const seq = useRef(0);                               // bumps on every local change: a slow save never overwrites newer typing
+  const unsaved = useRef(false);                       // a change the server hasn't stored yet (Download waits for it)
+  const timer = useRef(0);
   const paperRef = useRef(null);
   const styleTimer = useRef(0);
   useEffect(() => { loadDocument(docId); }, [docId]);
-  useEffect(() => { if (entry?.doc && !dirtyRef.current) setDraft(clone(entry.doc.content)); }, [entry?.doc]);
+  useEffect(() => { if (entry?.doc && draftRef.current === null) { draftRef.current = clone(entry.doc.content); setDraft(draftRef.current); } }, [entry?.doc]);
   useEffect(() => { if (entry?.doc && style === null) setStyle(entry.doc.style || 'classic'); }, [entry?.doc]);
-  useEffect(() => () => clearTimeout(styleTimer.current), []);
+  useEffect(() => () => { clearTimeout(styleTimer.current); clearTimeout(timer.current); }, []);
   if (!entry || entry.status === 'loading') return html`<div class="pane-pad"><${Skeleton} lines=${10} /></div>`;
   if (entry.status === 'error') return html`<div class="pane-pad"><${ErrorBox} message=${entry.error} onRetry=${() => loadDocument(docId)} /></div>`;
   const d = entry.doc;
-  const editing = tab === 'edit';
-  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(d.content);
-  dirtyRef.current = dirty;
   const shown = style || d.style || 'classic';   // d.style is already normalised by the server
-  const save = async () => {
-    setSaving(true);
-    const updated = await updateDocument(docId, draft);
-    setSaving(false);
-    if (updated) { dirtyRef.current = false; setDraft(clone(updated.content)); setUndo([]); setTab('preview'); }
+  const body = draft || d.content;
+
+  const flush = async () => {
+    clearTimeout(timer.current);
+    const mine = seq.current;
+    setSave({ state: 'saving' });
+    const updated = await updateDocument(docId, draftRef.current, { quiet: true });
+    if (!updated) { setSave({ state: 'failed' }); return false; }
+    if (mine === seq.current) { unsaved.current = false; draftRef.current = clone(updated.content); setDraft(draftRef.current); setSave({ state: 'saved' }); }
+    return true;
+  };
+  const change = (next, { now = false } = {}) => {
+    setUndo((u) => [...u.slice(-29), draftRef.current]);
+    draftRef.current = next;
+    seq.current += 1;
+    unsaved.current = true;
+    setDraft(next);
+    setSave({ state: 'pending' });
+    clearTimeout(timer.current);
+    if (now) return flush();
+    timer.current = setTimeout(flush, 1200);
+    return null;
+  };
+  const ed = {
+    value: body,
+    editing: !clean && tab === 'page',
+    commit: (path, v) => change(commitValue(draftRef.current, path, v)),
+    insert: (listPath, index, value, focusPath) => { focusLater(focusPath || `${listPath}.${index}`); change(insertAt(draftRef.current, listPath, index, value)); },
+    remove: (listPath, index, focusPath) => { if (focusPath) focusLater(focusPath); change(removeAt(draftRef.current, listPath, index)); },
+    undo: () => {
+      if (!undo.length) return;
+      const prev = undo[undo.length - 1];
+      setUndo((u) => u.slice(0, -1));
+      draftRef.current = prev;
+      seq.current += 1;
+      unsaved.current = true;
+      setDraft(prev);
+      setSave({ state: 'pending' });
+      clearTimeout(timer.current);
+      timer.current = setTimeout(flush, 300);
+    },
+    canUndo: undo.length > 0,
+    askLink: () => {},
   };
   const pickStyle = (id) => {
     setStyle(id);                                     // the preview changes right now: it is only CSS
@@ -201,47 +114,98 @@ function DocumentDetail({ docId }) {
       setStyleBusy(false);
     }, 500);
   };
-  // AI edits are saved at once, so the stored PDF (and Download) matches what the preview shows. Returns true when saved.
-  const persist = async (content) => {
-    const updated = await updateDocument(docId, content, { quiet: true });
-    if (updated) { dirtyRef.current = false; setDraft(clone(updated.content)); }
-    return !!updated;
-  };
-  const propose = (content) => { setUndo((u) => [...u.slice(-9), draft]); setDraft(content); return persist(content); };
-  const undoLast = async () => {
-    if (!undo.length) return;
-    const prev = undo[undo.length - 1];
-    setUndo((u) => u.slice(0, -1));
-    setDraft(prev);
-    if (await persist(prev)) toast('Undone — the PDF is back to the earlier version.', 'info');
-  };
-  const body = draft || d.content;
+  // AI edits (chat) are saved at once, so the stored PDF (and Download) matches what the page shows.
+  const propose = (content) => change(content, { now: true });
+  const hidden = d.kind === 'resume' ? fitSummary(body, d.fit) : '';
+  const status = { pending: 'Unsaved…', saving: 'Saving and updating the PDF…', failed: 'Not saved — check your connection',
+    saved: `Saved · ${d.page_count} page${d.page_count === 1 ? '' : 's'}`, idle: d.manually_edited ? `Edited ${relTime(d.updated_at)}` : 'Click any text to edit it' }[save.state];
+  const isLetter = d.kind === 'cover_letter';
   return html`<div class="detail">
     <header class="detail-top doc-top">
       <div class="row space wrap">
         <div class="grow"><span class="doc-kind">${DOC_KIND_LABEL[d.kind]}</span><h2>${d.title}</h2>
           <div class="muted small">${relTime(d.created_at)} · ${d.page_count} page(s)
-            ${d.job ? html` · for <a href=${`#/discover/job/${d.job_id}`}>${d.job.title} @ ${d.job.company}</a>` : ''}</div></div>
-        <div class="row gap">${d.has_pdf ? html`<a class="btn btn-primary btn-sm" href=${api.documentPdfUrl(d.id, shown === (d.style || 'classic') ? '' : shown)} download title="Downloads the PDF in the selected style"><${Icon} name="download" size=${15} /><span>Download PDF</span></a>` : null}
-          <button type="button" class="btn btn-secondary btn-sm" onClick=${() => { setDraft(clone(d.content)); dirtyRef.current = false; setUndo([]); setTab(editing ? 'preview' : 'edit'); }}>${editing ? 'Cancel' : 'Edit'}</button>
-          ${editing || dirty ? html`<button type="button" class="btn btn-primary btn-sm" disabled=${!dirty || saving} onClick=${save}>${saving ? 'Saving…' : 'Save changes'}</button>` : null}
+            ${d.job && d.job_id ? html` · for <a href=${`#/discover/job/${d.job_id}`}>${d.job.title} @ ${d.job.company}</a>` : ''}</div></div>
+        <div class="row gap">
+          <button type="button" class=${`btn btn-secondary btn-sm ${clean ? 'is-on' : ''}`} aria-pressed=${clean} title="See the page without editing marks"
+            onClick=${() => setClean(!clean)}><${Icon} name="eye" size=${15} /><span>${clean ? 'Edit on page' : 'Clean view'}</span></button>
+          ${d.has_pdf ? html`<a class=${`btn btn-primary btn-sm ${save.state === 'saving' || save.state === 'pending' ? 'is-busy' : ''}`}
+            href=${api.documentPdfUrl(d.id, shown === (d.style || 'classic') ? '' : shown)} download
+            onClick=${async (e) => { commitActive(); if (unsaved.current) { e.preventDefault(); if (await flush()) window.location.href = api.documentPdfUrl(d.id, shown === (d.style || 'classic') ? '' : shown); } }}
+            title="Downloads the PDF in the selected style"><${Icon} name="download" size=${15} /><span>Download PDF</span></a>` : null}
           <button type="button" class="icon-btn" aria-label="Delete document" onClick=${() => deleteDocument(d.id)}><${Icon} name="trash" size=${16} /></button></div>
       </div>
       <${StylePicker} styles=${styles} value=${shown} onChange=${pickStyle} busy=${styleBusy} />
-      ${d.manually_edited ? html`<${Notice} tone="info">Manually edited · saved ${relTime(d.updated_at)}</${Notice}>` : null}
-      ${dirty && !editing ? html`<${Notice} tone="warning">You have unsaved changes. “Save changes” keeps them and updates the PDF; “Edit” → “Cancel” discards them.</${Notice}>` : null}
+      ${d.target ? html`<${TargetPanel} t=${d.target} />` : null}
       ${d.stale ? html`<${Notice} tone="warning">Your profile changed after this was generated. Regenerate it to include the latest information.</${Notice}>` : null}
       <${Tabs} size="sm" label="Document sections" value=${tab} onChange=${setTab}
-        tabs=${[{ key: 'preview', label: 'Preview' }, { key: 'edit', label: 'Edit' }, { key: 'prov', label: 'What changed', count: d.provenance.rewrites.length }]} />
+        tabs=${[{ key: 'page', label: 'Page' }, { key: 'prov', label: 'What changed', count: d.provenance.rewrites.length }]} />
     </header>
     <div class="detail-main">
     <div class="detail-body scroll paper-stage" key=${tab} ref=${paperRef}>
       <${SnapFilter} />
-      ${tab === 'preview' ? (d.kind === 'cover_letter' ? html`<${LetterPreview} c=${body} style=${shown} />` : html`<${ResumePreview} c=${body} style=${shown} />`) : tab === 'edit' ? html`<${DocumentEditor} key=${`${d.id}:${d.updated_at}`} doc=${d} value=${draft || d.content} onChange=${setDraft} />` : html`<${Provenance} doc=${d} />`}
+      ${tab === 'page' ? html`
+        ${ed.editing ? html`<${EditToolbar} ed=${ed} layout=${body.layout} canLayout=${!isLetter} status=${status}
+          onLayout=${(v) => { if (v !== body.layout) change(setPath(draftRef.current, 'layout', v), { now: true }); }} />` : null}
+        ${hidden ? html`<div class="fit-note" role="status"><${Icon} name="info" size=${14} /> To stay on one page the PDF leaves out ${hidden} (faded below). Shorten a line or remove something to bring them back.</div>` : null}
+        ${isLetter ? html`<${LetterPaper} ed=${ed} style=${shown} />` : html`<${ResumePaper} ed=${ed} style=${shown} fit=${d.fit} kind=${d.kind} />`}`
+        : html`<${Provenance} doc=${d} />`}
     </div>
-    ${tab === 'preview' ? html`<${ChatDock} doc=${d} draft=${body} onProposal=${propose} onUndo=${undoLast} canUndo=${undo.length > 0}
+    ${tab === 'page' ? html`<${ChatDock} doc=${d} draft=${body} onProposal=${propose} onUndo=${ed.undo} canUndo=${undo.length > 0}
       getPaper=${() => paperRef.current && paperRef.current.querySelector('.paper')} />` : null}
     </div>
+  </div>`;
+}
+
+const LAYOUT_OPTIONS = [{ id: 'single', label: 'One column' }, { id: 'two_column', label: 'Two columns' }];
+
+/** "Resume for a job": paste a job description or a link, get a one-page resume written for it. */
+function CustomResume() {
+  const g = useStore((s) => s.gen[genKey(null, 'custom')]);
+  const [open, setOpen] = useState(false);
+  const busy = g && g.status === 'generating';
+  return html`<${Button} variant="primary" icon="spark" busy=${busy} onClick=${() => setOpen(true)}>${busy ? 'Tailoring…' : 'Resume for a job'}</${Button}>
+    ${open ? html`<${Portal}><${CustomResumeDialog} g=${g} busy=${busy} onClose=${() => setOpen(false)} /></${Portal}>` : null}`;
+}
+
+function CustomResumeDialog({ g, busy, onClose }) {
+  const styles = useStyles();
+  const ref = useRef();
+  const [f, setF] = useState({ url: '', jd_text: '', title: '', company: '', layout: 'single', style: 'classic' });
+  useFocusTrap(ref, () => { if (!busy) onClose(); });
+  const set = (k) => (e) => setF({ ...f, [k]: e.currentTarget.value });
+  const ready = f.jd_text.trim().length >= 80 || /^https?:\/\/\S+\.\S+/.test(f.url.trim());
+  const go = async (e) => {
+    e.preventDefault();
+    if (!ready || busy) return;
+    const doc = await generateCustomResume({ ...f, url: f.url.trim(), jd_text: f.jd_text.trim() });
+    if (doc) onClose();
+  };
+  return html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && !busy && onClose()}>
+    <form class="dialog custom-resume" role="dialog" aria-modal="true" aria-label="Resume for a job" ref=${ref} onSubmit=${go}>
+      <div class="row space"><h2 class="dlg-h">A one-page resume for any job</h2>
+        <button type="button" class="icon-btn" aria-label="Close" disabled=${busy} onClick=${onClose}><${Icon} name="x" size=${16} /></button></div>
+      <p class="muted small">Paste the job description or a link to the posting. Your resume is rewritten for it from your profile — every line fact-checked, nothing invented.</p>
+      <label class="field"><span class="field-label">Link to the job</span>
+        <input class="input" type="url" inputmode="url" placeholder="https://company.com/careers/role" value=${f.url} onInput=${set('url')} /></label>
+      <label class="field"><span class="field-label">…or paste the job description</span>
+        <textarea class="input" rows="7" placeholder="Paste the full description: responsibilities, requirements, skills…" value=${f.jd_text} onInput=${set('jd_text')}></textarea>
+        <span class="muted small">${f.jd_text.trim() ? `${f.jd_text.trim().length} characters` : 'LinkedIn links can’t be read — paste their text instead.'}</span></label>
+      <div class="editor-grid">
+        <label class="field"><span class="field-label">Job title <span class="muted">(optional)</span></span><input class="input" value=${f.title} onInput=${set('title')} /></label>
+        <label class="field"><span class="field-label">Company <span class="muted">(optional)</span></span><input class="input" value=${f.company} onInput=${set('company')} /></label>
+      </div>
+      <div class="field"><span class="field-label">Layout</span>
+        <div class="ed-seg" role="radiogroup" aria-label="Layout">${LAYOUT_OPTIONS.map((o) => html`<button type="button" role="radio" aria-checked=${f.layout === o.id}
+          class=${f.layout === o.id ? 'is-on' : ''} onClick=${() => setF({ ...f, layout: o.id })}>${o.label}</button>`)}</div></div>
+      <div class="field"><span class="field-label">Style</span><${StylePicker} styles=${styles} value=${f.style} onChange=${(id) => setF({ ...f, style: id })} /></div>
+      ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
+      <div class="dialog-actions">
+        ${busy ? html`<span class="muted small grow">Reading the job and tailoring — usually 20-60 seconds.</span>` : null}
+        <${Button} type="button" disabled=${busy} onClick=${onClose}>Cancel</${Button}>
+        <${Button} variant="primary" icon="spark" type="submit" busy=${busy} disabled=${!ready}>${busy ? 'Tailoring…' : 'Create resume'}</${Button}>
+      </div>
+    </form>
   </div>`;
 }
 
@@ -273,7 +237,7 @@ export function DocumentsView() {
   const groups = ['resume', 'cv', 'cover_letter'].map((k) => [k, docs.items.filter((d) => d.kind === k)]);
   return html`<div class="view view-documents">
     <${PageHead} title=${html`Documents, <span class="serif">fact-checked</span>`}
-      sub="Tailored resumes and cover letters per job, plus a full CV — nothing invented." actions=${html`<${CvGenerator} />`} />
+      sub="Tailored resumes and cover letters per job, plus a full CV — nothing invented. Click any text on the page to edit it." actions=${html`<${CustomResume} /><${CvGenerator} />`} />
     <div class="split split-docs">
       <section class="pane card" aria-label="Document library">
         <div class="scroll pane-pad doc-library">
@@ -285,8 +249,8 @@ export function DocumentsView() {
             ${items.map((d, i) => html`<a class=${`doc-row ${selected === d.id ? 'is-selected' : ''}`} style=${{ '--i': i }} href=${`#/documents/${d.id}`} key=${d.id}
                 aria-current=${selected === d.id ? 'true' : undefined}>
               <div class="doc-mini" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-              <div class="grow"><strong>${d.job ? d.job.title : d.title}</strong>
-                <span class="muted small">${d.job ? d.job.company : d.focus || 'Whole career'} · ${relTime(d.created_at)}</span></div>
+              <div class="grow"><strong>${d.job ? d.job.title : d.target ? d.target.title : d.title}</strong>
+                <span class="muted small">${d.job ? d.job.company : d.target ? (d.target.company || 'Your job description') : d.focus || 'Whole career'} · ${relTime(d.created_at)}</span></div>
               ${d.stale ? html`<${Badge} tone="warning">Stale</${Badge}>` : null}
             </a>`)}</div>` : null)}
         </div>

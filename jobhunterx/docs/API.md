@@ -301,6 +301,7 @@ concurrent generation for the same `(job_id, kind)` with 409.
 |---|---|---|---|
 | POST | `/api/jobs/{id}/documents` | `{ kind: "resume"\|"cover_letter" }` | `{ document: DocumentDetail }` |
 | POST | `/api/documents/cv` | `{ focus?: string }` | `{ document: DocumentDetail }` |
+| POST | `/api/documents/custom` | `{ jd_text?: string (≤ 20000), url?: string, title?: string, company?: string, layout?: "single"\|"two_column", style?: string }` | `{ document: DocumentDetail }` — a one-page resume tailored to a job the user brings (pasted description and/or a link; LinkedIn links are refused — paste their text). `job_id` is null; `target` = `{ title, company, url, keywords, matched }` (the job's named skills and which ones the resume shows). Bad or unreadable input `422`. Rate limited (12 / 5 min). |
 | GET | `/api/documents?job_id=&kind=` | – | `{ documents: DocumentSummary[] }` |
 | GET | `/api/documents/{id}` | – | `{ document: DocumentDetail }` |
 | PATCH | `/api/documents/{id}` | `{ content: ResumeContent \| CoverLetterContent }` | `{ document: DocumentDetail }` |
@@ -309,6 +310,13 @@ concurrent generation for the same `(job_id, kind)` with 409.
 | PATCH | `/api/documents/{id}/style` | `{ style: string }` | `{ document: DocumentDetail }` — saves the style and re-renders the stored PDF; content is untouched. Unknown style `422`. Rate limited (30/min). |
 | POST | `/api/documents/{id}/chat` | `{ instruction: string (3–600), content?: <the unsaved draft>, history?: { role: "user"\|"assistant", text }[] (≤ 12) }` | `ChatProposal` — **nothing is saved**; keep a proposal with `PATCH /api/documents/{id}`. Rate limited (10/min, 80/h per user → `429` + `Retry-After`). |
 | DELETE | `/api/documents/{id}` | – | `{ ok: true }` |
+
+Resume / CV content has `layout`: `"single"` (default) or `"two_column"` (side column: skills, education,
+certifications, languages; main column: summary, experience, projects, achievements). Any text field may carry inline
+formatting — `**bold**`, `*italic*`, `[label](https://…)` (`\*`, `\[`, `\]` for the literal characters); only
+http(s)/mailto links become clickable (`generation/richtext.py`, mirrored by `web/js/lib/richtext.js`). A resume PDF is
+always one page: `DocumentDetail.fit` lists what the one-page fitter left out of the PDF (e.g.
+`{ "max_bullets_per_exp": 2, "max_projects": 3 }`; empty when everything shows), so the editor can mark it.
 
 `PATCH /api/documents/{id}` updates the existing document in place. The content is
 validated against the document kind's structured model and rendered immediately

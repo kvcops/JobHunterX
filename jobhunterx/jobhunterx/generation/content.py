@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from jobhunterx.domain.candidate import CandidateProfile
 from jobhunterx.domain.candidate import Project
@@ -73,7 +73,12 @@ class EducationItem(BaseModel):
     details: str = ""
 
 
+#: Page layouts a resume / CV can use (the same content either way).
+LAYOUTS = ("single", "two_column")
+
+
 class ResumeContent(BaseModel):
+    layout: str = "single"                 # "single" column, or "two_column" (side column: skills, education, credentials)
     header: Header = Field(default_factory=Header)
     headline: str = ""
     summary: str = ""
@@ -86,6 +91,11 @@ class ResumeContent(BaseModel):
     competitions: list[str] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
     item_links: dict[str, list[Link]] = Field(default_factory=dict)   # certification / achievement text -> its links
+
+    @field_validator("layout")
+    @classmethod
+    def _layout(cls, v: str) -> str:
+        return v if v in LAYOUTS else "single"
 
 
 class CoverLetterContent(BaseModel):

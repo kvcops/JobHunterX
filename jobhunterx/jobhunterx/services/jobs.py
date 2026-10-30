@@ -172,6 +172,8 @@ def document_summary(d, current_hash: Optional[str], job: Optional[JobPosting] =
         "stale": bool(current_hash and d.profile_hash != current_hash),
         "page_count": d.page_count, "has_pdf": d.has_pdf, "warnings_count": len(d.provenance.warnings),
         "job": {"title": job.title, "company": job.company} if job else None,
+        "target": getattr(d, "target", None) or None,
+        "fit": getattr(d, "fit", None) or {},
     }
 
 
