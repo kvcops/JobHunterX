@@ -21,7 +21,7 @@ on:
       action:
         description: keygen (step 1 of a sealed hand-over), inspect (read-only), deploy, or repair (restart services that are failed)
         type: choice
-        options: [inspect, deploy, repair, keygen]
+        options: [inspect, deploy, repair, reboot, keygen]
         default: inspect
       sealed:
         description: Sealed credentials (only for the hand-over; leave empty when the VPS_* secrets are set)
