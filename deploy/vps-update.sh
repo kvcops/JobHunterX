@@ -33,6 +33,20 @@ ps -eo pid,args --no-headers | grep -Ei 'uvicorn|jobhunterx|gunicorn' | grep -v 
 say "Listening ports"
 ss -ltnp 2>/dev/null | awk 'NR>1 {print $4, $6}' | sed 's/users:((//; s/,fd=[0-9]*//g' | sort -u | head -25
 
+if [ "$ACTION" = "reboot" ]; then
+  say "Before reboot: these must start on their own"
+  bad=0
+  for u in jobhunterx.service creatoros-backend.service creatoros-frontend.service caddy-duck.service ssh.service; do
+    systemctl cat "$u" >/dev/null 2>&1 || continue
+    st=$(systemctl is-enabled "$u" 2>/dev/null || true); echo "$u: $st"
+    case "$st" in enabled|static|alias|indirect|generated) ;; *) bad=1;; esac
+  done
+  [ "$bad" = 0 ] || { echo "Not rebooting: a service above would not come back on its own"; exit 1; }
+  say "Rebooting in 5 seconds"
+  systemd-run --on-active=5 --timer-property=AccuracySec=1s systemctl reboot >/dev/null 2>&1 || (sleep 5; systemctl reboot) >/dev/null 2>&1 &
+  echo "reboot scheduled"
+  exit 0
+fi
 if [ "$ACTION" = "repair" ]; then
   say "Repair: services that are failed right now"
   FAILED=$(systemctl list-units --type=service --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}' | grep -E '^[A-Za-z0-9@._-]+\.service$' || true)
