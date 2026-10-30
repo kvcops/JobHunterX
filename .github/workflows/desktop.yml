@@ -1,0 +1,288 @@
+# Desktop app: keep it in step with main, prove every build works, then publish a new version.
+#
+# push to main               → merge main into the desktop branch on a staging branch (desktop-sync), build and
+#                              self-test the app on Windows, macOS and Linux; only when ALL pass is the desktop branch
+#                              moved forward and a new version published. Installed apps offer the update themselves.
+#                              A merge conflict or a failed build opens an issue and changes nothing.
+# push to jobhunterx-desktop → build and self-test (no release unless the commit message says [release])
+# Run workflow (manual)      → the same, with a "publish a release" switch
+#
+# One-time setup for auto-update (see desktop/README.md): repository secrets TAURI_SIGNING_PRIVATE_KEY and
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD (the matching public key is in desktop/src-tauri/tauri.conf.json). Without them
+# releases are still published, but those builds can't update themselves.
+#
+# This file must also be on main: GitHub only runs a push-to-main workflow from main's own copy.
+
+name: Desktop app
+
+on:
+  push:
+    branches: [main, jobhunterx-desktop]
+    paths-ignore: ["**/*.md", "reports/**", "research_notes/**"]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a new version after all builds pass
+        type: boolean
+        default: false
+
+concurrency:
+  group: desktop-app
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  DESKTOP_BRANCH: jobhunterx-desktop
+  STAGING_BRANCH: desktop-sync
+
+jobs:
+  prepare:
+    name: Merge main / pick what to build
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.pick.outputs.build }}
+      ref: ${{ steps.pick.outputs.ref }}
+      sync: ${{ steps.pick.outputs.sync }}
+      release: ${{ steps.pick.outputs.release }}
+      version: ${{ steps.pick.outputs.version }}
+      tag: ${{ steps.pick.outputs.tag }}
+      release_id: ${{ steps.draft.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DESKTOP_BRANCH }}
+          fetch-depth: 0
+
+      - name: Merge main into the desktop app, or use the pushed commit
+        id: pick
+        env:
+          ASK_RELEASE: ${{ inputs.release }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          base=$(python3 -c "import json; print('.'.join(json.load(open('desktop/src-tauri/tauri.conf.json'))['version'].split('.')[:2]))")
+          version="$base.$GITHUB_RUN_NUMBER"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=desktop-v$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            git fetch origin main
+            if git merge-base --is-ancestor origin/main HEAD; then
+              echo "The desktop app already has main@$(git rev-parse --short origin/main); nothing to do."
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if ! git merge --no-ff --no-edit -m "Sync main ($(git rev-parse --short origin/main)) into the desktop app" origin/main; then
+              git diff --name-only --diff-filter=U | sed 's/^/conflict: /'
+              git merge --abort
+              echo "::error::main conflicts with $DESKTOP_BRANCH — merge it by hand; the desktop app was not changed."
+              exit 1
+            fi
+            git push --force origin "HEAD:refs/heads/$STAGING_BRANCH"
+            { echo "build=true"; echo "sync=true"; echo "release=true"; echo "ref=$(git rev-parse HEAD)"; } >> "$GITHUB_OUTPUT"
+          else
+            release=false
+            # only the subject line counts, so a commit body that merely mentions the word doesn't publish
+            if [ "$ASK_RELEASE" = "true" ] || printf '%s\n' "$HEAD_MESSAGE" | head -1 | grep -qi '\[release\]'; then release=true; fi
+            { echo "build=true"; echo "sync=false"; echo "release=$release"; echo "ref=$GITHUB_SHA"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the draft release (published only after every build passes)
+        id: draft
+        if: steps.pick.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.pick.outputs.tag }}
+          REF: ${{ steps.pick.outputs.ref }}
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          prev=$(git tag --list 'desktop-v*' --sort=-v:refname | head -1)
+          { echo "Installers for Windows (.exe / .msi), macOS on Apple Silicon (.dmg) and Linux (.AppImage / .deb / .rpm)."
+            echo "Installed apps offer this update on their own."
+            echo
+            echo "Changes:"
+            git log --no-merges --pretty='- %s' ${prev:+$prev..}"$REF" | head -40; } > notes.md
+          # the id comes straight from the create call (a draft has no real tag yet, so it can't be looked up by tag)
+          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -f target_commitish="$REF" \
+                 -f name="JobHunterX $VERSION" -F body=@notes.md -F draft=true --jq .id)
+          test -n "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build · ${{ matrix.name }}
+    needs: prepare
+    if: needs.prepare.outputs.build == 'true'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-22.04, tests: true }
+          - { name: Windows, os: windows-latest, tests: false }
+          - { name: macOS (Apple Silicon), os: macos-14, tests: false }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Linux packages for the webview
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: jobhunterx/requirements.txt
+
+      - name: Python packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r jobhunterx/requirements.txt pyinstaller==6.22.3
+
+      - name: Tests
+        if: matrix.tests
+        working-directory: jobhunterx
+        run: python -m pytest -q --ignore=tests/frontend
+
+      - name: Freeze the backend and self-test it
+        run: python desktop/scripts/build_backend.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Desktop tools
+        working-directory: desktop
+        run: npm ci
+
+      - name: Version and updater settings for this build
+        id: cfg
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          # the public key is in tauri.conf.json (it is public by design); the private key is the repository secret
+          python3 - <<'PY'
+          import json, os
+          cfg = {"version": os.environ["VERSION"]}
+          if os.environ.get("HAS_KEY") == "true":
+              cfg["bundle"] = {"createUpdaterArtifacts": True}
+          json.dump(cfg, open("desktop/src-tauri/tauri.ci.json", "w"))
+          PY
+          if [ "$HAS_KEY" = "true" ]; then
+            echo "args=--config src-tauri/tauri.ci.json --features updater" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No updater signing key set up — this build can't update itself. See desktop/README.md."
+            echo "args=--config src-tauri/tauri.ci.json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: AppImage needs to find the private libraries some Python wheels ship (e.g. pillow.libs)
+        if: runner.os == 'Linux'
+        run: echo "WHEEL_LIBS=$(find "$PWD/desktop/src-tauri/backend" -type d -name '*.libs' | paste -sd:)" >> "$GITHUB_ENV"
+
+      - name: Build the installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LD_LIBRARY_PATH: ${{ env.WHEEL_LIBS }}
+        with:
+          projectPath: desktop
+          tauriScript: npx tauri
+          args: ${{ steps.cfg.outputs.args }}
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          updaterJsonPreferNsis: true
+
+      - name: Keep the installers with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobHunterX-${{ needs.prepare.outputs.version }}-${{ runner.os }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.exe
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.AppImage
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.rpm
+          retention-days: 14
+          if-no-files-found: error
+
+  promote:
+    name: Move the desktop branch forward
+    needs: [prepare, build]
+    if: needs.prepare.outputs.sync == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DESKTOP_BRANCH }}
+          fetch-depth: 0
+      - name: Fast-forward to the tested merge
+        env:
+          REF: ${{ needs.prepare.outputs.ref }}
+        run: |
+          git fetch origin "$STAGING_BRANCH"
+          if ! git merge-base --is-ancestor HEAD "$REF"; then
+            echo "::error::$DESKTOP_BRANCH changed while this ran; the next push to main will merge again."
+            exit 1
+          fi
+          git push origin "$REF:refs/heads/$DESKTOP_BRANCH"
+          git push origin --delete "$STAGING_BRANCH" || true
+
+  publish:
+    name: Publish the release
+    needs: [prepare, build, promote]
+    if: always() && needs.prepare.outputs.release == 'true' && needs.build.result == 'success' && (needs.promote.result == 'success' || needs.promote.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Make the release public (apps see it as the latest version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ID: ${{ needs.prepare.outputs.release_id }}
+        run: |
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/$ID/assets" --paginate --jq '.[].name')
+          echo "$assets"
+          for ext in '\.exe$' '\.dmg$' '\.AppImage$' '\.deb$'; do
+            echo "$assets" | grep -q "$ext" || { echo "::error::installer matching $ext missing — not publishing"; exit 1; }
+          done
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" -F draft=false -f make_latest=true --jq .html_url
+      - name: Remove desktop releases that ended up without files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select((.tag_name | startswith("desktop-v")) and (.assets | length) == 0 and (.draft | not)) | .tag_name' |
+          while read -r tag; do echo "removing empty release $tag"; gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done
+
+  report:
+    name: Report a failed update
+    needs: [prepare, build, promote, publish]
+    if: failure() && github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open an issue and clean up
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ID="${{ needs.prepare.outputs.release_id }}"
+          if [ -n "$ID" ]; then gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$ID" || true; fi
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Desktop app not updated for main@${GITHUB_SHA::7}" \
+            --body "The desktop app was **not** changed: merging main into \`$DESKTOP_BRANCH\` or building it failed. Details: $RUN_URL"
