@@ -165,6 +165,8 @@ def test_out_of_order_list_responses(page, server):
     run_search(page, server)
     all_tab = page.get_by_role("tab", name="All")
     all_tab.click()
+    expect(page.locator(".job-card").first).to_be_visible()
+    expect(all_tab).not_to_have_text(re.compile(r"\b0\s*$"))               # counts arrive just after the list
     total = int(re.search(r"\d+", all_tab.inner_text()).group(0))     # earlier tests in the session may have changed it
     assert total >= 2
     expect(page.locator(".job-card")).to_have_count(total)
