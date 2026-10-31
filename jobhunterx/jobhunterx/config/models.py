@@ -15,6 +15,7 @@ so three safety nets keep the app working when they drift:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import re
@@ -363,6 +364,12 @@ def availability() -> dict[str, Any]:
 # Per-model limiter: RPM spacing, rolling TPM window, daily RPD/TPD counters
 # ---------------------------------------------------------------------------
 
+# True inside work nobody is waiting on (a search run, a watchlist check). Calls from what the person just clicked —
+# a resume, a cover letter, the AI editor, auto-apply — go ahead of those in every model's queue, so a search that
+# keeps the free tiers busy never makes them wait behind its backlog. Set per task; tasks started inside inherit it.
+BACKGROUND: contextvars.ContextVar[bool] = contextvars.ContextVar("llm_background", default=False)
+
+
 class _ModelBudget:
     def __init__(self, model: str):
         self.model = model
@@ -374,6 +381,7 @@ class _ModelBudget:
         self.req_today = 0
         self.tok_today = 0
         self.waiting = 0                       # calls queued for this model right now
+        self.urgent = 0                        # of those, calls someone is waiting on (not BACKGROUND)
 
     def _roll_day(self) -> None:
         d = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -402,7 +410,8 @@ class _ModelBudget:
         wait = 0.0
         if lim["rpm"]:
             gap = 60.0 / lim["rpm"]
-            wait = max(0.0, self.last + gap - now) + self.waiting * gap
+            ahead = self.waiting if BACKGROUND.get() else self.urgent     # background calls queue behind everyone
+            wait = max(0.0, self.last + gap - now) + ahead * gap
         if lim["tpm"] and self.window:
             used = sum(t for ts, t in self.window if now - ts <= 60)
             if used + est_tokens > lim["tpm"]:
@@ -410,34 +419,48 @@ class _ModelBudget:
         return wait
 
     async def acquire(self, est_tokens: int) -> None:
+        background = BACKGROUND.get()
         self.waiting += 1
+        if not background:
+            self.urgent += 1
         try:
-            await self._acquire(est_tokens)
+            await self._acquire(est_tokens, background)
         finally:
             self.waiting -= 1
+            if not background:
+                self.urgent -= 1
 
-    async def _acquire(self, est_tokens: int) -> None:
+    async def _acquire(self, est_tokens: int, background: bool = False) -> None:
         lim = limits(self.model)
-        async with self.lock:
-            now = time.monotonic()
-            if lim["rpm"]:
-                wait = self.last + 60.0 / lim["rpm"] - now
-                if wait > 0:
-                    await asyncio.sleep(wait)
-            if lim["tpm"]:
-                while True:
-                    now = time.monotonic()
-                    while self.window and now - self.window[0][0] > 60:
-                        self.window.popleft()
-                    used = sum(t for _, t in self.window)
-                    if used + est_tokens <= lim["tpm"] or not self.window:
-                        break
-                    await asyncio.sleep(max(0.5, 60 - (now - self.window[0][0])))
-            self.last = time.monotonic()
-            self.window.append((self.last, est_tokens))
-            self.hour.append(self.last)
-            self._roll_day()
-            self.req_today += 1
+        while True:
+            async with self.lock:
+                # Checked at the moment of taking the slot: a background call that reaches the front while someone
+                # is waiting for a call steps back, so the waiting call gets the next slot.
+                if not (background and self.urgent):
+                    await self._take(lim, est_tokens)
+                    return
+            await asyncio.sleep(0.02)
+
+    async def _take(self, lim: dict, est_tokens: int) -> None:
+        now = time.monotonic()
+        if lim["rpm"]:
+            wait = self.last + 60.0 / lim["rpm"] - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+        if lim["tpm"]:
+            while True:
+                now = time.monotonic()
+                while self.window and now - self.window[0][0] > 60:
+                    self.window.popleft()
+                used = sum(t for _, t in self.window)
+                if used + est_tokens <= lim["tpm"] or not self.window:
+                    break
+                await asyncio.sleep(max(0.5, 60 - (now - self.window[0][0])))
+        self.last = time.monotonic()
+        self.window.append((self.last, est_tokens))
+        self.hour.append(self.last)
+        self._roll_day()
+        self.req_today += 1
 
     def record(self, tokens: int) -> None:
         self._roll_day()

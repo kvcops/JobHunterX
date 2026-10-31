@@ -393,6 +393,10 @@ def _age_days(p: JobPosting) -> float:
 
 
 async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
+    # Nobody waits on a search call by call: a resume, auto-apply or the AI editor started meanwhile goes first in every
+    # model's queue (this run's task and the tasks it starts only).
+    from jobhunterx.config import models as _models
+    _models.BACKGROUND.set(True)
     settings = get_settings()
     max_jobs = int(request.get("max_jobs") or settings.max_jobs_per_search)
     c = run.data["counts"]
