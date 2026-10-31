@@ -195,7 +195,8 @@ def parse_hn_comment(hit: dict, labels: list[str], places: list[str], include_re
         return None
     if title_overlap(_hn_role(header, body, labels), labels) <= 0:     # the role the post names, not any word in it
         return None
-    company = re.sub(r"\s*\(.*?\)", "", header.split("|")[0]).strip()[:80] or "Hacker News employer"
+    # "Backdoor - building agents that fix hiring | Founding Engineer | Remote": the name, not its tagline
+    company = re.split(r"\s+[-–—]\s+|:\s+", re.sub(r"\s*\(.*?\)", "", header.split("|")[0]).strip())[0][:80] or "Hacker News employer"
     if not company or len(company) < 2:
         return None
     email, apply_link = _hn_contact(body)

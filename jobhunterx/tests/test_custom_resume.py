@@ -106,3 +106,55 @@ def test_custom_resume_rejects_bad_input(client):  # noqa: F811
     assert r.status_code == 422 and "LinkedIn" in r.text
     assert client.post("/api/documents/custom", json={"url": "ftp://example.com/job"}).status_code == 422
     assert client.post("/api/documents/custom", json={"jd_text": JD, "layout": "three_column"}).status_code == 422
+
+
+# ---------------------------------------------------------------- skills: grouped, deduplicated, capped
+def test_skills_are_grouped_by_the_ai_with_a_second_chain_and_never_by_keywords(monkeypatch):
+    import asyncio
+    from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
+    from jobhunterx.generation import skills as sk
+
+    names = ["Slurm", "Terraform", "Lmod", "Environment Modules (Lmod, EasyBuild, Spack)", "Operations & Reliability"]
+    profile = CandidateProfile(name="X", skills=names)
+    snap = CandidateSnapshot(profile_hash="h")
+    chains = []
+
+    async def first_chain_fails(**kw):
+        chains.append(kw["chain"])
+        if kw["chain"] == "fast":
+            return None, ""
+        assert "Lmod" not in kw["user"].replace("(Lmod", "")        # repeat inside brackets removed before asking
+        return sk._Groups(groups=[{"category": "HPC", "items": ["Slurm", "Environment Modules (Lmod, EasyBuild, Spack)"]},
+                                  {"category": "Operations & Reliability", "items": ["Terraform"]}]), "m"
+
+    monkeypatch.setattr(sk, "call_structured", first_chain_fails)
+    groups, model = asyncio.new_event_loop().run_until_complete(sk.group_skills(profile, snap))
+    assert chains == ["fast", "extraction"] and model == "m"
+    assert [g.category for g in groups] == ["HPC", "Operations & Reliability"]
+    assert all("Operations & Reliability" not in g.items for g in groups)   # heading used as a category, not an item
+
+    async def nothing(**kw):
+        return None, ""
+
+    monkeypatch.setattr(sk, "call_structured", nothing)
+    groups, _ = asyncio.new_event_loop().run_until_complete(sk.group_skills(profile, snap))
+    assert len(groups) == 1 and groups[0].category == "Skills"          # one plain list, no guessed categories
+
+
+def test_one_page_resume_lists_job_skills_first_and_caps_the_rest():
+    from jobhunterx.generation.content import SkillGroup
+    from jobhunterx.generation.resume import MAX_SKILLS, MAX_SKILLS_PER_GROUP, _cap_skills
+    groups = [SkillGroup(category=f"G{g}", items=[f"s{g}-{i}" for i in range(20)]) for g in range(5)]
+    wanted = {"s4-19", "s0-7"}
+    out = _cap_skills(groups, lambda it: 0 if it in wanted else 1)
+    kept = [it for g in out for it in g.items]
+    assert len(kept) <= MAX_SKILLS and all(len(g.items) <= MAX_SKILLS_PER_GROUP for g in out)
+    assert wanted <= set(kept)
+
+
+def test_rows_keep_short_lines_on_one_line_and_dates_right_aligned():
+    c = {**CONTENT, "education": [{"degree": "M.Tech", "institution": "JNTU Kakinada, India", "start": "2008", "end": "2010"},
+                                  {"degree": "MCA", "institution": "Andhra University"}]}
+    html = render._render("resume.html", doc=c, s={"id": "classic", **render.styles.STYLES["classic"]}, **render.SHRINK_PROFILES[0])
+    assert 'width="80%"' in html and '<td class="right" width="20%">2008 – 2010</td>' in html
+    assert '<td width="100%"><span class="row-title">MCA' in html          # no dates: no empty half-row

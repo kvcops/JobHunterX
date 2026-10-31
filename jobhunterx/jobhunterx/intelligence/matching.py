@@ -26,12 +26,16 @@ from jobhunterx.domain.common import Seniority, WorkMode
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import ConstraintResult, ExperienceFit, MatchAssessment, ScoreComponent
 from jobhunterx.intelligence.policy import Policy, get_policy
-from jobhunterx.discovery.watchlist import is_mass_recruiter
 from jobhunterx.intelligence import scam as scam_rules
 from jobhunterx.intelligence.reach import assess_reach
 from jobhunterx.intelligence.text import term_in_text, tokens
 
-ENGINE_VERSION = "match-v3"   # v3: early-career experience bands, safety-net track, scam rules
+ENGINE_VERSION = "match-v4"   # v4: unknowns don't count as half-bad, no double penalties for scored warnings
+
+# Warnings whose dimension is already a scored component (a stretch on experience lowers "Experience fit"): they
+# explain the score, they don't multiply it down a second time. Only warnings about things the components don't
+# measure (a stale posting, a mandatory skill only related, notice period, pay, scam signals) do.
+_SCORED_WARN_KEYS = {"role", "experience", "seniority", "location", "employment_type", "company"}
 
 _EDU_ORDER = ["none", "diploma", "bachelor", "master", "phd"]
 
@@ -39,41 +43,6 @@ _EDU_ORDER = ["none", "diploma", "bachelor", "master", "phd"]
 # ---------------------------------------------------------------------------
 # Skill coverage
 # ---------------------------------------------------------------------------
-
-# Everyday tools an umbrella skill implies. Someone with years of "Linux" has used SSH, sudo and systemd even if the
-# resume never lists them; a job that names them must not read that person as missing them. Credit is "related", not full.
-_IMPLIED_BY: dict[str, tuple[str, ...]] = {
-    "linux": ("ubuntu", "debian", "centos", "rhel", "red hat", "red hat enterprise linux", "fedora", "suse", "systemd",
-              "ssh", "sudo", "bash", "shell", "shell scripting", "rpm", "apt", "yum", "rpm/apt", "cron", "linux administration",
-              "linux system administration", "unix"),
-    "unix": ("ssh", "bash", "shell", "shell scripting", "cron"),
-    "rhel": ("linux", "rpm", "yum", "systemd", "ssh", "sudo"),
-    "red hat": ("linux", "rpm", "yum", "systemd", "ssh", "sudo"),
-    "jenkins": ("ci/cd", "ci", "continuous integration"),
-    "github actions": ("ci/cd", "ci", "continuous integration", "git", "github"),
-    "gitlab ci": ("ci/cd", "ci", "continuous integration", "git", "gitlab"),
-    "git": ("github", "gitlab", "version control"),
-    "kubernetes": ("k8s", "kubectl", "container orchestration", "docker", "containers"),
-    "docker": ("containers", "containerization"),
-    "aws": ("ec2", "s3", "iam", "cloudwatch", "vpc", "cloud"),
-    "azure": ("azure vms", "azure monitor", "cloud"),
-    "gcp": ("google cloud", "gce", "cloud"),
-    "google cloud": ("gcp", "cloud"),
-    "terraform": ("infrastructure as code", "iac"),
-    "ansible": ("configuration management", "infrastructure as code"),
-    "prometheus": ("monitoring", "observability"),
-    "grafana": ("monitoring", "observability", "dashboards"),
-    "python": ("scripting",),
-    "pytorch": ("deep learning", "machine learning"),
-    "tensorflow": ("deep learning", "machine learning"),
-    "llm": ("generative ai", "genai", "large language models"),
-    "large language models": ("llm", "generative ai", "genai"),
-    "rag": ("retrieval augmented generation", "llm", "generative ai"),
-    "sql": ("relational databases", "databases"),
-    "postgresql": ("sql", "relational databases", "databases"),
-    "mysql": ("sql", "relational databases", "databases"),
-}
-
 
 def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, pol: Policy,
                   index: dict[str, SkillEvidence], candidate_text: str = "",
@@ -95,10 +64,6 @@ def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, po
     # named in the candidate's own experience / project text, just not in the skills list
     if candidate_text and any(len(f) > 1 and term_in_text(f, candidate_text) for f in forms):
         return pol.credit_listed_only, None, False
-    for s in snapshot.skills:
-        implied = {norm_term(x) for f in s.forms() for x in _IMPLIED_BY.get(f, ())}
-        if forms & implied:
-            return pol.credit_adjacent * max(s.strength, pol.credit_listed_only), s, True
     return 0.0, None, False
 
 
@@ -298,6 +263,7 @@ def assess(
     early = early_career(snapshot)
     job_track = "main"
     closeness, track, fit_reason, fit_method = role_fit
+    unknown: set[str] = set()     # components with no information: left out of the average, not scored as 0.5
 
     # --- 1. Role track -----------------------------------------------------
     if closeness < pol.role_fail_below:
@@ -383,6 +349,7 @@ def assess(
         constraints.append(ConstraintResult(key="experience", label="Experience", status="unknown",
                                             detail="The posting does not state an experience requirement."))
         unknowns.append("Experience requirement not stated")
+        unknown.add("experience_fit")
         comps.append(ScoreComponent(key="experience_fit", label="Experience fit", weight=pol.weights.experience_fit,
                                     score=pol.unknown_component, detail="Not stated — judged by seniority instead"))
 
@@ -392,6 +359,7 @@ def assess(
         constraints.append(ConstraintResult(key="seniority", label="Seniority", status="unknown",
                                             detail="Seniority level could not be determined."))
         sen_score = pol.unknown_component
+        unknown.add("seniority_alignment")
     else:
         diff = js.rank - cs.rank
         if early and diff >= pol.seniority_warn_steps and exp.band in ("reachable", "direct"):
@@ -424,6 +392,7 @@ def assess(
     constraints.append(loc_c)
     if loc_c.status == "unknown":
         unknowns.append("Location not stated")
+        unknown.add("location_preference")
     comps.append(ScoreComponent(key="location_preference", label="Location preference",
                                 weight=pol.weights.location_preference, score=loc_pref, detail=loc_c.detail))
 
@@ -435,11 +404,13 @@ def assess(
                                                             candidate_text or "", req.skill_links)
     if partial_method:
         unknowns.append("Job requirements could not be fully analysed (AI unavailable) — skill coverage is partial")
+        unknown.update({"skills_required", "skills_preferred"})
         comps.append(ScoreComponent(key="skills_required", label="Required skills", weight=pol.weights.skills_required,
                                     score=pol.unknown_component,
                                     detail=f"{len(matched_r)} of your skills appear in the posting; full requirements unknown"))
     elif req_score is None:
         unknowns.append("No explicit skill requirements found")
+        unknown.add("skills_required")
         comps.append(ScoreComponent(key="skills_required", label="Required skills", weight=pol.weights.skills_required,
                                     score=pol.unknown_component, detail="No explicit skill requirements"))
     else:
@@ -453,6 +424,8 @@ def assess(
             gaps.append(f"{name}: not shown directly (related: {via})")
         for name in missing_r[:5]:
             gaps.append(f"{name} not demonstrated in your profile")
+    if pref_score is None:
+        unknown.add("skills_preferred")
     comps.append(ScoreComponent(key="skills_preferred", label="Preferred skills", weight=pol.weights.skills_preferred,
                                 score=pref_score if pref_score is not None and not partial_method else pol.unknown_component,
                                 detail=f"{len(matched_p)}/{len(req.preferred_skills)} nice-to-haves" if req.preferred_skills else "None listed"))
@@ -487,13 +460,16 @@ def assess(
     job_work = "\n".join(req.responsibilities + req.requirement_lines) or job.description[:3000]
     if candidate_text and job_work:
         cos = cosine(job_work, candidate_text, idf or build_idf([job.description, candidate_text]))
-        rs = min(1.0, cos / pol.responsibility_full_at)
+        # TF-IDF cosine between a posting and a resume rarely gets near its "full" mark even for the same work; a
+        # square-root curve keeps real overlap from reading as a weak one (0.1 -> 0.63 instead of 0.4).
+        rs = min(1.0, math.sqrt(max(0.0, cos) / pol.responsibility_full_at))
         comps.append(ScoreComponent(key="responsibility_overlap", label="Responsibility overlap",
                                     weight=pol.weights.responsibility_overlap, score=rs,
                                     detail="Similarity between the job's work and your experience/projects"))
         if rs >= 0.7:
             strengths.append("Day-to-day work closely resembles your past work")
     else:
+        unknown.add("responsibility_overlap")
         comps.append(ScoreComponent(key="responsibility_overlap", label="Responsibility overlap",
                                     weight=pol.weights.responsibility_overlap, score=pol.unknown_component,
                                     detail="Not enough information"))
@@ -557,14 +533,14 @@ def assess(
     if job.company and any(norm_term(job.company) == norm_term(x) for x in snapshot.excluded_companies):
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is on your excluded list."))
-    elif is_mass_recruiter(job.company) and early and floor_track_on():
+    elif job.employer_kind == "it_services_bulk" and early and floor_track_on():
         # Large IT-services employers run the biggest fresher programmes (national tests, off-campus drives). They are a
         # safety net, kept apart so their generic postings never crowd out targeted roles.
         job_track = "floor"
         constraints.append(ConstraintResult(key="company", label="Company", status="warn", hard=False,
                                             detail=f"Safety-net track: {job.company} hires freshers in bulk through national "
                                                    "tests and off-campus drives — apply on its official hiring portal."))
-    elif is_mass_recruiter(job.company):
+    elif job.employer_kind == "it_services_bulk":
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is a mass-recruitment IT services firm — "
                                                    "bulk hiring, little real product AI work."))
@@ -582,12 +558,27 @@ def assess(
                                             detail=f"{job.employment_type.replace('_', ' ')} — you prefer {', '.join(t.replace('_', ' ') for t in snapshot.employment_types)}."))
 
     # --- Score -------------------------------------------------------------
-    wsum = sum(c.weight for c in comps) or 1.0
-    raw = 100 * sum(c.weight * max(0.0, min(1.0, c.score)) for c in comps) / wsum
+    # Average over what is KNOWN. Missing information is not half-bad evidence: a posting that doesn't state years
+    # used to score 0.5 there and every such job sank to ~55. Instead the known average is pulled a little toward the
+    # middle in proportion to how much is unknown (less certainty, never a free pass).
+    total_w = sum(c.weight for c in comps) or 1.0
+    known = [c for c in comps if c.key not in unknown]
+    known_w = sum(c.weight for c in known)
+    if known_w > 0:
+        avg = sum(c.weight * max(0.0, min(1.0, c.score)) for c in known) / known_w
+        unknown_share = 1 - known_w / total_w
+        avg -= pol.unknown_shrink * unknown_share * (avg - pol.unknown_component)
+    else:
+        avg = pol.unknown_component
+    raw = 100 * avg
     fails = [c for c in constraints if c.status == "fail" and c.hard]
     warns = [c for c in constraints if c.status == "warn"]
-    mult = max(pol.min_warn_multiplier, pol.warn_multiplier ** len(warns))
+    penalising = [c for c in warns if c.key not in _SCORED_WARN_KEYS]
+    mult = max(pol.min_warn_multiplier, pol.warn_multiplier ** len(penalising))
     score = raw * mult
+    # "Strong" needs the job's skills actually read; a posting the AI couldn't analyse tops out at "good".
+    if "skills_required" in unknown and req.method != "llm" and score >= pol.strong_at:
+        score = pol.strong_at - 1
     if fails:
         # Scale into [0, cap] so incompatible jobs stay ordered by how close they were.
         score = score * pol.hard_fail_score_cap / 100

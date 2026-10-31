@@ -61,8 +61,11 @@ class Policy(BaseModel):
     stale_after_days: int = 60
     # TF-IDF cosine at which responsibility overlap counts as full.
     responsibility_full_at: float = 0.25
-    # Neutral component value when the information is unknown.
+    # Neutral component value when the information is unknown (shown, but left out of the average).
     unknown_component: float = 0.5
+    # How far missing information pulls the known average toward that neutral value: 0 = ignore unknowns entirely,
+    # 1 = count them as neutral (the old behaviour). Scaled by the unknown share of the weights.
+    unknown_shrink: float = 0.35
 
 
 @lru_cache(maxsize=1)

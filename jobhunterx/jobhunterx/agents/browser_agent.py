@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import signal
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,7 +24,7 @@ if sys.platform == "win32":
 from jobhunterx.config.logging import get_logger
 from jobhunterx.config import database as db
 from jobhunterx.config.settings import get_settings, Settings
-from jobhunterx.models import AgentEvent, HITLType
+from jobhunterx.models import HITLType
 
 log = get_logger("browser_agent")
 
@@ -344,7 +343,6 @@ def _kill_zombie_chrome(user_data_dir: str) -> None:
 # screencast (agents/live_view.py). After the agent finishes, stops or needs
 # help, the browser stays open so the user can take over, continue or close it.
 
-import json
 import time
 from datetime import datetime, timezone
 from typing import Optional

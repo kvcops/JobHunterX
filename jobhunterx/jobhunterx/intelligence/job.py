@@ -35,7 +35,7 @@ from jobhunterx.intelligence.text import any_term_in_text, number_in_text, parse
 
 log = get_logger("job_understanding")
 
-VERSION = "job-v1"
+VERSION = "job-v2"   # v2: employer_kind
 ROLE_FIT_VERSION = "rolefit-v1"
 
 
@@ -85,6 +85,10 @@ class JobUnderstanding(BaseModel):
     application_deadline: str = ""
     responsibilities: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
+    employer_kind: Literal["product", "it_services_bulk", "staffing_agency", "other", "unknown"] = Field(
+        "unknown", description="who is hiring: a company building its own product; a large IT-services / outsourcing "
+                               "firm hiring in volume for client projects; a recruiter or staffing agency hiring for "
+                               "someone else; other (government, research, NGO...); unknown")
 
 
 _SYSTEM = """You are an expert technical recruiter extracting the facts of ONE job posting.
@@ -98,6 +102,9 @@ Extract only what the posting states. Never infer requirements that are not writ
 - salary only if explicitly stated, with salary_evidence copied verbatim.
 - education_mandatory=true only if a degree is strictly required (not 'or equivalent experience' / 'preferred').
 - responsibilities: up to 10 short lines describing the actual work.
+- employer_kind: judge the employer from the posting and what you know of the company — "it_services_bulk" only for
+  large IT-services / outsourcing firms that hire in volume for client work; "staffing_agency" when a recruiter posts
+  for an unnamed or other client.
 If the page is not a single job posting or explicitly says the job is closed, set the flags accordingly."""
 
 
@@ -182,6 +189,8 @@ def apply_understanding(job: JobPosting, u: JobUnderstanding, model: str) -> Non
         job.title = u.normalized_title.strip()[:120]
     if not job.company and u.company and u.company.lower() in text.lower():
         job.company = u.company.strip()[:120]
+    if u.employer_kind != "unknown":
+        job.employer_kind = u.employer_kind
     if job.seniority == Seniority.UNKNOWN:
         job.seniority = u.seniority
     if not job.role_family:
@@ -236,11 +245,17 @@ async def understand_job(job: JobPosting, snapshot: Optional[CandidateSnapshot] 
     if use_llm and job.description and len(job.description) > 200:
         user = (f"Job title (from source): {job.title}\nCompany (from source): {job.company}\n"
                 f"Location (from source): {job.location_raw}\n\nPosting text:\n{fence(job.description, 14000)}")
-        u, model = await call_structured(
-            task="job_understanding", version=VERSION, model=JobUnderstanding, system=_SYSTEM, user=user,
-            chain="extraction", max_tokens=2500,
-            cache_parts=(content_hash(job.title, job.description),),
-        )
+        u, model = None, ""
+        # A job read only by rules can't know its skills or level, so it scores half-blind. If the extraction models
+        # are busy or fail, a second, different chain reads it before falling back.
+        for chain in ("extraction", "fast"):
+            u, model = await call_structured(
+                task="job_understanding", version=VERSION, model=JobUnderstanding, system=_SYSTEM, user=user,
+                chain=chain, max_tokens=2500,
+                cache_parts=(content_hash(job.title, job.description),),
+            )
+            if u is not None:
+                break
         if u is not None:
             apply_understanding(job, u, model)
             _salary_from_text(job)
@@ -248,6 +263,7 @@ async def understand_job(job: JobPosting, snapshot: Optional[CandidateSnapshot] 
     job.requirements = fallback_requirements(job, snapshot)
     _salary_from_text(job)
     return "fallback"
+
 
 
 def inr_salary(text: str, require_context: bool = False) -> Optional[Salary]:

@@ -7,6 +7,7 @@ Requires the `playwright` Python package and a Chromium binary (PLAYWRIGHT_BROWS
 
 import glob
 import json
+import re
 import os
 import socket
 import subprocess
@@ -82,7 +83,7 @@ def page(browser, server):
 def run_search(page, base):
     page.goto(f"{base}/#/discover")
     page.get_by_role("button", name="Search now").click()
-    expect(page.get_by_text("Search complete", exact=True)).to_be_visible(timeout=30000)
+    expect(page.get_by_role("heading", name="Search complete")).to_be_visible(timeout=30000)
 
 
 def test_search_stream_and_explanations(page, server):
@@ -92,7 +93,7 @@ def test_search_stream_and_explanations(page, server):
     page.get_by_role("tab", name="Not a fit").click()
     expect(page.locator(".job-card", has_text="Senior AI Engineer")).to_contain_text("Requires 6+ years")
     expect(page.locator(".job-card", has_text="Frontend Engineer")).to_contain_text("Different career track")
-    expect(page.locator(".job-card", has_text="Berlin")).to_contain_text("not one of your locations")
+    expect(page.locator(".job-card", has_text="Berlin")).to_have_count(0)     # outside the country: dropped before scoring
     expect(page.locator(".job-card", has_text="Platform")).to_contain_text("Kubernetes")
     assert not page.errors
 
@@ -155,15 +156,20 @@ def test_stale_run_events_are_ignored(page, server):
     sockets[0].send(json.dumps({"type": "search.run", "run_id": "old-run",
                                 "data": {"run": {"id": "old-run", "status": "running", "stages": [], "counts": {}}}}))
     page.wait_for_timeout(400)
-    expect(page.get_by_text("Search complete", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="Search complete")).to_be_visible()
     expect(page.get_by_text("Ghost Job")).to_have_count(0)
     assert page.locator(".job-card").count() == before
 
 
 def test_out_of_order_list_responses(page, server):
     run_search(page, server)
-    page.get_by_role("tab", name="All").click()
-    expect(page.locator(".job-card")).to_have_count(6)
+    all_tab = page.get_by_role("tab", name="All")
+    all_tab.click()
+    expect(page.locator(".job-card").first).to_be_visible()
+    expect(all_tab).not_to_have_text(re.compile(r"\b0\s*$"))               # counts arrive just after the list
+    total = int(re.search(r"\d+", all_tab.inner_text()).group(0))     # earlier tests in the session may have changed it
+    assert total >= 2
+    expect(page.locator(".job-card")).to_have_count(total)
 
     def slow(route):
         if "q=Senior" in route.request.url:
@@ -290,8 +296,9 @@ def test_onboarding_resumes_at_saved_step_and_advances(page, server):
     expect(page.get_by_role("heading", name="Here's how we see you")).to_be_visible()
     page.get_by_role("button", name="Looks right").click()
     expect(page.get_by_role("heading", name="Where do you want to go?")).to_be_visible()
-    page.get_by_role("button", name="Continue").click()
-    page.get_by_role("button", name="Explore first").click()
+    page.get_by_role("button", name="Continue").click()             # preferences
+    page.get_by_role("button", name="Continue").click()             # pay
+    page.get_by_role("button", name="Not now, open the app").click()
     expect(page.locator(".view-discover")).to_be_visible()
     assert page.evaluate("localStorage.getItem('jhx-onboarding')") is None
     assert not page.errors

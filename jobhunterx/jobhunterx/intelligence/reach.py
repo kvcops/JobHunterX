@@ -161,7 +161,7 @@ def assess_reach(job: JobPosting, snapshot: Optional[CandidateSnapshot] = None,
 
     # 6. Company — researched watchlist data, or a mass recruiter.
     company = watchlist.find(job)
-    mass = watchlist.is_mass_recruiter(job.company)
+    mass = job.employer_kind == "it_services_bulk"          # as the AI read the posting
     if floor:
         add("company", 0, f"Safety net: {job.company} hires freshers in volume through national tests and off-campus "
                           "drives — the official hiring portal and test dates matter more than this posting.")

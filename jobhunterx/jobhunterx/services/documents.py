@@ -24,6 +24,11 @@ Emit = Callable[[dict], Awaitable[None]]
 _inflight: set[tuple[str, str]] = set()
 
 
+def _who() -> str:
+    """The profile in use: the in-flight guard is per person, so one user's CV never blocks another's."""
+    return storage.active_person() or "local"
+
+
 class AlreadyGenerating(RuntimeError):
     pass
 
@@ -73,7 +78,7 @@ async def generate_for_job(job_id: str, kind: str, profile: CandidateProfile, sn
                                                  header_for(profile).model_dump())
         return await _store(doc, pdf, pages)
 
-    return await _with_guard((job_id, kind), emit, job_id, kind, work)
+    return await _with_guard((f"{_who()}:{job_id}", kind), emit, job_id, kind, work)
 
 
 async def generate_cv_doc(profile: CandidateProfile, snapshot: CandidateSnapshot, focus: str, emit: Emit) -> GeneratedDocument:
@@ -82,7 +87,7 @@ async def generate_cv_doc(profile: CandidateProfile, snapshot: CandidateSnapshot
         pdf, pages = await asyncio.to_thread(render.render_cv, doc.content)
         return await _store(doc, pdf, pages)
 
-    return await _with_guard(("profile", "cv"), emit, None, "cv", work)
+    return await _with_guard((_who(), "cv"), emit, None, "cv", work)
 
 
 class BadTarget(ValueError):
@@ -179,7 +184,7 @@ async def generate_custom(profile: CandidateProfile, snapshot: CandidateSnapshot
         pdf, pages, doc.fit = await asyncio.to_thread(render.render_resume_fit, doc.content, doc.style)
         return await _store(doc, pdf, pages)
 
-    return await _with_guard(("custom", "resume"), emit, None, "resume", work)
+    return await _with_guard((_who(), "custom-resume"), emit, None, "resume", work)
 
 
 async def update_document(doc: GeneratedDocument, content: dict[str, Any], profile: CandidateProfile,

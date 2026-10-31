@@ -988,7 +988,15 @@ function onMessage(msg) {
       mergeFeed(run.id, run.activity);
       if (wasActive && ['completed', 'failed', 'cancelled'].includes(run.status)) {
         activity(`Search ${run.status}: ${run.counts.recommended} recommended, ${run.counts.rejected} not a fit`, run.status === 'failed' ? 'error' : 'info', 'search');
-        loadList();
+        // A search that only met jobs already in your list adds none of its own: "latest search only" would then
+        // show an empty list (every tab 0) although all your jobs are still there. Show them all instead.
+        const added = (run.counts && (run.counts.scored || 0)) > 0;
+        if (!added && getState().list.scope === 'run') {
+          setList({ scope: 'all' });
+          if (run.status === 'completed') toast('No new jobs since your last search — showing all your jobs.', 'info');
+        } else {
+          loadList();
+        }
       }
       return;
     }

@@ -34,7 +34,7 @@ from jobhunterx.intelligence import domain_age, skill_links
 from jobhunterx.intelligence.llm_structured import call_structured
 from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
 from jobhunterx.intelligence.policy import get_policy
-from jobhunterx.intelligence.text import common_words, term_in_text, title_overlap, tokens
+from jobhunterx.intelligence.text import common_words, term_in_text, title_overlap
 from jobhunterx.services import profile as profile_svc
 from jobhunterx.services.jobs import summary
 
@@ -187,28 +187,14 @@ _REMOTE_LEFTOVER = re.compile(r"(?i)\b(remote|anywhere|worldwide|global|work fro
 # Search results that are lists of jobs, not one job: "84 Linux Admin jobs in Hyderabad", "6000+ … jobs", "(426 Open Roles)".
 _LISTING_TITLE = re.compile(r"(?i)(^\s*\d[\d,]*\+?\s+.*\bjobs?\b|\bjobs?\s+(in|at|for)\b.*|\(\d[\d,]*\+?\s+(open\s+)?(roles|jobs|openings)\)|"
                             r"\b\d[\d,]*\+?\s+(open\s+)?(roles|jobs|openings|vacancies)\b|\bjob\s+vacancies\b)")
-# Places that, named alone in a result, mean the job is not in India (checked only when no candidate place is named).
-_FOREIGN = re.compile(r"(?i)\b(united states|u\.s\.a?|usa|canada|united kingdom|england|london|ireland|germany|berlin|"
-                      r"netherlands|amsterdam|france|paris|spain|poland|europe|emea|latam|brazil|mexico|argentina|"
-                      r"philippines|pakistan|bangladesh|sri lanka|vietnam|indonesia|malaysia|australia|new zealand|"
-                      r"japan|china|korea|israel|egypt|nigeria|kenya|south africa|new york|san francisco|seattle|"
-                      r"austin|boston|chicago|toronto|vancouver|remote[\s,\-–]+(us|usa|uk|eu|canada|europe))\b")
-
-
 def _lead_worth_reading(lead, snap: CandidateSnapshot) -> bool:
     """Cheap checks on a search result before spending a page fetch on it."""
     if dedupe.is_linkedin_url(lead.url):          # LinkedIn pages are never read or shown
         return False
     title = lead.title or ""
-    if _LISTING_TITLE.search(title):
-        return False
-    text = f"{title} {lead.snippet or ''}"
-    if snap.open_to_international or not _FOREIGN.search(text):
-        return True
-    forms = {f for p in snap.locations for f in [p.city, p.country, *p.aliases] if f}
-    if snap.home_country:
-        forms.add(snap.home_country)
-    return any(term_in_text(f, text) for f in forms)
+    # Where the job is gets checked on the page itself (_location_prefilter, the candidate's own places), not
+    # guessed here from a fixed list of "foreign" places — foreign depends on who is searching.
+    return not _LISTING_TITLE.search(title)
 
 
 class _TriageItem(BaseModel):
@@ -240,10 +226,10 @@ def _experience_lines(p: JobPosting, limit: int = 2) -> str:
     shortlist reads them, so a role asking for 5 years is ruled out before the slow detailed read. Uses the same
     years pattern as the no-AI requirements reader; the AI, not this code, decides what the words mean."""
     text = re.sub(r"\s+", " ", p.description or "")
-    out, end = [], -1
+    out, end, out_start = [], -1, 0
     for m in job_ai.YEARS_RE.finditer(text):
         a, b = max(0, m.start() - 50), m.end() + 40
-        if a < end:                       # overlaps the previous piece: grow it instead of repeating the words
+        if a < end and out:               # overlaps the previous piece: grow it instead of repeating the words
             out[-1] = text[out_start: b].strip()
         else:
             if len(out) >= limit:
@@ -407,6 +393,10 @@ def _age_days(p: JobPosting) -> float:
 
 
 async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
+    # Nobody waits on a search call by call: a resume, auto-apply or the AI editor started meanwhile goes first in every
+    # model's queue (this run's task and the tasks it starts only).
+    from jobhunterx.config import models as _models
+    _models.BACKGROUND.set(True)
     settings = get_settings()
     max_jobs = int(request.get("max_jobs") or settings.max_jobs_per_search)
     c = run.data["counts"]
@@ -418,6 +408,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     snap = await profile_svc.get_snapshot(profile)
     if request.get("include_international"):
         snap = snap.model_copy(update={"open_to_international": True})
+    # Web search ranks by THIS candidate's places and roles (as the AI understood the profile), not a fixed city list.
+    from jobhunterx.tools import deep_search as _ds
+    _ds.context_from_snapshot(snap)
     await run.stage("understand", "done",
                     f"{snap.professional_years:g} yrs · {snap.seniority.value} · "
                     + ", ".join(f.label for f in snap.role_families[:3]))
@@ -534,7 +527,6 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 pass
         hits = ats_index.search([*scope.titles, *snap.adjacent_titles[:4]], scope.locations or [scope.country],
                                 level=snap.seniority.value, include_remote=scope.include_remote, limit=max_jobs)
-        hits = [(r, sc) for r, sc in hits if keep_mass or not watchlist.is_mass_recruiter(r.company)]
         funded_hits = await _funded_openings(funding_task, scope, snap, {r.url for r, _ in hits})
         if funded_hits:
             names = sorted({r.company for r, _ in funded_hits})
@@ -827,6 +819,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         await run.stage(key, "done")
     await run.stage("rank", "done", f"{c['recommended']} recommended · {c['rejected']} not a fit")
     summary_line = f"Done — {c['recommended']} of {c['scored']} roles fit you"
+    if not c["scored"]:
+        summary_line = ("Done — no new jobs this time: everything found is already in your list. "
+                        "New postings appear daily; search again later or widen your places / roles.")
     if best:
         summary_line += f". Best match: {best[1].title} at {best[1].company} ({best[0]})"
     elif c["scored"]:

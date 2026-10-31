@@ -8,8 +8,6 @@ request counts, native billing unit tracking, and provider quotas.
 from __future__ import annotations
 
 import hashlib
-import time
-from typing import Any, Dict, Optional
 
 import aiosqlite
 from jobhunterx.config.database import get_db_path, pooled
