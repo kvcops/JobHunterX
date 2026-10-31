@@ -26,7 +26,6 @@ from jobhunterx.domain.common import Seniority, WorkMode
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import ConstraintResult, ExperienceFit, MatchAssessment, ScoreComponent
 from jobhunterx.intelligence.policy import Policy, get_policy
-from jobhunterx.discovery.watchlist import is_mass_recruiter
 from jobhunterx.intelligence import scam as scam_rules
 from jobhunterx.intelligence.reach import assess_reach
 from jobhunterx.intelligence.text import term_in_text, tokens
@@ -534,14 +533,14 @@ def assess(
     if job.company and any(norm_term(job.company) == norm_term(x) for x in snapshot.excluded_companies):
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is on your excluded list."))
-    elif is_mass_recruiter(job.company) and early and floor_track_on():
+    elif job.employer_kind == "it_services_bulk" and early and floor_track_on():
         # Large IT-services employers run the biggest fresher programmes (national tests, off-campus drives). They are a
         # safety net, kept apart so their generic postings never crowd out targeted roles.
         job_track = "floor"
         constraints.append(ConstraintResult(key="company", label="Company", status="warn", hard=False,
                                             detail=f"Safety-net track: {job.company} hires freshers in bulk through national "
                                                    "tests and off-campus drives — apply on its official hiring portal."))
-    elif is_mass_recruiter(job.company):
+    elif job.employer_kind == "it_services_bulk":
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is a mass-recruitment IT services firm — "
                                                    "bulk hiring, little real product AI work."))

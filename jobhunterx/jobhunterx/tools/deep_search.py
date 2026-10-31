@@ -28,6 +28,7 @@ exist → skipped (and remembered); a page that will not load → its search sni
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import re
 import time
@@ -69,7 +70,6 @@ NOISE = ("rocketreach.co", "zoominfo.com", "signalhire.com", "contactout.com", "
 _JOB_SITE_NAME = re.compile(r"(?i)(jobs?|careers?|hiring|vacanc|recruitment|naukri)")
 MAX_PER_SITE = 3              # results kept from one site (an ATS counts per employer board, not per host)
 _CAREERS_PATH = re.compile(r"/(careers?|jobs?|join-us|join|work-with-us|openings|vacancies|positions)(/|$|\?)", re.I)
-_JOB_ANCHOR = re.compile(r"\b(engineer|developer|scientist|analyst|manager|architect|intern|lead|specialist|consultant|designer)\b", re.I)
 # a single posting on an aggregator (a crowded channel, but a real job — and its company can be resolved)
 _AGG_POSTING = re.compile(r"(?i)(linkedin\.com/jobs/view/|indeed\.[a-z.]+/(viewjob|rc/clk|m/viewjob)|naukri\.com/job-listings-|"
                           r"foundit\.in/job/|glassdoor\.[a-z.]+/job-listing/|instahyre\.com/job-|cutshort\.io/job/|wellfound\.com/jobs/\d)")
@@ -147,16 +147,44 @@ KIND_BOOST = {"posting": 1.7, "board": 1.4, "careers": 1.25, "agg_posting": 1.05
 
 
 # ---------------------------------------------------------------- 1. understand the query
-CITIES = {"hyderabad": ["hyderabad", "secunderabad", "telangana", "hitec city", "gachibowli"],
-          "bengaluru": ["bengaluru", "bangalore", "karnataka"], "chennai": ["chennai", "tamil nadu"], "pune": ["pune", "maharashtra"],
-          "mumbai": ["mumbai", "maharashtra"], "delhi": ["delhi", "ncr", "gurugram", "gurgaon", "noida"], "kochi": ["kochi", "kerala"],
-          "kolkata": ["kolkata"], "ahmedabad": ["ahmedabad"], "vizag": ["visakhapatnam", "vizag"]}
-_CITY_FORMS = {f: c for c, forms in CITIES.items() for f in forms}
+# Who the search is for: the places (every spelling the AI gave the candidate's cities) and home country of the
+# candidate. Set once per search run (set_context); no fixed city table — a candidate in Pune or Toronto gets the same
+# place-aware ranking as one in Hyderabad. Empty for one-off lookups.
+_CTX: contextvars.ContextVar[dict] = contextvars.ContextVar("deep_search_ctx", default={})
+
+
+def set_context(places: dict[str, list[str]], country_forms: list[str], roles: Optional[list[str]] = None) -> contextvars.Token:
+    """places: canonical city -> its spellings; country_forms: the home country's names; roles: the candidate's target
+    titles (as the AI understood the profile)."""
+    forms = {f.lower(): c.lower() for c, fs in places.items() for f in [c, *fs] if f}
+    return _CTX.set({"places": {c.lower(): sorted({c.lower(), *(f.lower() for f in fs if f)}) for c, fs in places.items()},
+                     "forms": forms, "country": [c.lower() for c in country_forms if c],
+                     "roles": [r.lower() for r in (roles or []) if r and len(r) > 2]})
+
+
+def context_from_snapshot(snap) -> contextvars.Token:
+    places = {p.city: [p.city, *p.aliases] for p in snap.locations if p.city}
+    country = [snap.home_country] if snap.home_country else []
+    roles = [*snap.target_titles, *snap.adjacent_titles, *(f.label for f in snap.role_families)]
+    return set_context(places, country, roles)
+
+
+def _forms() -> dict[str, str]:
+    return _CTX.get().get("forms", {})
+
+
+def _place_forms(city: str) -> list[str]:
+    return _CTX.get().get("places", {}).get(city, [city])
+
+
+def _country() -> list[str]:
+    return _CTX.get().get("country", [])
+
+
+# Words that say what kind of search it is, not which role: English search phrasing, not domain knowledge.
 _MODIFIERS = {"fresher", "freshers", "entry", "level", "junior", "senior", "sr", "jr", "lead", "years", "year", "yrs", "experience", "exp",
               "job", "jobs", "hiring", "opening", "openings", "vacancy", "vacancies", "role", "roles", "position", "full", "time",
-              "fulltime", "remote", "hybrid", "onsite", "india", "careers", "apply", "in", "at", "for", "the", "and", "or", "with"}
-_ROLE_NOUNS = {"engineer", "developer", "analyst", "scientist", "manager", "architect", "intern", "specialist", "consultant", "designer", "administrator", "admin"}
-_SYN = {"ml": ["machine", "learning"], "ai": ["artificial", "intelligence"], "sde": ["software", "engineer"], "genai": ["generative", "ai"]}
+              "fulltime", "remote", "hybrid", "onsite", "careers", "apply", "in", "at", "for", "the", "and", "or", "with"}
 
 
 @dataclass
@@ -173,18 +201,25 @@ def understand(q: str) -> Query:
     core = re.sub(r"\(?\s*site:\S+(\s+OR\s+site:\S+)*\s*\)?", " ", q, flags=re.I)
     core = re.sub(r"\s+", " ", core.replace('"', " ")).strip()
     toks = re.findall(r"[a-z0-9+#.]+", core.lower())
+    forms, country = _forms(), set(_country())
     places, role = [], []
     i = 0
     while i < len(toks):
-        two = " ".join(toks[i:i + 2])
-        if two in _CITY_FORMS:
-            places.append(_CITY_FORMS[two]); i += 2; continue
-        if toks[i] in _CITY_FORMS:
-            places.append(_CITY_FORMS[toks[i]])
+        three, two = " ".join(toks[i:i + 3]), " ".join(toks[i:i + 2])
+        if three in forms:
+            places.append(forms[three]); i += 3; continue
+        if two in forms:
+            places.append(forms[two]); i += 2; continue
+        if toks[i] in forms:
+            places.append(forms[toks[i]])
+        elif toks[i] in country or two in country:
+            i += 2 if two in country else 1
+            continue
         elif toks[i] not in _MODIFIERS and not toks[i].isdigit() and len(toks[i]) > 1:
             role.append(toks[i])
         i += 1
-    return Query(raw=q, core=core, role=role[:6], places=list(dict.fromkeys(places)), india="india" in toks or bool(places),
+    home = any(c in core.lower() for c in country)
+    return Query(raw=q, core=core, role=role[:6], places=list(dict.fromkeys(places)), india=home or bool(places),
                  remote="remote" in toks)
 
 
@@ -194,7 +229,7 @@ def _variants(q: Query) -> list[tuple[str, str, list[str]]]:
     if "site:" in q.raw.lower() or not q.role:
         return out
     role = " ".join(q.role)
-    where = " ".join(q.places) or ("India" if q.india else "")
+    where = " ".join(q.places) or (_country()[0].title() if q.india and _country() else "")
     if q.remote:
         where = (where + " remote").strip()
     ats = ("(site:boards.greenhouse.io OR site:job-boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com "
@@ -283,11 +318,10 @@ _CO_PATTERNS = [
 ]
 _CO_STRIP = re.compile(r"(?i)\b(pvt\.?|private|ltd\.?|limited|inc\.?|llc|llp|corp(oration)?|technologies|technology|solutions|software|"
                        r"services|india|global|labs?|co\.?)\b")
-_CO_BAD = re.compile(r"(?i)^(linkedin|indeed|naukri|glassdoor|foundit|jobs?|careers?|hiring|urgent|new|top|latest|remote|india|"
-                     r"hyderabad|bengaluru|bangalore|\d+)$")
+_CO_BAD = re.compile(r"(?i)^(linkedin|indeed|naukri|glassdoor|foundit|jobs?|careers?|hiring|urgent|new|top|latest|remote|\d+)$")
 
 
-def _company_from(hit: Hit) -> Optional[str]:
+def _company_from(hit: Hit, q: Optional["Query"] = None) -> Optional[str]:
     title = re.sub(r"\s*[|–—]\s*(LinkedIn|Indeed.*|Naukri.*|Glassdoor|foundit.*)$", "", hit.title or "", flags=re.I).strip()
     if hit.kind in ("agg_posting", "aggregator"):
         for pat in _CO_PATTERNS:
@@ -295,8 +329,11 @@ def _company_from(hit: Hit) -> Optional[str]:
             if m:
                 c = m.group("c").strip(" .,-|")
                 low = c.lower()
-                if (1 < len(c) <= 60 and not _CO_BAD.match(c) and not _JOB_ANCHOR.search(c)
-                        and not any(f in low for f in _CITY_FORMS) and "," not in c.rstrip(".").replace(", llc", "").replace(", inc", "")):
+                role_words = set(q.role) if q else set()
+                if (1 < len(c) <= 60 and not _CO_BAD.match(c)
+                        and not (role_words and role_words & set(re.findall(r"[a-z0-9+#.]+", low)))   # a job title, not a company
+                        and not any(f in low for f in [*_forms(), *_country()])
+                        and "," not in c.rstrip(".").replace(", llc", "").replace(", inc", "")):
                     return c
         return None
     if hit.kind == "careers":                  # the employer's own careers site: the domain is the company
@@ -364,32 +401,52 @@ async def _probe(kind: str, slug: str, name: str) -> bool:
     return ok
 
 
-def _role_match(title: str, q: Query) -> float:
-    toks = set(re.findall(r"[a-z0-9+#.]+", (title or "").lower()))
-    for short, longs in _SYN.items():
-        if short in toks:
-            toks.update(longs)
-        if all(l in toks for l in longs):
-            toks.add(short)
-    role = [r for r in q.role]
+def _covered(role: list[str], title: str) -> set[int]:
+    """Which query role words a title has — directly or as initials either way ("ML" <-> "machine learning",
+    "artificial intelligence" <-> "AI"). Generic: no synonym table."""
+    t = re.findall(r"[a-z0-9+#.]+", (title or "").lower())
+    tset = set(t) | {a[0] + b[0] for a, b in zip(t, t[1:])} | {a[0] + b[0] + c[0] for a, b, c in zip(t, t[1:], t[2:])}
+    done = {i for i, r in enumerate(role) if r in tset}
+    for i in range(len(role) - 1):
+        if role[i][0] + role[i + 1][0] in t:
+            done |= {i, i + 1}
+    return done
+
+
+def _role_match(title: str, q: Query, common: frozenset = frozenset()) -> float:
+    """Share of the query's role words the title has. `common` = words most titles on the same board share (an
+    employer where every job says "Engineer"): at least one of the OTHER words must be there, so "Software Engineer"
+    is not an "AI Engineer" — learned from the board itself, not from a list of job nouns."""
+    role = list(q.role)
     if not role:
         return 0.0
-    hits = sum(1 for r in role if r in toks or any(r in _SYN.get(t, []) for t in toks))
-    specific = [r for r in role if r not in _ROLE_NOUNS]
-    if specific and not any(r in toks or any(r in _SYN.get(t, []) for t in toks) for r in specific):
-        return 0.0                               # "Software Engineer" is not an "AI Engineer"
-    return hits / len(role)
+    got = _covered(role, title)
+    specific = [i for i, r in enumerate(role) if r not in common]
+    if specific and not any(i in got for i in specific):
+        return 0.0
+    return len(got) / len(role)
+
+
+def _common_words(titles: list[str], share: float = 0.25, min_titles: int = 8) -> frozenset:
+    if len(titles) < min_titles:
+        return frozenset()
+    counts: dict[str, int] = {}
+    for title in titles:
+        for w in set(re.findall(r"[a-z0-9+#.]+", (title or "").lower())):
+            counts[w] = counts.get(w, 0) + 1
+    return frozenset(w for w, n in counts.items() if n / len(titles) >= share)
 
 
 def _place_ok(location: str, countries: list[str], q: Query) -> bool:
     text = f"{location} {' '.join(countries)}".lower()
     if not text.strip():
         return True
+    home = _country()
     if q.places:
-        if any(f in text for c in q.places for f in CITIES.get(c, [c])):
+        if any(f in text for c in q.places for f in _place_forms(c)):
             return True
-        return q.remote and "remote" in text and ("india" in text or not countries)
-    return "india" in text or ("remote" in text and q.remote) or not q.india
+        return q.remote and "remote" in text and (any(c in text for c in home) or not countries)
+    return any(c in text for c in home) or ("remote" in text and q.remote) or not q.india
 
 
 async def resolve_companies(hits: list[Hit], q: Query) -> list[Hit]:
@@ -398,7 +455,7 @@ async def resolve_companies(hits: list[Hit], q: Query) -> list[Hit]:
     from jobhunterx.domain.candidate import norm_term
     names: dict[str, tuple[str, float]] = {}
     for h in hits:
-        c = _company_from(h)
+        c = _company_from(h, q)
         if c:
             k = re.sub(r"[^a-z0-9]", "", c.lower())
             if k and k not in names:           # names read from aggregator posts first: those are the crowded channels
@@ -434,8 +491,9 @@ async def resolve_companies(hits: list[Hit], q: Query) -> list[Hit]:
         async with sem:
             jobs = await adapter.search_jobs(token, [" ".join(q.role)]) if kind in ("workday", "oracle") else await adapter.list_jobs(token)
         out = []
+        common = _common_words([j.title for j in jobs or []])
         for j in jobs or []:
-            m = _role_match(j.title, q)
+            m = _role_match(j.title, q, common)
             if m < 0.6 or not _place_ok(j.location_raw, j.countries, q):
                 continue
             age = (datetime.now(timezone.utc) - j.posted_at).days if j.posted_at else None
@@ -511,7 +569,7 @@ async def _crawl_page(hit: Hit, sem: asyncio.Semaphore) -> list[Hit]:
         anchor = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2) or "")).strip()[:140]
         ref = ats.parse_ats_url(url)
         kind = ("posting" if ref.job_id else "board") if ref else None
-        if (not kind and hit.kind == "careers" and _host(url) == _host(base) and _JOB_ANCHOR.search(anchor)
+        if (not kind and hit.kind == "careers" and _host(url) == _host(base) and _looks_like_role(anchor)
                 and _CAREERS_PATH.search(urlparse(url).path or "") and (urlparse(url).path or "").count("/") >= 3):
             kind = "posting"                       # a job link on the company's own careers page
         if not kind:
@@ -545,6 +603,16 @@ async def _crawl_page(hit: Hit, sem: asyncio.Semaphore) -> list[Hit]:
     return list(found.values())
 
 
+def _looks_like_role(anchor: str) -> bool:
+    """Link text that names a role: the search's own role words, or a title-like phrase (2-12 words, no sentence)."""
+    role = _CTX.get().get("roles") or []
+    low = (anchor or "").lower()
+    if role and any(r in low for r in role):
+        return True
+    words = re.findall(r"[A-Za-z][A-Za-z+#.\-]*", anchor or "")
+    return 2 <= len(words) <= 12 and not re.search(r"[.!?]\s", anchor) and sum(w[0].isupper() for w in words) >= len(words) / 2
+
+
 async def crawl(hits: list[Hit]) -> list[Hit]:
     order = {"careers": 0, "page": 1, "agg_posting": 2}
     targets = sorted([h for h in hits if h.kind in order], key=lambda h: (order[h.kind], -h.score))[:CRAWL_PAGES]
@@ -556,8 +624,6 @@ async def crawl(hits: list[Hit]) -> list[Hit]:
 
 
 # ---------------------------------------------------------------- 5. signals
-_FOREIGN = re.compile(r"(?i)\b(united states|usa|u\.s\.|canada|united kingdom|london|germany|berlin|europe|emea|latam|brazil|mexico|"
-                      r"philippines|pakistan|singapore|dubai|australia|new york|san francisco|seattle|toronto|remote[\s,\-–]+(us|uk|eu))\b")
 _AGO = re.compile(r"(?i)\b(\d+)\s*(hour|hr|day|week|month)s?\s+ago\b|\b(today|yesterday|just posted)\b")
 _OLD_YEAR = re.compile(r"\b(20[12]\d)\b")
 
@@ -578,12 +644,11 @@ def apply_signals(hits: list[Hit], q: Query) -> None:
         if years and max(years) < year:
             h.score *= 0.55                            # "… jobs December 2025" in a 2026 search
         if q.places or q.india:
-            forms = [f for c in q.places for f in CITIES.get(c, [c])] + ["india"]
-            local = any(f in text.lower() for f in forms)
-            if local:
-                h.score *= 1.12
-            elif _FOREIGN.search(text):
-                h.score *= 0.35
+            # the candidate's own places lift a result; the AI rerank and the matcher's location check deal with the
+            # rest (no fixed list of "foreign" places — foreign depends on who is searching)
+            forms = [f for c in q.places for f in _place_forms(c)] + _country()
+            if any(f in text.lower() for f in forms):
+                h.score *= 1.3
 
 
 VERIFY_TOP = 18

@@ -138,6 +138,9 @@ class JobPosting(BaseModel):
     sources: list[SourceRef] = Field(default_factory=list)
     ats: Optional[AtsRef] = None
     requirements: Requirements = Field(default_factory=Requirements)
+    # What kind of employer posted it, as the AI read the posting: product | it_services_bulk | staffing_agency |
+    # other ("" = not read). Replaces a fixed list of company names.
+    employer_kind: str = ""
     validation: ValidationReport = Field(default_factory=ValidationReport)
     discovered_at: datetime = Field(default_factory=utcnow)
     discovered_by_query: str = ""

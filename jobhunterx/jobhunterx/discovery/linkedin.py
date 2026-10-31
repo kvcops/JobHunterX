@@ -167,8 +167,8 @@ def _relevance(title: str, labels: list[str], common: set[str] | frozenset = fro
 
 
 def _bad_company(name: str, keep_mass: bool = False) -> bool:
-    from jobhunterx.discovery import watchlist
-    return (not keep_mass and watchlist.is_mass_recruiter(name)) or bool(_STAFFING.search(name or ""))
+    # Bulk IT-services employers are judged by the AI when the posting is read (JobPosting.employer_kind).
+    return bool(_STAFFING.search(name or ""))
 
 
 # ------------------------------------------------------------------ employer's own board

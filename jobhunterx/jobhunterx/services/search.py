@@ -418,6 +418,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
     snap = await profile_svc.get_snapshot(profile)
     if request.get("include_international"):
         snap = snap.model_copy(update={"open_to_international": True})
+    # Web search ranks by THIS candidate's places and roles (as the AI understood the profile), not a fixed city list.
+    from jobhunterx.tools import deep_search as _ds
+    _ds.context_from_snapshot(snap)
     await run.stage("understand", "done",
                     f"{snap.professional_years:g} yrs · {snap.seniority.value} · "
                     + ", ".join(f.label for f in snap.role_families[:3]))
@@ -534,7 +537,6 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 pass
         hits = ats_index.search([*scope.titles, *snap.adjacent_titles[:4]], scope.locations or [scope.country],
                                 level=snap.seniority.value, include_remote=scope.include_remote, limit=max_jobs)
-        hits = [(r, sc) for r, sc in hits if keep_mass or not watchlist.is_mass_recruiter(r.company)]
         funded_hits = await _funded_openings(funding_task, scope, snap, {r.url for r, _ in hits})
         if funded_hits:
             names = sorted({r.company for r, _ in funded_hits})

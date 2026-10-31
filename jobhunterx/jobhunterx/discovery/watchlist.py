@@ -9,7 +9,8 @@ every few hours puts the candidate among the first applicants.
 The data (`watchlist/companies.json`) is hand-researched: what each company
 really does with AI, whether it hires 1–3 year engineers, employee reviews,
 red flags, and how crowded applying there is. Mass-recruitment IT services
-firms are excluded on purpose (see `MASS_RECRUITERS`).
+firms are left out of the data on purpose (postings from them are recognised
+by the AI when read: JobPosting.employer_kind).
 """
 
 from __future__ import annotations
@@ -29,24 +30,6 @@ from jobhunterx.domain.job import AtsRef, JobPosting
 from jobhunterx.intelligence.text import term_in_text, term_pattern
 
 DATA_FILE = Path(__file__).resolve().parent.parent / "watchlist" / "companies.json"
-
-# City name → every way a posting may write it.
-CITY_FORMS: dict[str, tuple[str, ...]] = {
-    "Hyderabad": ("hyderabad", "secunderabad", "cyberabad", "hitec city", "hitech city", "gachibowli", "madhapur",
-                  "kondapur", "financial district", "nanakramguda", "telangana"),
-    "Bengaluru": ("bengaluru", "bangalore", "blr", "karnataka", "whitefield", "koramangala", "electronic city",
-                  "outer ring road", "hsr layout", "indiranagar"),
-}
-
-# Big IT-services / outsourcing employers: high-volume fresher hiring, little
-# product AI work. Never recommended; jobs from them are marked as such.
-MASS_RECRUITERS = (
-    "tcs", "tata consultancy services", "infosys", "wipro", "hcl", "hcltech", "hcl technologies", "tech mahindra",
-    "cognizant", "accenture", "capgemini", "ltimindtree", "lti mindtree", "mindtree", "mphasis", "hexaware",
-    "genpact", "persistent systems", "coforge", "birlasoft", "zensar", "ntt data", "dxc technology",
-    "ibm consulting", "l&t technology services", "ltts", "cyient", "sonata software", "mastek", "happiest minds",
-)
-
 
 class Reviews(BaseModel):
     ambitionbox: Optional[float] = None
@@ -114,24 +97,20 @@ def load() -> tuple[WatchCompany, ...]:
             c = WatchCompany.model_validate(item)
         except ValueError:
             continue
-        if not is_mass_recruiter(c.name):
-            out.append(c)
+        out.append(c)
     return tuple(out)
 
 
-_MASS_RE = re.compile("|".join(term_pattern(m).pattern for m in MASS_RECRUITERS), re.I)
-
-
-@lru_cache(maxsize=4096)
-def is_mass_recruiter(company: str) -> bool:
-    n = norm_term(company)
-    return bool(n) and bool(_MASS_RE.search(n))
+def covered_cities() -> list[str]:
+    """Cities the watchlist data has companies in (from the data itself, not a fixed table)."""
+    return sorted({city for c in load() for city in c.cities if city and city != REMOTE_INDIA})
 
 
 def cities_for(snap: CandidateSnapshot) -> list[str]:
-    """Watchlist cities the candidate wants to work in."""
-    wanted = " ; ".join(f for p in snap.locations for f in [p.city, *p.aliases] if f)
-    return [city for city, forms in CITY_FORMS.items() if any(term_in_text(f, wanted) for f in forms)]
+    """Watchlist cities the candidate wants to work in. The candidate's places carry every spelling the AI gave them
+    ("Bengaluru" / "Bangalore" / "BLR"), so they are matched against the watchlist's own city names."""
+    forms = [f for p in snap.locations for f in [p.city, p.region, *p.aliases] if f]
+    return [city for city in covered_cities() if any(term_in_text(city, f) or term_in_text(f, city) for f in forms)]
 
 
 REMOTE_INDIA = "Remote India"
