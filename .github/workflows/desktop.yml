@@ -121,7 +121,7 @@ jobs:
         include:
           - { name: Linux, os: ubuntu-22.04, tests: true }
           - { name: Windows, os: windows-latest, tests: false }
-          - { name: macOS (Apple Silicon), os: macos-14, tests: false }
+          - { name: macOS (Apple Silicon), os: macos-15, tests: false }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
