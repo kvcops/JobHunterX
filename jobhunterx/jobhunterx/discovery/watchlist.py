@@ -16,7 +16,6 @@ by the AI when read: JobPosting.employer_kind).
 from __future__ import annotations
 
 import json
-import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -27,7 +26,7 @@ from jobhunterx.discovery import ats
 from jobhunterx.domain.candidate import CandidateSnapshot, norm_term
 from jobhunterx.domain.common import WorkMode
 from jobhunterx.domain.job import AtsRef, JobPosting
-from jobhunterx.intelligence.text import term_in_text, term_pattern
+from jobhunterx.intelligence.text import term_in_text
 
 DATA_FILE = Path(__file__).resolve().parent.parent / "watchlist" / "companies.json"
 

@@ -9,13 +9,10 @@ provider-native cost calculation, and local availability checks.
 from __future__ import annotations
 
 import asyncio
-import json
-import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 import httpx
 from jobhunterx.config.logging import get_logger

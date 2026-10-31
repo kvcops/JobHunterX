@@ -241,8 +241,11 @@ def _variants(q: Query) -> list[tuple[str, str, list[str]]]:
 
 # ---------------------------------------------------------------- 2. fan-out
 def _page_for(query: str) -> int:
-    """Asked before? Then read the next page of results — the first page is what the last run already saw."""
-    key = "page:" + " ".join(sorted(set(re.findall(r"[a-z0-9]+", query.lower()))))
+    """Asked before? Then read the next page of results — the first page is what the last run already saw.
+    Counted per person: someone else asking the same query must still get the first page."""
+    from jobhunterx import storage
+    who = storage.active_person() or "local"
+    key = f"page:{who}:" + " ".join(sorted(set(re.findall(r"[a-z0-9]+", query.lower()))))
     store = _cache()
     n = store.get(key, 0)
     store.set(key, n + 1, expire=14 * 86400)
