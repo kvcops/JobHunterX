@@ -45,41 +45,6 @@ _EDU_ORDER = ["none", "diploma", "bachelor", "master", "phd"]
 # Skill coverage
 # ---------------------------------------------------------------------------
 
-# Everyday tools an umbrella skill implies. Someone with years of "Linux" has used SSH, sudo and systemd even if the
-# resume never lists them; a job that names them must not read that person as missing them. Credit is "related", not full.
-_IMPLIED_BY: dict[str, tuple[str, ...]] = {
-    "linux": ("ubuntu", "debian", "centos", "rhel", "red hat", "red hat enterprise linux", "fedora", "suse", "systemd",
-              "ssh", "sudo", "bash", "shell", "shell scripting", "rpm", "apt", "yum", "rpm/apt", "cron", "linux administration",
-              "linux system administration", "unix"),
-    "unix": ("ssh", "bash", "shell", "shell scripting", "cron"),
-    "rhel": ("linux", "rpm", "yum", "systemd", "ssh", "sudo"),
-    "red hat": ("linux", "rpm", "yum", "systemd", "ssh", "sudo"),
-    "jenkins": ("ci/cd", "ci", "continuous integration"),
-    "github actions": ("ci/cd", "ci", "continuous integration", "git", "github"),
-    "gitlab ci": ("ci/cd", "ci", "continuous integration", "git", "gitlab"),
-    "git": ("github", "gitlab", "version control"),
-    "kubernetes": ("k8s", "kubectl", "container orchestration", "docker", "containers"),
-    "docker": ("containers", "containerization"),
-    "aws": ("ec2", "s3", "iam", "cloudwatch", "vpc", "cloud"),
-    "azure": ("azure vms", "azure monitor", "cloud"),
-    "gcp": ("google cloud", "gce", "cloud"),
-    "google cloud": ("gcp", "cloud"),
-    "terraform": ("infrastructure as code", "iac"),
-    "ansible": ("configuration management", "infrastructure as code"),
-    "prometheus": ("monitoring", "observability"),
-    "grafana": ("monitoring", "observability", "dashboards"),
-    "python": ("scripting",),
-    "pytorch": ("deep learning", "machine learning"),
-    "tensorflow": ("deep learning", "machine learning"),
-    "llm": ("generative ai", "genai", "large language models"),
-    "large language models": ("llm", "generative ai", "genai"),
-    "rag": ("retrieval augmented generation", "llm", "generative ai"),
-    "sql": ("relational databases", "databases"),
-    "postgresql": ("sql", "relational databases", "databases"),
-    "mysql": ("sql", "relational databases", "databases"),
-}
-
-
 def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, pol: Policy,
                   index: dict[str, SkillEvidence], candidate_text: str = "",
                   link: Optional[dict] = None) -> tuple[float, Optional[SkillEvidence], bool]:
@@ -100,10 +65,6 @@ def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, po
     # named in the candidate's own experience / project text, just not in the skills list
     if candidate_text and any(len(f) > 1 and term_in_text(f, candidate_text) for f in forms):
         return pol.credit_listed_only, None, False
-    for s in snapshot.skills:
-        implied = {norm_term(x) for f in s.forms() for x in _IMPLIED_BY.get(f, ())}
-        if forms & implied:
-            return pol.credit_adjacent * max(s.strength, pol.credit_listed_only), s, True
     return 0.0, None, False
 
 

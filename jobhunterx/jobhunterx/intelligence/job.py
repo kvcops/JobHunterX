@@ -236,40 +236,25 @@ async def understand_job(job: JobPosting, snapshot: Optional[CandidateSnapshot] 
     if use_llm and job.description and len(job.description) > 200:
         user = (f"Job title (from source): {job.title}\nCompany (from source): {job.company}\n"
                 f"Location (from source): {job.location_raw}\n\nPosting text:\n{fence(job.description, 14000)}")
-        u, model = await call_structured(
-            task="job_understanding", version=VERSION, model=JobUnderstanding, system=_SYSTEM, user=user,
-            chain="extraction", max_tokens=2500,
-            cache_parts=(content_hash(job.title, job.description),),
-        )
+        u, model = None, ""
+        # A job read only by rules can't know its skills or level, so it scores half-blind. If the extraction models
+        # are busy or fail, a second, different chain reads it before falling back.
+        for chain in ("extraction", "fast"):
+            u, model = await call_structured(
+                task="job_understanding", version=VERSION, model=JobUnderstanding, system=_SYSTEM, user=user,
+                chain=chain, max_tokens=2500,
+                cache_parts=(content_hash(job.title, job.description),),
+            )
+            if u is not None:
+                break
         if u is not None:
             apply_understanding(job, u, model)
             _salary_from_text(job)
             return "llm"
     job.requirements = fallback_requirements(job, snapshot)
-    if job.seniority == Seniority.UNKNOWN:
-        job.seniority = seniority_from_title(job.title)
     _salary_from_text(job)
     return "fallback"
 
-
-# A title's own level words, for postings the AI couldn't read. Only explicit words: no word, no guess ("Engineer II",
-# "Software Engineer" stay unknown).
-_TITLE_LEVELS = [
-    (Seniority.ENTRY, r"\b(graduate|fresher|freshers|entry[- ]level|new grad|trainee)\b"),
-    (Seniority.INTERN, r"\b(intern|internship|apprentice)\b"),
-    (Seniority.PRINCIPAL, r"\b(principal|director|head of|vp|vice president|distinguished)\b"),
-    (Seniority.STAFF, r"\b(staff|lead|architect|manager)\b"),
-    (Seniority.SENIOR, r"\b(senior|sr\.?)(?=\s|$)"),
-    (Seniority.JUNIOR, r"\b(junior|jr\.?|associate)(?=\s|$)"),
-]
-
-
-def seniority_from_title(title: str) -> Seniority:
-    t = (title or "").lower()
-    for level, pattern in _TITLE_LEVELS:
-        if re.search(pattern, t):
-            return level
-    return Seniority.UNKNOWN
 
 
 def inr_salary(text: str, require_context: bool = False) -> Optional[Salary]:

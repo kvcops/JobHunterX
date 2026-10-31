@@ -109,18 +109,36 @@ def test_custom_resume_rejects_bad_input(client):  # noqa: F811
 
 
 # ---------------------------------------------------------------- skills: grouped, deduplicated, capped
-def test_skills_are_grouped_even_without_a_model_and_repeats_dropped():
-    from jobhunterx.generation.skills import _drop_bracketed_repeats, _fallback_groups, _is_heading
-    names = ["Python Automation", "Terraform", "AWS CLI", "Slurm", "InfiniBand", "Lmod",
-             "Environment Modules (Lmod, EasyBuild, Spack)", "Splunk", "Firewalls", "Operations & Reliability",
-             "Cloud & Managed Services"]
-    names = [n for n in names if not _is_heading(n)]
-    assert "Operations & Reliability" not in names and "Cloud & Managed Services" not in names
-    names = _drop_bracketed_repeats(names)
-    assert "Lmod" not in names and "Environment Modules (Lmod, EasyBuild, Spack)" in names
-    groups = {g.category: g.items for g in _fallback_groups(names)}
-    assert len(groups) >= 3 and "Skills" not in groups
-    assert "Slurm" in groups["HPC & Systems"] and "Terraform" in groups["Cloud & DevOps"]
+def test_skills_are_grouped_by_the_ai_with_a_second_chain_and_never_by_keywords(monkeypatch):
+    import asyncio
+    from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
+    from jobhunterx.generation import skills as sk
+
+    names = ["Slurm", "Terraform", "Lmod", "Environment Modules (Lmod, EasyBuild, Spack)", "Operations & Reliability"]
+    profile = CandidateProfile(name="X", skills=names)
+    snap = CandidateSnapshot(profile_hash="h")
+    chains = []
+
+    async def first_chain_fails(**kw):
+        chains.append(kw["chain"])
+        if kw["chain"] == "fast":
+            return None, ""
+        assert "Lmod" not in kw["user"].replace("(Lmod", "")        # repeat inside brackets removed before asking
+        return sk._Groups(groups=[{"category": "HPC", "items": ["Slurm", "Environment Modules (Lmod, EasyBuild, Spack)"]},
+                                  {"category": "Operations & Reliability", "items": ["Terraform"]}]), "m"
+
+    monkeypatch.setattr(sk, "call_structured", first_chain_fails)
+    groups, model = asyncio.new_event_loop().run_until_complete(sk.group_skills(profile, snap))
+    assert chains == ["fast", "extraction"] and model == "m"
+    assert [g.category for g in groups] == ["HPC", "Operations & Reliability"]
+    assert all("Operations & Reliability" not in g.items for g in groups)   # heading used as a category, not an item
+
+    async def nothing(**kw):
+        return None, ""
+
+    monkeypatch.setattr(sk, "call_structured", nothing)
+    groups, _ = asyncio.new_event_loop().run_until_complete(sk.group_skills(profile, snap))
+    assert len(groups) == 1 and groups[0].category == "Skills"          # one plain list, no guessed categories
 
 
 def test_one_page_resume_lists_job_skills_first_and_caps_the_rest():
