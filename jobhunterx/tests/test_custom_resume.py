@@ -106,3 +106,37 @@ def test_custom_resume_rejects_bad_input(client):  # noqa: F811
     assert r.status_code == 422 and "LinkedIn" in r.text
     assert client.post("/api/documents/custom", json={"url": "ftp://example.com/job"}).status_code == 422
     assert client.post("/api/documents/custom", json={"jd_text": JD, "layout": "three_column"}).status_code == 422
+
+
+# ---------------------------------------------------------------- skills: grouped, deduplicated, capped
+def test_skills_are_grouped_even_without_a_model_and_repeats_dropped():
+    from jobhunterx.generation.skills import _drop_bracketed_repeats, _fallback_groups, _is_heading
+    names = ["Python Automation", "Terraform", "AWS CLI", "Slurm", "InfiniBand", "Lmod",
+             "Environment Modules (Lmod, EasyBuild, Spack)", "Splunk", "Firewalls", "Operations & Reliability",
+             "Cloud & Managed Services"]
+    names = [n for n in names if not _is_heading(n)]
+    assert "Operations & Reliability" not in names and "Cloud & Managed Services" not in names
+    names = _drop_bracketed_repeats(names)
+    assert "Lmod" not in names and "Environment Modules (Lmod, EasyBuild, Spack)" in names
+    groups = {g.category: g.items for g in _fallback_groups(names)}
+    assert len(groups) >= 3 and "Skills" not in groups
+    assert "Slurm" in groups["HPC & Systems"] and "Terraform" in groups["Cloud & DevOps"]
+
+
+def test_one_page_resume_lists_job_skills_first_and_caps_the_rest():
+    from jobhunterx.generation.content import SkillGroup
+    from jobhunterx.generation.resume import MAX_SKILLS, MAX_SKILLS_PER_GROUP, _cap_skills
+    groups = [SkillGroup(category=f"G{g}", items=[f"s{g}-{i}" for i in range(20)]) for g in range(5)]
+    wanted = {"s4-19", "s0-7"}
+    out = _cap_skills(groups, lambda it: 0 if it in wanted else 1)
+    kept = [it for g in out for it in g.items]
+    assert len(kept) <= MAX_SKILLS and all(len(g.items) <= MAX_SKILLS_PER_GROUP for g in out)
+    assert wanted <= set(kept)
+
+
+def test_rows_keep_short_lines_on_one_line_and_dates_right_aligned():
+    c = {**CONTENT, "education": [{"degree": "M.Tech", "institution": "JNTU Kakinada, India", "start": "2008", "end": "2010"},
+                                  {"degree": "MCA", "institution": "Andhra University"}]}
+    html = render._render("resume.html", doc=c, s={"id": "classic", **render.styles.STYLES["classic"]}, **render.SHRINK_PROFILES[0])
+    assert 'width="80%"' in html and '<td class="right" width="20%">2008 – 2010</td>' in html
+    assert '<td width="100%"><span class="row-title">MCA' in html          # no dates: no empty half-row
