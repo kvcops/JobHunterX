@@ -288,4 +288,9 @@ def install(monkeypatch) -> dict:
     # the very jobs the scenario checks the reasons for
     from jobhunterx.services import search as search_svc
     monkeypatch.setattr(search_svc, "COMPANY_CAP", 99)
+    # sources added later talk to the internet through their own clients: the fake world has none of them
+    from jobhunterx.config.settings import get_settings
+    for flag in ("enable_yc_source", "enable_reddit_source", "enable_founder_posts", "enable_funding_signals",
+                 "enable_hn_source", "enable_domain_age_check", "enable_ats_index"):
+        monkeypatch.setattr(get_settings(), flag, False)
     return calls

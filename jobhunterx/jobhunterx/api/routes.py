@@ -524,7 +524,7 @@ async def get_watchlist(scope: Literal["mine", "all"] = "mine"):
             snap = await profile_svc.get_snapshot(profile)
             cities = watchlist.cities_for(snap)
             companies = watchlist.for_candidate(snap)
-    return {"cities": cities, "covered_cities": list(watchlist.CITY_FORMS), "total": len(watchlist.load()),
+    return {"cities": cities, "covered_cities": watchlist.covered_cities(), "total": len(watchlist.load()),
             "companies": [watchlist.public_view(c) for c in companies], "status": watcher.status()}
 
 

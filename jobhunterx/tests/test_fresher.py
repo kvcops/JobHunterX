@@ -67,14 +67,14 @@ def test_experienced_candidates_keep_the_old_rules():
 
 # ---------------------------------------------------------------- safety-net track
 def test_it_services_employer_is_a_safety_net_for_freshers(monkeypatch):
-    m = assess(fresher(), job(company="Infosys"), role_fit=FIT)
+    m = assess(fresher(), job(company="Infosys", employer_kind="it_services_bulk"), role_fit=FIT)
     assert m.track == "floor" and m.verdict != "incompatible"
     assert m.reach.score > 25                                      # not capped like a bulk pipeline for experienced people
-    senior = assess(snap(professional_years=6, seniority=Seniority.SENIOR), job(company="Infosys", seniority=Seniority.SENIOR), role_fit=FIT)
+    senior = assess(snap(professional_years=6, seniority=Seniority.SENIOR), job(company="Infosys", seniority=Seniority.SENIOR, employer_kind="it_services_bulk"), role_fit=FIT)
     assert senior.track == "main" and "company" in keys(senior, "fail")
     from jobhunterx.config.settings import get_settings
     monkeypatch.setattr(get_settings(), "fresher_floor_track", False)
-    assert "company" in keys(assess(fresher(), job(company="Infosys"), role_fit=FIT), "fail")
+    assert "company" in keys(assess(fresher(), job(company="Infosys", employer_kind="it_services_bulk"), role_fit=FIT), "fail")
 
 
 # ---------------------------------------------------------------- immediate joiners
@@ -178,7 +178,7 @@ def test_outcome_api_and_safety_net_view(client):
     j = job(id="j1", sources=[SourceRef(name="greenhouse", kind="ats_api", url="https://x", first_party=True)],
             posted_at=datetime.now(timezone.utc) - timedelta(days=1))
     _run(storage.save_job(j, assess(fresher(), j, role_fit=FIT), None))
-    f = job(id="j2", company="Wipro", title="Graduate Engineer Trainee")
+    f = job(id="j2", company="Wipro", title="Graduate Engineer Trainee", employer_kind="it_services_bulk")
     _run(storage.save_job(f, assess(fresher(), f, role_fit=FIT), None))
     counts = client.get("/api/jobs", params={"view": "recommended"}).json()["counts"]
     assert counts["safety_net"] == 1

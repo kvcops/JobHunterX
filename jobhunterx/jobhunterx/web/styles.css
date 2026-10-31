@@ -2067,3 +2067,5 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .custom-resume .dialog-actions { align-items: center; margin-top: 6px; }
 .custom-resume textarea { resize: vertical; min-height: 120px; }
 .btn.is-on { background: var(--accent-soft); }
+.paper .nowrap { white-space: nowrap; flex-shrink: 0; }
+.paper .paper-skill { margin: 2px 0; }

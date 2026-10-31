@@ -43,6 +43,9 @@ MAX_BULLETS_PER_ROLE = 4
 # Projects are often the strongest proof for a fresher: keep up to this many, most relevant first. The page fitter
 # (generation/render.py) drops the least relevant ones only when the page really is full.
 MAX_PROJECTS = 6
+# Skills on one page: enough to pass keyword screens, few enough to read. Job-named skills always come first.
+MAX_SKILLS = 32
+MAX_SKILLS_PER_GROUP = 9
 
 
 class _Bullet(BaseModel):
@@ -105,6 +108,23 @@ def _select(profile: CandidateProfile, job: JobPosting, snapshot: CandidateSnaps
                        key=lambda k: -cosine(docs[len(docs) - len(profile.projects) + k], jt, idf))
     projects = proj_rank[:MAX_PROJECTS]
     return exp_sel, projects, proj_rank[MAX_PROJECTS:]
+
+
+def _cap_skills(groups: list[SkillGroup], rank) -> list[SkillGroup]:
+    """A one-page resume lists the skills that matter, not all seventy: the ones this job names first, then the rest
+    in order, up to MAX_SKILLS (at most MAX_SKILLS_PER_GROUP a line). The full list stays in the profile and the CV."""
+    keep: set[tuple[int, int]] = set()
+    order = sorted(((rank(it), gi, ii) for gi, g in enumerate(groups) for ii, it in enumerate(g.items)))
+    per: dict[int, int] = {}
+    for _, gi, ii in order:
+        if len(keep) >= MAX_SKILLS:
+            break
+        if per.get(gi, 0) < MAX_SKILLS_PER_GROUP:
+            keep.add((gi, ii))
+            per[gi] = per.get(gi, 0) + 1
+    out = [SkillGroup(category=g.category, items=[it for ii, it in enumerate(g.items) if (gi, ii) in keep])
+           for gi, g in enumerate(groups)]
+    return [g for g in out if g.items]
 
 
 async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot, job: JobPosting,
@@ -172,6 +192,7 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
 
     skill_groups = [SkillGroup(category=g.category, items=sorted(g.items, key=rank)) for g in groups]
     skill_groups.sort(key=lambda g: min((rank(i) for i in g.items), default=1))
+    skill_groups = _cap_skills(skill_groups, rank)
 
     projects = [project_item(p, max_links=2)
                 for p in (profile.projects[idx] for idx in proj_sel)]

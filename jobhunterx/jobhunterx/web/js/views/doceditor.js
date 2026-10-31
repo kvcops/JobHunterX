@@ -278,7 +278,7 @@ export function ResumePaper({ ed, style = 'classic', fit = {}, kind = 'resume' }
 
   const skills = (c.skills.length || ed.editing) ? html`<section><h3>Skills</h3>
     ${c.skills.map((g, i) => html`<p class=${`paper-skill ed-row ${cut(i, LIMIT(f, 'max_skill_groups'))}`} key=${i}>
-      <strong>${E(`skills.${i}.category`, { ph: 'Category' })}:</strong> ${E(`skills.${i}.items`, { ph: 'skill, skill, skill', format: joinList, parse: splitList })}
+      ${!ed.editing && c.skills.length === 1 && /^(skills|other)$/i.test(g.category) ? null : html`<strong>${E(`skills.${i}.category`, { ph: 'Category' })}:</strong> `}${E(`skills.${i}.items`, { ph: 'skill, skill, skill', format: joinList, parse: splitList })}
       <${RemoveBtn} ed=${ed} listPath="skills" index=${i} what="skill group" /></p>`)}
     <${AddRow} ed=${ed} label="Skill group" onAdd=${() => ed.insert('skills', c.skills.length, { category: '', items: [] }, `skills.${c.skills.length}.category`)} />
   </section>` : null;
@@ -307,10 +307,11 @@ export function ResumePaper({ ed, style = 'classic', fit = {}, kind = 'resume' }
   </section>` : null;
 
   const education = (c.education.length || ed.editing) ? html`<section><h3>Education</h3>
-    ${c.education.map((e, i) => html`<p class=${`paper-edu ed-row ${cut(i, LIMIT(f, 'max_education'))}`} key=${i}>
-      <strong>${E(`education.${i}.degree`, { ph: 'Degree' })}</strong>${ed.editing || e.institution ? html` — ${E(`education.${i}.institution`, { ph: 'Institution' })}` : ''}
-      <span class="muted small"> ${E(`education.${i}.start`, { ph: 'Start' })}${e.start || e.end || ed.editing ? ' – ' : ''}${E(`education.${i}.end`, { ph: 'End' })}${ed.editing || e.grade ? html` · ${E(`education.${i}.grade`, { ph: 'Grade' })}` : ''}</span>
-      <${RemoveBtn} ed=${ed} listPath="education" index=${i} what="education entry" /></p>`)}
+    ${c.education.map((e, i) => html`<div class=${`paper-edu paper-item ed-row ${cut(i, LIMIT(f, 'max_education'))}`} key=${i}>
+      <div class="row space"><span><strong>${E(`education.${i}.degree`, { ph: 'Degree' })}</strong>${ed.editing || e.institution ? html` — ${E(`education.${i}.institution`, { ph: 'Institution' })}` : ''}
+        ${ed.editing || e.grade ? html`<span class="muted small"> · ${E(`education.${i}.grade`, { ph: 'Grade' })}</span>` : ''}</span>
+        ${ed.editing || e.start || e.end ? html`<span class="muted small nowrap">${E(`education.${i}.start`, { ph: 'Start year' })}${e.start && e.end || ed.editing ? ' – ' : ''}${E(`education.${i}.end`, { ph: 'End year' })}</span>` : null}</div>
+      <${RemoveBtn} ed=${ed} listPath="education" index=${i} what="education entry" /></div>`)}
     <${AddRow} ed=${ed} label="Education" onAdd=${() => ed.insert('education', c.education.length, { degree: '', institution: '', university: '', start: '', end: '', grade: '', details: '' }, `education.${c.education.length}.degree`)} />
   </section>` : null;
 

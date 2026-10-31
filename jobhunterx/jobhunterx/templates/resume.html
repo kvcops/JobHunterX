@@ -19,24 +19,29 @@
 
 {% macro links(ls) %}{% for l in ls %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}{% endmacro %}
 
+{# A title line with an optional right-aligned part (dates, links). Explicit widths: without them the PDF engine splits
+   the row 50/50 and a short institution name wraps under itself while the right half sits empty. #}
+{% macro row(right, rw=24) %}<table class="row"><tr><td width="{{ 100 - rw if right|trim else 100 }}%">{{ caller() }}</td>
+{% if right|trim %}<td class="right" width="{{ rw }}%">{{ right }}</td>{% endif %}</tr></table>{% endmacro %}
+
+{% macro dates(a, b) %}{{ a }}{% if a and b %} – {% endif %}{{ b }}{% endmacro %}
+
 {% macro summary() %}{% if doc.summary and not hide_summary %}<div class="section"><div class="section-title">{{ "Summary"|cap(s) }}</div><div>{{ doc.summary|rich }}</div></div>{% endif %}{% endmacro %}
 
 {% macro skills(stacked) %}{% if doc.skills %}<div class="section"><div class="section-title">{{ "Skills"|cap(s) }}</div>
 {% if stacked %}{% for g in doc.skills[:max_skill_groups] %}<div class="skill-block"><span class="row-title">{{ g.category|rich }}</span><br>{{ g["items"] | map("rich") | join(', ') }}</div>{% endfor %}
-{% else %}<table class="skills">{% for g in doc.skills[:max_skill_groups] %}<tr><td class="skill-cat">{{ g.category|rich }}</td><td>{{ g["items"] | map("rich") | join(', ') }}</td></tr>{% endfor %}</table>{% endif %}
+{% else %}{% set groups = doc.skills[:max_skill_groups] %}{% for g in groups %}<div class="skill-line">{% if not (groups|length == 1 and g.category|lower in ('skills', 'other')) %}<b>{{ g.category|rich }}:</b> {% endif %}{{ g["items"] | map("rich") | join(', ') }}</div>{% endfor %}{% endif %}
 </div>{% endif %}{% endmacro %}
 
 {% macro experience() %}{% if doc.experience %}<div class="section"><div class="section-title">{{ "Experience"|cap(s) }}</div>
 {% for e in doc.experience[:max_experience] %}
-<table><tr><td class="row-title">{{ e.role|rich }}{% if e.company %} — {{ e.company|rich }}{% endif %}</td>
-<td class="right">{{ e.start }}{% if e.start or e.end %} – {% endif %}{{ e.end }}</td></tr></table>
+{% call row(dates(e.start, e.end), 22) %}<span class="row-title">{{ e.role|rich }}{% if e.company %} — {{ e.company|rich }}{% endif %}</span>{% if e.location %} <span class="row-sub">· {{ e.location }}</span>{% endif %}{% endcall %}
 {% if e.bullets %}<ul>{% for b in e.bullets[:max_bullets_per_exp] %}<li>{{ b|rich }}</li>{% endfor %}</ul>{% endif %}
 {% endfor %}</div>{% endif %}{% endmacro %}
 
 {% macro projects() %}{% if doc.projects and max_projects > 0 %}<div class="section"><div class="section-title">{{ "Projects"|cap(s) }}</div>
 {% for p in doc.projects[:max_projects] %}
-<table><tr><td><span class="row-title">{{ p.title|rich }}</span>{% if p.technologies %} <span class="row-sub">· {{ p.technologies | join(', ') }}</span>{% endif %}</td>
-{% if p.links %}<td class="right links">{{ links(p.links) }}</td>{% endif %}</tr></table>
+{% call row(links(p.links) if p.links else '', 28) %}<span class="row-title">{{ p.title|rich }}</span>{% if p.technologies %} <span class="row-sub">· {{ p.technologies | join(', ') }}</span>{% endif %}{% endcall %}
 {% if p.description %}<div style="margin-bottom: {{ margin_exp }}">{{ p.description|rich }}</div>{% endif %}
 {% endfor %}</div>{% endif %}{% endmacro %}
 
@@ -44,8 +49,7 @@
 {% for e in doc.education[:max_education] %}
 {% if stacked %}<div class="skill-block"><span class="row-title">{{ e.degree|rich }}</span>{% if e.institution %}<br>{{ e.institution|rich }}{% endif %}{% if e.university %} <span class="row-sub">({{ e.university }})</span>{% endif %}
 <br><span class="row-sub">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}{% if e.grade %} · {{ e.grade }}{% endif %}</span></div>
-{% else %}<table><tr><td><span class="row-title">{{ e.degree|rich }}</span>{% if e.institution %} — {{ e.institution|rich }}{% endif %}{% if e.university %} <span class="row-sub">({{ e.university }})</span>{% endif %}{% if e.grade %} <span class="row-sub">({{ e.grade }})</span>{% endif %}</td>
-<td class="right">{{ e.start }}{% if e.start and e.end %} – {% endif %}{{ e.end }}</td></tr></table>{% endif %}
+{% else %}{% call row(dates(e.start, e.end), 20) %}<span class="row-title">{{ e.degree|rich }}</span>{% if e.institution %} — {{ e.institution|rich }}{% endif %}{% if e.university %} <span class="row-sub">({{ e.university }})</span>{% endif %}{% if e.grade %} <span class="row-sub">· {{ e.grade }}</span>{% endif %}{% endcall %}{% endif %}
 {% endfor %}</div>{% endif %}{% endmacro %}
 
 {% macro certifications(stacked) %}{% if doc.certifications and max_certs > 0 %}<div class="section"><div class="section-title">{{ "Certifications"|cap(s) }}</div>
