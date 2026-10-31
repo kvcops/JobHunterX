@@ -136,7 +136,7 @@ class Settings(BaseSettings):
     enable_funding_signals: bool = True     # startup funding news (Inc42, Entrackr, YourStory, Google News RSS)
     enable_domain_age_check: bool = True    # registration date of the apply site (public RDAP registry) as a scam signal
     linkedin_max_applicants: int = 150      # skip LinkedIn posts that already show this many applicants
-    max_llm_jd_extractions_per_search: int = 40
+    max_llm_jd_extractions_per_search: int = 60   # every job of a full search gets a real requirements read
     watch_interval_hours: float = 4.0            # how often watchlist boards are checked while the app runs; 0 = off
     fetch_timeout_s: float = 12.0
     allow_private_network_fetch: bool = False   # SSRF guard; keep False

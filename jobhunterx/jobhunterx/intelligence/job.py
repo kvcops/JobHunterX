@@ -246,8 +246,30 @@ async def understand_job(job: JobPosting, snapshot: Optional[CandidateSnapshot] 
             _salary_from_text(job)
             return "llm"
     job.requirements = fallback_requirements(job, snapshot)
+    if job.seniority == Seniority.UNKNOWN:
+        job.seniority = seniority_from_title(job.title)
     _salary_from_text(job)
     return "fallback"
+
+
+# A title's own level words, for postings the AI couldn't read. Only explicit words: no word, no guess ("Engineer II",
+# "Software Engineer" stay unknown).
+_TITLE_LEVELS = [
+    (Seniority.ENTRY, r"\b(graduate|fresher|freshers|entry[- ]level|new grad|trainee)\b"),
+    (Seniority.INTERN, r"\b(intern|internship|apprentice)\b"),
+    (Seniority.PRINCIPAL, r"\b(principal|director|head of|vp|vice president|distinguished)\b"),
+    (Seniority.STAFF, r"\b(staff|lead|architect|manager)\b"),
+    (Seniority.SENIOR, r"\b(senior|sr\.?)(?=\s|$)"),
+    (Seniority.JUNIOR, r"\b(junior|jr\.?|associate)(?=\s|$)"),
+]
+
+
+def seniority_from_title(title: str) -> Seniority:
+    t = (title or "").lower()
+    for level, pattern in _TITLE_LEVELS:
+        if re.search(pattern, t):
+            return level
+    return Seniority.UNKNOWN
 
 
 def inr_salary(text: str, require_context: bool = False) -> Optional[Salary]:
