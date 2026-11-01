@@ -25,6 +25,10 @@ on:
         description: Publish a new version after all builds pass
         type: boolean
         default: false
+      cleanup_drafts:
+        description: Only delete leftover desktop draft releases (from cancelled builds); build nothing
+        type: boolean
+        default: false
 
 concurrency:
   group: desktop-app
@@ -39,8 +43,22 @@ env:
   STAGING_BRANCH: desktop-sync
 
 jobs:
+  cleanup:
+    name: Delete leftover desktop drafts
+    if: github.event_name == 'workflow_dispatch' && inputs.cleanup_drafts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete draft desktop releases (runs share one concurrency group, so none is being built now)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select((.tag_name | startswith("desktop-v")) and .draft) | "\(.id) \(.tag_name)"' |
+          while read -r id tag; do echo "deleting draft $tag"; gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
+
   prepare:
     name: Merge main / pick what to build
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.cleanup_drafts) }}
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.pick.outputs.build }}
@@ -264,18 +282,23 @@ jobs:
             echo "$assets" | grep -q "$ext" || { echo "::error::installer matching $ext missing — not publishing"; exit 1; }
           done
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$ID" -F draft=false -f make_latest=true --jq .html_url
-      - name: Remove desktop releases that ended up without files
+      - name: Remove desktop releases that ended up without files, and drafts left by cancelled builds
         env:
           GH_TOKEN: ${{ github.token }}
+          ID: ${{ needs.prepare.outputs.release_id }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
             --jq '.[] | select((.tag_name | startswith("desktop-v")) and (.assets | length) == 0 and (.draft | not)) | .tag_name' |
           while read -r tag; do echo "removing empty release $tag"; gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag; done
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select((.tag_name | startswith(\"desktop-v\")) and .draft and (.id | tostring) != \"$ID\") | \"\\(.id) \\(.tag_name)\"" |
+          while read -r id tag; do echo "removing leftover draft $tag"; gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
 
   report:
     name: Report a failed update
     needs: [prepare, build, promote, publish]
-    if: failure() && github.ref_name == 'main'
+    # cancelled too: a build that never got a runner must not leave its draft release behind
+    if: (failure() || cancelled()) && github.ref_name == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Open an issue and clean up
@@ -285,6 +308,7 @@ jobs:
         run: |
           ID="${{ needs.prepare.outputs.release_id }}"
           if [ -n "$ID" ]; then gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$ID" || true; fi
+          if [ "${{ job.status }}" = "cancelled" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then exit 0; fi   # cancelled: tidy, no issue
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "Desktop app not updated for main@${GITHUB_SHA::7}" \
             --body "The desktop app was **not** changed: merging main into \`$DESKTOP_BRANCH\` or building it failed. Details: $RUN_URL"
