@@ -42,7 +42,7 @@
 {% macro projects() %}{% if doc.projects and max_projects > 0 %}<div class="section"><div class="section-title">{{ "Projects"|cap(s) }}</div>
 {% for p in doc.projects[:max_projects] %}
 {% call row(links(p.links) if p.links else '', 28) %}<span class="row-title">{{ p.title|rich }}</span>{% if p.technologies %} <span class="row-sub">· {{ p.technologies | join(', ') }}</span>{% endif %}{% endcall %}
-{% if p.description %}<div style="margin-bottom: {{ margin_exp }}">{{ p.description|rich }}</div>{% endif %}
+{% if p.description %}<div class="proj-desc">{{ p.description|rich }}</div>{% else %}<div class="proj-gap">&nbsp;</div>{% endif %}
 {% endfor %}</div>{% endif %}{% endmacro %}
 
 {% macro education(stacked) %}{% if doc.education %}<div class="section"><div class="section-title">{{ "Education"|cap(s) }}</div>

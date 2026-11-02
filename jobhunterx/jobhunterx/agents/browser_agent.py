@@ -172,7 +172,15 @@ async def _build_stealth_profile(settings: Settings, sess: Optional["ApplySessio
 
     key = browser_use_key()
     if key:                                 # a Browser Use cloud browser: runs on their machines, not on our memory
-        cloud = await _create_cloud_browser(key)
+        owner = (sess.data.get("user_id") or sess.data.get("person_id") or "local") if sess is not None else "local"
+        country = None
+        try:
+            from jobhunterx.services import profile as profile_svc
+            prof = await profile_svc.get_profile()
+            country = _country_code(prof.preferences.home_country if prof else "")
+        except Exception:
+            pass
+        cloud = await _create_cloud_browser(key, profile_id=await _cloud_profile_id(key, str(owner)), country=country)
         if sess is not None:
             sess.cloud = {"id": cloud["id"], "key": key, "liveUrl": cloud.get("liveUrl")}
         log.info("browser_profile_browser_use_cloud", session=str(cloud["id"])[:12])
@@ -445,12 +453,88 @@ def cloud_required() -> bool:
     return bool(user and user.self_signup)
 
 
-async def _create_cloud_browser(key: str) -> dict:
-    """Start a Browser Use cloud browser with this key. Returns {id, cdpUrl, liveUrl}."""
+BU_PROFILES = "https://api.browser-use.com/api/v2/profiles"
+_BU_PROFILE_FILE = _BASE_DIR / "data" / "browser_use_profiles.json"
+
+
+def _country_code(country: str) -> Optional[str]:
+    """'India' -> 'in' for the cloud browser's proxy (from the country names Babel ships; None when unknown)."""
+    name = (country or "").strip().lower()
+    if not name:
+        return None
+    if len(name) == 2 and name.isalpha():
+        return name
+    try:
+        from babel import Locale
+        for code, label in Locale("en").territories.items():
+            if len(code) == 2 and code.isalpha() and label.lower() == name:
+                return code.lower()
+    except Exception:
+        pass
+    return None
+
+
+async def _cloud_profile_id(key: str, owner: str) -> Optional[str]:
+    """One saved Browser Use profile per person and key. The cloud browser then keeps its cookies and site history from
+    one application to the next — a returning visitor, which bot checks score far better than a brand-new browser
+    each time (that is what raised most CAPTCHAs). None when the profile can't be made: the run goes on without it."""
+    import hashlib
+    import json as _json
+
     import httpx
+    slot = hashlib.sha256(f"{key}|{owner}".encode()).hexdigest()[:24]       # never the key itself on disk
+    try:
+        saved = _json.loads(_BU_PROFILE_FILE.read_text()) if _BU_PROFILE_FILE.exists() else {}
+    except Exception:
+        saved = {}
+    if saved.get(slot):
+        return saved[slot]
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(BU_PROFILES, headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"},
+                                  json={"name": "JobHunterX", "userId": owner[:64]})
+        pid = r.json().get("id") if r.status_code < 400 else None
+    except Exception as exc:
+        log.info("cloud_profile_unavailable", error=str(exc)[:120])
+        return None
+    if pid:
+        saved[slot] = pid
+        try:
+            _BU_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _BU_PROFILE_FILE.write_text(_json.dumps(saved))
+        except OSError:
+            pass
+    return pid
+
+
+def _forget_cloud_profile(pid: str) -> None:
+    import json as _json
+    try:
+        saved = _json.loads(_BU_PROFILE_FILE.read_text())
+        _BU_PROFILE_FILE.write_text(_json.dumps({k: v for k, v in saved.items() if v != pid}))
+    except Exception:
+        pass
+
+
+async def _create_cloud_browser(key: str, *, profile_id: Optional[str] = None, country: Optional[str] = None) -> dict:
+    """Start a Browser Use cloud browser with this key. Returns {id, cdpUrl, liveUrl}.
+    profile_id: the person's saved profile (cookies kept between runs). country: the proxy's country (the person's own,
+    so job sites see a visitor from where the candidate lives, not a US address)."""
+    import httpx
+    body: dict = {}
+    if profile_id:
+        body["profileId"] = profile_id
+    if country:
+        body["proxyCountryCode"] = country
     try:
         async with httpx.AsyncClient(timeout=45) as client:
-            r = await client.post(BU_API, headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"}, json={})
+            r = await client.post(BU_API, headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"}, json=body)
+            if r.status_code in (400, 404, 422) and body:
+                # a profile deleted on their side, or a country they don't serve: start a plain browser instead
+                log.info("cloud_browser_options_refused", status=r.status_code, options=sorted(body))
+                if profile_id:
+                    _forget_cloud_profile(profile_id)
+                r = await client.post(BU_API, headers={"X-Browser-Use-API-Key": key, "Content-Type": "application/json"}, json={})
     except httpx.HTTPError as exc:
         raise RuntimeError(f"Could not reach Browser Use ({type(exc).__name__}). Try again in a minute.") from exc
     if r.status_code == 401:

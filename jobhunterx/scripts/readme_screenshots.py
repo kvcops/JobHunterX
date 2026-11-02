@@ -80,6 +80,7 @@ def main() -> None:
 
             def shot(page, name, **kw):
                 page.wait_for_timeout(700)                         # let entrance animations settle
+                page.add_style_tag(content=".toasts { display: none !important; }")   # passing notices are not the screen
                 path = os.path.join(ASSETS, f"ui_{name}.png")
                 page.screenshot(path=path, **kw)
                 print("saved", os.path.relpath(path, os.path.dirname(HERE)))
@@ -113,7 +114,7 @@ def main() -> None:
                 dlg.get_by_label("Company").fill("Zeta Labs")
                 if take("custom_resume"):
                     shot(pg, "custom_resume")
-                dlg.get_by_role("button", name="Create resume").click()
+                dlg.get_by_role("button", name="Create all 3").click()
                 pg.locator(".paper").wait_for(timeout=60000)
                 pg.locator('.paper [data-p="summary"]').click()
                 if take("documents"):
@@ -124,6 +125,12 @@ def main() -> None:
                 pg.locator(".paper .paper-head h2").click()
                 if take("resume_two_column"):
                     shot(pg, "resume_two_column")
+
+            if take("apply_link"):
+                pg.goto(f"{base}/#/browser")
+                pg.get_by_label("Link to the job posting").fill("https://jobs.zetalabs.ai/careers/ai-engineer")
+                pg.wait_for_timeout(600)
+                shot(pg, "apply_link")
 
             if take("tracker"):
                 jobs = _api(base, "/api/jobs?view=all")["jobs"]
