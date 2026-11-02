@@ -243,8 +243,11 @@ def _age_days(r: Row) -> float:
 
 
 def search(labels: list[str], places: list[str], *, level: Optional[str] = None, include_remote: bool = False,
-           max_age_days: int = 30, limit: int = 60) -> list[tuple[Row, float]]:
-    """Postings whose title shares the meaning-bearing words of the candidate's titles, in their places; best first."""
+           max_age_days: int = 30, limit: int = 60, skip=None, weight=None) -> list[tuple[Row, float]]:
+    """Postings whose title shares the meaning-bearing words of the candidate's titles, in their places; best first.
+    skip(url) -> True leaves out a posting the person already has, BEFORE the limit, so a new search reaches further
+    down instead of returning the same top postings. weight(company) scales an employer (0 = leave it out): employers
+    earlier searches already covered, or that were never a fit, give way to new ones."""
     rows = _load()
     if not rows:
         return []
@@ -276,10 +279,15 @@ def search(labels: list[str], places: list[str], *, level: Optional[str] = None,
                 rel = max(rel, len(jt & w) / len(jt | w))
         if rel < 0.25:
             continue
+        if skip and skip(r.url):
+            continue
+        w = weight(r.company) if weight else 1.0
+        if w <= 0:
+            continue
         lv = LEVELS.get(r.level)
         # the candidate's own level first, one step away next, far above or below sinks
         fit = 1.0 if me is None or lv is None else {0: 1.0, 1: 0.8}.get(abs(lv - me), 0.35)
-        score = rel * fit * (1.25 if age <= 3 else 1.1 if age <= 7 else 1.0 if age <= 14 else 0.8)
+        score = w * rel * fit * (1.25 if age <= 3 else 1.1 if age <= 7 else 1.0 if age <= 14 else 0.8)
         out.append((r, score))
     out.sort(key=lambda x: -x[1])
     # one employer's ten copies of "Storage AI Engineer" must not take ten of the slots

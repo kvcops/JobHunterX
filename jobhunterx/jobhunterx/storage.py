@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -498,6 +499,41 @@ async def job_exists_many(jobs: list[JobPosting]) -> set[int]:
             if await find_existing(db, job) is not None:
                 out.add(i)
     return out
+
+
+def company_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+async def company_history() -> dict[str, dict]:
+    """Per employer, what earlier searches already brought this person: how many jobs, how many were a real fit,
+    how many were not. Searches use it to look past employers already covered (or never a fit) for new ones."""
+    where, params = _scope()
+    async with _conn() as db:
+        cur = await db.execute(
+            "SELECT company, COUNT(*), "
+            "SUM(CASE WHEN verdict IN ('strong','good') THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN verdict = 'incompatible' OR COALESCE(fit_score, 100) < 45 THEN 1 ELSE 0 END) "
+            f"FROM jobs WHERE {where} GROUP BY company", params)
+        rows = await cur.fetchall()
+    out: dict[str, dict] = {}
+    for company, total, good, poor in rows:
+        k = company_key(company)
+        if not k or k == "unknowncompany":
+            continue
+        h = out.setdefault(k, {"total": 0, "good": 0, "poor": 0})
+        h["total"] += total or 0
+        h["good"] += good or 0
+        h["poor"] += poor or 0
+    return out
+
+
+async def stored_urls() -> set[str]:
+    """Every posting link this person already has (canonical and apply links)."""
+    where, params = _scope()
+    async with _conn() as db:
+        cur = await db.execute(f"SELECT career_page_url, apply_url FROM jobs WHERE {where}", params)
+        return {u for row in await cur.fetchall() for u in row if u}
 
 
 async def count(where: str = "", params: tuple = ()) -> int:

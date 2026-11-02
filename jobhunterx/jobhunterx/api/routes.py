@@ -679,7 +679,7 @@ async def _refresh_outdated_once() -> None:
 
 @router.get("/jobs")
 async def list_jobs(view: str = "recommended", run_id: str = "", q: str = "", work_mode: str = "",
-                    min_score: int = 0, sort: Literal["chance", "score", "reach", "recent"] = "chance", limit: int = 200,
+                    min_score: int = 0, sort: Literal["chance", "score", "reach", "recent"] = "score", limit: int = 200,
                     offset: int = 0):
     """One page of jobs (page through with offset; has_more says whether another page exists) plus the tab counts."""
     if view not in jobs_svc.VIEWS:

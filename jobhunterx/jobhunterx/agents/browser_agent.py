@@ -1221,6 +1221,10 @@ _OPTION_JS = """function(op, arg) {
     const s = nativeSelect();
     return norm([s && s.selectedOptions[0] ? s.selectedOptions[0].text : '', el.value || '', c.innerText || ''].join(' ')).slice(0, 200);
   };
+  // suggestion lists are often drawn inside a web component's open shadow root
+  const deepAll = (root, q) => { const out = [...root.querySelectorAll(q)];
+    const walk = (r) => { for (const e of r.querySelectorAll('*')) if (e.shadowRoot) { out.push(...e.shadowRoot.querySelectorAll(q)); walk(e.shadowRoot); } };
+    try { walk(root); } catch (e) {} return out; };
   const PLACEHOLDER = /^(loading|searching|fetching|please wait|no (options|results|matches|data)|nothing found|not found|type to search|start typing|type (at least|more)|please enter|enter \\d+ or more|select\\.*$|select (an? )?(option|one)|choose\\.*$|--)/i;
   if (op === 'inspect') {
     const s = nativeSelect();
@@ -1260,9 +1264,10 @@ _OPTION_JS = """function(op, arg) {
       '[class*=menu] [class*="-option"]', '[id*="-option-"]', '.select__option', 'li.iti__country', '.country-list li.country',
       '[data-automation-id=promptOption]', '.MuiAutocomplete-option', '.ant-select-item-option', '.vs__dropdown-option',
       '.select2-results__option', '.chosen-results li', '.pac-item', 'ul.ui-autocomplete li', '.autocomplete-suggestion',
-      '.dropdown-menu.show li', '[class*=suggestion] li', '[class*=dropdown] [class*=item]'];
+      '.dropdown-menu.show li', '[class*=suggestion] li', '[class*=suggest] [class*=item]', '[class*=autocomplete] li',
+      '[class*=results] li', '[class*=dropdown] [class*=item]'];
     const found = new Set();
-    for (const q of SEL) { try { for (const e of sc.querySelectorAll(q)) if (!e.contains(el) && !el.contains(e)) found.add(e); } catch (e) {} }
+    for (const q of SEL) { try { for (const e of deepAll(sc, q)) if (!e.contains(el) && !el.contains(e)) found.add(e); } catch (e) {} }
     let cands = [...found].filter(vis);
     cands = cands.filter((c) => !cands.some((o) => o !== c && c.contains(o)));
     const opts = [], els = [];
@@ -1276,7 +1281,7 @@ _OPTION_JS = """function(op, arg) {
       opts.push({ t, dial: c.getAttribute('data-dial-code') || (c.querySelector('[data-dial-code]') || { getAttribute: () => '' }).getAttribute('data-dial-code') || '' });
       if (opts.length >= 400) break;
     }
-    const busy = [...(sc === doc ? doc : sc).querySelectorAll('[class*=loading i],[class*=spinner i],[aria-busy=true]')].some((e) => vis(e) && !e.contains(el));
+    const busy = deepAll(sc, '[class*=loading i],[class*=spinner i],[aria-busy=true]').some((e) => vis(e) && !e.contains(el));
     const list = els.length ? (els[0].closest('[role=listbox],ul,[class*=menu-list],[class*=menu],[class*=list]') || els[0].parentElement) : null;
     win.__jhxOpts = els; win.__jhxList = list;
     return { opts, loading: busy || /^(loading|searching|fetching|please wait)/i.test(placeholder), empty: placeholder,
@@ -1352,11 +1357,25 @@ def _option_score(text: str, dial: str, want: str, code: str, aliases: list[str]
     return score - len(t) / 1000 if score else 0
 
 
+def _head_score(text: str, value: str) -> float:
+    """Places are written many ways ("Hyderabad, Telangana, India" vs "Hyderabad, TG, IN"): an option that starts with the
+    place's own name (the part before the first comma) is a match when the rest agrees or nothing else was given."""
+    if "," not in value:
+        return 0
+    head = _norm_opt(value.split(",")[0])
+    t = _norm_opt(text)
+    if len(head) < 3 or not re.match(rf"{re.escape(head)}( |$)", t):
+        return 0
+    rest = [w for w in _norm_opt(value.split(",", 1)[1]).split() if len(w) > 1]
+    hits = sum(re.search(rf"(^| ){re.escape(w)}( |$)", t[len(head):]) is not None for w in rest)
+    return 62 + 4 * hits if hits else 50
+
+
 def _best(options: list[dict], value: str) -> tuple[int, float]:
     want, code, aliases = _want(value)
     best, best_score = -1, 0.0
     for i, o in enumerate(options):
-        s = _option_score(o.get("t", ""), o.get("dial", ""), want, code, aliases)
+        s = max(_option_score(o.get("t", ""), o.get("dial", ""), want, code, aliases), _head_score(o.get("t", ""), value))
         if s > best_score:
             best, best_score = i, s
     return best, best_score
@@ -1365,7 +1384,7 @@ def _best(options: list[dict], value: str) -> tuple[int, float]:
 _GOOD = 60     # below this an option is only loosely related to what was asked: list them and let the agent decide
 
 
-async def _choose_option(browser_session: Any, index: int, value: str, search: str = "", wait_seconds: float = 8) -> Any:
+async def _choose_option(browser_session: Any, index: int, value: str, search: str = "", wait_seconds: float = 10) -> Any:
     """Open a dropdown (native, React-Select, Material, Workday, country-code flag pickers, autocompletes…), type a search
     if it has a search box, WAIT until the list has loaded and stopped changing, click the best-matching option with a
     real mouse click, and check that the field now shows it."""
@@ -1400,20 +1419,31 @@ async def _choose_option(browser_session: Any, index: int, value: str, search: s
             await send.Input.dispatchKeyEvent(params={"type": "keyUp", "key": ch}, session_id=sid)
             await asyncio.sleep(0.06)
 
-    async def settled(limit: float) -> dict:
-        """Poll the options until the list stops loading and stays the same for a moment (or a good match shows)."""
-        deadline = time.monotonic() + limit
-        last, since, r = None, time.monotonic(), {"opts": []}
+    def sig_of(r: dict) -> tuple:
+        return tuple(o["t"] for o in r.get("opts") or [])
+
+    async def settled(limit: float, before: Optional[tuple] = None) -> dict:
+        """Poll the options until the list stops loading and stays the same for a moment (or a good match shows).
+        before: the list as it was before typing. Search-as-you-type boxes wait a moment after the last key, then ask
+        a server — until then they keep showing the old list or "No results". Neither counts as the answer for the
+        first few seconds; only a list that changed (or a good match) ends the wait early."""
+        start = time.monotonic()
+        deadline = start + limit
+        patience = min(limit * 0.6, 4.0) if before is not None else 0.0
+        last, since, r = None, start, {"opts": []}
         while True:
             r = await js("options") or {"opts": []}
-            sig = tuple(o["t"] for o in r["opts"])
+            sig = sig_of(r)
             now = time.monotonic()
             if sig != last:
                 last, since = sig, now
+            fresh = before is None or sig != before
             if r["opts"] and not r.get("loading") and now - since >= 0.6:
-                if _best(r["opts"], value)[1] >= _GOOD or now - since >= 1.5:
+                if _best(r["opts"], value)[1] >= _GOOD:
                     return r
-            if r.get("empty") and not r.get("loading") and now - since >= 1.2:
+                if now - since >= 1.5 and (fresh or now - start >= patience):
+                    return r
+            if r.get("empty") and not r.get("loading") and now - since >= 1.2 and now - start >= patience:
                 return r                                              # "No options" has stayed: this search found nothing
             if now >= deadline:
                 return r
@@ -1434,7 +1464,7 @@ async def _choose_option(browser_session: Any, index: int, value: str, search: s
         have = _norm_opt(shown)
         return bool(words) and sum(w in have for w in words) >= max(1, (len(words) + 1) // 2)
 
-    wait_seconds = max(3.0, min(float(wait_seconds or 8), 20.0))
+    wait_seconds = max(3.0, min(float(wait_seconds or 10), 20.0))
     try:
         info = await js("inspect") or {}
         if info.get("kind") == "select":
@@ -1460,8 +1490,10 @@ async def _choose_option(browser_session: Any, index: int, value: str, search: s
         terms = [search] if search else []
         if code and phone_util.country_for_code(code):
             terms += [phone_util.country_for_code(code), "+" + code]
+        if "," in value:                                              # a place: most boxes match its own name only
+            terms.append(value.split(",")[0])
         terms.append(value)
-        terms = list(dict.fromkeys(t.strip() for t in terms if t and t.strip()))[:3]
+        terms = list(dict.fromkeys(t.strip() for t in terms if t and t.strip()))[:4]
 
         r = await settled(1.2 if info.get("typable") else min(2.5, wait_seconds))                       # some lists show everything on open
         i, score = _best(r["opts"], value)
@@ -1471,13 +1503,17 @@ async def _choose_option(browser_session: Any, index: int, value: str, search: s
                 focus = await js("focus_input") or {}
                 if not focus.get("ok"):
                     break
+                before = sig_of(r)
                 await type_text(term)
                 typed = term
                 await asyncio.sleep(0.5)
-                r = await settled(wait_seconds)
+                r = await settled(wait_seconds, before)
                 if not r["opts"] and not r.get("empty") and info.get("workday"):
                     await key("Enter", 13, "\r")                      # Workday-style boxes search on Enter
                     r = await settled(wait_seconds)
+                elif not r["opts"] and not r.get("empty"):
+                    await key("ArrowDown", 40)                        # some boxes open their list only on a key press
+                    r = await settled(min(4.0, wait_seconds))
                 i, score = _best(r["opts"], value)
                 if score >= _GOOD:
                     break
@@ -1584,9 +1620,9 @@ def _build_tools(profile: Optional[dict] = None, files: Optional[dict] = None) -
     @controller.action("Pick an option in ANY dropdown, select, combobox or autocomplete (country, phone country code / flag "
                        "picker, location, college, degree, notice period, 'how did you hear'…). Give the dropdown's index "
                        "and the value you want (the country name, the '+code', the degree name… exactly as you want it chosen); optional "
-                       "search = a shorter word to type into its search box (e.g. 'CVR' for a college). It opens the list, "
+                       "search = a shorter word to type into its search box (the distinctive part of a long name). It opens the list, "
                        "types, WAITS for the options to load, clicks the best match and checks the field shows it.")
-    async def choose_option(index: int, value: str, browser_session, search: str = "", wait_seconds: float = 8) -> ActionResult:
+    async def choose_option(index: int, value: str, browser_session, search: str = "", wait_seconds: float = 10) -> ActionResult:
         return await _choose_option(browser_session, index, value, search, wait_seconds)
 
     @controller.action("Tick or untick a checkbox / toggle / switch by its index, and verify it changed. "

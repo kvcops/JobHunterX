@@ -358,7 +358,7 @@ function Filters() {
     return () => clearTimeout(t);
   }, [q]);
   // Only filters the user set count here; "latest search only" is shown as its own chip below.
-  const active = (list.work_mode ? 1 : 0) + (list.min_score ? 1 : 0) + (list.sort !== 'chance' ? 1 : 0);
+  const active = (list.work_mode ? 1 : 0) + (list.min_score ? 1 : 0) + (list.sort !== 'score' ? 1 : 0);
   return html`<div class="filter-block"><div class="filter-row">
     <label class="search-field"><${Icon} name="search" size=${15} />
       <input type="search" placeholder="Filter by title, company, place" aria-label="Filter jobs" value=${q} onInput=${(e) => setQ(e.currentTarget.value)} /></label>
@@ -374,7 +374,7 @@ function Filters() {
           <${Field} label="Minimum score">${(id) => html`<${Select} id=${id} block label="Minimum score" value=${String(list.min_score || 0)} onChange=${(v) => setList({ min_score: Number(v) })}
             options=${[['0', 'Any score'], ['45', '45 and above', 'Includes stretch roles'], ['60', '60 and above', 'Good matches'], ['75', '75 and above', 'Strong matches only']]} />`}</${Field}>
           <${Field} label="Sort">${(id) => html`<${Select} id=${id} block label="Sort" value=${list.sort} onChange=${(v) => setList({ sort: v })}
-            options=${[['chance', 'Best chance', 'Fit and how likely you are to be seen'], ['score', 'Best fit'],
+            options=${[['score', 'Best fit', 'Highest score first'], ['chance', 'Best chance', 'Fit and how likely you are to be seen'],
               ['reach', 'Least crowded', 'Fresh posts, employer boards, email routes first'], ['recent', 'Most recent']]} />`}</${Field}>
         </div>
       </${Popover}>
