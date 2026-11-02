@@ -60,7 +60,7 @@ export function initialState() {
     setup: { data: null, error: null, saving: false, tests: {} },   // API keys; checked before anything else
     details: {},            // jobId -> { status, job, error }
     list: {
-      scope: 'all', runId: null, view: 'recommended', q: '', work_mode: '', min_score: 0, sort: 'chance',
+      scope: 'all', runId: null, view: 'recommended', q: '', work_mode: '', min_score: 0, sort: 'score',
       ids: [], counts: null, status: 'idle', error: null, hasMore: false, more: false,
     },
     pending: { save: {}, track: {}, verify: {}, rescore: {}, connect: {}, apply: {}, remove: {} },

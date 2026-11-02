@@ -196,8 +196,39 @@ async def plan_queries(snap: CandidateSnapshot, scope: SearchScope, max_queries:
     # never-asked first, then the longest ago; the stable sort keeps the interleaved order inside each group
     queries.sort(key=lambda q: used.get(_norm_query(q), 0) if now - used.get(_norm_query(q), 0) < HISTORY_FRESH_S else 0)
     queries = queries[:max_queries]
+    # Every run also asks the open job boards directly (Greenhouse, Lever, Ashby): each hit there is a company's own
+    # board, which is then read in full and remembered, so the set of employers keeps growing run after run.
+    have = {_norm_query(q) for q in queries}
+    for q in board_queries(scope, round_):
+        k = _norm_query(q)
+        if k not in have and now - used.get(k, 0) >= HISTORY_FRESH_S and len(queries) < max_queries + BOARD_QUERIES:
+            have.add(k)
+            queries.append(q)
     _record(snap.profile_hash, queries)
     return queries, method
+
+
+BOARD_KINDS = ("greenhouse", "lever", "ashby")
+BOARD_QUERIES = 6                    # extra open-board queries per run, on top of the plan
+
+
+def board_queries(scope: SearchScope, round_: int = 0) -> list[str]:
+    """site: queries on the open job boards, titles x places, starting at a different title each run."""
+    from jobhunterx.discovery import ats
+    hosts = [ats.ADAPTERS[k].search_hosts[0] for k in BOARD_KINDS if k in ats.ADAPTERS and ats.ADAPTERS[k].search_hosts]
+    titles = scope.titles[:8]
+    places = list(scope.locations[:3]) or [scope.country]
+    if scope.include_remote:
+        places.append(f"remote {scope.country}".strip())
+    if not titles or not hosts:
+        return []
+    out = []
+    for n in range(len(titles) * len(places)):
+        title = titles[(n + round_) % len(titles)]
+        place = places[(n // len(titles) + round_) % len(places)]
+        for host in hosts:
+            out.append(f'site:{host} "{title}" {place}'.strip())
+    return out
 
 
 def router_config() -> dict:
