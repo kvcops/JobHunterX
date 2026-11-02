@@ -83,8 +83,21 @@ PID=$(pgrep -f "uvicorn.*jobhunterx|jobhunterx.api.main|python.*jobhunterx" | he
 PY=""; [ -n "$PID" ] && PY=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
 for v in .venv venv jobhunterx/.venv jobhunterx/venv; do [ -z "$PY" ] && [ -x "$REPO_DIR/$v/bin/python" ] && PY="$REPO_DIR/$v/bin/python"; done
 REQ=$(git ls-files | grep -E '(^|/)requirements\.txt$' | head -1)
-if [ -n "$REQ" ] && [ -n "$PY" ] && ! git diff --quiet "$BEFORE" "$AFTER" -- "$REQ"; then
-  say "requirements changed: installing with $PY"; "$PY" -m pip install -q -r "$REQ" || { echo "pip install failed"; exit 1; }
+# Install when requirements.txt changed, or when the app's Python is missing something it lists (an earlier deploy
+# whose install failed). pip leaves what is already satisfied alone.
+missing() { "$PY" -m pip install --dry-run -q -r "$REQ" 2>/dev/null | grep -q "Would install"; }
+if [ -n "$REQ" ] && [ -n "$PY" ] && { ! git diff --quiet "$BEFORE" "$AFTER" -- "$REQ" || missing; }; then
+  say "installing requirements with $PY"
+  if ! OUT=$("$PY" -m pip install -q -r "$REQ" 2>&1); then
+    # The app runs on the system Python (not a virtual env) and the OS refuses pip there (PEP 668). The app's other
+    # packages already live in that Python, so the same install is repeated the way they were put there.
+    if echo "$OUT" | grep -q "externally-managed-environment" && [ ! -f "$(dirname "$(dirname "$PY")")/pyvenv.cfg" ]; then
+      echo "system Python refuses pip (PEP 668): installing the app's packages with --break-system-packages"
+      "$PY" -m pip install -q --break-system-packages -r "$REQ" || { echo "pip install failed"; exit 1; }
+    else
+      echo "$OUT" | tail -20; echo "pip install failed"; exit 1
+    fi
+  fi
 fi
 
 say "Restart"
