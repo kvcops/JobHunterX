@@ -197,7 +197,7 @@ def _between(text: str, start: str, end: str) -> str:
 def fake_llm(chain: str, messages: list[dict]) -> str:
     system = messages[0]["content"]
     user = messages[-1]["content"]
-    if "senior technical recruiter building" in system:
+    if "building an accurate, honest model of a candidate" in system:
         return json.dumps(CANDIDATE)
     if "extracting the facts of ONE job posting" in system:
         title = re.search(r"Job title \(from source\): (.*)", user).group(1).strip()

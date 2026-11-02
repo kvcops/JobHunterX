@@ -232,7 +232,7 @@ async def refresh_links(snapshot: CandidateSnapshot, profile_dict: dict, emit=No
                 and m.profile_hash == snapshot.profile_hash and m.engine_version == ENGINE_VERSION):
             continue
         todo.append((p, m))
-    done = 0
+    done = changed = 0
     for i in range(0, len(todo), 20):
         chunk = todo[i:i + 20]
         posts = [p for p, _ in chunk]
@@ -242,12 +242,17 @@ async def refresh_links(snapshot: CandidateSnapshot, profile_dict: dict, emit=No
         for p, m in chunk:
             fit = fits.get(p.id) or (m.role_fit, m.role_track, "", m.method or "fallback")
             new = assess(snapshot, p, role_fit=fit, candidate_text=text, idf=build_idf([p.description, text]))
+            if m is not None and m.reach is not None and new.reach is None:
+                new.reach = m.reach                    # the reach estimate does not depend on the skill links
             await storage.update_posting(p)
             await storage.update_match(p.id, new)
             done += 1
-    if done and emit:
-        # one event at the end: the list reloads once (cards and tab counts together), not once per job
-        await emit({"type": "jobs.refreshed", "data": {"count": done}})
+            if m is None or (m.score, m.verdict, m.track) != (new.score, new.verdict, new.track):
+                changed += 1
+    if changed and emit:
+        # one event at the end, and only if something a person can see changed: the list reloads once (cards and tab
+        # counts together), not once per job
+        await emit({"type": "jobs.refreshed", "data": {"count": changed}})
     return done
 
 

@@ -67,7 +67,7 @@ Rules:
   no new numbers, metrics, tools, technologies, employers, titles, scope or outcomes. If a bullet is already good, return it unchanged.
 - Never add a skill or technology to a bullet that the bullet does not already mention, even if the job asks for it.
 - Start bullets with a strong action verb in the SAME tense as the original bullet (past tense for finished work,
-  e.g. "Built", never "Build"); keep each under 35 words.
+  never turning a past-tense verb into its present or base form); keep each under 35 words.
 - Write names, degrees, titles and numbers exactly as the candidate wrote them (do not expand abbreviations).
 - Summary (2-3 sentences, under 60 words): open with the candidate's own title and level exactly as given, then the
   2-3 strengths from the candidate material that matter most for THIS job (the skills and kinds of work the job asks

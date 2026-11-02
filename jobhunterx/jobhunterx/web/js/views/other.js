@@ -536,7 +536,7 @@ function BrowserKeyCard({ d }) {
 const FREE_SOURCES = [
   { k: 'enable_yc_source', name: 'YC Work at a Startup', label: 'Use YC startup jobs',
     hint: "No key — YC startups' public job pages in India and remote. Each role shows the company's own minimum experience (many say \u201cnew grads ok\u201d) and the founder who is hiring." },
-  { k: 'enable_reddit_source', name: 'r/developersIndia', label: 'Use Reddit hiring posts',
+  { k: 'enable_reddit_source', name: 'Reddit', label: 'Use Reddit hiring posts',
     hint: 'No key — the monthly \u201cWho\u2019s hiring?\u201d thread, where small teams post roles with pay and experience. Reddit blocks some cloud servers; from a home connection it works.' },
   { k: 'enable_founder_posts', name: 'Founder hiring posts', label: 'Find founder posts',
     hint: '\u201cWe\u2019re hiring\u201d posts on X, found through your web search providers. JobHunterX never opens or logs in to X — you open the post yourself. (LinkedIn postings are never shown.)' },
@@ -620,7 +620,7 @@ function TuningSection({ d }) {
         onChange=${(v) => setT({ ...t, tavily_search_depth: v })} options=${[['basic', 'Basic', '1 credit'], ['advanced', 'Advanced', '2 credits']]} />`}</${Field}>
     </div>
     <div class="set-toggles" style=${{ margin: '12px 0' }}><div class="set-toggle"><div><strong>Safety-net track for freshers</strong>
-      <span class="muted small">Under ~3 years: show large IT-services fresher programmes (national tests, off-campus drives) in their own “Safety net” tab instead of hiding them.</span></div>
+      <span class="muted small">Under ~3 years: show large bulk-hiring programmes (tests, recruitment drives) in their own “Safety net” tab instead of hiding them.</span></div>
       <label class="switch"><input type="checkbox" checked=${t.fresher_floor_track !== false} onChange=${(e) => setT({ ...t, fresher_floor_track: e.currentTarget.checked })} /><span class="switch-ui"></span></label></div></div>
     <div class="row gap"><${Button} variant="primary" disabled=${!dirty} onClick=${() => saveSettings({ tunables: t })}>Save</${Button}>
       <${Button} disabled=${!dirty} onClick=${() => setT(d.tunables)}>Discard</${Button}></div>

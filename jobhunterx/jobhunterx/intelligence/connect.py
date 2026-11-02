@@ -72,7 +72,7 @@ class _Draft(BaseModel):
     message: str = Field("", description="email / DM body, 70-130 words, plain text, signed with the candidate's first name")
 
 
-_SYS = """You write short, warm, specific outreach for a job seeker in India asking a person at a company for a referral
+_SYS = """You write short, warm, specific outreach for a job seeker asking a person at a company for a referral
 or a quick word with the hiring team. Rules:
 - Use ONLY the facts given. Never invent achievements, numbers, companies, tools, dates or titles.
 - Mention at most 3 of the matched skills, and the one real role or project given, in plain words.

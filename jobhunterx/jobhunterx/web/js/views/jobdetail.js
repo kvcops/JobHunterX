@@ -49,15 +49,15 @@ function FresherCard({ m }) {
       <${Badge} tone=${band[0]}>${band[1]}</${Badge}>
       ${e.candidate_label ? html`<span class="muted small">Your experience as recruiters count it: <strong>${e.candidate_label}</strong></span>` : null}</div>
       ${e.advice ? html`<p class="small">${e.advice}</p>` : null}` : null}
-    ${m.track === 'floor' ? html`<${Notice} tone="info"><strong>Safety-net track.</strong> Large IT-services employers hire freshers in volume
-      through national tests and off-campus drives. Register on their official hiring portal and note the test dates — keep applying to
+    ${m.track === 'floor' ? html`<${Notice} tone="info"><strong>Safety-net track.</strong> Large services / outsourcing employers hire early-career people in bulk
+      through tests and recruitment drives. Register on their official hiring portal and note the test dates — keep applying to
       targeted roles alongside. You can turn this track off in Settings → Search tuning.</${Notice}>` : null}
   </section>`;
 }
 
 const CHANNEL_OPTIONS = [['own_site', "Company's own site"], ['referral', 'Referral'], ['hiring_team', 'Note to the hiring team'],
   ['founder_outreach', 'Founder outreach'], ['linkedin', 'LinkedIn'], ['job_board', 'Other job board'], ['challenge', 'Hiring challenge'],
-  ['it_services_test', 'IT-services test / drive'], ['email', 'Email to the posting'], ['other', 'Other']];
+  ['it_services_test', 'Bulk-hiring test / drive'], ['email', 'Email to the posting'], ['other', 'Other']];
 const EVENT_LABEL = { reply: 'A person replied', screen: 'Screening call', interview: 'Interview', offer: 'Offer', rejected: 'Rejected' };
 
 /** What happened after applying — feeds the per-channel results in the tracker. */

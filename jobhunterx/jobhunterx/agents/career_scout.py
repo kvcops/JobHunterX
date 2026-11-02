@@ -48,19 +48,19 @@ ROLE KEYWORD: {keyword_line}
 START: {start_line}
 
 HOW TO WORK (fast and exact)
-1. Get to the job LIST. On a careers home page, look for "Search jobs", "View all jobs", "Open positions", "Job
-   openings", "Find your role", "Explore jobs" or a country / "India" chooser. Use ONLY the company's own site or the
-   job board it sends you to (Workday, Greenhouse, Lever, SuccessFactors, iCIMS, Eightfold, Phenom, Oracle…), never a
-   job portal (LinkedIn, Naukri, Indeed, Glassdoor, Foundit, Instahyre, Cutshort…). If you land on ONE job, go back
-   to the list.
+1. Get to the job LIST. On a careers home page, look for the link or button that opens the open positions / job
+   search, or a country or region chooser (pick the one in the LOCATION FILTER). Use ONLY the company's own site or the
+   applicant-tracking system it sends you to, never a job portal or aggregator that lists many companies' jobs. If you
+   land on ONE job, go back to the list.
 2. Apply the location on the site itself:
    - Location box or typeahead: type the place, then use `choose_option` so you WAIT for the suggestions and pick the
-     one for the place (prefer the city; else "City, State, India"; else the state; else India).
+     one for the place (prefer the city; else the city with its region and country; else the region; else the
+     country).
    - Filter panel / checkboxes / dropdowns: open the location (or country → city) filter and tick the place.
    - Address bar: if the results address already has a search or location parameter (e.g. ...?location=...,
      ...?q=...), you may simply open that address with the place / keyword changed — often the most reliable way.
 3. Keyword: type the role keyword in the job search box and search. If that gives 0 jobs, try ONE broader word (the
-   main noun, e.g. "Engineer"); still 0 → clear the keyword and keep only the location. No search box → skip it.
+   main word of the job title); still 0 → clear the keyword and keep only the location. No search box → skip it.
 4. CHECK before you finish: the page shows at least one job card, and the place is applied (a filter chip, the
    address, or the jobs' locations show it). Scroll once if the list loads as you scroll.
 5. Finish with `done`, success=true, and write exactly:
@@ -81,10 +81,21 @@ Fix exactly that on {company}'s careers site (same filters as before), then fini
 lines (RESULTS_URL, KEYWORD_USED, JOBS_SHOWN, NOTES)."""
 
 
-def _prompt(company: str, location: str, keyword: str, start: str = "") -> str:
+async def _home_country() -> str:
+    """The candidate's own country (their profile setting), for a site that insists on a country first."""
+    try:
+        from jobhunterx.services import profile as profile_svc
+        prof = await profile_svc.get_profile()
+        return (prof.preferences.home_country if prof else "").strip()
+    except Exception:
+        return ""
+
+
+def _prompt(company: str, location: str, keyword: str, start: str = "", country: str = "") -> str:
     return SCOUT_PROMPT.format(
         company=company,
-        location_line=location or "none — keep all locations (but prefer India if the site asks for a country)",
+        location_line=location or ("none — keep all locations"
+                                   + (f" (if the site asks for a country first, pick {country})" if country else "")),
         keyword_line=keyword or "none — list all jobs",
         start_line=(f"the browser is already on {start} (found by a web search; check it is {company}'s own careers "
                     "site, else search again)") if start else "a web search results page is open; pick the official careers site")
@@ -580,10 +591,10 @@ class _StartPick(BaseModel):
 
 
 _START_SYS = """You choose where a browser should start to find one company's open jobs. From web search results, pick
-the company's OWN careers site: best its job search / job list page, else its careers home page, or the job board it
-uses (Workday, Greenhouse, Lever, SuccessFactors, iCIMS, Eightfold, Phenom, Oracle…). Never a job portal or aggregator
-(LinkedIn, Naukri, Indeed, Glassdoor, Foundit, Instahyre…), a news or review page, or a different company with a
-similar name. When the place is in India and the company has an India careers site or page, prefer it."""
+the company's OWN careers site: best its job search / job list page, else its careers home page, or the
+applicant-tracking system it uses for its jobs. Never a job portal or aggregator that lists many companies' jobs, a
+news or review page, or a different company with a similar name. When the company has a careers site or page for the
+country of the place given, prefer it."""
 
 
 async def _find_start(company: str, location: str) -> str:
@@ -694,7 +705,7 @@ async def scout(company: str, location: str = "", keyword: str = "", on_step: Op
         query = f"{company} careers jobs" + (f" {location}" if location else "")
         first = start or "https://html.duckduckgo.com/html/?q=" + query.replace(" ", "+")
         kwargs: dict[str, Any] = {
-            "task": _prompt(company, location, keyword, start), "llm": llm, "controller": _tools(), "browser_session": bs,
+            "task": _prompt(company, location, keyword, start, await _home_country()), "llm": llm, "controller": _tools(), "browser_session": bs,
             "register_new_step_callback": on_agent_step, "use_vision": "auto",
             "initial_actions": [{"navigate": {"url": first, "new_tab": False}}],
             # token-lean: no end-of-run judge call, a smaller page outline per step, a few actions per step

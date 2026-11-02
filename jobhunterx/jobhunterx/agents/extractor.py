@@ -24,7 +24,7 @@ from jobhunterx.intelligence.llm_structured import call_structured, fence
 
 log = get_logger("extractor")
 
-VERSION = "profile-extract-v7"   # v7: skills = the resume's own skills section (v6: must be written in the PDF)
+VERSION = "profile-extract-v8"   # v7: skills = the resume's own skills section (v6: must be written in the PDF)
 
 _SYSTEM = """You convert a resume into a structured candidate profile.
 Extract ONLY what is written in the resume. Never invent or infer employers, dates, skills, metrics or links.
@@ -32,12 +32,12 @@ Extract ONLY what is written in the resume. Never invent or infer employers, dat
   employment_type is "internship" for internships/trainee roles, otherwise "full_time", "part_time", "contract" or "freelance" if stated, else "".
 - education: every degree/diploma/school with grade and details if present. `institution` is the college or school
   actually attended, exactly as written. `university` is the separate affiliating / degree-awarding university ONLY if
-  the resume names one (e.g. "CVR College of Engineering, affiliated to JNTU Hyderabad" → institution "CVR College of
-  Engineering", university "JNTU Hyderabad"); otherwise leave it empty. Never copy the same name into both.
+  the resume names one (a college "affiliated to" or whose degree is "awarded by" a university: the college is the
+  institution, the university is the university); otherwise leave it empty. Never copy the same name into both.
 - projects: every project with its technologies. Put EVERY link of the project in its `links`, each with a short
-  `label` taken from the link's own text (e.g. "Code", "Live demo", "Paper", "Video"); set `url` to the main one.
-- linkedin / github / portfolio: the candidate's own profile links. Other personal profiles or pages (blog, coding
-  profiles, research profiles, personal sites…) go in `links` with a short label.
+  `label` taken from the link's own text (the words shown on the link); set `url` to the main one.
+- linkedin / github / portfolio: the candidate's own profile links. Every other personal profile or page
+  (on any site) goes in `links` with a short label.
 - item_links: a link that belongs to one certification, achievement or competition (credential, certificate,
   result page): section = "certification" | "achievement" | "competition", item = that entry's text exactly as you wrote it.
 - Use the "Embedded links" list: each line is `url | text on the link | nearby lines`; the nearby lines tell you
@@ -51,7 +51,7 @@ Extract ONLY what is written in the resume. Never invent or infer employers, dat
   given name, middle name(s) and family name (surname), in normal capitalisation. Many resumes print the surname first
   or use an initial for it; split by what the parts are, not by their order. Leave a part empty when it is not clear.
 - suggested_role: the single job title that best describes the candidate today.
-- relevant_experience: a short phrase describing their experience as stated (e.g. "1.5 years in ML engineering").
+- relevant_experience: a short phrase describing their experience as stated (how long, in what area).
 - Leave qa_memory and preferences empty."""
 
 

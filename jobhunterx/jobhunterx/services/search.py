@@ -210,11 +210,11 @@ _TRIAGE_SYS = """You shortlist job postings for one candidate before a detailed 
 3 = squarely the candidate's field and a level they can realistically get;
 2 = a related role they could credibly apply for (adjacent field, or one level above/below);
 1 = weak link (shares a word but different work);
-0 = a different field, or two or more levels above/below their level (e.g. Senior / Lead / Principal / Staff / Manager
-    titles for someone with under 3 years; intern roles for someone with 5+ years).
-Judge the work the title describes, not shared generic words like "Engineer", "Senior" or "Manager".
+0 = a different field, or two or more levels above/below their level (senior, lead or management titles for someone
+    early in their career; trainee or intern roles for someone with many years).
+Judge the work the title describes, not generic words that many titles share (level words, broad job nouns).
 A posting may show what it says about experience ("asks: …"). Read it against the candidate's years: asking for clearly
-more years than the candidate has (e.g. 4+ years for someone with 0-2) is out of reach → 0; asking a little more → at most 2.
+more years than the candidate has (roughly double or more) is out of reach → 0; asking a little more → at most 2.
 For an early-career candidate, openings meant for people at their level, in their field, are the best finds → 3.
 Score every index."""
 TRIAGE_MAX = 140
@@ -498,7 +498,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 settings, scope.titles, scope.locations or [scope.country or "India"],
                 labels=[*scope.titles, *snap.adjacent_titles, *[f.label for f in snap.role_families]],
                 include_remote=scope.include_remote, max_postings=max(10, max_jobs // 2), skip=already_seen, on_progress=note,
-                fresher=search.early_career(snap))
+                fresher=search.early_career(snap), country=scope.country)
         except Exception as exc:                  # a source that is down or out of quota never fails the search
             log.warning("job_apis_failed", error=str(exc)[:160])
             return []

@@ -355,7 +355,7 @@ class Workday(AtsAdapter):
     kind = "workday"
     _URL = re.compile(r"(?P<tenant>[\w\-]+)\.(?P<wd>wd\d+)\.myworkdayjobs\.com/(?:wday/cxs/[\w\-]+/)?"
                       r"(?:[a-z]{2}-[A-Z]{2}/)?(?P<site>[\w\-]+)(?:/job/(?P<path>[^?#]+))?", re.I)
-    DEFAULT_QUERIES = ("AI engineer", "machine learning", "generative AI", "LLM")
+    DEFAULT_QUERIES = ("",)        # no words given: the newest jobs on the board (our own matching picks from them)
     PER_QUERY = 40
     MAX_DETAILS = 30
 
@@ -484,7 +484,7 @@ class OracleRecruiting(AtsAdapter):
     search_hosts = ("oraclecloud.com/hcmUI/CandidateExperience",)
     _URL = re.compile(r"(?P<host>[\w\-]+(?:\.[\w\-]+)*\.oraclecloud\.com)/hcmUI/CandidateExperience/[\w\-]+/sites/"
                       r"(?P<site>[\w\-]+)(?:/(?:job|requisitions/preview)/(?P<job>\d+))?", re.I)
-    DEFAULT_QUERIES = ("engineer", "developer", "analyst")
+    DEFAULT_QUERIES = ("",)        # no words given: the newest jobs on the board (our own matching picks from them)
     PER_QUERY = 25
     MAX_DETAILS = 30
 
@@ -533,18 +533,31 @@ class OracleRecruiting(AtsAdapter):
             countries=[_COUNTRY_CODES.get(country, country)] if country else [],
         )
 
-    COUNTRY = "India"              # JobHunterX searches India; the board's own location filter keeps results local
     _country_ids: dict[str, Optional[int]] = {}
 
+    @staticmethod
+    async def _candidate_country() -> str:
+        """The candidate's own country (their profile setting) — the board's location filter keeps results there."""
+        try:
+            from jobhunterx.services import profile as profile_svc
+            prof = await profile_svc.get_profile()
+            return (prof.preferences.home_country if prof else "").strip()
+        except Exception:
+            return ""
+
     async def _country_id(self, host: str, site: str) -> Optional[int]:
-        """The board's location-facet id for India (keyword search matches titles only, so location must be a filter)."""
-        key = f"{host}/{site}"
+        """The board's location-facet id for the candidate's country (keyword search matches titles only, so location
+        must be a filter). None when there is no country or the board has no such facet."""
+        country = await self._candidate_country()
+        if not country:
+            return None
+        key = f"{host}/{site}/{country.lower()}"
         if key not in self._country_ids:
             data, _ = await net.fetch_json(
                 f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=locationsFacet"
                 f"&finder=findReqs;siteNumber={site},facetsList=LOCATIONS,limit=1")
             facets = [f for b in ((data or {}).get("items") or []) if isinstance(b, dict) for f in b.get("locationsFacet") or []]
-            hit = next((f for f in facets if str(f.get("Name", "")).strip().lower() == self.COUNTRY.lower()), None)
+            hit = next((f for f in facets if str(f.get("Name", "")).strip().lower() == country.lower()), None)
             self._country_ids[key] = int(hit["Id"]) if hit and hit.get("Id") else None
         return self._country_ids[key]
 
@@ -558,7 +571,7 @@ class OracleRecruiting(AtsAdapter):
         pages = await asyncio.gather(*(
             net.fetch_json(f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true"
                            f"&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber={site},{loc}"
-                           f"limit={self.PER_QUERY},sortBy=POSTING_DATES_DESC,keyword=%22{quote(q)}%22")
+                           f"limit={self.PER_QUERY},sortBy=POSTING_DATES_DESC" + (f",keyword=%22{quote(q)}%22" if q else ""))
             for q in (queries or self.DEFAULT_QUERIES)[:4]))
         for data, _ in pages:
             if not isinstance(data, dict):

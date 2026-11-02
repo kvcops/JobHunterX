@@ -58,12 +58,11 @@ def early_career(snap: CandidateSnapshot) -> bool:
 _PLAN_SYSTEM = """You design web search queries that surface individual, currently open job postings for one candidate.
 Use the candidate's target titles, adjacent titles and locations given to you. Vary the angle: exact titles,
 title synonyms employers use, skill-anchored queries for their strongest skills, and remote variants (only if remote is
-accepted). EVERY query must name one of the candidate's locations (or "remote India" style for remote).
+accepted). EVERY query must name one of the candidate's locations (for remote: "remote" plus their country).
 Prefer queries that land on ONE posting on an employer's own career page or applicant-tracking-system job page (use the
 site: hosts given), not on job-board result lists: never write "jobs in <city>" or "<n> openings" style queries.
 Do not include seniority levels above the candidate's. Keep each query under 120 characters. No duplicates.
-Match the candidate's level. Most postings found by a bare title ("AI Engineer", "Data Scientist") ask for several years
-of experience. When the candidate is early-career (a fresher or under about 3 years), the queries must find the openings
+Match the candidate's level. Most postings found by a bare job title ask for several years of experience. When the candidate is early-career (a fresher or under about 3 years), the queries must find the openings
 meant for people at their level: use the titles and the wording employers in the candidate's country actually use when
 they hire at that level, and a years range that fits the candidate. Never write queries that would mostly surface roles
 needing far more experience than the candidate has. level_titles: the candidate's titles reworded that way."""

@@ -131,7 +131,7 @@ class Settings(BaseSettings):
     fresher_floor_track: bool = True        # under ~3 yrs: show large IT-services fresher programmes as a separate safety-net track
     enable_hn_source: bool = False          # Hacker News: YC job posts + monthly 'Who is hiring?' (India / India-friendly remote only)
     enable_yc_source: bool = True           # YC Work at a Startup public job pages (minimum experience shown per role)
-    enable_reddit_source: bool = True       # r/developersIndia posts flaired 'Hiring' (Reddit's public JSON / RSS)
+    enable_reddit_source: bool = True       # hiring threads in the Reddit communities of the candidate's field
     enable_founder_posts: bool = True       # founders' 'we're hiring' posts on X / LinkedIn, via your web search providers only
     enable_funding_signals: bool = True     # startup funding news (Inc42, Entrackr, YourStory, Google News RSS)
     enable_domain_age_check: bool = True    # registration date of the apply site (public RDAP registry) as a scam signal

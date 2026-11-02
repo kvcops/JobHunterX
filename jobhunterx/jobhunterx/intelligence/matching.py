@@ -30,7 +30,7 @@ from jobhunterx.intelligence import scam as scam_rules
 from jobhunterx.intelligence.reach import assess_reach
 from jobhunterx.intelligence.text import term_in_text, tokens
 
-ENGINE_VERSION = "match-v5"   # v5: requirements met by education / experience; related shown apart (v4: unknowns)
+ENGINE_VERSION = "match-v6"   # v6: field-neutral wording (v5: education / experience can meet requirements)
 
 # Warnings whose dimension is already a scored component (a stretch on experience lowers "Experience fit"): they
 # explain the score, they don't multiply it down a second time. Only warnings about things the components don't
@@ -564,16 +564,16 @@ def assess(
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
                                             detail=f"{job.company} is on your excluded list."))
     elif job.employer_kind == "it_services_bulk" and early and floor_track_on():
-        # Large IT-services employers run the biggest fresher programmes (national tests, off-campus drives). They are a
-        # safety net, kept apart so their generic postings never crowd out targeted roles.
+        # Large services / outsourcing employers run the biggest entry-level programmes (aptitude tests, recruitment
+        # drives). They are a safety net, kept apart so their generic postings never crowd out targeted roles.
         job_track = "floor"
         constraints.append(ConstraintResult(key="company", label="Company", status="warn", hard=False,
-                                            detail=f"Safety-net track: {job.company} hires freshers in bulk through national "
-                                                   "tests and off-campus drives — apply on its official hiring portal."))
+                                            detail=f"Safety-net track: {job.company} hires early-career people in bulk "
+                                                   "through tests and recruitment drives — apply on its official hiring portal."))
     elif job.employer_kind == "it_services_bulk":
         constraints.append(ConstraintResult(key="company", label="Company", status="fail",
-                                            detail=f"{job.company} is a mass-recruitment IT services firm — "
-                                                   "bulk hiring, little real product AI work."))
+                                            detail=f"{job.company} is a mass-recruitment services firm — "
+                                                   "bulk hiring for client work, usually far from the role's real work."))
 
     scam = scam_rules.check(job)
     if scam.level == "critical":
