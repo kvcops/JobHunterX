@@ -327,6 +327,7 @@ function JobCardView({ job, onOpen = openJob, selected, index = 0, fresh }) {
         ${m ? html`<${Badge} tone=${VERDICT_TONE[m.verdict]}>${VERDICT_LABEL[m.verdict]}</${Badge}>` : html`<${Badge}>Not scored</${Badge}>`}
         <${Badge} tone=${VALIDATION_TONE[job.validation.status]}>${VALIDATION_LABEL[job.validation.status]}</${Badge}>
         ${job.match_stale ? html`<${Badge} tone="warning">Profile changed</${Badge}>` : null}
+        ${job.needs_account ? html`<span title="This site makes you sign in before applying — auto-apply is off; documents still work"><${Badge} tone="warning">Sign-in needed</${Badge}></span>` : null}
         ${m && m.required_total ? html`<span class="fact">${m.required_matched}/${m.required_total} skills</span>` : null}
         ${exp && exp.fit !== 'unknown' ? html`<span class=${`fact tone-text-${EXPERIENCE_TONE[exp.fit]}`}>${experienceText(exp)}</span>` : null}
       </div>

@@ -8,7 +8,7 @@ from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot, nor
 from jobhunterx.generation.content import SkillGroup
 from jobhunterx.intelligence.llm_structured import call_structured
 
-VERSION = "skillgroups-v2"
+VERSION = "skillgroups-v3"
 
 
 class _Groups(BaseModel):
@@ -29,7 +29,9 @@ def _drop_bracketed_repeats(names: list[str]) -> list[str]:
 
 
 async def group_skills(profile: CandidateProfile, snapshot: CandidateSnapshot, *, use_llm: bool = True) -> tuple[list[SkillGroup], str]:
-    names = [s.name for s in snapshot.skills] or list(profile.skills)
+    # The candidate's own skills list — the skills section of their resume. Tools named only inside a project line
+    # ("Rust" in one project's stack) stay in that project line; they are not promoted to the Skills section.
+    names = list(profile.skills) or [s.name for s in snapshot.skills]
     seen: set[str] = set()
     names = [n for n in names if n and not (norm_term(n) in seen or seen.add(norm_term(n)))]
     names = _drop_bracketed_repeats(names)

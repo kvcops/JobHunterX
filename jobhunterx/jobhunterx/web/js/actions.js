@@ -1072,6 +1072,9 @@ function onMessage(msg) {
       if (ids.length) removeJobs(ids); else loadList();
       return;
     }
+    case 'jobs.refreshed':                 // existing jobs re-scored in the background (better matcher / new resume)
+      if (s.app.phase === 'ready') loadList();
+      return;
     case 'document.status': {
       const d = msg.data || {};
       if (d.status === 'ready' || d.status === 'failed') loadDocuments();

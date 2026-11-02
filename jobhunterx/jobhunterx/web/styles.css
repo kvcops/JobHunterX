@@ -2062,10 +2062,32 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 /* tailored-to panel + "resume for a job" */
 .target-panel { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--field); font-size: .88rem; }
 .target-panel .kw-miss { color: var(--text); font-weight: 500; }
-.custom-resume { display: flex; flex-direction: column; gap: 12px; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; }
+/* "Documents for any job": wide, two columns (the job | what to create), header and actions fixed, the body
+   scrolls only when the window is really short; one column on phones */
+.custom-resume { display: flex; flex-direction: column; width: min(960px, 100%); max-height: calc(100vh - 32px); padding: 0; overflow: hidden; }
+.custom-resume .cr-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 22px 26px 14px; border-bottom: 1px solid var(--line); }
+.custom-resume .cr-head p { margin: 4px 0 0; }
 .custom-resume .dlg-h { font-size: 1.2rem; margin: 0; }
-.custom-resume .dialog-actions { align-items: center; margin-top: 6px; }
-.custom-resume textarea { resize: vertical; min-height: 120px; }
+.custom-resume .cr-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 24px; padding: 18px 26px; overflow-y: auto; min-height: 0;
+  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.custom-resume .cr-body::-webkit-scrollbar { width: 8px; }
+.custom-resume .cr-body::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
+.custom-resume .cr-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.custom-resume .cr-side { padding-left: 24px; border-left: 1px solid var(--line); }
+.custom-resume .cr-step { font-size: .72rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.custom-resume .cr-grow { flex: 1; }
+.custom-resume textarea { resize: vertical; min-height: 190px; height: 100%; }
+.custom-resume .kind-picks { flex-direction: column; }
+.custom-resume .kind-pick { flex: none; }
+.custom-resume .style-picker, .custom-resume .styles { flex-wrap: wrap; }
+.custom-resume .cr-foot { display: flex; align-items: center; gap: 10px; padding: 14px 26px; border-top: 1px solid var(--line); background: var(--card-solid); }
+@media (max-width: 760px) {
+  .custom-resume .cr-body { grid-template-columns: 1fr; padding: 16px; }
+  .custom-resume .cr-side { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); padding-top: 14px; }
+  .custom-resume .cr-head, .custom-resume .cr-foot { padding-left: 16px; padding-right: 16px; }
+  .custom-resume .cr-foot .grow { display: none; }
+  .custom-resume textarea { min-height: 140px; }
+}
 .btn.is-on { background: var(--accent-soft); }
 .paper .nowrap { white-space: nowrap; flex-shrink: 0; }
 .paper .paper-skill { margin: 2px 0; }
@@ -2086,3 +2108,13 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .apply-link .link-btn { align-self: flex-start; }
 .kind-pick .kp-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 .kind-pick .kp-text small { font-size: .74rem; }
+
+/* Skill chips: have / related / missing; a dashed border marks a nice-to-have (it never greys out a skill you have) */
+.chip-warn { background: color-mix(in srgb, var(--warning) 10%, var(--card-solid)); border-color: color-mix(in srgb, var(--warning) 30%, transparent); color: color-mix(in srgb, var(--warning) 80%, var(--text)); }
+.chip.nice { border-style: dashed; }
+.chip.soft.nice { color: var(--text-3); }
+.skill-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.skill-legend > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.skill-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.skill-legend .dot.good { background: var(--success); } .skill-legend .dot.warn { background: var(--warning); }
+.skill-legend .dot.bad { background: var(--danger); } .skill-legend .dot.none { background: var(--text-3); }

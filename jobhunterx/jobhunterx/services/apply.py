@@ -200,6 +200,13 @@ async def start(job_id: str, emit: Emit, continuing: bool = False) -> dict:
     if ba.busy_for(_user_id()):
         raise ApplyError(ba.busy_message())       # prod mode: one browser, and another user has it open
 
+    if not continuing:
+        from jobhunterx.intelligence import account_wall
+        row = await storage.get_row(job_id)
+        posting = storage.row_to_objects(row)[0] if row else None
+        if posting is not None and account_wall.needs_account(posting):
+            raise ApplyError("This job's site makes you sign in or create an account before applying, which the agent "
+                             "can't do. Your resume, CV and cover letter can still be made here — then apply on their site.")
     if continuing:
         sess = await _restore(job_id)
         sess.update(status="preparing", message="Getting ready to continue…", notice="", result="")

@@ -30,7 +30,7 @@ from jobhunterx.intelligence import scam as scam_rules
 from jobhunterx.intelligence.reach import assess_reach
 from jobhunterx.intelligence.text import term_in_text, tokens
 
-ENGINE_VERSION = "match-v4"   # v4: unknowns don't count as half-bad, no double penalties for scored warnings
+ENGINE_VERSION = "match-v5"   # v5: requirements met by education / experience; related shown apart (v4: unknowns)
 
 # Warnings whose dimension is already a scored component (a stretch on experience lowers "Experience fit"): they
 # explain the score, they don't multiply it down a second time. Only warnings about things the components don't
@@ -53,11 +53,20 @@ def _skill_credit(name: str, aliases: list[str], snapshot: CandidateSnapshot, po
         if f in index:
             return index[f].strength or pol.credit_listed_only, index[f], False
     # the AI-judged link (same skill under another name / related experience), see intelligence/skill_links.py
-    ev = index.get(norm_term((link or {}).get("via", "")))
+    via = (link or {}).get("via", "")
+    ev = index.get(norm_term(via))
     if ev and link.get("relation") == "same":
         return ev.strength or pol.credit_listed_only, ev, False
     if ev and link.get("relation") == "related":
         return pol.credit_adjacent * max(ev.strength, pol.credit_listed_only), ev, True
+    if via and not ev and link.get("relation") in ("same", "related"):
+        # met by the candidate's degree, a job they held or a project (not a skills-list entry): "education: …",
+        # "experience: …", "project: …"
+        kind = via.split(":", 1)[0].strip().lower()
+        base = pol.credit_professional if kind in ("education", "experience") else pol.credit_project
+        if link.get("relation") == "same":
+            return base, None, False
+        return pol.credit_adjacent * base, SkillEvidence(name=via, key=norm_term(via)), True
     for s in snapshot.skills:
         if forms & {norm_term(a) for a in s.adjacent}:
             return pol.credit_adjacent * max(s.strength, pol.credit_listed_only), s, True
@@ -118,6 +127,27 @@ def candidate_work_text(profile_dict: dict) -> str:
         parts += [p.get("title", ""), p.get("description", ""), " ".join(p.get("technologies", []))]
     parts.append(profile_dict.get("summary", ""))
     return "\n".join(x for x in parts if x)
+
+
+def candidate_evidence(profile_dict: dict) -> list[str]:
+    """The candidate's degrees, jobs, projects and certifications as short lines, for judging requirements that a
+    skills list can't answer ("Bachelor's in CS", "Built and deployed a RAG pipeline")."""
+    out = []
+    for e in profile_dict.get("education", []) or []:
+        bits = [e.get("degree", ""), e.get("institution", ""), e.get("university", "")]
+        line = ", ".join(b for b in bits if b)
+        if line:
+            out.append(f"education: {line}")
+    for e in profile_dict.get("experience", []) or []:
+        if e.get("role") or e.get("company"):
+            out.append(f"experience: {e.get('role', '')} @ {e.get('company', '')}".strip())
+    for p in profile_dict.get("projects", []) or []:
+        if p.get("title"):
+            tech = ", ".join(p.get("technologies", [])[:8])
+            out.append(f"project: {p['title']}" + (f" ({tech})" if tech else ""))
+    for c in (profile_dict.get("certifications", []) or [])[:8]:
+        out.append(f"certification: {c}")
+    return out[:40]
 
 
 # ---------------------------------------------------------------------------
@@ -613,9 +643,11 @@ def assess(
         gaps=gaps[:8],
         unknowns=list(dict.fromkeys(unknowns))[:6],
         matched_required=matched_r,
-        missing_required=missing_r + [n for n, _ in partial_r],
+        missing_required=missing_r,
         matched_preferred=matched_p,
-        missing_preferred=missing_p + [n for n, _ in partial_p],
+        missing_preferred=missing_p,
+        related_required=[{"skill": n, "via": v} for n, v in partial_r],
+        related_preferred=[{"skill": n, "via": v} for n, v in partial_p],
         experience=exp,
         rejected_reasons=[f.detail for f in fails],
         role_fit=round(closeness, 3),

@@ -2116,6 +2116,9 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
         final, ok = str(history)[:500], False
     hitl = _verdict(final)
     job_id = sess.data["job_id"]
+    if hitl == HITLType.LOGIN:
+        from jobhunterx.intelligence import account_wall       # remember the site: later jobs there are marked
+        account_wall.learn(sess.data.get("url") or sess.data.get("apply_url") or "")
     if ok and hitl is None and "SUCCESS" in final.upper():
         from jobhunterx import storage
         await db.update_job(job_id, status="applied")
