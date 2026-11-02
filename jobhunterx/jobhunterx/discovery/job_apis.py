@@ -1,6 +1,6 @@
 """
 Optional extra job sources: Adzuna (India, needs a free key), Hacker News (YC jobs + "Who is hiring?", opt-in), and the
-community / startup sources in community.py (YC Work at a Startup, r/developersIndia, founder hiring posts).
+community / startup sources in community.py (YC Work at a Startup, Reddit hiring threads, founder hiring posts).
 
 Why these three, and how each is used (see README "Job Sources"):
 
@@ -292,7 +292,7 @@ def status(settings) -> dict:
             "founders": bool(getattr(settings, "enable_founder_posts", True))}
 
 
-SOURCE_NAMES = {"adzuna": "Adzuna", "hackernews": "Hacker News", "yc": "YC Work at a Startup", "reddit": "r/developersIndia",
+SOURCE_NAMES = {"adzuna": "Adzuna", "hackernews": "Hacker News", "yc": "YC Work at a Startup", "reddit": "Reddit hiring threads",
                 "founders": "founder hiring posts"}
 # free-text sources: the post was matched to the candidate's field when it was parsed
 _PREMATCHED = {"hackernews", "reddit", "founder_post"}
@@ -300,7 +300,7 @@ _PREMATCHED = {"hackernews", "reddit", "founder_post"}
 
 async def discover(settings, titles: list[str], places: list[str], *, labels: list[str], include_remote: bool = False,
                    max_postings: int = 30, skip: Optional[Callable[[JobPosting], Awaitable[bool]]] = None,
-                   on_progress: Progress = None, fresher: bool = False) -> tuple[list[JobPosting], dict]:
+                   on_progress: Progress = None, fresher: bool = False, country: str = "") -> tuple[list[JobPosting], dict]:
     """Postings from every enabled source for titles × places. Returns (postings, stats per source)."""
     from jobhunterx.discovery import linkedin
     t0 = time.monotonic()
@@ -339,7 +339,7 @@ async def discover(settings, titles: list[str], places: list[str], *, labels: li
     if on["yc"]:
         jobs.append(("yc", guarded("yc", community.yc_search(labels, places, include_remote=include_remote))))
     if on["reddit"]:
-        jobs.append(("reddit", guarded("reddit", community.reddit_search(labels, include_remote=include_remote))))
+        jobs.append(("reddit", guarded("reddit", community.reddit_search(labels, include_remote=include_remote, country=country))))
     if on["founders"] and titles:
         jobs.append(("founders", guarded("founders", community.founder_posts(titles, places, labels, fresher=fresher))))
     results = await asyncio.gather(*(j for _, j in jobs))

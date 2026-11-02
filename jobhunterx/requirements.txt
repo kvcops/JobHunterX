@@ -23,6 +23,7 @@ uvicorn[standard]==0.41.0
 fastapi==0.140.7
 python-multipart==0.0.32
 httpx==0.28.1
+phonenumbers==9.0.42          # calling codes and number formats for every country (no table of chosen countries)
 
 # --- Data Schemas & Configuration ---
 pydantic==2.12.5

@@ -31,7 +31,7 @@ from jobhunterx.intelligence.llm_structured import call_structured
 
 log = get_logger("skill_links")
 
-VERSION = "skill-links-v7"   # v7: judged against the whole profile (education, roles, projects, work text)
+VERSION = "skill-links-v8"   # v8: field-neutral instructions (v7: whole profile — education, roles, projects)
 BATCH = 15                    # job skills judged per AI call (small batches give steadier answers)
 LOOKUPS_PER_ROUND = 6         # skills looked up on the web per resolve() call (cached afterwards)
 CANDIDATE_SKILLS = 160        # candidate skills shown to the model (all of them, for nearly everyone)
@@ -60,31 +60,26 @@ class _Links(BaseModel):
     links: list[_Link] = Field(default_factory=list)
 
 
-_SYSTEM = """You compare a job's requirements with ONE candidate, like an experienced technical recruiter who keeps up
-with new tools and reads the whole resume — not only its skills list. You get the candidate's SKILLS, their EVIDENCE
+_SYSTEM = """You compare a job's requirements with ONE candidate, like an experienced recruiter in the candidate's own
+field who keeps up with how that field's tools, methods and job titles change, and who reads the whole resume — not
+only its skills list. The candidate can be in any field or industry. You get the candidate's SKILLS, their EVIDENCE
 (degrees, jobs held, projects, certifications) and an excerpt of their WORK (experience and project text).
 For each JOB REQUIREMENT decide whether the candidate demonstrates it:
-- "same": demonstrated — the same skill under another name, an abbreviation, a narrower/broader name they clearly
-  cover, or something their work plainly shows (e.g. "GenAI" = "Generative AI"; "LLMs" = "Large Language Models";
-  "PyTorch" demonstrates "deep learning frameworks"; "Built and deployed a RAG pipeline" is shown by a production RAG
-  project or job; "Postgres" = "PostgreSQL"; "vector databases" is shown by FAISS / pgvector / Pinecone work).
-- A BROAD FIELD ("Generative AI", "Machine Learning", "Cloud platforms", "Backend systems") is "same" when the candidate
-  has several specific skills or work inside it.
-- A DEGREE requirement ("Bachelor's in Computer Science or a related field") is "same" when their education meets it
-  (a B.Tech / B.E. / B.S. in CS, IT or a related engineering field meets a bachelor's in CS); "or equivalent
-  experience" is met by relevant work. Set via to that education line.
-- An EXPERIENCE statement ("Experience with Docker or cloud basics", "Built at least one LLM project") is judged
-  against their jobs and projects.
-- "related": real, transferable experience — an adjacent tool, another tool OF THE SAME KIND, the field it belongs to
-  or the foundation it is built on (e.g. "LangGraph" → "CrewAI"; "LangChain" → "LlamaIndex"; "FastAPI" → "Flask";
-  "AWS" → "GCP"; "MCP" → "A2A").
-- "none": no real link. Sharing a broad area is NOT enough ("Python" does not make someone a "React" developer;
-  "SQL" is not "Spark"; Python is not "C# / .NET").
-- A requirement listing ALTERNATIVES ("LangChain, LangGraph, or custom orchestration"; "AWS or GCP") is met when ANY
-  one alternative is met — judge it by the best one.
-- A SOFT SKILL ("Communication", "Problem solving") cannot be disproved by a resume: "same", via the closest skill.
+- "same": demonstrated — the same thing under another name or spelling, an abbreviation, a narrower or broader name
+  the candidate clearly covers, or something their work or projects plainly show they have done.
+- A BROAD AREA named in the job is "same" when the candidate has several specific skills or pieces of work inside it.
+- A DEGREE or QUALIFICATION requirement is "same" when the candidate's education meets it: the same level in the same or
+  a closely related subject (degree names differ by country and institution — judge the substance, not the wording);
+  "or equivalent experience" is met by relevant work. Set via to that education line.
+- An EXPERIENCE statement ("experience with …", "has done …") is judged against their jobs and projects.
+- "related": real, transferable experience — an adjacent tool or method, another one OF THE SAME KIND, the area it
+  belongs to, or the foundation it is built on — so the candidate could pick it up quickly.
+- "none": no real link. Working in the same broad field is NOT enough on its own.
+- A requirement listing ALTERNATIVES ("A, B or C") is met when ANY one alternative is met — judge it by the best one.
+- A SOFT SKILL (communication, teamwork, problem solving…) cannot be disproved by a resume: "same", via the closest
+  item of their work.
 Set "via" to ONE item copied exactly from SKILLS or EVIDENCE that best supports "same" or "related"; empty for "none".
-Set "known" to false only if you genuinely do not know what the requirement is (a new or niche product).
+Set "known" to false only if you genuinely do not know what the requirement is (a new or niche product or term).
 Return one entry for every job requirement, using its text exactly as given."""
 
 

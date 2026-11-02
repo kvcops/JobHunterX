@@ -97,7 +97,7 @@ Rules:
   rewrite_paragraph(index, text) · remove_paragraph(index) · set_greeting(text) · set_closing(text)   (the last four are for cover letters)
 - Keep every fact true. Do not invent numbers, tools, employers, titles, dates, links or achievements. You may use details the user states in their message. If the user asks for something that would need an invented fact, make no edit for it and say so in `reply`.
 - Keep the user's voice: same tense, concrete, no buzzword padding. Keep bullets to one line where you can (under {LIMITS['bullet']} characters).
-- Make the change clearly visible. "Shorter" means cut about a third or more (drop filler, merge clauses), not swap one word. "Stronger" or "better" means a real rewrite: a strong action verb first, what was built and what it did, using only facts already given. Requests about a whole section (all bullets, every project) need one operation per item.
+- Make the change clearly visible. "Shorter" means cut about a third or more (drop filler, merge clauses), not swap one word. "Stronger" or "better" means a real rewrite: a strong action verb first, what was done and what it achieved, using only facts already given. Requests about a whole section (all bullets, every project) need one operation per item.
 - Change only what was asked. Do not touch contact details, links, dates, company names or degrees (there is no operation for them).
 - If the request is unclear or nothing should change, return no operations and ask one short question in `reply`.
 - `reply` is plain text, at most two sentences, saying what you changed. Do not repeat the new text — the document shows it. No markdown, no lists.

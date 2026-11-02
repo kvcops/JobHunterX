@@ -35,7 +35,7 @@ from jobhunterx.intelligence.text import any_term_in_text, number_in_text, parse
 
 log = get_logger("job_understanding")
 
-VERSION = "job-v3"   # v3: degrees kept out of skills, apply_needs_account (v2: employer_kind)
+VERSION = "job-v4"   # v4: field-neutral wording (v3: degrees kept out of skills, apply_needs_account)
 ROLE_FIT_VERSION = "rolefit-v1"
 
 
@@ -88,12 +88,12 @@ class JobUnderstanding(BaseModel):
     apply_needs_account: bool = Field(False, description="true if applying on this site requires signing in or creating "
                                                          "an account first")
     employer_kind: Literal["product", "it_services_bulk", "staffing_agency", "other", "unknown"] = Field(
-        "unknown", description="who is hiring: a company building its own product; a large IT-services / outsourcing "
-                               "firm hiring in volume for client projects; a recruiter or staffing agency hiring for "
-                               "someone else; other (government, research, NGO...); unknown")
+        "unknown", description="who is hiring: a company hiring for its own business; a large services / outsourcing "
+                               "firm (any industry) hiring in bulk for client work; a recruiter or staffing agency "
+                               "hiring for someone else; other (government, research, non-profit...); unknown")
 
 
-_SYSTEM = """You are an expert technical recruiter extracting the facts of ONE job posting.
+_SYSTEM = """You are an expert recruiter in the posting's own field, extracting the facts of ONE job posting.
 Extract only what the posting states. Never infer requirements that are not written.
 - required_skills: skills/technologies/methods the posting requires; preferred_skills: nice-to-have/bonus ones.
   Use the posting's own wording for `name`; add common aliases. must_have=true only for explicit mandatory language.
@@ -108,8 +108,8 @@ Extract only what the posting states. Never infer requirements that are not writ
 - education_mandatory=true only if a degree is strictly required (not 'or equivalent experience' / 'preferred').
 - responsibilities: up to 10 short lines describing the actual work.
 - employer_kind: judge the employer from the posting and what you know of the company — "it_services_bulk" only for
-  large IT-services / outsourcing firms that hire in volume for client work; "staffing_agency" when a recruiter posts
-  for an unnamed or other client.
+  large services / outsourcing firms (in any industry) that hire in bulk for client work; "staffing_agency" when a
+  recruiter posts for an unnamed or other client.
 If the page is not a single job posting or explicitly says the job is closed, set the flags accordingly."""
 
 
