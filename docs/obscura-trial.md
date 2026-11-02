@@ -56,10 +56,38 @@ Not good:
 - It is a young, independent engine ("may differ from Chromium", says its own README). Job portals change often; every
   difference becomes a failed application that is hard to debug.
 
+## Follow-up tests (deal-breakers)
+
+| | Obscura | Chromium |
+|---|---|---|
+| Attached resume really sent (fetch + FormData, the way React forms send) | **no** — the page shows the file attached (name and size right), but the request leaves the resume field out | yes, PDF bytes arrive |
+| Plain HTML form marked `multipart/form-data` | **sent as `x-www-form-urlencoded`** — a file can't travel this way at all | multipart, file included |
+| Elements browser-use gives the AI on the Lever application page | **3,463** (310,000 characters, ~78,000 tokens) | 77 |
+
+So with Obscura an application would go out **without the resume** while everything looks fine — the worst kind of
+failure for auto-apply. And some pages produce an element list too long for any small model.
+
+## Decision model for picking elements (Keyvix `free/jev-1.13`)
+
+Idea: let a decision model (it answers typed questions — yes/no, pick one option, a score — with probabilities in
+~300 ms) pick which element is the name box, the email box, the resume upload and the submit button, instead of the
+agent's chat model reading a long list.
+
+What was found:
+- `free/jev-1.13` only accepts `POST /v1/decisions` (`state` + named `questions`); chat calls return 400. It cannot
+  plan or act — at most it can replace the "which element?" choice. The agent still needs a chat model.
+- Free tier: 5 requests a minute per account, 64K-token context (the Lever list above does not fit).
+- The service answered **"Service temporarily unavailable" (503) on every call for over 30 minutes** (08:53–09:23 UTC),
+  so accuracy could not be measured. `scripts/decision_picker_trial.py` is ready: one call per page asks for all five
+  fields, grades each pick against the page, and fills + submits the local test form with the picks
+  (`KEYVIX_KEY_FILE=... python -m scripts.decision_picker_trial --obscura ./obscura [--form-only]`).
+- Caution: Keyvix's site shows placeholder customer logos and fake-urgency banners; send it no real candidate data.
+
 ## Verdict
 
-Not a replacement for Browser Use's cloud browser yet, and not a CAPTCHA fix. It **is** a good lighter option for
-running the browser on the server itself, if memory is the problem — worth a small, opt-in experiment, not a switch.
+Not usable for auto-apply today: the resume upload does not reach the company. Not a CAPTCHA fix either. The memory
+saving is real; it is worth re-testing when Obscura fixes file uploads in form submissions. A decision model can't fix
+these problems — they are in the browser, not in choosing elements.
 
 ## Trying it without code changes (admin only)
 
