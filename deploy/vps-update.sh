@@ -99,9 +99,10 @@ REQ=$(git ls-files | grep -E '(^|/)requirements\.txt$' | head -1)
 # whose install failed). pip leaves what is already satisfied alone.
 # (a dry run changes nothing; on a system Python the OS refuses even that, so it is asked with the same override)
 missing() {
-  local out; out=$("$PY" -m pip install --dry-run -q -r "$REQ" 2>&1)
+  # (no -q here: quiet mode hides the "Would install …" line this looks for)
+  local out; out=$("$PY" -m pip install --dry-run -r "$REQ" 2>&1)
   if echo "$out" | grep -q "externally-managed-environment"; then
-    out=$("$PY" -m pip install --dry-run -q --break-system-packages -r "$REQ" 2>&1)
+    out=$("$PY" -m pip install --dry-run --break-system-packages -r "$REQ" 2>&1)
   fi
   echo "$out" | grep -q "Would install"
 }
