@@ -47,6 +47,16 @@ if [ "$ACTION" = "reboot" ]; then
   echo "reboot scheduled"
   exit 0
 fi
+if [ "$ACTION" = "logs" ]; then
+  # read-only: only the app's error lines (tracebacks, exceptions, locks, timeouts) from the last 2000 log lines
+  say "JobHunterX errors (recent)"
+  journalctl -u jobhunterx.service -n 2000 --no-pager -o short-iso 2>/dev/null \
+    | grep -E "Traceback|Error|Exception|error|locked|Timeout|timed out|File \"/opt/jobhunterx|^\S+ \S+ \S+\[[0-9]+\]:\s{4}" \
+    | grep -viE "password|token|secret|api[_-]?key|authorization|cookie" | tail -80
+  say "service"; systemctl status jobhunterx.service --no-pager -n 0 2>/dev/null | head -5
+  for p in /api/meta /api/health /; do echo "GET $p -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:9000$p" || true)"; done
+  exit 0
+fi
 if [ "$ACTION" = "repair" ]; then
   say "Repair: services that are failed right now"
   FAILED=$(systemctl list-units --type=service --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}' | grep -E '^[A-Za-z0-9@._-]+\.service$' || true)
