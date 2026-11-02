@@ -106,7 +106,7 @@ def _outcome(row: dict) -> Optional[dict]:
 
 
 async def list_jobs(view: str, current_hash: Optional[str], *, run_id: str = "", q: str = "", work_mode: str = "",
-                    min_score: int = 0, sort: str = "chance", limit: int = 200,
+                    min_score: int = 0, sort: str = "score", limit: int = 200,
                     offset: int = 0) -> tuple[list[dict], dict]:
     # Filters shared by the list and the tab counts, so a tab's number always matches what it shows.
     filters, params = [], []
@@ -124,7 +124,7 @@ async def list_jobs(view: str, current_hash: Optional[str], *, run_id: str = "",
         params.append(work_mode)
     base = VIEWS.get(view, VIEWS["recommended"])
     clauses = ([f"({base})"] if base else []) + filters
-    order = SORTS.get(sort, SORTS["chance"])
+    order = SORTS.get(sort, SORTS["score"])
     rows = await storage.list_rows(" AND ".join(clauses), tuple(params), order=order, limit=limit, offset=offset)
     docs = await storage.latest_document_ids([r["id"] for r in rows])
     items = [summary(r, current_hash, docs.get(r["id"])) for r in rows]

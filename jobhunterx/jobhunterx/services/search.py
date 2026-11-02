@@ -269,6 +269,20 @@ async def _triage(snap: CandidateSnapshot, jobs: list[JobPosting]) -> Optional[d
     return out
 
 
+def _company_weight(history: dict[str, dict]) -> Callable[[str], float]:
+    """How much a search should want an employer, from what earlier searches already brought this person.
+    New employers come first; employers already covered give way the more jobs they already gave; employers that kept
+    coming back without one real fit are left out (0). Learned per person from their own list — no fixed names."""
+    def weight(name: str) -> float:
+        h = history.get(storage.company_key(name))
+        if not h:
+            return 1.2
+        if h["good"] == 0 and (h["poor"] >= 2 or h["total"] >= 3):
+            return 0.0
+        return 1.0 / (1.0 + 0.4 * h["total"])
+    return weight
+
+
 def _cap_per_company(jobs: list[JobPosting], cap: Optional[int] = None) -> list[JobPosting]:
     """Keep the order, but at most `cap` jobs per employer (the best ones, as the list is sorted best first)."""
     cap = COMPANY_CAP if cap is None else cap
@@ -419,6 +433,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                   f"of experience, strongest in {tracks}", "good")
 
     watch_mode = request.get("mode") == "watch"
+    company_weight = _company_weight(await storage.company_history())
     scope = search.scope_from_snapshot(snap, locations=request.get("locations") or None,
                                        role_focus=request.get("role_focus") or None,
                                        work_modes=request.get("work_modes") or None)
@@ -525,8 +540,10 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                 await asyncio.wait_for(asyncio.shield(refresh), 90)
             except asyncio.TimeoutError:
                 pass
+        have = await storage.stored_urls()
         hits = ats_index.search([*scope.titles, *snap.adjacent_titles[:4]], scope.locations or [scope.country],
-                                level=snap.seniority.value, include_remote=scope.include_remote, limit=max_jobs)
+                                level=snap.seniority.value, include_remote=scope.include_remote, limit=max_jobs,
+                                skip=lambda u: u in have or dedupe.canonical_url(u) in have, weight=company_weight)
         funded_hits = await _funded_openings(funding_task, scope, snap, {r.url for r, _ in hits})
         if funded_hits:
             names = sorted({r.company for r, _ in funded_hits})
@@ -578,7 +595,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                       + (f", including {len(boards)} company career boards" if boards else ""), "info")
     registry.remember([(r, "") for r in boards.values()], source="search")
     known = {(r.kind, r.token.lower()) for r, _ in watch_refs}
-    found_refs = [(r, watchlist.find_board(r)) for k, r in boards.items() if k not in known][:12]
+    found_refs = [(r, watchlist.find_board(r)) for k, r in boards.items() if k not in known][:20]
     known |= {(r.kind, r.token.lower()) for r, _ in found_refs}
     remembered = registry.pick(REGISTRY_PER_RUN, exclude=known)
     reg_names = {(r.kind, r.token.lower()): n for r, n in remembered if n}
@@ -695,6 +712,12 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
         if seen:
             unique = [p for i, p in enumerate(unique) if i not in seen]
             await run.say("dedupe", f"Left out {len(seen)} jobs you've already seen — this search brings only new ones", "info")
+        tired = [p for p in unique if company_weight(p.company or "") <= 0]
+        if tired and len(tired) < len(unique):
+            unique = [p for p in unique if company_weight(p.company or "") > 0]
+            names = sorted({p.company for p in tired if p.company})
+            await run.say("dedupe", f"Left out {len(tired)} jobs from employers whose earlier jobs never fitted you ("
+                          + ", ".join(names[:4]) + (" …" if len(names) > 4 else "") + ")", "info")
     # Shortlist: which postings are the candidate's field? One AI call scores them all; the cap then keeps the best.
     pool = sorted(unique, key=lambda p: -_title_relevance(p, snap))[:TRIAGE_MAX]
     rest = unique[len(pool):] if len(unique) > TRIAGE_MAX else []
@@ -713,7 +736,9 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                       + (f" ({before - len(pool)} are a different line of work)" if before > len(pool) else ""), "info")
     else:
         unique = pool + rest
-    unique.sort(key=lambda p: (-(fit or {}).get(p.id, 0), -(p.primary_source.first_party if p.primary_source else 0),
+    # new employers before ones earlier searches already covered, within the same fit
+    unique.sort(key=lambda p: (-(fit or {}).get(p.id, 0), -(company_weight(p.company or "") >= 1),
+                               -(p.primary_source.first_party if p.primary_source else 0),
                                -round(_title_relevance(p, snap), 1), _age_days(p)))
     unique = _cap_per_company(unique)[:max_jobs]
     run.data["total"] = len(unique)
