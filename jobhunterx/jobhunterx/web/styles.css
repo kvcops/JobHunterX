@@ -2069,3 +2069,20 @@ textarea.input.auto-grow { resize: none; overflow: hidden; min-height: 64px; fie
 .btn.is-on { background: var(--accent-soft); }
 .paper .nowrap { white-space: nowrap; flex-shrink: 0; }
 .paper .paper-skill { margin: 2px 0; }
+
+/* "Documents for any job": which documents to write */
+.kind-picks { display: flex; flex-wrap: wrap; gap: 8px; }
+.kind-pick { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line-strong);
+  border-radius: 12px; cursor: pointer; background: var(--field); flex: 1 1 160px; min-width: 0; }
+.kind-pick.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.kind-pick input { accent-color: var(--accent); margin: 0; }
+
+/* Auto-apply: apply to any job link */
+.apply-link { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding: 12px; border: 1px solid var(--line-strong);
+  border-radius: 14px; background: var(--field); }
+.apply-link-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.apply-link-row .input { flex: 1 1 180px; min-width: 0; }
+.apply-link small { line-height: 1.4; }
+.apply-link .link-btn { align-self: flex-start; }
+.kind-pick .kp-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.kind-pick .kp-text small { font-size: .74rem; }

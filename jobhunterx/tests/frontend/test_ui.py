@@ -238,12 +238,17 @@ def test_resume_for_a_pasted_job_edits_on_the_page(page, server):
     dlg.get_by_label("Job title").fill("AI Engineer")
     dlg.get_by_label("Company").fill("Zeta Labs")
     dlg.get_by_role("radio", name="Two columns").click()
-    dlg.get_by_role("button", name="Create resume").click()
+    # resume, CV and cover letter are all chosen at first; one click on a choice leaves it out
+    dlg.get_by_role("checkbox", name="CV").uncheck()
+    expect(dlg.get_by_role("button", name="Create 2 documents")).to_be_visible()
+    dlg.get_by_role("checkbox", name="CV").check()
+    dlg.get_by_role("button", name="Create all 3").click()
     paper = page.locator(".paper")
     expect(paper).to_contain_text("Asha Rao", timeout=30000)
     expect(paper).to_have_attribute("data-layout", "two_column")
     expect(page.locator(".target-panel")).to_contain_text("AI Engineer")
     expect(page.locator(".doc-library")).to_contain_text("Zeta Labs")
+    expect(page.locator(".doc-library")).to_contain_text("Cover letter")
 
     # edit right on the page: bold a word in the summary, then it saves (no separate edit form)
     summary = paper.locator('[data-p="summary"]')

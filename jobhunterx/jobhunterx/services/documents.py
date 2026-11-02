@@ -174,26 +174,79 @@ def _strings(v: Any) -> list[str]:
     return []
 
 
+KINDS = ("resume", "cv", "cover_letter")
+
+
 async def generate_custom(profile: CandidateProfile, snapshot: CandidateSnapshot, *, jd_text: str, url: str,
-                          title: str, company: str, layout: str, style: str, emit: Emit) -> GeneratedDocument:
-    """A one-page resume tailored to a job the user brings (not one of the found jobs)."""
+                          title: str, company: str, layout: str, style: str, emit: Emit,
+                          kinds: tuple[str, ...] = ("resume",)) -> tuple[list[GeneratedDocument], list[str]]:
+    """Documents for a job the user brings (not one of the found jobs): any of a one-page resume, a CV and a cover
+    letter. The job is read once; every chosen document is written at the same time. Returns (documents, problems):
+    one document that fails does not throw away the others."""
+    kinds = tuple(k for k in KINDS if k in kinds) or ("resume",)
+    style = styles.normalize(style)
+
     async def work():
         job = await job_from_input(jd_text, url, title, company, snapshot, understand=False)
-        # the job read, the bullet rewrite and the skill grouping run at the same time
-        doc = await generate_resume(profile, snapshot, job, job_ready=read_requirements(job, snapshot))
-        doc.job_id = None
-        doc.content["layout"] = layout if layout in LAYOUTS else "single"
-        doc.style = styles.normalize(style)
-        doc.title = f"Resume — {job.title}" + (f" @ {job.company}" if job.company else "")
-        doc.focus = job.title
-        terms, matched = keyword_report(doc.content, job)
-        doc.target = {"title": job.title, "company": job.company, "url": url.strip(), "keywords": terms,
-                      "aliases": {t: job.requirements.skill_aliases.get(t, []) for t in terms},
-                      "matched": matched, "method": job.requirements.method}
-        pdf, pages, doc.fit = await asyncio.to_thread(render.render_resume_fit, doc.content, doc.style)
-        return await _store(doc, pdf, pages)
+        reading = asyncio.ensure_future(read_requirements(job, snapshot))   # shared by every document below
 
-    return await _with_guard((_who(), "custom-resume"), emit, None, "resume", work)
+        def name(kind_label: str) -> str:
+            return f"{kind_label} — {job.title}" + (f" @ {job.company}" if job.company else "")
+
+        async def resume():
+            doc = await generate_resume(profile, snapshot, job, job_ready=reading)
+            doc.job_id = None
+            doc.content["layout"] = layout if layout in LAYOUTS else "single"
+            doc.style = style
+            doc.title, doc.focus = name("Resume"), job.title
+            terms, matched = keyword_report(doc.content, job)
+            doc.target = {"title": job.title, "company": job.company, "url": url.strip(), "keywords": terms,
+                          "aliases": {t: job.requirements.skill_aliases.get(t, []) for t in terms},
+                          "matched": matched, "method": job.requirements.method}
+            pdf, pages, doc.fit = await asyncio.to_thread(render.render_resume_fit, doc.content, doc.style)
+            return await _store(doc, pdf, pages)
+
+        async def cv():
+            if not (title or "").strip():
+                await reading                       # the CV's focus is the job's title
+            doc = await generate_cv(profile, snapshot, focus=job.title or (title or "").strip())
+            doc.style = style
+            doc.target = {"title": job.title, "company": job.company, "url": url.strip()}
+            pdf, pages = await asyncio.to_thread(render.render_cv, doc.content, doc.style)
+            return await _store(doc, pdf, pages)
+
+        async def cover_letter():
+            await reading                           # the letter needs the job's requirements
+            doc = await generate_cover_letter(profile, snapshot, job, None)
+            doc.job_id = None
+            doc.style = style
+            doc.title = name("Cover letter")
+            doc.target = {"title": job.title, "company": job.company, "url": url.strip()}
+            pdf, pages = await asyncio.to_thread(render.render_cover_letter, doc.content,
+                                                 header_for(profile).model_dump(), doc.style)
+            return await _store(doc, pdf, pages)
+
+        makers = {"resume": resume, "cv": cv, "cover_letter": cover_letter}
+        results = await asyncio.gather(*(makers[k]() for k in kinds), return_exceptions=True)
+        if not reading.done():
+            await asyncio.gather(reading, return_exceptions=True)
+        docs = [r for r in results if isinstance(r, GeneratedDocument)]
+        labels = {"resume": "resume", "cv": "CV", "cover_letter": "cover letter"}
+        problems = [f"The {labels[k]} could not be written ({str(r)[:120] or type(r).__name__})."
+                    for k, r in zip(kinds, results) if isinstance(r, BaseException)]
+        if not docs:
+            first = next(r for r in results if isinstance(r, BaseException))
+            raise first
+        return docs, problems
+
+    out: dict = {}
+
+    async def guarded():
+        out["docs"], out["problems"] = await work()
+        return out["docs"][0]
+
+    await _with_guard((_who(), "custom-resume"), emit, None, kinds[0], guarded)
+    return out["docs"], out["problems"]
 
 
 async def update_document(doc: GeneratedDocument, content: dict[str, Any], profile: CandidateProfile,

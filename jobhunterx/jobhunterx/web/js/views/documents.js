@@ -158,21 +158,35 @@ function DocumentDetail({ docId }) {
 }
 
 const LAYOUT_OPTIONS = [{ id: 'single', label: 'One column' }, { id: 'two_column', label: 'Two columns' }];
+const DOC_KINDS = [
+  { id: 'resume', label: 'Resume', hint: 'one page, tailored' },
+  { id: 'cv', label: 'CV', hint: 'everything, focused on this role' },
+  { id: 'cover_letter', label: 'Cover letter', hint: 'for this job' },
+];
+function createLabel(kinds) {
+  if (kinds.length === 1) return `Create ${DOC_KINDS.find((k) => k.id === kinds[0]).label.toLowerCase()}`;
+  return kinds.length === DOC_KINDS.length ? 'Create all 3' : `Create ${kinds.length} documents`;
+}
 
 /** "Resume for a job": paste a job description or a link, get a one-page resume written for it. */
 function CustomResume() {
   const g = useStore((s) => s.gen[genKey(null, 'custom')]);
   const [open, setOpen] = useState(false);
   const busy = g && g.status === 'generating';
-  return html`<${Button} variant="primary" icon="spark" busy=${busy} onClick=${() => setOpen(true)}>${busy ? 'Tailoring…' : 'Resume for a job'}</${Button}>
+  return html`<${Button} variant="primary" icon="spark" busy=${busy} onClick=${() => setOpen(true)}>${busy ? 'Writing…' : 'Resume for a job'}</${Button}>
     ${open ? html`<${Portal}><${CustomResumeDialog} g=${g} busy=${busy} onClose=${() => setOpen(false)} /></${Portal}>` : null}`;
 }
 
 function CustomResumeDialog({ g, busy, onClose }) {
   const styles = useStyles();
   const ref = useRef();
-  const [f, setF] = useState({ url: '', jd_text: '', title: '', company: '', layout: 'single', style: 'classic' });
-  useFocusTrap(ref, () => { if (!busy) onClose(); });
+  const [f, setF] = useState({ url: '', jd_text: '', title: '', company: '', layout: 'single', style: 'classic',
+    kinds: DOC_KINDS.map((k) => k.id) });
+  const toggleKind = (id) => {
+    const on = f.kinds.includes(id) ? f.kinds.filter((k) => k !== id) : [...f.kinds, id];
+    if (on.length) setF({ ...f, kinds: DOC_KINDS.map((k) => k.id).filter((k) => on.includes(k)) });
+  };
+  useFocusTrap(ref, onClose);
   const set = (k) => (e) => setF({ ...f, [k]: e.currentTarget.value });
   const ready = f.jd_text.trim().length >= 80 || /^https?:\/\/\S+\.\S+/.test(f.url.trim());
   const go = async (e) => {
@@ -181,11 +195,15 @@ function CustomResumeDialog({ g, busy, onClose }) {
     const doc = await generateCustomResume({ ...f, url: f.url.trim(), jd_text: f.jd_text.trim() });
     if (doc) onClose();
   };
-  return html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && !busy && onClose()}>
+  return html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
     <form class="dialog custom-resume" role="dialog" aria-modal="true" aria-label="Resume for a job" ref=${ref} onSubmit=${go}>
-      <div class="row space"><h2 class="dlg-h">A one-page resume for any job</h2>
-        <button type="button" class="icon-btn" aria-label="Close" disabled=${busy} onClick=${onClose}><${Icon} name="x" size=${16} /></button></div>
-      <p class="muted small">Paste the job description or a link to the posting. Your resume is rewritten for it from your profile — every line fact-checked, nothing invented.</p>
+      <div class="row space"><h2 class="dlg-h">Documents for any job</h2>
+        <button type="button" class="icon-btn" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button></div>
+      <p class="muted small">Paste the job description or a link to the posting. Your documents are written for it from your profile — every line fact-checked, nothing invented.</p>
+      <div class="field"><span class="field-label">What to create</span>
+        <div class="kind-picks" role="group" aria-label="What to create">${DOC_KINDS.map((k) => html`<label class=${`kind-pick ${f.kinds.includes(k.id) ? 'is-on' : ''}`}>
+          <input type="checkbox" checked=${f.kinds.includes(k.id)} disabled=${busy || (f.kinds.length === 1 && f.kinds.includes(k.id))} onChange=${() => toggleKind(k.id)} />
+          <span class="kp-text"><b>${k.label}</b><small class="muted">${k.hint}</small></span></label>`)}</div></div>
       <label class="field"><span class="field-label">Link to the job</span>
         <input class="input" type="url" inputmode="url" placeholder="https://company.com/careers/role" value=${f.url} onInput=${set('url')} /></label>
       <label class="field"><span class="field-label">…or paste the job description</span>
@@ -195,15 +213,15 @@ function CustomResumeDialog({ g, busy, onClose }) {
         <label class="field"><span class="field-label">Job title <span class="muted">(optional)</span></span><input class="input" value=${f.title} onInput=${set('title')} /></label>
         <label class="field"><span class="field-label">Company <span class="muted">(optional)</span></span><input class="input" value=${f.company} onInput=${set('company')} /></label>
       </div>
-      <div class="field"><span class="field-label">Layout</span>
+      ${f.kinds.includes('resume') ? html`<div class="field"><span class="field-label">Resume layout</span>
         <div class="ed-seg" role="radiogroup" aria-label="Layout">${LAYOUT_OPTIONS.map((o) => html`<button type="button" role="radio" aria-checked=${f.layout === o.id}
-          class=${f.layout === o.id ? 'is-on' : ''} onClick=${() => setF({ ...f, layout: o.id })}>${o.label}</button>`)}</div></div>
+          class=${f.layout === o.id ? 'is-on' : ''} onClick=${() => setF({ ...f, layout: o.id })}>${o.label}</button>`)}</div></div>` : null}
       <div class="field"><span class="field-label">Style</span><${StylePicker} styles=${styles} value=${f.style} onChange=${(id) => setF({ ...f, style: id })} /></div>
       ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
       <div class="dialog-actions">
-        ${busy ? html`<span class="muted small grow">Reading the job and tailoring — usually 20-60 seconds.</span>` : null}
-        <${Button} type="button" disabled=${busy} onClick=${onClose}>Cancel</${Button}>
-        <${Button} variant="primary" icon="spark" type="submit" busy=${busy} disabled=${!ready}>${busy ? 'Tailoring…' : 'Create resume'}</${Button}>
+        ${busy ? html`<span class="muted small grow">Reading the job and writing ${f.kinds.length > 1 ? 'them side by side' : 'it'} — usually 20-90 seconds. You can close this; they will appear under Documents.</span>` : null}
+        <${Button} type="button" onClick=${onClose}>${busy ? 'Close' : 'Cancel'}</${Button}>
+        <${Button} variant="primary" icon="spark" type="submit" busy=${busy} disabled=${!ready}>${busy ? 'Writing…' : createLabel(f.kinds)}</${Button}>
       </div>
     </form>
   </div>`;

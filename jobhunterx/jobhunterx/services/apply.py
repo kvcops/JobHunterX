@@ -227,6 +227,42 @@ async def start(job_id: str, emit: Emit, continuing: bool = False) -> dict:
     return sess.snapshot()
 
 
+async def import_link(url: str, jd_text: str = "", title: str = "", company: str = "") -> str:
+    """A job the user found somewhere else: save it as one of their jobs (so the tracker, documents and the agent all
+    work on it) and return its id. The posting page is read when it can be; when it can't, the link alone is enough
+    to apply — the documents are then written from the title and company given."""
+    from urllib.parse import urlparse
+
+    from jobhunterx.domain.job import JobPosting
+
+    url = (url or "").strip()
+    parts = urlparse(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ApplyError("That link doesn't look like a web address (it should start with https://).")
+    if docs_svc._LINKEDIN.search(parts.hostname):
+        raise ApplyError("LinkedIn applications are not automated. Open the job on the company's own site and use that link.")
+    profile = await profile_svc.get_profile()
+    if not profile:
+        raise ApplyError("Add your resume first.")
+    snapshot = await profile_svc.get_snapshot(profile)
+    try:
+        posting = await docs_svc.job_from_input(jd_text, url, title, company, snapshot)
+    except docs_svc.BadTarget:
+        if jd_text.strip():
+            raise
+        labels = parts.hostname.split(".")[:-1] or [parts.hostname]     # without the ending (.com, .ai)
+        site = max(labels, key=len)                                       # jobs.zetalabs.ai -> zetalabs
+        posting = JobPosting(title=(title or "").strip()[:120] or "Job application",
+                             company=(company or "").strip()[:120] or site.capitalize(),
+                             canonical_url=url, apply_url=url, description="")
+    posting.canonical_url = posting.canonical_url or url
+    posting.apply_url = url
+    posting.id = ""                                # a real job id (the "custom-…" one is for documents only)
+    job_id = await storage.save_job(posting, None, None)
+    await storage.set_saved(job_id, True)
+    return job_id
+
+
 async def stop(job_id: str) -> Optional[dict]:
     from jobhunterx.agents import browser_agent as ba
     t = _tasks.get(job_id)

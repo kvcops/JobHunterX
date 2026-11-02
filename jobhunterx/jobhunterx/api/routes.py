@@ -14,10 +14,10 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Awaitable, Callable, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
 from jobhunterx import auth, storage
@@ -67,6 +67,43 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 async def emit(event: dict) -> None:
     event.setdefault("ts", datetime.now(timezone.utc).isoformat())
     await ws_manager.broadcast(event)
+
+
+# ---------------------------------------------------------------------------
+# Long work (writing documents) runs on its own, apart from the request: if the browser stops waiting — its own time
+# limit, a proxy, a closed tab — the work still finishes and is saved. The request waits up to WAIT_S; after that it
+# answers 202 {"pending": id} and the app asks GET /tasks/{id} until the answer is there.
+# ---------------------------------------------------------------------------
+_tasks: dict[str, dict] = {}
+WAIT_S = 45.0
+_TASK_KEEP_S = 1800
+
+
+async def _detached(make: Callable[[], Awaitable[dict]]):
+    import time
+    now = time.monotonic()
+    for k in [k for k, t in _tasks.items() if t["task"].done() and now - t["at"] > _TASK_KEEP_S]:
+        _tasks.pop(k, None)
+    tid = uuid.uuid4().hex
+    _tasks[tid] = {"task": asyncio.create_task(make()), "owner": _uid(), "at": now}
+    return await _task_answer(tid, WAIT_S)
+
+
+async def _task_answer(tid: str, wait: float):
+    t = _tasks[tid]["task"]
+    try:
+        return await asyncio.wait_for(asyncio.shield(t), wait)
+    except asyncio.TimeoutError:
+        return JSONResponse(status_code=202, content={"pending": tid})
+
+
+@router.get("/tasks/{task_id}")
+async def task_status(task_id: str, wait: float = Query(20.0, ge=0, le=25)):
+    """The answer of long work started earlier (see _detached); 202 {"pending": id} while it is still running."""
+    t = _tasks.get(task_id)
+    if t is None or t["owner"] != _uid():
+        raise HTTPException(404, "That task is unknown or finished long ago — please try again.")
+    return await _task_answer(task_id, wait)
 
 
 async def _profile_or_400() -> CandidateProfile:
@@ -848,6 +885,29 @@ async def apply_job(job_id: str):
     return {"status": "started", "session": session}
 
 
+class ApplyLinkRequest(BaseModel):
+    url: str = Field(..., min_length=8, max_length=2000)
+    jd_text: str = Field("", max_length=20000)
+    title: str = Field("", max_length=120)
+    company: str = Field("", max_length=120)
+
+
+@router.post("/apply/link")
+async def apply_link(body: ApplyLinkRequest, request: Request):
+    """Apply to a job found anywhere: the link becomes one of your jobs, then the agent applies as for any other."""
+    ratelimit.check(request, "apply-link", limit=10, per_s=300)
+    await _profile_or_400()
+    try:
+        job_id = await apply_svc.import_link(body.url, body.jd_text, body.title, body.company)
+        session = await apply_svc.start(job_id, emit)
+    except (apply_svc.ApplyError, docs_svc.BadTarget) as exc:
+        raise HTTPException(409 if isinstance(exc, apply_svc.ApplyError) else 422, str(exc))
+    row = await storage.get_row(job_id)
+    if row:
+        await emit({"type": "job.updated", "job_id": job_id, "data": {"job": jobs_svc.summary(row, None)}})
+    return {"status": "started", "job_id": job_id, "session": session}
+
+
 # ---------------------------------------------------------------------------
 # Auto-apply session controls
 # ---------------------------------------------------------------------------
@@ -940,6 +1000,7 @@ class CustomResumeRequest(BaseModel):
     company: str = Field("", max_length=120)
     layout: Literal["single", "two_column"] = "single"
     style: str = Field("classic", max_length=32)
+    kinds: list[Literal["resume", "cv", "cover_letter"]] = Field(default_factory=lambda: ["resume"], min_length=1, max_length=3)
 
 
 MAX_DOC_BYTES = 300_000          # a resume is a few KB; this only stops abuse
@@ -995,47 +1056,62 @@ async def _doc_detail(doc) -> dict:
 async def create_job_document(job_id: str, body: JobDocumentRequest):
     profile = await _profile_or_400()
     snap = await profile_svc.get_snapshot(profile)
-    try:
-        doc = await docs_svc.generate_for_job(job_id, body.kind, profile, snap, emit)
-    except docs_svc.JobNotFound:
-        raise HTTPException(404, "Job not found")
-    except docs_svc.AlreadyGenerating as exc:
-        raise HTTPException(409, str(exc))
-    except GenerationUnavailable as exc:
-        raise HTTPException(502, str(exc))
-    await _summary_and_publish(job_id)
-    return {"document": await _doc_detail(doc)}
+
+    async def make():
+        try:
+            doc = await docs_svc.generate_for_job(job_id, body.kind, profile, snap, emit)
+        except docs_svc.JobNotFound:
+            raise HTTPException(404, "Job not found")
+        except docs_svc.AlreadyGenerating as exc:
+            raise HTTPException(409, str(exc))
+        except GenerationUnavailable as exc:
+            raise HTTPException(502, str(exc))
+        await _summary_and_publish(job_id)
+        return {"document": await _doc_detail(doc)}
+
+    return await _detached(make)
 
 
 @router.post("/documents/cv")
 async def create_cv(body: CvRequest):
     profile = await _profile_or_400()
     snap = await profile_svc.get_snapshot(profile)
-    try:
-        doc = await docs_svc.generate_cv_doc(profile, snap, body.focus.strip(), emit)
-    except docs_svc.AlreadyGenerating as exc:
-        raise HTTPException(409, str(exc))
-    return {"document": await _doc_detail(doc)}
+
+    async def make():
+        try:
+            doc = await docs_svc.generate_cv_doc(profile, snap, body.focus.strip(), emit)
+        except docs_svc.AlreadyGenerating as exc:
+            raise HTTPException(409, str(exc))
+        return {"document": await _doc_detail(doc)}
+
+    return await _detached(make)
 
 
 @router.post("/documents/custom")
 async def create_custom_resume(body: CustomResumeRequest, request: Request):
-    """Tailored one-page resume for a pasted job description or a job link (not one of the found jobs)."""
+    """Documents for a pasted job description or a job link (not one of the found jobs): a one-page resume, a CV and
+    / or a cover letter — the ones in `kinds`, written at the same time."""
     ratelimit.check(request, "doc-custom", limit=12, per_s=300)
     if not body.jd_text.strip() and not body.url.strip():
         raise HTTPException(422, "Paste the job description or give a link to the posting.")
     profile = await _profile_or_400()
     snap = await profile_svc.get_snapshot(profile)
-    try:
-        doc = await docs_svc.generate_custom(profile, snap, jd_text=body.jd_text, url=body.url, title=body.title,
-                                             company=body.company, layout=body.layout, style=body.style, emit=emit)
-    except docs_svc.BadTarget as exc:
-        raise HTTPException(422, str(exc))
-    except docs_svc.AlreadyGenerating as exc:
-        raise HTTPException(409, str(exc))
-    except GenerationUnavailable as exc:
-        raise HTTPException(502, str(exc))
-    return {"document": await _doc_detail(doc)}
+
+    async def make():
+        try:
+            docs, problems = await docs_svc.generate_custom(
+                profile, snap, jd_text=body.jd_text, url=body.url, title=body.title, company=body.company,
+                layout=body.layout, style=body.style, emit=emit, kinds=tuple(body.kinds))
+        except docs_svc.BadTarget as exc:
+            raise HTTPException(422, str(exc))
+        except docs_svc.AlreadyGenerating as exc:
+            raise HTTPException(409, str(exc))
+        except GenerationUnavailable as exc:
+            raise HTTPException(502, str(exc))
+        details = [await _doc_detail(d) for d in docs]
+        return {"document": details[0], "documents": details, "problems": problems}
+
+    return await _detached(make)
 
 
 @router.get("/documents")
