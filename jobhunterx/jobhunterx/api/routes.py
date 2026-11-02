@@ -657,15 +657,16 @@ async def _refresh_outdated_once() -> None:
     snap = await storage.get_snapshot(h)          # only an understanding that already exists — never starts an AI build
     if snap is None:
         return
-    try:
-        n = await jobs_svc.reassess_outdated(snap, profile.model_dump(mode="json"))
-        if n:
-            log.info("jobs_reassessed", count=n)
-    except Exception as exc:
-        log.warning("jobs_reassess_failed", error=str(exc)[:160])
-
     async def relink():
-        # the AI part (re-linking skills with the current linker, re-scoring for the current profile) in the background
+        # all of it in the background, never inside the request that lists the jobs: the rule re-score first (no AI),
+        # then re-linking skills with the current linker and re-scoring for the current profile (AI, low priority)
+        try:
+            n = await jobs_svc.reassess_outdated(snap, profile.model_dump(mode="json"))
+            if n:
+                log.info("jobs_reassessed", count=n)
+                await emit({"type": "jobs.refreshed", "data": {"count": n}})
+        except Exception as exc:
+            log.warning("jobs_reassess_failed", error=str(exc)[:160])
         try:
             n = await jobs_svc.refresh_links(snap, profile.model_dump(mode="json"), emit)
             if n:
