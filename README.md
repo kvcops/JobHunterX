@@ -250,7 +250,17 @@ flowchart LR
 
 #### 6 · Honest documents 📝
 <img src="assets/ui_documents.png" alt="Documents" width="90%"/>
-<br/><sub><i>Every AI edit is fact-checked against your profile. "What changed" shows each edit — accepted or rejected, and why.</i></sub>
+<br/><sub><i>Every AI edit is fact-checked against your profile. Click any text on the page to edit it — the toolbar adds bold, italic, links and lines, with undo — and it always stays one page. "What changed" shows each AI edit — accepted or rejected, and why.</i></sub>
+<br/><br/>
+
+#### 6b · A resume for any job 🎯
+<img src="assets/ui_custom_resume.png" alt="Resume for a job" width="90%"/>
+<br/><sub><i>Found a job somewhere else? Paste its description or a link to the posting. The resume uses only skills you really have; skills the job asks for that are not in your profile are listed for you, never added.</i></sub>
+<br/><br/>
+
+#### 6c · One or two columns ↔️
+<img src="assets/ui_resume_two_column.png" alt="Two-column resume" width="90%"/>
+<br/><sub><i>Switch layouts in one click: skills and education on the side, experience in the main column. The PDF matches what you see.</i></sub>
 <br/><br/>
 
 #### 7 · Auto-apply: documents first ✅

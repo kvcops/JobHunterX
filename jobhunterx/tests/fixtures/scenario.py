@@ -224,7 +224,9 @@ def fake_llm(chain: str, messages: list[dict]) -> str:
             elif "Kubernetes" not in text and "FastAPI" in text:
                 out.append({"id": bid, "text": "Deployed model APIs with FastAPI, Docker and Kubernetes"})  # unearned skill
             else:
-                out.append({"id": bid, "text": "Designed and built " + text[0].lower() + text[1:]})
+                first, _, rest = text.partition(" ")
+                lead = "Designed and built" if first.lower() == "built" else first
+                out.append({"id": bid, "text": f"{lead} {rest}".strip()})
         return json.dumps({"summary": "AI engineer with hands-on experience building RAG assistants and LLM features in Python.",
                            "bullets": out})
     if "comprehensive academic/professional CV" in system:

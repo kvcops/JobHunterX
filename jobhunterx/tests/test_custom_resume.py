@@ -158,3 +158,65 @@ def test_rows_keep_short_lines_on_one_line_and_dates_right_aligned():
     html = render._render("resume.html", doc=c, s={"id": "classic", **render.styles.STYLES["classic"]}, **render.SHRINK_PROFILES[0])
     assert 'width="80%"' in html and '<td class="right" width="20%">2008 – 2010</td>' in html
     assert '<td width="100%"><span class="row-title">MCA' in html          # no dates: no empty half-row
+
+
+# ---------------------------------------------------------------- only the candidate's own skills, and fast
+def test_profile_skills_never_include_names_the_ai_invented(monkeypatch):
+    import asyncio
+    from jobhunterx.domain.candidate import CandidateProfile
+    from jobhunterx.intelligence import candidate as cand
+
+    profile = CandidateProfile.model_validate({
+        "name": "Ravi K R", "summary": "Built statistics dashboards and systems tools. Led R&D demos.",
+        "skills": ["Python", "HTML", "CSS", "JavaScript", "C++"],
+        "projects": [{"title": "Charts", "description": "Plots of usage statistics", "technologies": ["Python", "C++"]}]})
+    real = cand.call_structured
+
+    async def invents(**kw):
+        if kw["task"] == "skill_aliases":
+            return cand._SkillsOut(skills=[
+                {"name": "Python", "aliases": ["py"]}, {"name": "JavaScript", "aliases": ["JS"]},
+                {"name": "Rust", "aliases": ["C++"]},                  # a new name, "proved" by another skill
+                {"name": "R", "aliases": ["statistics"]},              # a one-letter name, "proved" by a loose word
+                {"name": "C++", "aliases": ["cpp"]}]), "m"
+        if kw["task"] == "candidate_core":
+            core, model = await real(**kw)
+            if core is not None:
+                core.extra_skills = ["Rust", "R", "Go"]
+            return core, model
+        return await real(**kw)
+
+    monkeypatch.setattr(cand, "call_structured", invents)
+    from tests.fixtures import scenario
+    scenario.install(monkeypatch)
+    monkeypatch.setattr(cand, "call_structured", invents)
+    snap = asyncio.new_event_loop().run_until_complete(cand.build_snapshot(profile))
+    names = {s.name for s in snap.skills}
+    assert {"Python", "JavaScript", "C++"} <= names
+    assert not names & {"Rust", "R", "Go"}, names
+    assert "C++" not in next(s.aliases for s in snap.skills if s.name == "Rust") if "Rust" in names else True
+
+    listed = CandidateProfile.model_validate({**profile.model_dump(), "skills": [*profile.skills, "R"]})
+    snap2 = asyncio.new_event_loop().run_until_complete(cand.build_snapshot(listed))
+    assert "R" in {s.name for s in snap2.skills}                       # written in the skills list: it is theirs
+
+
+def test_custom_resume_runs_its_ai_steps_side_by_side(client, monkeypatch):  # noqa: F811
+    import time
+    from jobhunterx.intelligence import llm_structured
+    client.put("/api/profile", json=scenario.PROFILE)
+    _wait_snapshot(client)
+    fast = llm_structured.call_llm_with_fallback
+
+    async def slow(chain, messages, **kw):
+        import asyncio
+        await asyncio.sleep(1.0)
+        return await fast(chain, messages, **kw)
+
+    monkeypatch.setattr(llm_structured, "call_llm_with_fallback", slow)
+    t0 = time.monotonic()
+    r = client.post("/api/documents/custom", json={"jd_text": JD + " (side by side)"})
+    took = time.monotonic() - t0
+    assert r.status_code == 200, r.text
+    # job read + bullet rewrite + skill grouping are ~3 AI calls of 1 s: one after another was >= 3 s
+    assert took < 2.6, took

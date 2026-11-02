@@ -33,7 +33,7 @@ function TargetPanel({ t }) {
     <div class="row space wrap"><span><span class="muted small">Tailored to</span> <strong>${t.title}</strong>${t.company ? html` <span class="muted">@ ${t.company}</span>` : null}
       ${safeUrl(t.url) ? html` · <a href=${safeUrl(t.url)} target="_blank" rel="noopener noreferrer" class="small">posting</a>` : null}</span>
       ${kw.length ? html`<${Badge} tone=${hit.size / kw.length >= 0.7 ? 'success' : hit.size / kw.length >= 0.4 ? 'warning' : 'danger'}>${hit.size}/${kw.length} job keywords</${Badge}>` : null}</div>
-    ${missing.length ? html`<p class="muted small">Not on the page yet: ${missing.map((k, i) => html`${i ? ', ' : ''}<span class="kw-miss">${k}</span>`)}. Add one only where you really used it.</p>` : null}
+    ${missing.length ? html`<p class="muted small">The job also asks for ${missing.map((k, i) => html`${i ? ', ' : ''}<span class="kw-miss">${k}</span>`)} — not in your profile, so not on your resume. Add one only if you really have it.</p>` : null}
   </div>`;
 }
 

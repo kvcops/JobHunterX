@@ -98,13 +98,13 @@ _LINKEDIN = re.compile(r"(^|\.)linkedin\.com$", re.I)
 
 
 async def job_from_input(jd_text: str, url: str, title: str, company: str,
-                         snapshot: CandidateSnapshot) -> JobPosting:
+                         snapshot: CandidateSnapshot, *, understand: bool = True) -> JobPosting:
     """A JobPosting for a job the user brings: pasted description text, a link to the posting, or both (the pasted
-    text wins; the link is kept for reference). Requirements are read exactly as for discovered jobs."""
+    text wins; the link is kept for reference). Requirements are read exactly as for discovered jobs — now, or later
+    with read_requirements() when understand=False (so the read can run alongside the resume writing)."""
     from urllib.parse import urlparse
 
     from jobhunterx.discovery.page import posting_from_url
-    from jobhunterx.intelligence.job import understand_job
 
     jd_text, url = (jd_text or "").strip(), (url or "").strip()
     posting: Optional[JobPosting] = None
@@ -124,14 +124,22 @@ async def job_from_input(jd_text: str, url: str, title: str, company: str,
         posting = JobPosting(description=jd_text[:20000], canonical_url=url, apply_url=url)
     posting.title = (title or "").strip()[:120] or posting.title
     posting.company = (company or "").strip()[:120] or posting.company
+    posting.id = "custom-" + hashlib.sha1(f"{posting.title}|{posting.company}|{posting.description}".encode()).hexdigest()[:16]
+    if understand:
+        await read_requirements(posting, snapshot)
+    return posting
+
+
+async def read_requirements(posting: JobPosting, snapshot: CandidateSnapshot) -> None:
+    """The AI job read (skills, years, title, company), then a title/company from the first line if still missing."""
+    from jobhunterx.intelligence.job import understand_job
+
     await understand_job(posting, snapshot)
     if not posting.title or not posting.company:
         t, c = _title_company_guess(posting.description)
         posting.title = posting.title or t or "Target role"
         if not posting.company and c and c.lower() in posting.description.lower():
             posting.company = c
-    posting.id = "custom-" + hashlib.sha1(f"{posting.title}|{posting.company}|{posting.description}".encode()).hexdigest()[:16]
-    return posting
 
 
 def _title_company_guess(text: str) -> tuple[str, str]:
@@ -170,8 +178,9 @@ async def generate_custom(profile: CandidateProfile, snapshot: CandidateSnapshot
                           title: str, company: str, layout: str, style: str, emit: Emit) -> GeneratedDocument:
     """A one-page resume tailored to a job the user brings (not one of the found jobs)."""
     async def work():
-        job = await job_from_input(jd_text, url, title, company, snapshot)
-        doc = await generate_resume(profile, snapshot, job)
+        job = await job_from_input(jd_text, url, title, company, snapshot, understand=False)
+        # the job read, the bullet rewrite and the skill grouping run at the same time
+        doc = await generate_resume(profile, snapshot, job, job_ready=read_requirements(job, snapshot))
         doc.job_id = None
         doc.content["layout"] = layout if layout in LAYOUTS else "single"
         doc.style = styles.normalize(style)
