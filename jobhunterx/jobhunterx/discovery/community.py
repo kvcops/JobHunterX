@@ -4,7 +4,8 @@ Community and startup sources — where early-career roles show up before (or in
 * YC Work at a Startup — the public ycombinator.com/jobs pages (no login). Each listing carries the company's own
   minimum experience ("Any (new grads ok)", "1+ years"), so a fresher can see at a glance which ones are open to them,
   and the job page names the founder who is hiring.
-* r/developersIndia — the monthly "Who's hiring?" megathread, where each top-level comment fills a fixed template
+* Reddit — recurring "Who's hiring?" megathreads in the communities of the candidate's field (chosen by the AI),
+  where each top-level comment usually fills a template
   (company, link, location, role, experience, pay). Read through Reddit's public JSON, with the RSS feeds as a
   fallback (Reddit refuses JSON from many cloud addresses, and rate-limits). A refused source is skipped.
 * Founder hiring posts — "we're hiring" posts on X, found only through the web search providers you already use (no
@@ -36,7 +37,11 @@ log = get_logger("community")
 YC_BASE = "https://www.ycombinator.com"
 YC_DETAIL_LIMIT = 12
 YC_MAX_AGE_DAYS = 120               # some company pages still list roles from years ago
-REDDIT_SUBS = ("developersIndia",)
+# Which Reddit communities to read is chosen per candidate (their field and country) by the AI — see communities().
+_SUB_NAME = re.compile(r"^[A-Za-z0-9_]{2,21}$")
+_SUBS_SYSTEM = """You know Reddit well. List the subreddits (names only, without "r/") where people in the given field
+and country regularly post job openings — usually in a recurring "who's hiring" / "hiring" megathread. Only communities
+you are confident exist and are active. At most 3. Return an empty list if you know none for this field and country."""
 REDDIT_MAX_AGE_DAYS = 30
 REDDIT_HEADERS = {"User-Agent": "python:jobhunterx:1.0 (personal job search assistant)", "Accept": "application/json"}
 _INDIA_LOC = re.compile(r"(?i)\b(india|(?-i:IN)\b|hyderabad|secunderabad|bengaluru|bangalore|chennai|pune|mumbai|delhi|gurugram|"
@@ -186,7 +191,7 @@ def _exp(p: JobPosting) -> str:
 
 
 # ------------------------------------------------------------------ Reddit
-# r/developersIndia keeps hiring in one "Who's hiring? - Monthly Megathread", where each top-level comment fills a fixed
+# Many communities keep hiring in one recurring "Who's hiring?" megathread, where each top-level comment fills a
 # template (Company Name / Link / Location / Role/Position / Type / Experience Required / Pay Range / ...).
 _MEGATHREAD = re.compile(r"(?i)who['’]?s\s+hiring|hiring\s+megathread")
 _FIELDS = {"company": r"company(?:\s+name)?", "link": r"(?:company\s+)?(?:link|website)", "location": r"location",
@@ -233,7 +238,7 @@ def _short(value: str, limit: int = 120) -> str:
 
 
 def parse_megathread_comment(c: dict, labels: list[str], *, include_remote: bool = True,
-                             now: Optional[datetime] = None) -> Optional[JobPosting]:
+                             now: Optional[datetime] = None, sub: str = "") -> Optional[JobPosting]:
     """One top-level comment {body, permalink, created_utc, author} → a posting, or None (questions, other fields, abroad)."""
     now = now or datetime.now(timezone.utc)
     text = _md_text(c.get("body") or "")
@@ -261,9 +266,9 @@ def parse_megathread_comment(c: dict, labels: list[str], *, include_remote: bool
                    "internship" if re.search(r"(?i)intern", f.get("type", "") + role) else
                    "full_time" if re.search(r"(?i)full", f.get("type", "")) else "",
                    work_mode=WorkMode.REMOTE if re.search(r"(?i)remote", loc) and not _INDIA_LOC.search(loc.replace("India", "")) else WorkMode.UNKNOWN,
-                   discovered_by_query="Reddit r/developersIndia: Who's hiring? megathread",
+                   discovered_by_query=f"Reddit r/{sub or '?'}: Who's hiring? megathread",
                    sources=[SourceRef(name="reddit", kind="community", url=link, confidence=0.45)])
-    p.validation.checks["title"] = FieldCheck(status="inferred", value=p.title, evidence="r/developersIndia hiring megathread")
+    p.validation.checks["title"] = FieldCheck(status="inferred", value=p.title, evidence=f"r/{sub or '?'} hiring megathread")
     if f.get("experience"):
         p.validation.checks["experience"] = FieldCheck(status="inferred", value=f["experience"][:60], evidence="Megathread post")
     return p
@@ -341,14 +346,38 @@ async def _comments(sub: str, thread: dict) -> list[dict]:
     return [c for c in parse_reddit_rss(xml or "") if _thread_id(c["permalink"]) == tid and c["permalink"].rstrip("/").count("/") > 5]
 
 
-async def reddit_search(labels: list[str], *, include_remote: bool = True, limit: int = 25) -> list[JobPosting]:
+async def communities(labels: list[str], country: str = "") -> list[str]:
+    """Subreddits with hiring threads for this candidate's field and country (the AI's answer, cached per field)."""
+    from pydantic import BaseModel, Field
+
+    from jobhunterx.intelligence.llm_structured import call_structured
+
+    class _Subs(BaseModel):
+        subreddits: list[str] = Field(default_factory=list)
+
+    field = ", ".join(dict.fromkeys(l for l in labels if l))[:300]
+    if not field:
+        return []
+    try:
+        res, _ = await call_structured(task="reddit_communities", version="subs-v1", model=_Subs, system=_SUBS_SYSTEM,
+                                       user=f"Field / roles: {field}\nCountry: {country or 'any'}", chain="fast",
+                                       max_tokens=300, cache_parts=(field.lower(), (country or "").lower()))
+    except Exception as exc:
+        log.info("reddit_communities_unavailable", error=str(exc)[:100])
+        return []
+    names = [re.sub(r"^/?r/", "", s.strip()) for s in (res.subreddits if res else [])]
+    return [n for n in dict.fromkeys(names) if _SUB_NAME.match(n)][:3]
+
+
+async def reddit_search(labels: list[str], *, include_remote: bool = True, limit: int = 25,
+                        country: str = "") -> list[JobPosting]:
     now = datetime.now(timezone.utc)
     out: list[JobPosting] = []
     seen: set[str] = set()
-    for sub in REDDIT_SUBS:
+    for sub in await communities(labels, country):
         for thread in await _megathreads(sub):
             for c in await _comments(sub, thread):
-                p = parse_megathread_comment(c, labels, include_remote=include_remote, now=now)
+                p = parse_megathread_comment(c, labels, include_remote=include_remote, now=now, sub=sub)
                 if p and p.canonical_url not in seen:
                     seen.add(p.canonical_url)
                     out.append(p)

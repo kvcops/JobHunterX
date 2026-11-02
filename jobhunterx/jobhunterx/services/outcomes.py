@@ -24,7 +24,7 @@ CHANNELS = ["own_site", "referral", "hiring_team", "founder_outreach", "linkedin
             "it_services_test", "email", "other"]
 CHANNEL_LABELS = {"own_site": "Company's own site", "referral": "Referral", "hiring_team": "Note to the hiring team",
                   "founder_outreach": "Founder outreach", "linkedin": "LinkedIn", "job_board": "Other job board",
-                  "challenge": "Hiring challenge", "it_services_test": "IT-services test / drive", "email": "Email to the posting",
+                  "challenge": "Hiring challenge", "it_services_test": "Bulk-hiring test / drive", "email": "Email to the posting",
                   "other": "Other"}
 EVENTS = ["reply", "screen", "interview", "offer", "rejected"]
 # tracking statuses that imply an event

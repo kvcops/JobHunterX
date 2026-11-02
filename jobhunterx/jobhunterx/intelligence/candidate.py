@@ -86,7 +86,7 @@ class CandidateUnderstanding(BaseModel):
     skills: list[_SkillOut] = Field(default_factory=list)
 
 
-_SYSTEM = """You are a senior technical recruiter building an accurate, honest model of a candidate.
+_SYSTEM = """You are a senior recruiter in the candidate's own field, building an accurate, honest model of a candidate.
 Use ONLY the profile provided. Do not invent experience, skills, employers or achievements.
 
 Produce:
@@ -217,7 +217,7 @@ class _SkillsOut(BaseModel):
 
 
 _SKILLS_SYSTEM = """For each skill/technology/tool given, return its name exactly as given, at most 3 aliases (abbreviations,
-alternative spellings, common other names) and at most 3 adjacent skills a technical recruiter would accept as partial
+alternative spellings, common other names) and at most 3 adjacent skills a recruiter in that field would accept as partial
 evidence. Return every skill given, in the same order, and nothing else."""
 SKILL_CHUNK = 12            # skills per call: small answers come back fast, and the calls run side by side
 

@@ -25,6 +25,7 @@ from jobhunterx.config.logging import get_logger
 from jobhunterx.config import database as db
 from jobhunterx.config.settings import get_settings, Settings
 from jobhunterx.models import HITLType
+from jobhunterx.utils import phone as phone_util
 
 log = get_logger("browser_agent")
 
@@ -1034,14 +1035,6 @@ _PREFILL_JS = """(p) => {
     ['last', (t) => /last\\s*name|family\\s*name|sur\\s*name|^last$|^l\\s?name$|\\blname\\b/.test(t)],
     ['first', (t) => /first\\s*name|given\\s*name|fore\\s*name|^first$|^f\\s?name$|\\bfname\\b|preferred\\s*first/.test(t)],
     ['email', (t) => /e\\s?mail/.test(t)],
-    ['linkedin', (t) => /linked\\s*in/.test(t)],
-    ['github', (t) => /git\\s*hub/.test(t)],
-    ['gitlab', (t) => /git\\s*lab/.test(t)],
-    ['twitter', (t) => /twitter|\\bx\\.com|^x( handle| profile| url)?$/.test(t)],
-    ['kaggle', (t) => /kaggle/.test(t)], ['leetcode', (t) => /leet\\s*code/.test(t)], ['medium', (t) => /\\bmedium\\b/.test(t)],
-    ['behance', (t) => /behance/.test(t)], ['dribbble', (t) => /dribbble/.test(t)], ['stackoverflow', (t) => /stack\\s*overflow/.test(t)],
-    ['scholar', (t) => /scholar/.test(t)], ['other_social', (t) => /facebook|instagram|youtube|tiktok|threads|social/.test(t)],
-    ['portfolio', (t) => /portfolio|personal\\s*(web)?\\s*site|^web\\s*site|website|personal url|home\\s*page|^url$|^link$|blog/.test(t)],
   ];
   const labelOf = (el, d) => {
     let s = [...(el.labels || [])].map((l) => l.innerText).join(' ');
@@ -1072,13 +1065,23 @@ _PREFILL_JS = """(p) => {
         const hit = kinds.find(([, f]) => f(t));
         if (hit) kind = hit[0];
       }
+      // a box that names a site gets the candidate's link on that site (the site names come from their own links)
+      let value = kind ? p[kind] : '';
+      for (const t of sources) {
+        if (kind) break;
+        const words = new Set(t.replace(/[^a-z0-9]+/g, ' ').trim().split(' '));
+        const site = Object.keys(p.sites || {}).find((n) => words.has(n) || (n.length > 3 && t.replace(/\\s+/g, '').includes(n)));
+        if (site) { kind = 'site:' + site; value = p.sites[site]; }
+      }
+      if (!kind && sources.some((t) => /portfolio|personal\\s*(web)?\\s*site|^web\\s*site|website|personal url|home\\s*page|^url$|^link$|blog/.test(t))) kind = 'portfolio';
       if (!kind && a === 'url') kind = 'portfolio';
-      if (!kind || !p[kind] || (seen.has(kind) && !['first', 'last', 'full', 'email'].includes(kind))) continue;
+      if (kind === 'portfolio') value = p.portfolio;
+      if (!kind || !value || (seen.has(kind) && !['first', 'last', 'full', 'email'].includes(kind))) continue;
       seen.add(kind);
-      el.focus(); setter.call(el, p[kind]);
+      el.focus(); setter.call(el, value);
       for (const ev of ['input', 'change']) el.dispatchEvent(new Event(ev, { bubbles: true }));
       el.blur();
-      filled.push((labelOf(el, d) || el.placeholder || el.name || kind).replace(/\\s+/g, ' ').replace(/\\*/g, '').trim().slice(0, 40) + ' = ' + p[kind]);
+      filled.push((labelOf(el, d) || el.placeholder || el.name || kind).replace(/\\s+/g, ' ').replace(/\\*/g, '').trim().slice(0, 40) + ' = ' + value);
     }
   }
   return filled;
@@ -1176,7 +1179,7 @@ async def _prefill(browser_session: Any, profile: dict) -> Any:
     first, last, full = name_parts(profile)
     vals = {"full": full, "first": first, "last": last, "email": profile.get("email") or "", **profile_links(profile)}
     code, national = split_phone(profile.get("phone", ""), home_country(profile))
-    phone = {"code": code.lstrip("+"), "code_plus": code, "iso": _ISO.get(code, ""), "national": national}
+    phone = {"code": code.lstrip("+"), "code_plus": code, "iso": phone_util.region_for_code(code), "national": national}
     try:
         filled: list = []
         for _ in range(8):                               # single-page forms render a moment after load
@@ -1310,16 +1313,13 @@ def _want(value: str) -> tuple[str, str, list[str]]:
     """What the agent asked for → (normalised value, calling code digits if it is a country / code, aliases)."""
     v = _norm_opt(value)
     code, aliases = "", []
-    m = re.fullmatch(r"\+?\s?(\d{1,4})", v)
+    m = re.fullmatch(r"\+?\s?(\d{1,4})", v) or re.fullmatch(r".+? \+?(\d{1,4})", v)    # "+91" / "india +91"
     if m:
         code = m.group(1)
     else:
-        for name, c in _CALLING_CODES.items():
-            if v == name or re.fullmatch(rf"{re.escape(name)} ?\+?{c.lstrip('+')}", v):
-                code = c.lstrip("+")
+        code = phone_util.calling_code(v).lstrip("+")                                # a country name
     if code:
-        aliases = [n for n, c in _CALLING_CODES.items() if c == "+" + code] + ["+" + code]
-        aliases += _COUNTRY_ALIASES.get(_CODE_COUNTRY.get("+" + code, "").lower(), [])
+        aliases = phone_util.aliases_for_code(code) + ["+" + code]
     return v, code, aliases
 
 
@@ -1454,8 +1454,8 @@ async def _choose_option(browser_session: Any, index: int, value: str, search: s
 
         want_v, code, _aliases = _want(value)
         terms = [search] if search else []
-        if code and _CODE_COUNTRY.get("+" + code):
-            terms += [_CODE_COUNTRY["+" + code], "+" + code]
+        if code and phone_util.country_for_code(code):
+            terms += [phone_util.country_for_code(code), "+" + code]
         terms.append(value)
         terms = list(dict.fromkeys(t.strip() for t in terms if t and t.strip()))[:3]
 
@@ -1533,7 +1533,7 @@ def _build_tools(profile: Optional[dict] = None) -> Any:
 
     @controller.action("Pick an option in ANY dropdown, select, combobox or autocomplete (country, phone country code / flag "
                        "picker, location, college, degree, notice period, 'how did you hear'…). Give the dropdown's index "
-                       "and the value you want (e.g. value='India', value='+91', value='Bachelor of Technology'); optional "
+                       "and the value you want (the country name, the '+code', the degree name… exactly as you want it chosen); optional "
                        "search = a shorter word to type into its search box (e.g. 'CVR' for a college). It opens the list, "
                        "types, WAITS for the options to load, clicks the best match and checks the field shows it.")
     async def choose_option(index: int, value: str, browser_session, search: str = "", wait_seconds: float = 8) -> ActionResult:
@@ -1623,53 +1623,18 @@ def _build_tools(profile: Optional[dict] = None) -> Any:
     return controller
 
 
-# Calling codes for the countries candidates here usually live in; others fall back to the number as written.
-_CALLING_CODES = {"india": "+91", "united states": "+1", "usa": "+1", "canada": "+1", "united kingdom": "+44", "uk": "+44",
-                  "singapore": "+65", "united arab emirates": "+971", "uae": "+971", "germany": "+49", "australia": "+61"}
-_CODE_COUNTRY = {"+91": "India", "+1": "United States", "+44": "United Kingdom", "+65": "Singapore",
-                 "+971": "United Arab Emirates", "+49": "Germany", "+61": "Australia"}
-_ISO = {"+91": "in", "+1": "us", "+44": "gb", "+65": "sg", "+971": "ae", "+49": "de", "+61": "au"}
-_COUNTRY_ALIASES = {"india": ["india", "bharat", "ind", "in"], "united states": ["united states of america", "usa", "us"],
-                    "united kingdom": ["uk", "great britain", "gb"], "united arab emirates": ["uae", "ae"]}
-
-
 def prefs_country(profile: dict) -> str:
     return ((profile.get("preferences") or {}).get("home_country") or "").strip()
 
 
 def home_country(profile: dict) -> str:
-    """The country set in preferences; else the one the phone's '+code' names; else India (who this app is for)."""
-    country = prefs_country(profile)
-    if country:
-        return country
-    m = re.match(r"\s*(?:\+|00)\s*(\d{1,3})", profile.get("phone") or "")
-    if m:
-        for code in (m.group(1)[:n] for n in (3, 2, 1)):
-            if "+" + code in _CODE_COUNTRY:
-                return _CODE_COUNTRY["+" + code]
-    return "India"
+    """The country set in preferences; else the one the phone's '+code' names; else '' (unknown)."""
+    return prefs_country(profile) or phone_util.country_from_phone(profile.get("phone") or "")
 
 
-def split_phone(phone: str, country: str = "India") -> tuple[str, str]:
-    """'+91 80747 49058' → ('+91', '8074749058'); '08074749058' / '918074749058' with India → ('+91', '8074749058')."""
-    raw = (phone or "").strip()
-    digits = re.sub(r"\D", "", raw)
-    if not digits:
-        return "", ""
-    if raw.startswith("+") or raw.startswith("00"):
-        if raw.startswith("00"):
-            digits = digits[2:]
-        for code in sorted({c.lstrip("+") for c in _CALLING_CODES.values()}, key=len, reverse=True):
-            if digits.startswith(code) and 7 <= len(digits) - len(code) <= 12:
-                return "+" + code, digits[len(code):]
-        m = re.match(r"\+?\s*(\d{1,3})[\s\-()]+(.+)", raw.lstrip("0"))
-        return ("+" + m.group(1), re.sub(r"\D", "", m.group(2))) if m else ("", digits)
-    code = _CALLING_CODES.get((country or "India").lower(), "")
-    if code == "+91":                       # Indian mobiles: 10 digits starting 6-9, never a leading 0 or a doubled 91
-        if len(digits) == 12 and digits.startswith("91"):
-            digits = digits[2:]
-        digits = digits.lstrip("0") if len(digits) == 11 else digits
-    return code, digits
+def split_phone(phone: str, country: str = "") -> tuple[str, str]:
+    """'+91 80747 49058' → ('+91', '8074749058'); a number without '+code' is read as a number of `country`."""
+    return phone_util.split(phone, country)
 
 
 def name_parts(profile: dict) -> tuple[str, str, str]:
@@ -1695,38 +1660,43 @@ def name_parts(profile: dict) -> tuple[str, str, str]:
     return first or auto_first, last or auto_last, full
 
 
-# Which site a link belongs to, by its address — never by the box it was typed into on the profile.
-_LINK_SITES = [("linkedin", "linkedin.com"), ("github", "github.com"), ("gitlab", "gitlab.com"), ("twitter", "twitter.com"),
-               ("twitter", "x.com"), ("kaggle", "kaggle.com"), ("leetcode", "leetcode.com"), ("medium", "medium.com"),
-               ("behance", "behance.net"), ("dribbble", "dribbble.com"), ("stackoverflow", "stackoverflow.com"),
-               ("scholar", "scholar.google.")]
-
-
-def _link_site(url: str) -> str:
+# Which site a link belongs to, by its own address — never by the box it was typed into on the profile, and with no
+# list of sites: "github.com/x" → "github", "www.behance.net/x" → "behance", "scholar.google.com/…" → "google".
+def _site_name(url: str) -> str:
     host = _host(url if "://" in url else "https://" + url).lower().removeprefix("www.")
-    for site, domain in _LINK_SITES:
-        if host == domain or host.endswith("." + domain) or (domain.endswith(".") and host.startswith(domain)):
-            return site
-    return ""
+    labels = [x for x in host.split(".") if x]
+    if len(labels) < 2:
+        return ""
+    # "example.co.uk" / "example.com.au": the name sits before a two-part ending
+    if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in ("co", "com", "org", "net", "ac", "gov", "edu"):
+        return labels[-3]
+    return labels[-2]
 
 
-def profile_links(profile: dict) -> dict[str, str]:
-    """{'linkedin': …, 'github': …, 'portfolio': …, 'twitter': …} sorted by domain, so a GitHub address saved in the
-    portfolio box still goes only to GitHub fields, and a portfolio is never a LinkedIn / GitHub / social profile."""
-    out: dict[str, str] = {}
-    cands = [("portfolio", profile.get("portfolio")), ("linkedin", profile.get("linkedin")), ("github", profile.get("github"))]
-    cands += [((l.get("label") or "").lower(), l.get("url")) for l in profile.get("links") or [] if isinstance(l, dict)]
-    for hint, url in cands:
+def profile_links(profile: dict) -> dict:
+    """{'portfolio': url, 'sites': {site name: url}} from the candidate's own links. A box that names a site gets the link
+    whose address is on that site; a portfolio / personal-website box gets the portfolio. A link saved in the LinkedIn
+    box that is not on linkedin.com is not trusted for LinkedIn boxes (same for every named box)."""
+    sites: dict[str, str] = {}
+    portfolio = ""
+    named = [("linkedin", profile.get("linkedin")), ("github", profile.get("github"))]
+    for hint, url in named:
         url = (url or "").strip()
-        if not url:
+        if url and _site_name(url) == hint:
+            sites.setdefault(hint, url)
+    for l in profile.get("links") or []:
+        if not isinstance(l, dict) or not (l.get("url") or "").strip():
             continue
-        site = _link_site(url)
-        if not site:
-            if hint in ("linkedin", "github"):
-                continue                       # not a linkedin.com / github.com address: don't trust it for that box
-            site = "portfolio"
-        out.setdefault(site, url)
-    return out
+        url = l["url"].strip()
+        name = _site_name(url)
+        if name:
+            sites.setdefault(name, url)
+        if not portfolio and re.search(r"(?i)portfolio|website|personal|home ?page|blog", l.get("label") or ""):
+            portfolio = url
+    own = (profile.get("portfolio") or "").strip()
+    if own and _site_name(own) not in ("linkedin",):
+        portfolio = own
+    return {"portfolio": portfolio, "sites": sites}
 
 
 def _pay_lines(qa: dict) -> list[str]:
@@ -1794,15 +1764,14 @@ def _profile_block(profile: dict) -> str:
 - Last name (surname / family name): {last or first + '  (only one name — repeat it if a last name is required)'}
 - Full name: {full}
 - Email: {profile.get('email', '')}
-- Phone country code: {code or '(unknown)'}{f' ({_CODE_COUNTRY[code]})' if code in _CODE_COUNTRY else ''}
-- Phone number WITHOUT country code: {national or profile.get('phone', '')}{'  (10-digit Indian mobile)' if code == '+91' else ''}
+- Phone country code: {code or '(unknown)'}{f' ({phone_util.country_for_code(code)})' if phone_util.country_for_code(code) else ''}
+- Phone number WITHOUT country code: {national or profile.get('phone', '')}
 - Phone (full, international): {(code + ' ' + national).strip() if national else profile.get('phone', '')}
 - Current location: {profile.get('location', '')}
 - Home country: {country}
 - Languages: {', '.join(langs) if isinstance(langs, list) else langs}
-- LinkedIn URL (only for LinkedIn fields): {links.get('linkedin') or '(none — leave LinkedIn fields empty)'}
-- GitHub URL (only for GitHub / code fields): {links.get('github') or '(none)'}
-- Portfolio / personal website: {links.get('portfolio') or '(none — use the GitHub URL if a portfolio/website is required)'}{links_block}
+- Profile links (each ONLY for a box that names its site): {'; '.join(f'{n}: {u}' for n, u in links['sites'].items()) or '(none)'}
+- Portfolio / personal website: {links['portfolio'] or '(none — if a website is required, use the most relevant profile or project link)'}{links_block}
 - Summary: {profile.get('summary', '')}
 
 === SKILLS ===
@@ -1832,9 +1801,9 @@ Keep your thinking extremely brief and short (1 concise sentence max). Do NOT wr
 BASIC RULES:
 1. Fill in all required fields with the candidate information above. Name, email and profile links may already be
    pre-filled (see the pre-fill result) — check them, don't retype them. On a new form page, `prefill_basic_fields` does them in one go.
-2. Use the Q&A answers for dropdown/select/radio/input questions about salary, CTC, notice period, work authorization, etc.
-3. Do NOT fill in Current CTC or Expected CTC unless the application form explicitly asks.
-4. If a generic "salary" is asked, prioritize expected salary / expected CTC.
+2. Use the Q&A answers for dropdown/select/radio/input questions about salary, notice period, work authorization, etc.
+3. Do NOT fill in current or expected salary / compensation unless the application form explicitly asks.
+4. If a generic "salary" is asked, prioritize the expected salary.
 5. For education and work experience fields, use the detailed history provided above (see EDUCATION and PHONE rules below).
 6. Upload files with the `upload_file` action (give the file input's index and the exact path):
    - Resume / CV / "Resume/CV" upload → the RESUME file below (one page, tailored to this job).
@@ -1849,11 +1818,11 @@ NAME RULES:
 - "Middle name" → leave empty. "Preferred name" → the first name.
 
 LINK / URL RULES (each link goes ONLY in its own box):
-- LinkedIn box → only the LinkedIn URL (linkedin.com). GitHub box → only the GitHub URL (github.com).
-- Portfolio / Personal website / Website box → the portfolio URL (if none and the box is required, the GitHub URL).
-- Twitter / X, Facebook, Instagram, Kaggle, Medium, Behance or any other site's box → only a link of THAT site from
-  "Other links"; if there is none, leave it empty. Never put the LinkedIn or GitHub URL in another site's box.
-- "Any other link" / "Additional links" → the portfolio or a project link, not LinkedIn again.
+- A box that names a site → only the candidate's link on THAT site ("Profile links"); if there is none, leave it empty.
+  Never put one site's link in another site's box.
+- Portfolio / Personal website / Website box → the portfolio (if none and the box is required, the most relevant
+  profile or project link).
+- "Any other link" / "Additional links" → the portfolio or a project link, not a link already used in another box.
 
 DROPDOWN / SELECT FIELD RULES:
 - For EVERY dropdown, select, combobox, autocomplete or search-as-you-type box (country, phone country code / flag,
@@ -1861,13 +1830,14 @@ DROPDOWN / SELECT FIELD RULES:
   value you want. It opens the list, types the search, WAITS for the options to finish loading, clicks the matching
   option and tells you what the field shows. Do NOT type into a dropdown and click an option yourself.
 - If choose_option lists the options instead, call it again with the exact option text (or a shorter `search` word).
-- Country fields → the home country above (India → "India"). Never pick "Indiana", "Indian Ocean…" or another country.
+- Country fields → the home country above, exactly. Never pick a similar-looking option (a state, region, ocean or
+  another country whose name starts the same way).
 - If an option says "Other" and the form has a text field next to it, select "Other" and type the specific value.
 - For "Years of Experience" dropdowns, pick the option that matches the candidate's total experience.
 - EXPERIENCE QUESTIONS ARE NEVER ROUNDED UP. "Do you have N+ years of X?" → answer "No" unless the work history above
   really shows it. A numeric experience box gets the true number (0 for a fresher). If an honest answer would end the
   application, still answer honestly — an inflated answer is caught at interview and gets the candidate blacklisted.
-- For "Salary" / "Expected CTC" dropdowns, use the Q&A answers provided above.
+- For salary / expected compensation dropdowns, use the Q&A answers provided above.
 
 DATE / CALENDAR FIELD RULES:
 - For <input type="date"> fields: Type the date directly in MM/DD/YYYY or YYYY-MM-DD format (check the placeholder for the expected format).
@@ -1883,19 +1853,22 @@ EDUCATION RULES (college vs university — they are different things):
   If no university is given, use the college name there too.
 - If there is only ONE field ("School / University", "Education institution"), enter the college attended.
 - For a college / university dropdown or autocomplete: FIRST search for the exact college name (type it, or its distinctive
-  part, e.g. choose_option(value="CVR College of Engineering", search="CVR")), and pick the matching one. Try one
-  short variant or common abbreviation if nothing matches (e.g. "JNTU" for "Jawaharlal Nehru Technological University").
+  part of the name as `search`), and pick the matching one. Try one short variant or the common abbreviation of the
+  name if nothing matches.
   Only if it is truly not in the list, choose "Other" / "Not listed" and type the full name in the text box that appears.
   Never pick a different college or the university in place of the college.
 
-PHONE RULES (Indian numbers: country code +91, then a 10-digit mobile number):
+PHONE RULES (the candidate's phone above; its country calling code is the "+digits" it starts with — if it has none,
+the calling code of the home country):
 - `prefill_basic_fields` usually sets the phone and its country code already — read its result first.
-- If the form has a SEPARATE country-code picker or prefix box (a flag, "+1" dropdown, "Country code" field), set it with
-  `choose_option` (value="+91", or the country name "India") and type ONLY the 10-digit number WITHOUT the code.
-- If the field already shows a prefix such as "+91" inside or beside the input, type only the 10-digit number, with
-  clear=false if the "+91" is part of the box's own text.
-- If it is a single plain phone field with no country code shown, type the full international number ("+91 98xxxxxxxx").
-- Never type the country code twice (no "+91 +91…" or "9191…"), no leading 0 before the number, never "+1" for an Indian number.
+- If the form has a SEPARATE country-code picker or prefix box (a flag, a "+code" dropdown, "Country code" field), set it
+  with `choose_option` (value = the calling code, or the home country's name) and type ONLY the national number,
+  WITHOUT the code.
+- If the field already shows the calling code inside or beside the input, type only the national number, with
+  clear=false if the code is part of the box's own text.
+- If it is a single plain phone field with no country code shown, type the full international number (+code, then the
+  national number).
+- Never type the country code twice, no extra leading 0 after the code, and never a different country's code.
 
 RADIO BUTTON / CHECKBOX RULES:
 - To tick or untick a checkbox (or a toggle / switch), use the `set_checkbox` action with the box's index and
@@ -1906,7 +1879,7 @@ RADIO BUTTON / CHECKBOX RULES:
   candidate; for a radio group, pick exactly one.
 - Custom-styled checkboxes are often NOT in the element list at all. If you cannot find the box's index (or
   `set_checkbox` says it is not a checkbox), use `set_checkbox_by_text` with a short exact phrase from its label,
-  e.g. text="I agree to the privacy policy". The same action works for radio options ("Yes", "Immediate joiner").
+  e.g. text="I agree to the privacy policy". The same action works for radio options ("Yes", "No", or the option's own words).
 - If both report they could not change the box, click its visible text once, then move on.
 - For "Yes/No" questions about work authorization, visa sponsorship, etc., use the Work Authorization Rule below.
 - For gender/ethnicity questions, these are usually optional — skip unless required.

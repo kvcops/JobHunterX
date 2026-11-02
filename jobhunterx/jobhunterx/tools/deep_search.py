@@ -712,7 +712,7 @@ class _Rerank(BaseModel):
 
 _RERANK_SYS = """You rank web search results for a job search. For each numbered result give a score 0-10:
 10 = ONE currently open job posting that matches the role and place in the query (best on the employer's own site or ATS);
-8 = the same but on a job board (LinkedIn, Naukri, Indeed…);
+8 = the same but on a job board or aggregator;
 6 = the employer's own careers page / job board listing several matching roles;
 2 = a page that only lists many jobs from many employers ("3,000 jobs in…");
 0 = salary pages, people's profiles or portfolios, blogs, guides, courses, news, or a different role or country.
