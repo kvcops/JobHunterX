@@ -85,7 +85,14 @@ for v in .venv venv jobhunterx/.venv jobhunterx/venv; do [ -z "$PY" ] && [ -x "$
 REQ=$(git ls-files | grep -E '(^|/)requirements\.txt$' | head -1)
 # Install when requirements.txt changed, or when the app's Python is missing something it lists (an earlier deploy
 # whose install failed). pip leaves what is already satisfied alone.
-missing() { "$PY" -m pip install --dry-run -q -r "$REQ" 2>/dev/null | grep -q "Would install"; }
+# (a dry run changes nothing; on a system Python the OS refuses even that, so it is asked with the same override)
+missing() {
+  local out; out=$("$PY" -m pip install --dry-run -q -r "$REQ" 2>&1)
+  if echo "$out" | grep -q "externally-managed-environment"; then
+    out=$("$PY" -m pip install --dry-run -q --break-system-packages -r "$REQ" 2>&1)
+  fi
+  echo "$out" | grep -q "Would install"
+}
 if [ -n "$REQ" ] && [ -n "$PY" ] && { ! git diff --quiet "$BEFORE" "$AFTER" -- "$REQ" || missing; }; then
   say "installing requirements with $PY"
   if ! OUT=$("$PY" -m pip install -q -r "$REQ" 2>&1); then
