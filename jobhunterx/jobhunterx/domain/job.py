@@ -100,6 +100,10 @@ class Requirements(BaseModel):
     skill_aliases: dict[str, list[str]] = Field(default_factory=dict)
     # job skill → {"relation": "same"|"related", "via": candidate skill, "why": …}, set by intelligence/skill_links.py
     skill_links: dict[str, dict] = Field(default_factory=dict)
+    links_version: str = ""                # the skill_links VERSION that judged them (older ones are re-judged)
+    # applying on this site needs signing in / creating an account (read from the posting by the job reader, or
+    # learned when the browser agent met a login wall on the same site) — auto-apply can't do it, documents still can
+    apply_needs_account: bool = False
     experience_min: Optional[float] = None
     experience_max: Optional[float] = None
     experience_evidence: str = ""

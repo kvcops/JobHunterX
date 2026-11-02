@@ -189,11 +189,14 @@ function MatchTab({ job }) {
     <section><h3 class="sec-title">Skills</h3>
       <div class="skill-cloud">
         ${m.matched_required.map((s) => html`<span class="chip chip-good" title="Required — you have it">${s}</span>`)}
-        ${m.missing_required.map((s) => html`<span class="chip chip-bad" title="Required — not shown in your profile">${s}</span>`)}
-        ${m.matched_preferred.map((s) => html`<span class="chip chip-good soft" title="Nice to have — you have it">${s}</span>`)}
-        ${m.missing_preferred.map((s) => html`<span class="chip soft" title="Nice to have — not shown">${s}</span>`)}
+        ${(m.related_required || []).map((r) => html`<span class="chip chip-warn" title=${`Required — you have related experience: ${r.via}`}>${r.skill}</span>`)}
+        ${m.missing_required.map((s) => html`<span class="chip chip-bad" title="Required — not in your profile">${s}</span>`)}
+        ${m.matched_preferred.map((s) => html`<span class="chip chip-good nice" title="Nice to have — you have it">${s}</span>`)}
+        ${(m.related_preferred || []).map((r) => html`<span class="chip chip-warn nice" title=${`Nice to have — you have related experience: ${r.via}`}>${r.skill}</span>`)}
+        ${m.missing_preferred.map((s) => html`<span class="chip soft nice" title="Nice to have — not in your profile">${s}</span>`)}
       </div>
-      <p class="muted small">Green: you have it. Red: required but not in your profile. Faded: nice-to-have.</p>
+      <p class="muted small skill-legend"><span><i class="dot good"></i>You have it</span><span><i class="dot warn"></i>Related experience</span>
+        <span><i class="dot bad"></i>Required, missing</span><span><i class="dot none"></i>Nice to have, missing</span><span>Dashed = nice to have</span></p>
     </section>
   </div>`;
 }
@@ -333,8 +336,12 @@ export function JobDetail({ jobId, onClose }) {
           onChange=${(v) => setTracking(jobId, v)} options=${tracking.map((t) => [t, TRACKING_LABEL[t] || humanize(t)])} />
         <${Button} size="sm" icon="refresh" busy=${!!pending.verify[jobId]} onClick=${() => verifyJob(jobId)}>Re-verify</${Button}>
         <${Button} size="sm" icon="bolt" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score</${Button}>
-        <${Button} size="sm" icon="globe" busy=${!!pending.apply[jobId]} onClick=${() => autoApply(jobId)}>Auto-apply</${Button}>
+        ${job.needs_account
+          ? html`<span class="chip chip-warn" title="This site makes you sign in or create an account before applying — the agent can't do that">Sign-in needed</span>`
+          : html`<${Button} size="sm" icon="globe" busy=${!!pending.apply[jobId]} onClick=${() => autoApply(jobId)}>Auto-apply</${Button}>`}
       </div>
+      ${job.needs_account ? html`<${Notice} tone="info">This site makes you sign in or create an account before applying, so auto-apply is off for it.
+        Make your resume, CV and cover letter in <b>Application kit</b>, then apply on their site.</${Notice}>` : null}
       ${job.match_stale ? html`<${Notice} tone="warning">Your profile changed since this job was scored.
         <${Button} size="sm" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score now</${Button}></${Notice}>` : null}
       <${Tabs} label="Job sections" value=${tab} onChange=${setTab} tabs=${TABS} size="sm" />

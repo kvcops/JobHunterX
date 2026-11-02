@@ -24,7 +24,7 @@ from jobhunterx.intelligence.llm_structured import call_structured, fence
 
 log = get_logger("extractor")
 
-VERSION = "profile-extract-v6"   # v6: skills / technologies must be written in the PDF (v5: three parts at once)
+VERSION = "profile-extract-v7"   # v7: skills = the resume's own skills section (v6: must be written in the PDF)
 
 _SYSTEM = """You convert a resume into a structured candidate profile.
 Extract ONLY what is written in the resume. Never invent or infer employers, dates, skills, metrics or links.
@@ -42,7 +42,10 @@ Extract ONLY what is written in the resume. Never invent or infer employers, dat
   result page): section = "certification" | "achievement" | "competition", item = that entry's text exactly as you wrote it.
 - Use the "Embedded links" list: each line is `url | text on the link | nearby lines`; the nearby lines tell you
   which project or entry a link belongs to. Skip email (mailto:) and phone (tel:) links. Never invent a URL.
-- skills: every technology, tool, language, framework and method named anywhere in the resume, as written.
+- skills: the items of the resume's own skills section(s) (Skills / Technical Skills / Tech Stack…), as written,
+  one item per skill. A tool named only inside a project or job line belongs to that project's `technologies` or that
+  job's bullets, NOT to skills. Only if the resume has no skills section at all, list the technologies named in the
+  experience bullets.
 - certifications, achievements, competitions, languages (spoken languages) as lists.
 - name: the full name exactly as the resume prints it. first_name / middle_name / last_name: the same name split into
   given name, middle name(s) and family name (surname), in normal capitalisation. Many resumes print the surname first

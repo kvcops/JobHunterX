@@ -95,6 +95,9 @@ class MatchAssessment(BaseModel):
     missing_required: list[str] = Field(default_factory=list)
     matched_preferred: list[str] = Field(default_factory=list)
     missing_preferred: list[str] = Field(default_factory=list)
+    # shown, but only as related experience: [{"skill": job skill, "via": what of yours is related}]
+    related_required: list[dict] = Field(default_factory=list)
+    related_preferred: list[dict] = Field(default_factory=list)
     experience: ExperienceFit = Field(default_factory=ExperienceFit)
     rejected_reasons: list[str] = Field(default_factory=list)
     role_fit: float = 0.0

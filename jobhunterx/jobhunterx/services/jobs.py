@@ -10,8 +10,8 @@ from jobhunterx.domain.candidate import CandidateSnapshot
 from jobhunterx.domain.job import JobPosting
 from jobhunterx.domain.match import MatchAssessment
 from jobhunterx.intelligence import job as job_ai
-from jobhunterx.intelligence import domain_age, skill_links
-from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
+from jobhunterx.intelligence import account_wall, domain_age, skill_links
+from jobhunterx.intelligence.matching import assess, build_idf, candidate_evidence, candidate_work_text
 
 _MAIN = "COALESCE(json_extract(match_json, '$.track'), 'main') != 'floor'"   # safety-net jobs have their own view
 # Jobs saved before LinkedIn postings were left out stay in Saved / Applied, but no longer appear in the discovery views.
@@ -69,6 +69,7 @@ def _summary(p: JobPosting, m: Optional[MatchAssessment], row: dict, current_has
         "valid_through": _iso(p.valid_through),
         "discovered_at": _iso(p.discovered_at) or row.get("created_at"),
         "apply_url": p.apply_url,
+        "needs_account": account_wall.needs_account(p),
         "source": {"name": src.name, "kind": src.kind, "url": src.url, "first_party": src.first_party} if src else None,
         "sources_count": len(p.sources),
         "salary": p.salary.model_dump(mode="json") if p.salary else None,
@@ -188,7 +189,7 @@ async def rescore(job_id: str, snapshot: CandidateSnapshot, profile_dict: dict, 
     fits = await job_ai.assess_role_fit(snapshot, [p], use_llm=use_llm)
     text = candidate_work_text(profile_dict)
     if use_llm:
-        await skill_links.resolve(snapshot, [p], text)
+        await skill_links.resolve(snapshot, [p], text, candidate_evidence(profile_dict))
         await storage.update_posting(p)
     m = assess(snapshot, p, role_fit=fits[p.id], candidate_text=text, idf=build_idf([p.description, text]))
     await storage.update_match(job_id, m)
@@ -213,6 +214,43 @@ async def reassess_outdated(snapshot: CandidateSnapshot, profile_dict: dict, lim
     return done
 
 
+async def refresh_links(snapshot: CandidateSnapshot, profile_dict: dict, emit=None, limit: int = 300) -> int:
+    """Jobs whose skills were linked by an older linker, or that were scored for an older version of the profile (a
+    new resume upload), are re-linked and re-scored — so a better matcher reaches the jobs already found. Runs in the
+    background at low priority; returns how many jobs changed."""
+    from jobhunterx.config import models as _models
+    from jobhunterx.intelligence.matching import ENGINE_VERSION
+    _models.BACKGROUND.set(True)
+    rows = await storage.list_rows("match_json IS NOT NULL", order="updated_at DESC", limit=limit)
+    text, evidence = candidate_work_text(profile_dict), candidate_evidence(profile_dict)
+    todo = []
+    for row in rows:
+        p, m = storage.row_to_objects(row)
+        if p is None:
+            continue
+        if (p.requirements.links_version == skill_links.VERSION and m is not None
+                and m.profile_hash == snapshot.profile_hash and m.engine_version == ENGINE_VERSION):
+            continue
+        todo.append((p, m))
+    done = 0
+    for i in range(0, len(todo), 20):
+        chunk = todo[i:i + 20]
+        posts = [p for p, _ in chunk]
+        await skill_links.resolve(snapshot, posts, text, evidence)
+        stale_fit = [p for p, m in chunk if m is None or m.profile_hash != snapshot.profile_hash]
+        fits = await job_ai.assess_role_fit(snapshot, stale_fit) if stale_fit else {}
+        for p, m in chunk:
+            fit = fits.get(p.id) or (m.role_fit, m.role_track, "", m.method or "fallback")
+            new = assess(snapshot, p, role_fit=fit, candidate_text=text, idf=build_idf([p.description, text]))
+            await storage.update_posting(p)
+            await storage.update_match(p.id, new)
+            done += 1
+    if done and emit:
+        # one event at the end: the list reloads once (cards and tab counts together), not once per job
+        await emit({"type": "jobs.refreshed", "data": {"count": done}})
+    return done
+
+
 async def verify(job_id: str, snapshot: Optional[CandidateSnapshot], profile_dict: Optional[dict]) -> bool:
     row = await storage.get_row(job_id)
     if not row:
@@ -230,7 +268,7 @@ async def verify(job_id: str, snapshot: Optional[CandidateSnapshot], profile_dic
     if snapshot and profile_dict:
         text = candidate_work_text(profile_dict)
         role_fit = (m.role_fit, m.role_track, "", m.method) if m else (await job_ai.assess_role_fit(snapshot, [p]))[p.id]
-        await skill_links.resolve(snapshot, [p], text)
+        await skill_links.resolve(snapshot, [p], text, candidate_evidence(profile_dict))
         await storage.update_posting(p)
         await storage.update_match(job_id, assess(snapshot, p, role_fit=role_fit, candidate_text=text,
                                                   idf=build_idf([p.description, text])))
