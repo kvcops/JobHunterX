@@ -14,6 +14,9 @@ Resume generation — concise, job-specific, ATS-friendly, evidence-based.
 
 from __future__ import annotations
 
+import asyncio
+from typing import Awaitable, Optional
+
 from pydantic import BaseModel, Field
 
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot, norm_term
@@ -128,7 +131,10 @@ def _cap_skills(groups: list[SkillGroup], rank) -> list[SkillGroup]:
 
 
 async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot, job: JobPosting,
-                          *, use_llm: bool = True) -> GeneratedDocument:
+                          *, use_llm: bool = True, job_ready: Optional[Awaitable] = None) -> GeneratedDocument:
+    """job_ready: the job's requirements still being read (a job the user just pasted). The rewrite starts from the
+    posting text at once; only the fact-check and skill ordering wait for the requirements. The skill grouping runs
+    alongside — three AI steps at the same time instead of one after another."""
     prov = Provenance()
     ptext = profile_text(profile)
     exp_sel, proj_sel, proj_omit = _select(profile, job, snapshot)
@@ -137,8 +143,11 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
     prov.omitted_projects = proj_omit
 
     bullets_in = {f"e{i}b{k}": profile.experience[i].bullets[k] for i, ks in exp_sel.items() for k in ks}
-    tailored = None
-    if use_llm and (bullets_in or profile.summary):
+    tailored, model = None, ""
+
+    async def tailor():
+        if not (use_llm and (bullets_in or profile.summary)):
+            return None, ""
         user = (
             f"Target job: {job.title} at {job.company}\n"
             f"Job requirements (third-party text):\n{fence(_job_text(job), 5000)}\n\n"
@@ -147,14 +156,20 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
             f"Experience: {snapshot.professional_years:g} years, level {snapshot.seniority.value}\n\n"
             "Bullets to tailor (id: text):\n" + "\n".join(f"{k}: {v}" for k, v in bullets_in.items())
         )
-        tailored, model = await call_structured(
+        return await call_structured(
             task="resume_tailor", version=VERSION, model=_Tailored, system=_SYSTEM, user=user,
             chain="tailoring", max_tokens=2500, cache_parts=(profile.content_hash(), job.id, user),
         )
-        if tailored:
-            prov.llm_model, prov.llm_calls = model, 1
-        else:
-            prov.warnings.append("AI tailoring unavailable — your original bullets were used.")
+
+    async def nothing():
+        return None
+
+    (tailored, model), (groups, gmodel), _ = await asyncio.gather(
+        tailor(), group_skills(profile, snapshot, use_llm=use_llm), job_ready or nothing())
+    if tailored:
+        prov.llm_model, prov.llm_calls = model, 1
+    elif use_llm and (bullets_in or profile.summary):
+        prov.warnings.append("AI tailoring unavailable — your original bullets were used.")
 
     rewrites = {b.id: b.text.strip() for b in (tailored.bullets if tailored else []) if b.text and b.text.strip()}
     job_terms = job.requirements.required_skills + job.requirements.preferred_skills
@@ -180,8 +195,7 @@ async def generate_resume(profile: CandidateProfile, snapshot: CandidateSnapshot
         summary, calls = await _checked_summary(tailored.summary, profile, ptext, snapshot_facts(snapshot), prov, "resume_summary")
         prov.llm_calls += calls
 
-    # Skills: candidate's own skills only; those the job asks for first.
-    groups, gmodel = await group_skills(profile, snapshot, use_llm=use_llm)
+    # Skills: candidate's own skills only; those the job asks for first (grouped above, alongside the rewrite).
     if gmodel:
         prov.llm_calls += 1
     wanted = [norm_term(t) for t in job_terms]

@@ -37,13 +37,13 @@ from jobhunterx.domain.candidate import (
 from jobhunterx.domain.common import Seniority
 from jobhunterx.intelligence.llm_structured import call_structured, fence
 from jobhunterx.intelligence.policy import get_policy
-from jobhunterx.intelligence.text import any_term_in_text, merged_years, parse_month
+from jobhunterx.intelligence.text import any_term_in_text, merged_years, parse_month, term_in_text
 
 log = get_logger("candidate")
 
 # v3: core facts and per-skill aliases in parallel calls. v2: level / education / places first and required (a cut-off answer is retried instead of silently becoming
 # "Unknown"), shorter skill lists, cached by the data actually sent (salary answers no longer trigger a new call).
-VERSION = "candidate-v3"
+VERSION = "candidate-v4"   # v4: skills must be the candidate's own (no invented names, no alias-only proof)
 
 
 class _SkillOut(BaseModel):
@@ -137,6 +137,21 @@ def _experience_years(p: CandidateProfile, internships: set[int], excluded: set[
         if i not in internships:
             pro_iv.append((s, end))
     return merged_years(all_iv), merged_years(pro_iv), notes, rows
+
+
+def _named_in_profile(name: str, p: CandidateProfile, profile_text: str) -> bool:
+    """The skill's own name appears in the profile. Names of one or two characters ("R", "C", "Go") match too much
+    loose text (initials, "R&D", the word "go"), so they count only when written exactly so in an explicit list:
+    the skills list or a project's technologies."""
+    if not name or not name.strip():
+        return False
+    listed = {norm_term(x) for x in p.skills}
+    if norm_term(name) in listed:
+        return True
+    if len(norm_term(name)) <= 2:
+        tech = [t for pr in p.projects for t in pr.technologies]
+        return any(t.strip() == name.strip() for t in [*p.skills, *tech])
+    return term_in_text(name, profile_text)
 
 
 def _skill_strength(forms: list[str], p: CandidateProfile) -> tuple[float, list[str]]:
@@ -243,12 +258,17 @@ async def understand_candidate(profile: CandidateProfile) -> tuple[Optional[Cand
         return None, model
     skills: list[_SkillOut] = []
     covered: set[str] = set()
+    asked = {norm_term(n): n for n in names}
     for res, _ in skill_results:
         for sk in (res.skills if res else []):
             k = norm_term(sk.name)
-            if sk.name and k not in covered:
-                covered.add(k)
-                skills.append(_SkillOut(name=sk.name, aliases=sk.aliases[:3], adjacent=sk.adjacent[:3]))
+            # The model was asked for other names of THESE skills. A name it brings itself ("Rust" next to "C++") is
+            # not the candidate's skill, and an alias that is another of the candidate's skills is not an alias.
+            if not sk.name or k not in asked or k in covered:
+                continue
+            covered.add(k)
+            aliases = [a for a in sk.aliases if a and norm_term(a) not in asked]
+            skills.append(_SkillOut(name=asked[k], aliases=aliases[:3], adjacent=sk.adjacent[:3]))
     for name in [*names, *core.extra_skills]:        # a batch that failed, or skills found only in the bullets
         if name and norm_term(name) not in covered:
             covered.add(norm_term(name))
@@ -290,8 +310,9 @@ async def build_snapshot(profile: CandidateProfile, use_llm: bool = True) -> Can
         key = norm_term(s.name)
         if not key or key in seen:
             continue
-        # Verification: the skill must actually be in the profile.
-        if not any_term_in_text(forms, profile_text) and key not in {norm_term(x) for x in profile.skills}:
+        # Verification: the skill ITSELF must be in the profile — its own name, not just an alias the model wrote
+        # (an alias like "statistics" for "R" would otherwise prove a skill the person never listed).
+        if not _named_in_profile(s.name, profile, profile_text):
             continue
         strength, sources = _skill_strength(forms, profile)
         if not sources:
