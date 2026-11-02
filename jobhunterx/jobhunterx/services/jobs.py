@@ -200,6 +200,7 @@ async def reassess_outdated(snapshot: CandidateSnapshot, profile_dict: dict, lim
     """Re-score jobs that an older matcher version scored for this same profile — no AI calls: the stored requirements
     and role fit are reused, only the rules change (e.g. the early-career experience bands). Returns how many changed."""
     from jobhunterx.intelligence.matching import ENGINE_VERSION
+    import asyncio
     rows = await storage.list_rows("match_json IS NOT NULL", order="updated_at DESC", limit=limit)
     text = candidate_work_text(profile_dict)
     done = 0
@@ -208,16 +209,21 @@ async def reassess_outdated(snapshot: CandidateSnapshot, profile_dict: dict, lim
         if m is None or m.engine_version == ENGINE_VERSION or m.profile_hash != snapshot.profile_hash:
             continue
         fit = (m.role_fit, m.role_track, "", m.method or "fallback")
-        new = assess(snapshot, p, role_fit=fit, candidate_text=text, idf=build_idf([p.description, text]))
+        # the scoring runs in a worker thread and the loop breathes between jobs: other requests are never held up
+        new = await asyncio.to_thread(assess, snapshot, p, role_fit=fit, candidate_text=text,
+                                      idf=build_idf([p.description, text]))
         await storage.update_match(p.id, new)
         done += 1
+        await asyncio.sleep(0.02)
     return done
 
 
-async def refresh_links(snapshot: CandidateSnapshot, profile_dict: dict, emit=None, limit: int = 300) -> int:
+async def refresh_links(snapshot: CandidateSnapshot, profile_dict: dict, emit=None, limit: int = 120) -> int:
     """Jobs whose skills were linked by an older linker, or that were scored for an older version of the profile (a
     new resume upload), are re-linked and re-scored — so a better matcher reaches the jobs already found. Runs in the
     background at low priority; returns how many jobs changed."""
+    import asyncio
+
     from jobhunterx.config import models as _models
     from jobhunterx.intelligence.matching import ENGINE_VERSION
     _models.BACKGROUND.set(True)
@@ -241,7 +247,9 @@ async def refresh_links(snapshot: CandidateSnapshot, profile_dict: dict, emit=No
         fits = await job_ai.assess_role_fit(snapshot, stale_fit) if stale_fit else {}
         for p, m in chunk:
             fit = fits.get(p.id) or (m.role_fit, m.role_track, "", m.method or "fallback")
-            new = assess(snapshot, p, role_fit=fit, candidate_text=text, idf=build_idf([p.description, text]))
+            new = await asyncio.to_thread(assess, snapshot, p, role_fit=fit, candidate_text=text,
+                                          idf=build_idf([p.description, text]))
+            await asyncio.sleep(0.02)                  # let other requests in between jobs
             if m is not None and m.reach is not None and new.reach is None:
                 new.reach = m.reach                    # the reach estimate does not depend on the skill links
             await storage.update_posting(p)

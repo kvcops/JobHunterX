@@ -19,9 +19,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: keygen (step 1 of a sealed hand-over), inspect (read-only), deploy, or repair (restart services that are failed)
+        description: keygen (step 1 of a sealed hand-over), inspect (read-only), logs (read-only, the app's recent errors), deploy, or repair (restart services that are failed)
         type: choice
-        options: [inspect, deploy, repair, reboot, keygen]
+        options: [inspect, logs, deploy, repair, reboot, keygen]
         default: inspect
       sealed:
         description: Sealed credentials (only for the hand-over; leave empty when the VPS_* secrets are set)

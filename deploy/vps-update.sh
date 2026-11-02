@@ -47,6 +47,16 @@ if [ "$ACTION" = "reboot" ]; then
   echo "reboot scheduled"
   exit 0
 fi
+if [ "$ACTION" = "logs" ]; then
+  # read-only: only the app's error lines (tracebacks, exceptions, locks, timeouts) from the last 2000 log lines
+  say "JobHunterX errors (recent)"
+  journalctl -u jobhunterx.service -n 2000 --no-pager -o short-iso 2>/dev/null \
+    | grep -E "Traceback|Error|Exception|error|locked|Timeout|timed out|File \"/opt/jobhunterx|^\S+ \S+ \S+\[[0-9]+\]:\s{4}" \
+    | grep -viE "password|token|secret|api[_-]?key|authorization|cookie" | tail -80
+  say "service"; systemctl status jobhunterx.service --no-pager -n 0 2>/dev/null | head -5
+  for p in /api/meta /api/health /; do echo "GET $p -> HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:9000$p" || true)"; done
+  exit 0
+fi
 if [ "$ACTION" = "repair" ]; then
   say "Repair: services that are failed right now"
   FAILED=$(systemctl list-units --type=service --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}' | grep -E '^[A-Za-z0-9@._-]+\.service$' || true)
@@ -83,8 +93,28 @@ PID=$(pgrep -f "uvicorn.*jobhunterx|jobhunterx.api.main|python.*jobhunterx" | he
 PY=""; [ -n "$PID" ] && PY=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
 for v in .venv venv jobhunterx/.venv jobhunterx/venv; do [ -z "$PY" ] && [ -x "$REPO_DIR/$v/bin/python" ] && PY="$REPO_DIR/$v/bin/python"; done
 REQ=$(git ls-files | grep -E '(^|/)requirements\.txt$' | head -1)
-if [ -n "$REQ" ] && [ -n "$PY" ] && ! git diff --quiet "$BEFORE" "$AFTER" -- "$REQ"; then
-  say "requirements changed: installing with $PY"; "$PY" -m pip install -q -r "$REQ" || { echo "pip install failed"; exit 1; }
+# Install when requirements.txt changed, or when the app's Python is missing something it lists (an earlier deploy
+# whose install failed). pip leaves what is already satisfied alone.
+# (a dry run changes nothing; on a system Python the OS refuses even that, so it is asked with the same override)
+missing() {
+  local out; out=$("$PY" -m pip install --dry-run -q -r "$REQ" 2>&1)
+  if echo "$out" | grep -q "externally-managed-environment"; then
+    out=$("$PY" -m pip install --dry-run -q --break-system-packages -r "$REQ" 2>&1)
+  fi
+  echo "$out" | grep -q "Would install"
+}
+if [ -n "$REQ" ] && [ -n "$PY" ] && { ! git diff --quiet "$BEFORE" "$AFTER" -- "$REQ" || missing; }; then
+  say "installing requirements with $PY"
+  if ! OUT=$("$PY" -m pip install -q -r "$REQ" 2>&1); then
+    # The app runs on the system Python (not a virtual env) and the OS refuses pip there (PEP 668). The app's other
+    # packages already live in that Python, so the same install is repeated the way they were put there.
+    if echo "$OUT" | grep -q "externally-managed-environment" && [ ! -f "$(dirname "$(dirname "$PY")")/pyvenv.cfg" ]; then
+      echo "system Python refuses pip (PEP 668): installing the app's packages with --break-system-packages"
+      "$PY" -m pip install -q --break-system-packages -r "$REQ" || { echo "pip install failed"; exit 1; }
+    else
+      echo "$OUT" | tail -20; echo "pip install failed"; exit 1
+    fi
+  fi
 fi
 
 say "Restart"
