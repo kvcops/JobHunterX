@@ -253,9 +253,9 @@ flowchart LR
 <br/><sub><i>Every AI edit is fact-checked against your profile. Click any text on the page to edit it — the toolbar adds bold, italic, links and lines, with undo — and it always stays one page. "What changed" shows each AI edit — accepted or rejected, and why.</i></sub>
 <br/><br/>
 
-#### 6b · A resume for any job 🎯
-<img src="assets/ui_custom_resume.png" alt="Resume for a job" width="90%"/>
-<br/><sub><i>Found a job somewhere else? Paste its description or a link to the posting. The resume uses only skills you really have; skills the job asks for that are not in your profile are listed for you, never added.</i></sub>
+#### 6b · Resume, CV and cover letter for any job 🎯
+<img src="assets/ui_custom_resume.png" alt="Documents for any job" width="90%"/>
+<br/><sub><i>Found a job somewhere else? Paste its description or a link to the posting and pick what you need — resume, CV, cover letter, or all three, written at the same time. Only skills written in your own resume are used; skills the job asks for that you don't have are listed for you, never added.</i></sub>
 <br/><br/>
 
 #### 6c · One or two columns ↔️
@@ -271,6 +271,11 @@ flowchart LR
 #### 8 · Auto-apply: watch it work, live 🤖
 <img src="assets/ui_browser.png" alt="Live browser agent" width="90%"/>
 <br/><sub><i>No extra Chrome window — the browser is streamed into the app. Every step is listed in plain words, with what was clicked and typed.</i></sub>
+<br/><br/>
+
+#### 8b · Apply to any job link 🔗
+<img src="assets/ui_apply_link.png" alt="Apply to any job link" width="90%"/>
+<br/><sub><i>Paste the link to a job on the company's site: it is added to your tracker, your documents are written for it, and the agent applies — watch it or take over. The cloud browser keeps its own saved profile and uses your country, so job sites see a returning visitor and ask for CAPTCHAs far less often.</i></sub>
 <br/><br/>
 
 #### 9 · When it needs you 🙌

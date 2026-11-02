@@ -21,7 +21,7 @@
 {% for p in c.projects %}
 <table><tr><td class="row-title">{{ p.title|rich }}</td>
 {% if p.links %}<td class="right links">{% for l in p.links %}<a href="{{ l.url }}">{{ l.text or l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</td>{% endif %}</tr></table>
-{% if p.description %}<div>{{ p.description|rich }}</div>{% endif %}
+{% if p.description %}<div class="proj-desc">{{ p.description|rich }}</div>{% else %}<div class="proj-gap">&nbsp;</div>{% endif %}
 {% if p.technologies %}<div class="row-sub">Technologies: {{ p.technologies | join(', ') }}</div>{% endif %}
 {% if p.url and not p.links %}<div class="row-sub"><a href="{{ p.url }}">{{ p.url }}</a></div>{% endif %}
 <div style="height:4px"></div>

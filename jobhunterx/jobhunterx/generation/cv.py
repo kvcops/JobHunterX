@@ -14,6 +14,8 @@ Differences from the resume (by design, not by filename):
 
 from __future__ import annotations
 
+import asyncio
+
 from pydantic import BaseModel, Field
 
 from jobhunterx.domain.candidate import CandidateProfile, CandidateSnapshot
@@ -61,6 +63,7 @@ async def generate_cv(profile: CandidateProfile, snapshot: CandidateSnapshot, *,
     ptext = profile_text(profile)
     lines = {f"e{i}b{k}": b for i, e in enumerate(profile.experience) for k, b in enumerate(e.bullets)}
     out = None
+    grouping = asyncio.ensure_future(group_skills(profile, snapshot, use_llm=use_llm))   # alongside the writing
     if use_llm:
         tracks = ", ".join(f.label for f in snapshot.role_families[:4])
         user = (f"Focus (optional): {focus or 'none — cover the whole career'}\nCareer tracks: {tracks}\n"
@@ -99,7 +102,7 @@ async def generate_cv(profile: CandidateProfile, snapshot: CandidateSnapshot, *,
         summary, calls = await _checked_summary(out.summary, profile, ptext, snapshot_facts(snapshot), prov, "cv_summary")
         prov.llm_calls += calls
 
-    groups, gmodel = await group_skills(profile, snapshot, use_llm=use_llm)
+    groups, gmodel = await grouping
     if gmodel:
         prov.llm_calls += 1
     content = ResumeContent(

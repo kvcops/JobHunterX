@@ -77,8 +77,9 @@ def test_resume_and_cover_letter_finish_while_a_search_runs(monkeypatch):
         search = asyncio.create_task(execute(run, profile, {}))
         await asyncio.sleep(0.3)                          # the search is under way
         assert not search.done()
-        doc = await docs_svc.generate_custom(profile, snap, jd_text=JD, url="", title="", company="", layout="single",
-                                             style="classic", emit=noop)
+        docs, _ = await docs_svc.generate_custom(profile, snap, jd_text=JD, url="", title="", company="", layout="single",
+                                                 style="classic", emit=noop)
+        doc = docs[0]
         resume_done_first = not search.done()
         await search
         rows = await storage.list_rows(order="fit_score DESC")

@@ -24,7 +24,7 @@ from jobhunterx.intelligence.llm_structured import call_structured, fence
 
 log = get_logger("extractor")
 
-VERSION = "profile-extract-v5"   # v5: read in three parts at once (v4: name split into first / middle / last)
+VERSION = "profile-extract-v6"   # v6: skills / technologies must be written in the PDF (v5: three parts at once)
 
 _SYSTEM = """You convert a resume into a structured candidate profile.
 Extract ONLY what is written in the resume. Never invent or infer employers, dates, skills, metrics or links.
@@ -194,6 +194,47 @@ def _attach_links(profile: CandidateProfile, links: list[dict]) -> CandidateProf
     profile.links, profile.item_links = extra, item_links
     return profile
 
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#.]*")
+_SHORT_EDGE = r"[\s,;:|/•·()\[\]{}\-–—]"
+
+
+def _compact(s: str) -> str:
+    return re.sub(r"[^a-z0-9+#]", "", s.lower())
+
+
+def written_in(name: str, text: str) -> bool:
+    """Is this skill really written in the resume? A short name ("R", "Go", "C") only when it stands alone, set off like
+    a list item — "R@5" or "RRF" is not the R language. Longer names may differ in case, spaces and dots
+    ("NodeJS" for "Node.js"), but must be whole words: "Rust" is not in "trust"."""
+    n = (name or "").strip()
+    if not n:
+        return False
+    if len(_compact(n)) <= 2:
+        pat = rf"(?:^|{_SHORT_EDGE}){re.escape(n)}(?=$|{_SHORT_EDGE}|\.(?!\w))"
+        return re.search(pat, text, re.M) is not None
+    if re.search(rf"(?<![A-Za-z0-9]){re.escape(n)}(?![A-Za-z0-9+#])", text, re.I):
+        return True
+    want = _compact(n)
+    words = [_compact(w) for w in _TOKEN.findall(text)]
+    return any("".join(words[i:i + k]) == want for k in (1, 2, 3) for i in range(len(words) - k + 1))
+
+
+def _ground(profile: CandidateProfile, text: str) -> list[str]:
+    """Drop skills and project technologies the AI wrote that the resume does not contain. Returns what was dropped."""
+    dropped: list[str] = []
+
+    def keep(names: list[str]) -> list[str]:
+        out = []
+        for x in names:
+            (out if written_in(x, text) else dropped).append(x)
+        return out
+
+    profile.skills = keep(profile.skills)
+    for pr in profile.projects:
+        pr.technologies = keep(pr.technologies)
+    return list(dict.fromkeys(dropped))
+
+
 
 class _Part(_Lenient):
     """One slice of the profile. Coerced the same lenient way as the full profile (a skills string becomes a list…)."""
@@ -257,6 +298,9 @@ async def extract_profile(pdf_bytes: bytes) -> tuple[CandidateProfile, dict]:
         return CandidateProfile(), {"status": "failed",
                                     "warnings": ["The AI could not read this resume right now. Please try again or fill in your profile manually."]}
     profile = _attach_links(CandidateProfile.model_validate(merged), links)
+    dropped = _ground(profile, text)
+    if dropped:
+        log.info("profile_terms_not_in_resume", dropped=dropped[:20])
     model = ", ".join(sorted(set(used_models)))
     labels = {"about": "name, contact and skills", "work": "experience and education", "extras": "projects and certificates"}
     warnings = [f"The AI could not read your {labels[k]} this time — please add them or upload again." for k in missing]

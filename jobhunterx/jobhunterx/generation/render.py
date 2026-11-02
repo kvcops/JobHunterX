@@ -76,6 +76,7 @@ def _geometry(ctx: dict) -> dict:
 
 def _render(template: str, **ctx) -> str:
     ctx = {**_ALL, **ctx}
+    ctx.setdefault("margin_project", f"{_num(ctx.get('margin_exp'), 2) + 3:g}px")   # room between projects
     return _env().get_template(template).render(g=_geometry(ctx), **ctx)
 
 
@@ -112,11 +113,17 @@ def render_resume(content: dict, style: str = styles.DEFAULT_STYLE) -> tuple[byt
 
 
 def render_cv(content: dict, style: str = styles.DEFAULT_STYLE) -> tuple[bytes, int]:
-    """A CV gets a roomier layout, but is still squeezed onto one page when it can be."""
-    roomy = {**_CV_LAYOUT, "margin_section": "10px"}
-    steps = [roomy] + [dict(sp) for sp in SHRINK_PROFILES] \
-        + [{**SHRINK_PROFILES[-1], **t} for t in _TRIM_STEPS]
-    pdf, pages, _ = _fit_one_page("cv.html", content, steps, "cv", style)
+    """A CV keeps everything and may run to more pages. It gets the roomy layout; only when it is just over one page
+    are the tighter type sizes tried to bring it onto one. Content is never cut, and at most a few renders are made
+    (a long CV used to go through every resume trimming step — slow, and it dropped projects)."""
+    st = styles.get(style)
+    roomy = {**_ALL, **_CV_LAYOUT, "margin_section": "10px"}
+    pdf, pages = _html_to_pdf(_render("cv.html", doc=content, s=st, **roomy))
+    if pages == 2:
+        for sp in SHRINK_PROFILES:
+            tight, n = _html_to_pdf(_render("cv.html", doc=content, s=st, **{**_ALL, **sp}))
+            if n == 1:
+                return tight, 1
     return pdf, pages
 
 

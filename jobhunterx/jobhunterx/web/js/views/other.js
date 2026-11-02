@@ -3,7 +3,7 @@ import { html, useState, useEffect, useRef } from '../lib/preact.js';
 import { useStore } from '../state/store.js';
 import {
   loadTracker, navigate, setTracking, loadInterventions, continueIntervention, skipIntervention, focusIntervention, markInterventionApplied,
-  applyControl, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
+  applyControl, applyLink, saveSettings, setModel, setPipelineMode, resetEverything, clearJobs, loadUsage,
   loadSettings, refreshModels, setProviders, loadDbHealth, repairDb, backupDb, setMotion, changePassword, setOfficeAI,
 } from '../actions.js';
 import { PeopleManager } from './people.js';
@@ -262,6 +262,33 @@ function useLiveFrames(canvas) {
   return [frame, (msg) => sock.current && sock.current.send(msg)];
 }
 
+/** Apply to a job found anywhere: paste the link to the company's posting. */
+function ApplyLink({ busy, compact }) {
+  const [url, setUrl] = useState('');
+  const [more, setMore] = useState(false);
+  const [title, setTitle] = useState('');
+  const [company, setCompany] = useState('');
+  const ok = /^https?:\/\/\S+\.\S+/.test(url.trim());
+  const go = async (e) => {
+    e.preventDefault();
+    if (!ok || busy) return;
+    if (await applyLink({ url: url.trim(), title: title.trim(), company: company.trim() })) { setUrl(''); setTitle(''); setCompany(''); }
+  };
+  return html`<form class=${`apply-link ${compact ? 'compact' : ''}`} onSubmit=${go} aria-label="Apply to a job link">
+    <span class="sec-title">Apply to any job link</span>
+    <div class="apply-link-row">
+      <input class="input" type="url" inputmode="url" placeholder="https://company.com/careers/job/123" aria-label="Link to the job posting"
+        value=${url} onInput=${(e) => setUrl(e.currentTarget.value)} />
+      <${Button} variant="primary" icon="play" type="submit" busy=${busy} disabled=${!ok}>Apply</${Button}>
+    </div>
+    ${more ? html`<div class="apply-link-row">
+      <input class="input" placeholder="Job title (optional)" aria-label="Job title" value=${title} onInput=${(e) => setTitle(e.currentTarget.value)} />
+      <input class="input" placeholder="Company (optional)" aria-label="Company" value=${company} onInput=${(e) => setCompany(e.currentTarget.value)} />
+    </div>` : html`<button type="button" class="link-btn small" onClick=${() => setMore(true)}>Add title and company</button>`}
+    <small class="muted">The job is added to your Tracker, your documents are written for it, then the agent applies — you can watch or take over. LinkedIn links are not automated.</small>
+  </form>`;
+}
+
 export function BrowserView() {
   const b = useStore((s) => s.browser);
   const br = useStore((s) => (s.meta.data || {}).browser);
@@ -357,6 +384,7 @@ export function BrowserView() {
           ${sess && sess.message && WORKING.includes(status) ? html`<div class="ap-now" key=${sess.message}><${Spinner} size=${14} /><span>${sess.message}</span></div>` : null}
           ${sess && sess.notice ? html`<${Notice} tone=${status === 'failed' ? 'warning' : 'info'}>${sess.notice}</${Notice}>` : null}
           ${controls ? html`<div class="ap-controls">${controls}</div>` : null}
+          ${!sess || ['applied', 'closed', 'failed', 'stopped'].includes(status) ? html`<${ApplyLink} busy=${busy === 'link'} compact=${!!sess} />` : null}
           ${waiting && status !== 'needs_you' ? html`<a class="ap-alert" href="#/interventions"><${Icon} name="alert" size=${15} /> ${waiting} application${waiting === 1 ? '' : 's'} waiting for you <${Icon} name="arrow" size=${14} /></a>` : null}
         </div>
         ${sess && sess.kit && Object.keys(sess.kit).length ? html`<div class="ap-sec"><span class="sec-title">Application kit</span><${KitList} kit=${sess.kit} /></div>` : null}

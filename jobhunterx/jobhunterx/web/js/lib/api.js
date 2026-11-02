@@ -117,7 +117,28 @@ export async function request(path, {
   if (text && data === null) {
     throw new ApiError('The server sent an unreadable response.', { status: res.status, code: 'bad_response' });
   }
+  // Long work (writing documents) goes on at the server after a while: wait for its answer instead of giving up.
+  if (res.status === 202 && data && data.pending && !path.startsWith('/tasks/')) return waitForTask(data.pending, signal);
   return data;
+}
+
+const TASK_WAIT_MS = 10 * 60_000;
+
+async function waitForTask(id, signal) {
+  const until = Date.now() + TASK_WAIT_MS;
+  while (Date.now() < until) {
+    if (signal && signal.aborted) throw new DOMException('Request aborted', 'AbortError');
+    let data;
+    try {
+      data = await request(`/tasks/${encodeURIComponent(id)}`, { query: { wait: 20 }, timeout: 35_000, signal });
+    } catch (err) {
+      // a dropped connection or a slow answer is not the end of the work: ask again
+      if (err && (err.code === 'timeout' || err.code === 'network')) { await new Promise((r) => setTimeout(r, 2000)); continue; }
+      throw err;
+    }
+    if (!(data && data.pending)) return data;
+  }
+  throw new ApiError('This is taking much longer than usual. It will appear under Documents when it is done.', { code: 'timeout' });
 }
 
 const enc = encodeURIComponent;
@@ -177,6 +198,7 @@ export const api = {
   deleteJob: (id, o) => request(`/jobs/${enc(id)}`, { method: 'DELETE', ...o }),
   clearJobs: (scope, o) => request('/jobs', { method: 'DELETE', query: { scope }, ...o }),
   applyJob: (id, o) => request(`/jobs/${enc(id)}/apply`, { method: 'POST', ...o }),
+  applyLink: (body, o) => request('/apply/link', { method: 'POST', body, timeout: 90_000, ...o }),
 
   // first-run setup (API keys)
   setup: (o) => request('/setup', o),
@@ -195,9 +217,9 @@ export const api = {
   deleteMonitor: (id, o) => request(`/monitors/${enc(id)}`, { method: 'DELETE', ...o }),
 
   // documents
-  generateDocument: (jobId, kind, o) => request(`/jobs/${enc(jobId)}/documents`, { method: 'POST', body: { kind }, timeout: 120_000, ...o }),
-  generateCustomResume: (body, o) => request('/documents/custom', { method: 'POST', body, timeout: 150_000, ...o }),
-  generateCv: (focus, o) => request('/documents/cv', { method: 'POST', body: focus ? { focus } : {}, timeout: 120_000, ...o }),
+  generateDocument: (jobId, kind, o) => request(`/jobs/${enc(jobId)}/documents`, { method: 'POST', body: { kind }, timeout: 75_000, ...o }),
+  generateCustomResume: (body, o) => request('/documents/custom', { method: 'POST', body, timeout: 75_000, ...o }),
+  generateCv: (focus, o) => request('/documents/cv', { method: 'POST', body: focus ? { focus } : {}, timeout: 75_000, ...o }),
   listDocuments: (query, o) => request('/documents', { query, ...o }),
   getDocument: (id, o) => request(`/documents/${enc(id)}`, o),
   updateDocument: (id, content, o) => request(`/documents/${enc(id)}`, { method: 'PATCH', body: { content }, ...o }),

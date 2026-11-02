@@ -525,6 +525,29 @@ export async function autoApply(jobId) {
   }
 }
 
+/** Apply to a job found anywhere (a link to the company's posting): it becomes one of your jobs, then the agent
+ *  applies as for any other. Returns true when the agent started. */
+export async function applyLink(body) {
+  const br = (getState().meta.data || {}).browser;
+  if (br && !br.ready) {
+    toast('Add your Browser Use key in Settings → Web search & browser first.', 'warning');
+    navigate('#/settings/search');
+    return false;
+  }
+  setSlice('browser', { busy: 'link' });
+  try {
+    const { session } = await api.applyLink(body);
+    if (session) setSlice('browser', { status: 'ready', session, error: null });
+    loadTracker();
+    return true;
+  } catch (err) {
+    toast(errorText(err), 'danger');
+    return false;
+  } finally {
+    setSlice('browser', { busy: '' });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
@@ -563,11 +586,13 @@ export async function generateCustomResume(body) {
   if (getState().gen[key]?.status === 'generating') return null;
   setEntry('gen', key, { status: 'generating', error: null, documentId: null, startedAt: Date.now() });
   try {
-    const { document } = await api.generateCustomResume(body);
+    const { document, documents = [document], problems = [] } = await api.generateCustomResume(body);
     setEntry('gen', key, { status: 'ready', error: null, documentId: document.id });
-    setEntry('docDetails', document.id, { status: 'ready', doc: document, error: null });
+    for (const d of documents) setEntry('docDetails', d.id, { status: 'ready', doc: d, error: null });
     loadDocuments();
     navigate(`#/documents/${document.id}`);
+    if (documents.length > 1) toast(`${documents.length} documents ready — find them in the list on the left.`, 'success');
+    for (const p of problems) toast(p, 'warning');
     return document;
   } catch (err) {
     setEntry('gen', key, { status: 'failed', error: errorText(err), documentId: null });
