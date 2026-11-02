@@ -25,6 +25,7 @@ from jobhunterx.config.logging import get_logger
 from jobhunterx.config import database as db
 from jobhunterx.config.settings import get_settings, Settings
 from jobhunterx.models import HITLType
+from jobhunterx.agents import form_frames
 from jobhunterx.utils import phone as phone_util
 
 log = get_logger("browser_agent")
@@ -617,6 +618,10 @@ def describe_action(name: str, params: dict, state: Any) -> str:
         return f"Type “{shown}” into {lbl}"
     if name == "upload_file":
         return f"Upload {Path(str(p.get('path', 'file'))).name}"
+    if name in ("upload_document", "attach_with_button"):
+        return f"Attach the {str(p.get('kind', 'file')).replace('_', ' ')}"
+    if name == "check_required_fields":
+        return "Check every required field is filled"
     if name == "select_dropdown":
         return f"Choose “{p.get('text', '')}” in {lbl}"
     if name == "choose_option":
@@ -891,9 +896,7 @@ _CHECKBOX_BY_TEXT_JS = """(text, want) => {
   const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
   const t = norm(text);
   if (!t) return { found: false };
-  const docs = [document];
-  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
-  const cands = [];
+""" + form_frames.ROOTS_JS + """  const cands = [];
   for (const d of docs) {
     for (const box of d.querySelectorAll('input[type=checkbox],input[type=radio]')) {
       const texts = [...(box.labels || [])].map((l) => norm(l.innerText || l.textContent));
@@ -933,17 +936,20 @@ async def _set_checkbox_by_text(browser_session: Any, text: str, checked: bool) 
     import json as _json
     from browser_use import ActionResult
     try:
-        cdp = await browser_session.get_or_create_cdp_session()
-        out = await cdp.cdp_client.send.Runtime.evaluate(
-            params={"expression": f"({_CHECKBOX_BY_TEXT_JS})({_json.dumps(text)}, {_json.dumps(bool(checked))})",
-                    "returnByValue": True}, session_id=cdp.session_id)
-        r = (out.get("result") or {}).get("value") or {}
+        # the page first, then each embedded frame (also one from another site) until one has the box
+        r: dict = {}
+        expr = f"[({_CHECKBOX_BY_TEXT_JS})({_json.dumps(text)}, {_json.dumps(bool(checked))})]"
+        for sid in await form_frames.page_sessions(browser_session):
+            out = await browser_session.cdp_client.send.Runtime.evaluate(
+                params={"expression": expr, "returnByValue": True}, session_id=sid)
+            r = ((out.get("result") or {}).get("value") or [{}])[0] or {}
+            if r.get("found"):
+                break
     except Exception as exc:
         return ActionResult(error=f"Checkbox “{text}”: {str(exc)[:160]}")
     word = "ticked" if checked else "unticked"
     if not r.get("found"):
-        return ActionResult(error=f"No checkbox next to the words “{text}” — use a shorter exact phrase from the label. "
-                                  "If the form sits inside an embedded frame, open the form's own page first.")
+        return ActionResult(error=f"No checkbox next to the words “{text}” — use a shorter exact phrase from the label.")
     name = r.get("label") or text
     if r.get("state") == checked:
         return ActionResult(extracted_content=f"Checkbox “{name}” is {'already ' if r.get('already') else 'now '}{word}.")
@@ -1026,9 +1032,7 @@ async def _wait_for_human_check(browser_session: Any, max_seconds: int = 25) -> 
 # ("name" on a Last-name box) cannot flip it. Only empty, visible, editable fields are touched; a link goes only into the
 # box made for that site (no GitHub in a LinkedIn or Twitter box).
 _PREFILL_JS = """(p) => {
-  const docs = [document];
-  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
-  const norm = (s) => (s || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\\-\\[\\].:*]+/g, ' ').replace(/\\s+/g, ' ').trim().toLowerCase();
+""" + form_frames.ROOTS_JS + """  const norm = (s) => (s || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\\-\\[\\].:*]+/g, ' ').replace(/\\s+/g, ' ').trim().toLowerCase();
   const SKIP = /company|employer|organi[sz]ation|school|college|university|reference|referr|manager|emergency|hiring|recruiter|city|country|\\bstate\\b|(home|street|postal|current|permanent|mailing|residential) address|^address|nominee|father|mother|spouse|guardian|parent|middle|nick|maiden|alternate|secondary|confirm|search|keyword/;
   const kinds = [
     ['full', (t) => /first\\s*(name)?\\s*(and|&|\\/)\\s*last|full\\s*name|^name$|^your name|legal name|candidate name|applicant name|name as per/.test(t)],
@@ -1093,9 +1097,7 @@ _PREFILL_JS = """(p) => {
 # country, then types only the national number; a plain box gets the full international number unless it is clearly a
 # 10-digit-only box. Anything it cannot handle safely is reported back for the agent to do with choose_option.
 _PHONE_JS = """(p) => {
-  const docs = [document];
-  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} }
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+""" + form_frames.ROOTS_JS + """  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
   const selSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
   const put = (el, v) => { el.focus(); setter.call(el, v); for (const ev of ['input', 'change']) el.dispatchEvent(new Event(ev, { bubbles: true })); el.blur(); };
   const tap = (el) => { for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: el.ownerDocument.defaultView })); };
@@ -1182,17 +1184,19 @@ async def _prefill(browser_session: Any, profile: dict) -> Any:
     phone = {"code": code.lstrip("+"), "code_plus": code, "iso": phone_util.region_for_code(code), "national": national}
     try:
         filled: list = []
+        # in the page and in every iframe, also one from another site (an embedded job board) and shadow roots
         for _ in range(8):                               # single-page forms render a moment after load
-            filled = await _eval(browser_session, f"({_PREFILL_JS})({_json.dumps(vals)})") or []
+            filled = await form_frames.eval_everywhere(browser_session, f"({_PREFILL_JS})({_json.dumps(vals)})")
             if filled:
                 break
             await asyncio.sleep(0.75)
         if code and national:
-            filled += await _eval(browser_session, f"({_PHONE_JS})({_json.dumps(phone)})") or []
+            filled += await form_frames.eval_everywhere(browser_session, f"({_PHONE_JS})({_json.dumps(phone)})")
     except Exception as exc:
         return ActionResult(extracted_content=f"Pre-fill skipped ({str(exc)[:80]}). Fill the form normally.")
     if not filled:
-        return ActionResult(extracted_content="No basic fields to pre-fill here (maybe an Apply button must be clicked first).")
+        return ActionResult(extracted_content="No basic fields to pre-fill here (maybe an Apply button must be clicked first). "
+                                              "Do not call prefill_basic_fields again on this page — fill the fields yourself.")
     return ActionResult(extracted_content="Pre-filled: " + "; ".join(filled) + ". Check them once; do not retype them.")
 
 
@@ -1516,9 +1520,55 @@ async def _choose_option(browser_session: Any, index: int, value: str, search: s
         return ActionResult(error=f"Dropdown {index}: {str(exc)[:160]}")
 
 
-def _build_tools(profile: Optional[dict] = None) -> Any:
+def _build_tools(profile: Optional[dict] = None, files: Optional[dict] = None) -> Any:
     from browser_use import ActionResult, Controller
     controller = Controller()
+    files = files or {}
+
+    def _path(kind: str) -> str:
+        return files.get((kind or "").strip().lower().replace(" ", "_").replace("-", "_"), "")
+
+    @controller.action("Upload the candidate's RESUME, COVER LETTER or CV to the form — kind = 'resume', 'cover_letter' or "
+                       "'cv'. It finds the right file field itself, also inside embedded frames and custom upload widgets, "
+                       "and checks the page took the file. Use this for every upload (not upload_file).")
+    async def upload_document(kind: str, browser_session) -> ActionResult:
+        path = _path(kind)
+        if not path:
+            return ActionResult(error=f"There is no {kind} file for this application.")
+        ok, msg = await form_frames.upload_document(browser_session, kind.strip().lower(), path)
+        if ok:
+            return ActionResult(extracted_content=f"{kind.replace('_', ' ').capitalize()} {msg}.")
+        return ActionResult(error=f"{kind.replace('_', ' ').capitalize()} not attached: {msg}. If the form has an "
+                                  "'Attach' / 'Upload' button for it, use attach_with_button with that button's index.")
+
+    @controller.action("Attach the RESUME / COVER LETTER / CV through an upload widget's button ('Attach', 'Upload', "
+                       "'Choose file'): give the button's index and kind. It presses the button and answers the file "
+                       "chooser that opens. Use when upload_document could not find the field.")
+    async def attach_with_button(index: int, kind: str, browser_session) -> ActionResult:
+        from browser_use.browser.events import ClickElementEvent
+        path = _path(kind)
+        if not path:
+            return ActionResult(error=f"There is no {kind} file for this application.")
+        node = await browser_session.get_element_by_index(index)
+        if node is None:
+            return ActionResult(error=f"No element {index} on the page now.")
+
+        async def press():
+            ev = browser_session.event_bus.dispatch(ClickElementEvent(node=node))
+            await ev
+        ok, msg = await form_frames.upload_via_chooser(browser_session, press, path)
+        if ok:
+            return ActionResult(extracted_content=f"{kind.replace('_', ' ').capitalize()} {msg}.")
+        return ActionResult(error=f"{kind.replace('_', ' ').capitalize()} not attached: {msg}.")
+
+    @controller.action("List the REQUIRED fields of the form that are still empty (also in embedded frames and custom "
+                       "widgets, including file uploads). Use it before pressing Submit.")
+    async def check_required_fields(browser_session) -> ActionResult:
+        empty = await form_frames.empty_required(browser_session)
+        if not empty:
+            return ActionResult(extracted_content="Every required field is filled.")
+        return ActionResult(extracted_content="Still empty (required): " + "; ".join(empty[:15]) +
+                                              ". Fill them before submitting.")
 
     @controller.action("Wait for a security check (Cloudflare 'Just a moment', Turnstile, 'I'm not a robot' box) to clear; "
                        "clicks the checkbox once if there is one. Use this BEFORE reporting CAPTCHA_DETECTED.")
@@ -1800,17 +1850,23 @@ Keep your thinking extremely brief and short (1 concise sentence max). Do NOT wr
 
 BASIC RULES:
 1. Fill in all required fields with the candidate information above. Name, email and profile links may already be
-   pre-filled (see the pre-fill result) — check them, don't retype them. On a new form page, `prefill_basic_fields` does them in one go.
+   pre-filled (see the pre-fill result) — check them, don't retype them. On a new form page, `prefill_basic_fields` does them
+   in one go; call it ONCE per form page — if it filled nothing, fill those fields yourself instead of calling it again.
 2. Use the Q&A answers for dropdown/select/radio/input questions about salary, notice period, work authorization, etc.
 3. Do NOT fill in current or expected salary / compensation unless the application form explicitly asks.
 4. If a generic "salary" is asked, prioritize the expected salary.
 5. For education and work experience fields, use the detailed history provided above (see EDUCATION and PHONE rules below).
-6. Upload files with the `upload_file` action (give the file input's index and the exact path):
-   - Resume / CV / "Resume/CV" upload → the RESUME file below (one page, tailored to this job).
-   - Cover letter upload → the COVER LETTER file. If there is a cover letter text box instead, paste a short version of it.
-   - Only if the form has a SEPARATE field that explicitly asks for a full / detailed CV in addition to the resume → the CV file.
-7. After filling, click the Submit/Apply button.
-8. Report the final status: SUCCESS or the reason for stopping.
+6. Upload files with `upload_document` (kind = 'resume' / 'cover_letter' / 'cv'); it finds the field itself, also in
+   embedded frames and custom widgets. If it says the field was not found, use `attach_with_button` with the index of the
+   field's Attach / Upload button. Do not use upload_file.
+   - Resume / CV / "Resume/CV" upload → kind 'resume' (one page, tailored to this job).
+   - Cover letter upload → kind 'cover_letter'. If there is a cover letter text box instead, paste a short version of it.
+   - Only if the form has a SEPARATE field that explicitly asks for a full / detailed CV in addition to the resume → 'cv'.
+7. Before pressing Submit, call `check_required_fields` and fill everything it lists (scroll the whole form: questions
+   further down count too). Repeat until it says every required field is filled.
+8. NEVER submit without the resume attached when the form has a resume field. If the resume cannot be attached after
+   upload_document and attach_with_button, STOP and report "TOO_COMPLEX: resume upload needs a person" — do not submit.
+9. Click the Submit/Apply button, then report the final status: SUCCESS or the reason for stopping.
 
 NAME RULES:
 - "First name" / "Given name" → the FIRST NAME above. "Last name" / "Surname" / "Family name" → the LAST NAME above.
@@ -2046,7 +2102,7 @@ async def _run_agent(sess: ApplySession, continuing: bool) -> None:
             await asyncio.sleep(delay)
 
     kwargs: dict[str, Any] = {
-        "task": build_task(sess, continuing), "llm": llm, "controller": _build_tools(sess.profile),
+        "task": build_task(sess, continuing), "llm": llm, "controller": _build_tools(sess.profile, sess.files),
         "register_new_step_callback": on_step, "use_vision": "auto",
         "available_file_paths": [p for p in sess.files.values() if p],
     }

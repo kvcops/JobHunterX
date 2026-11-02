@@ -88,18 +88,21 @@ git fetch --quiet origin "$BRANCH" && git merge --ff-only "origin/$BRANCH" || { 
 AFTER=$(git rev-parse HEAD)
 echo "$BRANCH: ${BEFORE:0:7} -> ${AFTER:0:7}"; git log --oneline "$BEFORE..$AFTER" | head -20
 
-# the Python that runs the app: from the running process, else a venv in the checkout
+# the Python that runs the app: a virtual env in the checkout first (a venv's python is a link to the system one, so
+# following the running process to its binary would wrongly give the system Python), else the running process's
 PID=$(pgrep -f "uvicorn.*jobhunterx|jobhunterx.api.main|python.*jobhunterx" | head -1 || true)
-PY=""; [ -n "$PID" ] && PY=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
+PY=""
 for v in .venv venv jobhunterx/.venv jobhunterx/venv; do [ -z "$PY" ] && [ -x "$REPO_DIR/$v/bin/python" ] && PY="$REPO_DIR/$v/bin/python"; done
+[ -z "$PY" ] && [ -n "$PID" ] && PY=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)
 REQ=$(git ls-files | grep -E '(^|/)requirements\.txt$' | head -1)
 # Install when requirements.txt changed, or when the app's Python is missing something it lists (an earlier deploy
 # whose install failed). pip leaves what is already satisfied alone.
 # (a dry run changes nothing; on a system Python the OS refuses even that, so it is asked with the same override)
 missing() {
-  local out; out=$("$PY" -m pip install --dry-run -q -r "$REQ" 2>&1)
+  # (no -q here: quiet mode hides the "Would install …" line this looks for)
+  local out; out=$("$PY" -m pip install --dry-run -r "$REQ" 2>&1)
   if echo "$out" | grep -q "externally-managed-environment"; then
-    out=$("$PY" -m pip install --dry-run -q --break-system-packages -r "$REQ" 2>&1)
+    out=$("$PY" -m pip install --dry-run --break-system-packages -r "$REQ" 2>&1)
   fi
   echo "$out" | grep -q "Would install"
 }
