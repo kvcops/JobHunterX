@@ -35,7 +35,7 @@ from jobhunterx.intelligence.text import any_term_in_text, number_in_text, parse
 
 log = get_logger("job_understanding")
 
-VERSION = "job-v2"   # v2: employer_kind
+VERSION = "job-v3"   # v3: degrees kept out of skills, apply_needs_account (v2: employer_kind)
 ROLE_FIT_VERSION = "rolefit-v1"
 
 
@@ -85,6 +85,8 @@ class JobUnderstanding(BaseModel):
     application_deadline: str = ""
     responsibilities: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
+    apply_needs_account: bool = Field(False, description="true if applying on this site requires signing in or creating "
+                                                         "an account first")
     employer_kind: Literal["product", "it_services_bulk", "staffing_agency", "other", "unknown"] = Field(
         "unknown", description="who is hiring: a company building its own product; a large IT-services / outsourcing "
                                "firm hiring in volume for client projects; a recruiter or staffing agency hiring for "
@@ -93,8 +95,11 @@ class JobUnderstanding(BaseModel):
 
 _SYSTEM = """You are an expert technical recruiter extracting the facts of ONE job posting.
 Extract only what the posting states. Never infer requirements that are not written.
-- required_skills: skills/technologies the posting requires; preferred_skills: nice-to-have/bonus ones.
+- required_skills: skills/technologies/methods the posting requires; preferred_skills: nice-to-have/bonus ones.
   Use the posting's own wording for `name`; add common aliases. must_have=true only for explicit mandatory language.
+  A degree or field of study is NOT a skill: put it only in education_* (never in the skill lists).
+- apply_needs_account: true when the application can only be sent after signing in or creating an account — the page
+  says so, or you know the hiring portal it is on works that way (judge from the page and its address).
 - experience_*: the overall professional experience requirement (not years of a company's history).
   experience_evidence must be copied verbatim from the posting.
 - seniority: the level of the role as titled/described.
@@ -191,6 +196,7 @@ def apply_understanding(job: JobPosting, u: JobUnderstanding, model: str) -> Non
         job.company = u.company.strip()[:120]
     if u.employer_kind != "unknown":
         job.employer_kind = u.employer_kind
+    req.apply_needs_account = bool(u.apply_needs_account)
     if job.seniority == Seniority.UNKNOWN:
         job.seniority = u.seniority
     if not job.role_family:
@@ -244,7 +250,9 @@ async def understand_job(job: JobPosting, snapshot: Optional[CandidateSnapshot] 
     """Populate job.requirements (and missing normalized fields). Returns method used."""
     if use_llm and job.description and len(job.description) > 200:
         user = (f"Job title (from source): {job.title}\nCompany (from source): {job.company}\n"
-                f"Location (from source): {job.location_raw}\n\nPosting text:\n{fence(job.description, 14000)}")
+                f"Location (from source): {job.location_raw}\n"
+                f"Application address: {job.apply_url or job.canonical_url or '(unknown)'}\n\n"
+                f"Posting text:\n{fence(job.description, 14000)}")
         u, model = None, ""
         # A job read only by rules can't know its skills or level, so it scores half-blind. If the extraction models
         # are busy or fail, a second, different chain reads it before falling back.

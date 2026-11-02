@@ -32,7 +32,7 @@ from jobhunterx.intelligence import connect
 from jobhunterx.intelligence import job as job_ai
 from jobhunterx.intelligence import domain_age, skill_links
 from jobhunterx.intelligence.llm_structured import call_structured
-from jobhunterx.intelligence.matching import assess, build_idf, candidate_work_text
+from jobhunterx.intelligence.matching import assess, build_idf, candidate_evidence, candidate_work_text
 from jobhunterx.intelligence.policy import get_policy
 from jobhunterx.intelligence.text import common_words, term_in_text, title_overlap
 from jobhunterx.services import profile as profile_svc
@@ -723,6 +723,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
 
     # 6–9. Validate → extract → match → rank, streamed in chunks --------------
     text = candidate_work_text(profile.model_dump(mode="json"))
+    evidence = candidate_evidence(profile.model_dump(mode="json"))
     idf = build_idf([p.description for p in unique] + [text])
     llm_budget = settings.max_llm_jd_extractions_per_search
     for key in ("validate", "extract", "match", "rank"):
@@ -784,7 +785,7 @@ async def execute(run: Run, profile: CandidateProfile, request: dict) -> None:
                               + (f" and {n_req} required skills" if n_req else ""), "info", ref)
             validate.finalize(p)   # extraction may reveal closed / not-a-posting
         fits = await job_ai.assess_role_fit(snap, chunk)
-        linked = await skill_links.resolve(snap, chunk, text)     # other names / related skills, web lookup if new
+        linked = await skill_links.resolve(snap, chunk, text, evidence)     # other names / related skills, web lookup if new
         if linked:
             await run.say("match", f"Linked {linked} job skills to your experience under other names or related skills", "info")
         for p in chunk:

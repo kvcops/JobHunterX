@@ -31,10 +31,11 @@ from jobhunterx.intelligence.llm_structured import call_structured
 
 log = get_logger("skill_links")
 
-VERSION = "skill-links-v6"
+VERSION = "skill-links-v7"   # v7: judged against the whole profile (education, roles, projects, work text)
 BATCH = 15                    # job skills judged per AI call (small batches give steadier answers)
 LOOKUPS_PER_ROUND = 6         # skills looked up on the web per resolve() call (cached afterwards)
-CANDIDATE_SKILLS = 60         # candidate skills shown to the model
+CANDIDATE_SKILLS = 160        # candidate skills shown to the model (all of them, for nearly everyone)
+WORK_EXCERPT = 3000           # characters of the candidate's own experience / project text shown with them
 
 _store = None
 
@@ -59,26 +60,32 @@ class _Links(BaseModel):
     links: list[_Link] = Field(default_factory=list)
 
 
-_SYSTEM = """You compare a job's required skills with a candidate's skills, like an experienced technical recruiter
-who keeps up with new tools. For each JOB SKILL decide whether one of the CANDIDATE SKILLS demonstrates it:
-- "same": the same skill under another name, an abbreviation, or a narrower/broader name the candidate clearly covers
-  (e.g. "GenAI" = "Generative AI"; "LLMs" = "Large Language Models"; "K8s" = "Kubernetes"; "PyTorch" demonstrates
-  "deep learning frameworks").
-- A BROAD FIELD in the job ("Generative AI", "Machine Learning", "Cloud", "Data Engineering") is "same" when the candidate
-  has several specific skills inside that field — use the most representative one as "via".
-- "related": real, transferable experience — an adjacent tool, another tool or framework OF THE SAME KIND as one the
-  candidate uses, the field the skill belongs to, or the foundation it is built on, so the candidate could pick it up
-  quickly (e.g. "LLMs" or "RAG" → "Agentic AI" / "AI agents"; "LangGraph" → "CrewAI" / "AutoGen";
-  "LangChain" → "LlamaIndex"; "FastAPI" → "Flask"; "AWS" → "GCP"; "MCP" → "A2A").
+_SYSTEM = """You compare a job's requirements with ONE candidate, like an experienced technical recruiter who keeps up
+with new tools and reads the whole resume — not only its skills list. You get the candidate's SKILLS, their EVIDENCE
+(degrees, jobs held, projects, certifications) and an excerpt of their WORK (experience and project text).
+For each JOB REQUIREMENT decide whether the candidate demonstrates it:
+- "same": demonstrated — the same skill under another name, an abbreviation, a narrower/broader name they clearly
+  cover, or something their work plainly shows (e.g. "GenAI" = "Generative AI"; "LLMs" = "Large Language Models";
+  "PyTorch" demonstrates "deep learning frameworks"; "Built and deployed a RAG pipeline" is shown by a production RAG
+  project or job; "Postgres" = "PostgreSQL"; "vector databases" is shown by FAISS / pgvector / Pinecone work).
+- A BROAD FIELD ("Generative AI", "Machine Learning", "Cloud platforms", "Backend systems") is "same" when the candidate
+  has several specific skills or work inside it.
+- A DEGREE requirement ("Bachelor's in Computer Science or a related field") is "same" when their education meets it
+  (a B.Tech / B.E. / B.S. in CS, IT or a related engineering field meets a bachelor's in CS); "or equivalent
+  experience" is met by relevant work. Set via to that education line.
+- An EXPERIENCE statement ("Experience with Docker or cloud basics", "Built at least one LLM project") is judged
+  against their jobs and projects.
+- "related": real, transferable experience — an adjacent tool, another tool OF THE SAME KIND, the field it belongs to
+  or the foundation it is built on (e.g. "LangGraph" → "CrewAI"; "LangChain" → "LlamaIndex"; "FastAPI" → "Flask";
+  "AWS" → "GCP"; "MCP" → "A2A").
 - "none": no real link. Sharing a broad area is NOT enough ("Python" does not make someone a "React" developer;
-  "SQL" is not "Spark").
-- A job skill that lists ALTERNATIVES ("Classical ML, GenAI/RAG/agents or MLOps", "AWS or GCP") is met when ANY one
-  alternative is met — judge it by the best one.
-- A SOFT SKILL ("Communication", "Analytical skills", "Problem solving", "Teamwork") cannot be disproved by a skills
-  list: mark it "same" with via = the candidate skill closest to the work it describes.
-Set "via" to the ONE candidate skill (copied exactly) that best supports "same" or "related"; empty for "none".
-Set "known" to false only if you genuinely do not know what the job skill is (a new or niche product).
-Return one entry for every job skill, using the job skill text exactly as given."""
+  "SQL" is not "Spark"; Python is not "C# / .NET").
+- A requirement listing ALTERNATIVES ("LangChain, LangGraph, or custom orchestration"; "AWS or GCP") is met when ANY
+  one alternative is met — judge it by the best one.
+- A SOFT SKILL ("Communication", "Problem solving") cannot be disproved by a resume: "same", via the closest skill.
+Set "via" to ONE item copied exactly from SKILLS or EVIDENCE that best supports "same" or "related"; empty for "none".
+Set "known" to false only if you genuinely do not know what the requirement is (a new or niche product).
+Return one entry for every job requirement, using its text exactly as given."""
 
 
 def _key(job_skill: str, cand_hash: str) -> str:
@@ -88,6 +95,22 @@ def _key(job_skill: str, cand_hash: str) -> str:
 def _cand_skills(snap: CandidateSnapshot) -> list[str]:
     ranked = sorted(snap.skills, key=lambda s: -s.strength)
     return [s.name for s in ranked[:CANDIDATE_SKILLS]]
+
+
+def _match_evidence(via: str, evidence: list[str]) -> Optional[str]:
+    """An evidence line the model pointed at ("education: B.Tech, Computer Science…"), tolerant of small changes."""
+    v = norm_term(via)
+    if not v:
+        return None
+    for e in evidence:
+        ne = norm_term(e)
+        if v == ne or (len(v) > 6 and (v in ne or ne in v)):
+            return e
+    body = norm_term(via.split(":", 1)[-1])
+    for e in evidence:
+        if len(body) > 6 and body in norm_term(e.split(":", 1)[-1]):
+            return e
+    return None
 
 
 def _cand_hash(names: list[str]) -> str:
@@ -148,12 +171,15 @@ def _match_candidate(name: str, cand: list[str]) -> Optional[str]:
 _GENERIC = {"and", "the", "of", "for", "with", "systems", "system", "development", "engineering", "tools", "framework"}
 
 
-async def _judge(skills: list[str], cand: list[str], notes: dict[str, str], who: str = "") -> dict[str, _Link]:
+async def _judge(skills: list[str], cand: list[str], notes: dict[str, str], who: str = "",
+                 evidence: Optional[list[str]] = None, work: str = "") -> dict[str, _Link]:
     out: dict[str, _Link] = {}
+    evidence = evidence or []
     for i in range(0, len(skills), BATCH):
         part = skills[i:i + BATCH]
         lines = "\n".join(f"- {s}" + (f"   (web description: {notes[s][:400]})" if notes.get(s) else "") for s in part)
-        user = f"CANDIDATE: {who}\nCANDIDATE SKILLS: {', '.join(cand)}\n\nJOB SKILLS:\n{lines}"
+        user = (f"CANDIDATE: {who}\nSKILLS: {', '.join(cand)}\nEVIDENCE:\n" + "\n".join(f"- {e}" for e in evidence)
+                + (f"\nWORK (excerpt):\n{work[:WORK_EXCERPT]}" if work else "") + f"\n\nJOB REQUIREMENTS:\n{lines}")
         try:
             res, used = await call_structured(task="skill_links", version=VERSION, model=_Links, system=_SYSTEM, user=user,
                                            chain="fast", max_tokens=3500, cache_parts=(user,))
@@ -166,7 +192,9 @@ async def _judge(skills: list[str], cand: list[str], notes: dict[str, str], who:
             if not src:
                 continue
             rel = link.relation.strip().lower()
-            via = _match_candidate(link.via, cand)
+            via = _match_evidence(link.via, evidence) if link.via.split(":", 1)[0].strip().lower() in (
+                "education", "experience", "project", "certification") else None
+            via = via or _match_candidate(link.via, cand) or _match_evidence(link.via, evidence)
             if rel in ("same", "related") and not via:
                 log.info("skill_link_unplaced", skill=src, via=link.via[:60])
             if rel not in ("same", "related") or not via:
@@ -175,14 +203,18 @@ async def _judge(skills: list[str], cand: list[str], notes: dict[str, str], who:
     return out
 
 
-async def resolve(snap: CandidateSnapshot, jobs: list[JobPosting], candidate_text: str = "") -> int:
-    """Fill `requirements.skill_links` on each job for skills plain matching cannot place. Returns links found."""
+async def resolve(snap: CandidateSnapshot, jobs: list[JobPosting], candidate_text: str = "",
+                  evidence: Optional[list[str]] = None) -> int:
+    """Fill `requirements.skill_links` on each job for requirements plain matching cannot place. Returns links found.
+    evidence: the candidate's degrees, jobs, projects and certifications as lines ("education: B.Tech, CSE — …"),
+    so a degree or experience requirement can be met by them, not only by a skills-list entry."""
+    evidence = list(evidence or [])
     cand = _cand_skills(snap)
     who = (f"{', '.join(snap.target_titles[:3]) or ', '.join(f.label for f in snap.role_families[:3])}; "
            f"~{snap.professional_years:g} years; fields: {', '.join(f.label for f in snap.role_families[:4])}")
     if not cand or not jobs:
         return 0
-    chash = _cand_hash(cand)
+    chash = _cand_hash(cand + evidence)
     index = snap.skill_index()
     store = _cache()
     wanted: dict[str, None] = {}
@@ -200,7 +232,7 @@ async def resolve(snap: CandidateSnapshot, jobs: list[JobPosting], candidate_tex
         else:
             todo.append(s)
     if todo:
-        judged = await _judge(todo, cand, {}, who)
+        judged = await _judge(todo, cand, {}, who, evidence, candidate_text)
         # Models rarely admit they don't know a new tool: anything judged "unknown" or "none" is read about on the
         # web and judged again with that description (unknown ones first; each description is cached for 60 days).
         unknown = sorted((s for s, l in judged.items() if not l.known or l.relation == "none"),
@@ -209,7 +241,7 @@ async def resolve(snap: CandidateSnapshot, jobs: list[JobPosting], candidate_tex
             notes = dict(zip(unknown, await asyncio.gather(*(_describe(s) for s in unknown))))
             notes = {s: t for s, t in notes.items() if t}
             if notes:
-                judged.update(await _judge(list(notes), cand, notes, who))
+                judged.update(await _judge(list(notes), cand, notes, who, evidence, candidate_text))
         for s, link in judged.items():
             entry = {"relation": link.relation, "via": link.via, "why": link.why}
             store.set(_key(s, chash), entry, expire=90 * 86400)
@@ -225,6 +257,7 @@ async def resolve(snap: CandidateSnapshot, jobs: list[JobPosting], candidate_tex
             if e and e.get("relation") in ("same", "related") and e.get("via"):
                 links[s] = e
         req.skill_links = links
+        req.links_version = VERSION
         found += len(links)
     return found
 

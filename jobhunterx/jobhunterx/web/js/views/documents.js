@@ -197,32 +197,42 @@ function CustomResumeDialog({ g, busy, onClose }) {
   };
   return html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
     <form class="dialog custom-resume" role="dialog" aria-modal="true" aria-label="Resume for a job" ref=${ref} onSubmit=${go}>
-      <div class="row space"><h2 class="dlg-h">Documents for any job</h2>
-        <button type="button" class="icon-btn" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button></div>
-      <p class="muted small">Paste the job description or a link to the posting. Your documents are written for it from your profile — every line fact-checked, nothing invented.</p>
-      <div class="field"><span class="field-label">What to create</span>
-        <div class="kind-picks" role="group" aria-label="What to create">${DOC_KINDS.map((k) => html`<label class=${`kind-pick ${f.kinds.includes(k.id) ? 'is-on' : ''}`}>
-          <input type="checkbox" checked=${f.kinds.includes(k.id)} disabled=${busy || (f.kinds.length === 1 && f.kinds.includes(k.id))} onChange=${() => toggleKind(k.id)} />
-          <span class="kp-text"><b>${k.label}</b><small class="muted">${k.hint}</small></span></label>`)}</div></div>
-      <label class="field"><span class="field-label">Link to the job</span>
-        <input class="input" type="url" inputmode="url" placeholder="https://company.com/careers/role" value=${f.url} onInput=${set('url')} /></label>
-      <label class="field"><span class="field-label">…or paste the job description</span>
-        <textarea class="input" rows="7" placeholder="Paste the full description: responsibilities, requirements, skills…" value=${f.jd_text} onInput=${set('jd_text')}></textarea>
-        <span class="muted small">${f.jd_text.trim() ? `${f.jd_text.trim().length} characters` : 'LinkedIn links can’t be read — paste their text instead.'}</span></label>
-      <div class="editor-grid">
-        <label class="field"><span class="field-label">Job title <span class="muted">(optional)</span></span><input class="input" value=${f.title} onInput=${set('title')} /></label>
-        <label class="field"><span class="field-label">Company <span class="muted">(optional)</span></span><input class="input" value=${f.company} onInput=${set('company')} /></label>
+      <header class="cr-head">
+        <div><h2 class="dlg-h">Documents for any job</h2>
+          <p class="muted small">Paste a job's description or a link to it. Everything is written from your profile — every line fact-checked, nothing invented.</p></div>
+        <button type="button" class="icon-btn" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
+      </header>
+      <div class="cr-body">
+        <section class="cr-col" aria-label="The job">
+          <span class="cr-step">1 · The job</span>
+          <label class="field"><span class="field-label">Link to the job</span>
+            <input class="input" type="url" inputmode="url" placeholder="https://company.com/careers/role" value=${f.url} onInput=${set('url')} /></label>
+          <label class="field cr-grow"><span class="field-label">…or paste the job description</span>
+            <textarea class="input" placeholder="Paste the full description: responsibilities, requirements, skills…" value=${f.jd_text} onInput=${set('jd_text')}></textarea>
+            <span class="muted small">${f.jd_text.trim() ? `${f.jd_text.trim().length} characters` : 'LinkedIn links can’t be read — paste their text instead.'}</span></label>
+          <div class="editor-grid">
+            <label class="field"><span class="field-label">Job title <span class="muted">(optional)</span></span><input class="input" value=${f.title} onInput=${set('title')} /></label>
+            <label class="field"><span class="field-label">Company <span class="muted">(optional)</span></span><input class="input" value=${f.company} onInput=${set('company')} /></label>
+          </div>
+        </section>
+        <section class="cr-col cr-side" aria-label="Your documents">
+          <span class="cr-step">2 · What to create</span>
+          <div class="kind-picks" role="group" aria-label="What to create">${DOC_KINDS.map((k) => html`<label class=${`kind-pick ${f.kinds.includes(k.id) ? 'is-on' : ''}`}>
+            <input type="checkbox" checked=${f.kinds.includes(k.id)} disabled=${busy || (f.kinds.length === 1 && f.kinds.includes(k.id))} onChange=${() => toggleKind(k.id)} />
+            <span class="kp-text"><b>${k.label}</b><small class="muted">${k.hint}</small></span></label>`)}</div>
+          ${f.kinds.includes('resume') ? html`<div class="field"><span class="field-label">Resume layout</span>
+            <div class="ed-seg" role="radiogroup" aria-label="Layout">${LAYOUT_OPTIONS.map((o) => html`<button type="button" role="radio" aria-checked=${f.layout === o.id}
+              class=${f.layout === o.id ? 'is-on' : ''} onClick=${() => setF({ ...f, layout: o.id })}>${o.label}</button>`)}</div></div>` : null}
+          <div class="field"><span class="field-label">Style</span><${StylePicker} styles=${styles} value=${f.style} onChange=${(id) => setF({ ...f, style: id })} /></div>
+        </section>
       </div>
-      ${f.kinds.includes('resume') ? html`<div class="field"><span class="field-label">Resume layout</span>
-        <div class="ed-seg" role="radiogroup" aria-label="Layout">${LAYOUT_OPTIONS.map((o) => html`<button type="button" role="radio" aria-checked=${f.layout === o.id}
-          class=${f.layout === o.id ? 'is-on' : ''} onClick=${() => setF({ ...f, layout: o.id })}>${o.label}</button>`)}</div></div>` : null}
-      <div class="field"><span class="field-label">Style</span><${StylePicker} styles=${styles} value=${f.style} onChange=${(id) => setF({ ...f, style: id })} /></div>
-      ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
-      <div class="dialog-actions">
-        ${busy ? html`<span class="muted small grow">Reading the job and writing ${f.kinds.length > 1 ? 'them side by side' : 'it'} — usually 20-90 seconds. You can close this; they will appear under Documents.</span>` : null}
+      <footer class="cr-foot">
+        ${g && g.status === 'failed' ? html`<div class="error-text small grow" role="alert">${g.error}</div>`
+          : busy ? html`<span class="muted small grow">Reading the job and writing ${f.kinds.length > 1 ? 'them side by side' : 'it'} — usually 20-90 seconds. You can close this; they will appear under Documents.</span>`
+          : html`<span class="muted small grow">${ready ? 'Ready.' : 'Add a link or paste the description to start.'}</span>`}
         <${Button} type="button" onClick=${onClose}>${busy ? 'Close' : 'Cancel'}</${Button}>
         <${Button} variant="primary" icon="spark" type="submit" busy=${busy} disabled=${!ready}>${busy ? 'Writing…' : createLabel(f.kinds)}</${Button}>
-      </div>
+      </footer>
     </form>
   </div>`;
 }

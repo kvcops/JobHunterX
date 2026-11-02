@@ -640,6 +640,7 @@ async def check_watchlist():
 # ---------------------------------------------------------------------------
 
 _reassessed: set[str] = set()      # profiles whose jobs were brought up to the current matcher in this process
+_bg_tasks: set = set()
 
 
 async def _refresh_outdated_once() -> None:
@@ -662,6 +663,17 @@ async def _refresh_outdated_once() -> None:
             log.info("jobs_reassessed", count=n)
     except Exception as exc:
         log.warning("jobs_reassess_failed", error=str(exc)[:160])
+
+    async def relink():
+        # the AI part (re-linking skills with the current linker, re-scoring for the current profile) in the background
+        try:
+            n = await jobs_svc.refresh_links(snap, profile.model_dump(mode="json"), emit)
+            if n:
+                log.info("jobs_relinked", count=n)
+        except Exception as exc:
+            log.warning("jobs_relink_failed", error=str(exc)[:160])
+    _bg_tasks.add(t := asyncio.create_task(relink()))
+    t.add_done_callback(_bg_tasks.discard)
 
 
 @router.get("/jobs")
