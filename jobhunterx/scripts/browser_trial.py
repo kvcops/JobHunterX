@@ -81,6 +81,14 @@ class _Form(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        if self.path == "/upload-check":           # does the attached file's content really go out?
+            raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            _Form.got = {"upload_bytes": len(raw), "pdf_in_request": PDF[:8] in raw}
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
         from email.parser import BytesParser
         from email.policy import default
         raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -296,6 +304,22 @@ async def run(kind: str, obscura: str, stealth: bool) -> dict:
                     res["screenshot"] = f"error: {str(exc)[:120]}"
                 return res
             await step("live view + take over (CDP)", cdp_features(), 60)
+
+            async def resume_really_sent():
+                """Attach the resume the way browser-use does (DOM.setFileInputFiles), send the form with fetch +
+                FormData (how React application forms send) and check the PDF bytes arrive at the server."""
+                _Form.got = {}
+                await page.goto(form_url, wait_until="load")
+                cdp = await ctx.new_cdp_session(page)
+                doc = await cdp.send("DOM.getDocument", {"depth": -1})
+                node = await cdp.send("DOM.querySelector", {"nodeId": doc["root"]["nodeId"], "selector": "#resume"})
+                await cdp.send("DOM.setFileInputFiles", {"files": [resume], "nodeId": node["nodeId"]})
+                shown = await page.evaluate("""async () => { const i = document.getElementById('resume');
+                    await fetch('/upload-check', {method: 'POST', body: new FormData(document.getElementById('f'))});
+                    return i.files ? i.files.length : 0 }""")
+                await page.wait_for_timeout(500)
+                return {"page_shows_file_attached": shown == 1, **_Form.got}
+            await step("resume really sent (fetch + FormData)", resume_really_sent(), 30)
             await browser.close()
     finally:
         pass
