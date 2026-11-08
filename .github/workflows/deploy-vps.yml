@@ -21,7 +21,7 @@ on:
       action:
         description: keygen (step 1 of a sealed hand-over), inspect (read-only), logs (read-only, the app's recent errors), deploy, or repair (restart services that are failed)
         type: choice
-        options: [inspect, logs, deploy, repair, reboot, keygen, creatoros-inspect, creatoros-diagnose, creatoros-deploy]
+        options: [inspect, logs, deploy, repair, reboot, keygen, creatoros-inspect, creatoros-diagnose, creatoros-bench, creatoros-deploy]
         default: inspect
       sealed:
         description: Sealed credentials (only for the hand-over; leave empty when the VPS_* secrets are set)

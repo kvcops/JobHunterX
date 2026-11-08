@@ -117,6 +117,43 @@ for pid, ev in list(runs.items())[-4:]:
   say "Diagnose only — nothing changed"; exit 0
 fi
 
+if [ "$ACTION" = "bench" ]; then
+  say "Benchmark (temporary files only; skipped while a cut is running)"
+  DB=$(grep -E '^DATABASE_URL=' "$DIR/.env" 2>/dev/null | cut -d= -f2- | sed 's#^sqlite+aiosqlite:///##')
+  [ -n "$DB" ] && [ -f "$DB" ] || DB="$DIR/creatoros.db"
+  busy=$("$PY" -c "import sqlite3,sys;print(sqlite3.connect(sys.argv[1]).execute(\"SELECT COUNT(*) FROM jobs WHERE status='running'\").fetchone()[0])" "$DB" 2>/dev/null || echo 0)
+  [ "$busy" = "0" ] || { echo "a cut is running — not benchmarking now"; exit 0; }
+  T=$(mktemp -d)
+  "$PY" - "$T" <<'PYEOF' 2>&1 | grep -vE "^INFO|DeprecationWarning" | tail -12
+import sys, time, os
+sys.path.insert(0, os.getcwd())
+t = sys.argv[1]
+from backend.app.core.config import settings  # noqa: F401  (.env)
+from render.browser.template_scene import render_template_clip
+s = time.time()
+render_template_clip("kt_slam", {"statement": "Three hearts keep one octopus alive", "emphasis": ["Three"]},
+                     {"kicker": "Bench"}, 1080, 1920, 6.0, f"{t}/kt.mp4", look="orbit")
+print(f"animated scene 6 s: {time.time() - s:.1f} s")
+from PIL import Image
+Image.new("RGB", (1600, 1000), (40, 80, 120)).save(f"{t}/p.jpg")
+from render.ffmpeg.scene_composer import compose_shots_scene
+s = time.time()
+compose_shots_scene(shots=[{"path": f"{t}/p.jpg", "kind": "image", "duration": 6.0, "src_size": (1600, 1000),
+                            "motion": "in", "amount": 0.08}],
+                    caption_segments=[{"start_sec": 0, "end_sec": 6, "text": "one two three four five six"}],
+                    duration_sec=6.0, width=1080, height=1920, output_path=f"{t}/photo.mp4")
+print(f"photo scene 6 s (zoom + captions + grade): {time.time() - s:.1f} s")
+from backend.app.audio.tts_kokoro import synthesize_speech
+from pathlib import Path
+s = time.time()
+d, _, _ = synthesize_speech("An octopus has three hearts. One of them stops when it swims.", voice_id="am_michael",
+                            output_path=Path(f"{t}/v.wav"))
+print(f"Kokoro: {d:.1f} s of speech in {time.time() - s:.1f} s")
+PYEOF
+  rm -rf "$T"
+  say "Bench done — nothing changed"; exit 0
+fi
+
 [ "$ACTION" = "deploy" ] || { say "Inspect only — nothing changed"; exit 0; }
 
 # ---------------------------------------------------------------- deploy
@@ -139,7 +176,15 @@ fi
 
 say "Website"
 if $G diff --quiet "$OLD" HEAD -- frontend; then echo "frontend unchanged"; else
-  (cd frontend && (npm ci --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund >/dev/null 2>&1) && npm run build 2>&1 | tail -4) || echo "frontend build failed"
+  # Keep the working build: a failed build on a small server must never take the site down.
+  (cd frontend && rm -rf .next.bak && { [ -d .next ] && cp -a .next .next.bak || true; }
+   (npm ci --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund >/dev/null 2>&1)
+   if NODE_OPTIONS=--max-old-space-size=1536 npm run build > /tmp/creatoros-build.log 2>&1; then
+     tail -4 /tmp/creatoros-build.log; rm -rf .next.bak
+   else
+     echo "frontend build FAILED — restoring the previous build"; tail -15 /tmp/creatoros-build.log
+     [ -d .next.bak ] && { rm -rf .next; mv .next.bak .next; }
+   fi)
 fi
 
 say "Restart"
