@@ -74,6 +74,49 @@ for f in "$DIR"/tmp/logs/worker.log; do
     | sort | uniq -c | sort -rn | head -25
 done
 
+if [ "$ACTION" = "diagnose" ]; then
+  say "Jobs (last 14 days)"
+  DB=$(grep -E '^DATABASE_URL=' "$DIR/.env" 2>/dev/null | cut -d= -f2- | sed 's#^sqlite+aiosqlite:///##')
+  [ -n "$DB" ] && [ -f "$DB" ] || DB="$DIR/creatoros.db"
+  "$PY" - "$DB" <<'PYEOF'
+import sqlite3, sys, re
+con = sqlite3.connect(sys.argv[1])
+rows = con.execute("SELECT job_type, status, COUNT(*) FROM jobs WHERE created_at > datetime('now','-14 days') GROUP BY 1,2 ORDER BY 1,2").fetchall()
+for r in rows: print("  %-14s %-10s %d" % r)
+print("\n  latest 25 jobs: created | updated | minutes | status | progress | error")
+for r in con.execute("SELECT job_id, job_type, status, progress, created_at, updated_at, COALESCE(error,'') FROM jobs ORDER BY created_at DESC LIMIT 25"):
+    jid, typ, st, pr, c, u, err = r
+    mins = con.execute("SELECT (julianday(?)-julianday(?))*1440", (u, c)).fetchone()[0] or 0
+    err = re.sub(r"(key|token|secret|password)=\S+", r"\1=***", err, flags=re.I)[:160]
+    print(f"  {c[5:16]} | {u[11:16]} | {mins:6.1f} | {typ[:11]:11s} {st:9s} {pr or 0:4.2f} | {err}")
+PYEOF
+  say "Memory / OOM kills (14 days)"
+  free -m | head -3; swapon --show 2>/dev/null | head -3
+  journalctl -k --since "14 days ago" --no-pager -o short 2>/dev/null | grep -iE "out of memory|oom-kill|killed process" | tail -15
+  say "Worker log: errors and stops (last 4000 lines)"
+  L="$DIR/tmp/logs/worker.log"
+  [ -f "$L" ] && tail -n 4000 "$L" | grep -E "ERROR|Traceback|Timeout|timed out|failed|Killed|MemoryError|cancel|paused|stopped responding|interrupted|resum" \
+    | grep -vE "unusable answer|has no API key|rate-limited|switching to|primp|ddgs|research.search|research.entities|creatoros.research|INFO" | sed -E 's/(key|token)=[^ ]+/\1=***/Ig' | tail -60
+  say "Stage timings of recent cuts (minutes from start of each project's run)"
+  [ -f "$L" ] && tail -n 30000 "$L" | grep -E "proj_[0-9a-f]+ \| [a-z_.]+" | "$PY" -c '
+import sys, re, datetime as dt
+runs = {}
+for line in sys.stdin:
+    m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),\d+ .*?(proj_[0-9a-f]+) \| ([a-z_.]+)", line)
+    if not m: continue
+    t = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"); runs.setdefault(m.group(2), []).append((t, m.group(3)))
+for pid, ev in list(runs.items())[-4:]:
+    t0 = ev[0][0]; seen = {}
+    for t, st in ev: seen.setdefault(st, (t - t0).total_seconds() / 60)
+    last = (ev[-1][0] - t0).total_seconds() / 60
+    keys = [k for k in seen if k.split(".")[-1] in ("planned","researched","generated","synthesized","aligned","directing","acquired","rendering","encoding","mixed","completed","failed")]
+    print(f"  {pid}: total {last:.1f} min | " + " ".join(f"{k}@{seen[k]:.1f}" for k in keys))
+'
+  say "Render speed (frames per second of browser captures)"
+  [ -f "$L" ] && tail -n 30000 "$L" | grep -oE "frames piped in [0-9.]+s \([0-9.]+ fps\)" | tail -12
+  say "Diagnose only — nothing changed"; exit 0
+fi
+
 [ "$ACTION" = "deploy" ] || { say "Inspect only — nothing changed"; exit 0; }
 
 # ---------------------------------------------------------------- deploy
