@@ -185,16 +185,29 @@ def shape(o, depth=0):
     return type(o).__name__
 import re
 allv, token = [], ""
-for page in range(30):
-    q = "?type=public&limit=100" + (f"&next_token={token}" if token else "")
-    st, body, dt = call("GET", "https://api.heygen.com/v3/models/audio/voices" + q)
-    if st != 200:
-        print("page", page, st, str(body)[:200]); break
-    allv += body.get("data") or []
-    token = body.get("next_token") or ""
-    if not body.get("has_more") or not token:
+first = None
+for pname in ("token", "next_token", "cursor", "page_token"):
+    allv, token = [], ""
+    for page in range(40):
+        q = "?type=public&limit=100" + (f"&{pname}={token}" if token else "")
+        st, body, dt = call("GET", "https://api.heygen.com/v3/models/audio/voices" + q)
+        if st != 200:
+            print("page", page, st, str(body)[:200]); break
+        got = body.get("data") or []
+        if page == 1 and got and allv and got[0].get("voice_id") == allv[0].get("voice_id"):
+            print(pname, ": same page again"); break
+        allv += got
+        token = body.get("next_token") or ""
+        if not body.get("has_more") or not token:
+            break
+    print(f"pagination via {pname}: {len(allv)} voices")
+    if len(allv) > 100:
         break
 print("public voices:", len(allv), "english:", sum(1 for v in allv if v.get("language") == "en"))
+off = [v for v in allv if str(v.get("voice_id", "")).startswith("public_")]
+print("official (public_*) voices:", len(off))
+for v in off[:200]:
+    print("  OFF", v["voice_id"], "|", v.get("language"), "|", v["name"])
 kw = re.compile(r"narrat|documentar|story|educat|teacher|deep|warm|energ|news|author|calm|friendly|british|american|confident|clear|dramatic|epic|movie|trailer|podcast|radio|host|announcer|young|old|wise|cheer|excit|kid|child|grand|whisper|soft|bold|hype|creator|youtube|explainer|professional|smooth|rich", re.I)
 picks = [v for v in allv if v.get("language") == "en" and kw.search(v.get("name", ""))]
 print("descriptive english voices:", len(picks))
@@ -208,7 +221,8 @@ try:
     wm = WhisperModel("tiny.en", device="cpu", compute_type="int8")
 except Exception as e:
     wm = None; print("no whisper:", e)
-vid = next((v["voice_id"] for v in picks if "Deep Authority" in v["name"]), picks[0]["voice_id"] if picks else "")
+vid = next((v["voice_id"] for v in off if "Narrator" in v["name"]), off[0]["voice_id"] if off else (picks[0]["voice_id"] if picks else ""))
+print("tag test voice:", vid)
 for text in ("Octopuses have three hearts.", "[excited] Octopuses have three hearts.",
              "[whispers] Octopuses have three hearts.", "[dramatic] Octopuses have three hearts.",
              "Octopuses have three hearts. [laughs] Really!"):
@@ -221,7 +235,11 @@ for text in ("Octopuses have three hearts.", "[excited] Octopuses have three hea
     if wm:
         import tempfile
         f = tempfile.mktemp(suffix=".wav"); urllib.request.urlretrieve(url, f)
-        segs, _ = wm.transcribe(f); said = " ".join(s.text for s in segs).strip(); os.remove(f)
+        import soundfile as sf, numpy as np
+        a, sr = sf.read(f, dtype="float32", always_2d=True); a = a.mean(axis=1)
+        if sr != 16000:
+            a = np.interp(np.linspace(0, len(a), int(len(a) * 16000 / sr), endpoint=False), np.arange(len(a)), a).astype("float32")
+        segs, _ = wm.transcribe(a); said = " ".join(s.text for s in segs).strip(); os.remove(f)
     print(f"{text!r} -> {dur:.2f}s heard: {said!r} ({dt:.1f}s)")
 PYEOF
   say "HeyGen probe done — nothing changed"; exit 0
