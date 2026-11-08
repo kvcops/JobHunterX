@@ -156,9 +156,11 @@ fi
 
 if [ "$ACTION" = "frames" ]; then
   # Contact sheets of the newest finished videos, base64 in the log (read-only).
-  PD="$DIR/projects"; [ -d "$PD" ] || PD=$(find "$DIR" -maxdepth 3 -type d -name projects | head -1)
+  PD=$(cd "$DIR" && "$PY" -c "from backend.app.core.config import settings; print(settings.projects_dir)" 2>/dev/null </dev/null | tail -1)
+  [ -d "$PD" ] || PD="$DIR/projects"
+  echo "projects: $PD ($(ls -d "$PD"/proj_* 2>/dev/null | wc -l) folders, $(find "$PD" -maxdepth 2 -name '*.mp4' 2>/dev/null | wc -l) finished videos)"
   FF=$(command -v ffmpeg || echo "$DIR/.venv/bin/ffmpeg")
-  for v in $(ls -t "$PD"/proj_*/*.mp4 2>/dev/null | grep -v '/scenes/' | head -3); do
+  for v in $(ls -t $(find "$PD" -maxdepth 2 -name '*.mp4' 2>/dev/null) 2>/dev/null | head -3); do
     d=$(dirname "$v"); dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$v" 2>/dev/null </dev/null)
     say "VIDEO $(basename "$d") $(basename "$v") ${dur}s"
     "$PY" - "$d/manifest.json" <<'PYEOF'
