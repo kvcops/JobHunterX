@@ -267,6 +267,68 @@ PYEOF
   say "HeyGen probe done — nothing changed"; exit 0
 fi
 
+if [ "$ACTION" = "tone" ]; then
+  # Measures HeyGen audio tags: is the tag read out, and what it does to pitch,
+  # loudness and pace. Read-only; the key in .env is never printed.
+  ( cd "$DIR" && set -a && . ./.env 2>/dev/null; set +a; "$PY" - <<'PYEOF'
+import time, numpy as np
+from backend.app.audio import heygen_tts as h
+try:
+    from faster_whisper import WhisperModel
+    wm = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+except Exception as e:
+    wm = None; print("no whisper:", e)
+def f0(a, sr):
+    fr, hop, out = int(sr * .04), int(sr * .01), []
+    lo, hi = int(sr / 400), int(sr / 70)
+    for i in range(0, len(a) - fr, hop):
+        x = a[i:i + fr]; x = x - x.mean()
+        e = float((x * x).sum())
+        if e < 1e-4 * fr: continue
+        c = np.correlate(x, x, "full")[fr - 1:]
+        k = lo + int(np.argmax(c[lo:hi]))
+        if c[k] > .45 * c[0]: out.append(sr / k)
+    return np.array(out)
+def hear(a, sr):
+    if not wm: return ""
+    b = np.interp(np.linspace(0, len(a), int(len(a) * 16000 / sr), endpoint=False), np.arange(len(a)), a).astype("float32")
+    return " ".join(s.text for s in wm.transcribe(b)[0]).strip()
+pool = h.cast_pool()
+voices = [pool["authority"][0]["voice_id"], pool["story"][0]["voice_id"]]
+S = "Nobody expected what happened next in the village."
+TAGS = ["", "[excited]", "[happy]", "[cheerful]", "[sad]", "[somber]", "[crying]", "[angry]", "[frustrated]",
+        "[shouts]", "[shocked]", "[surprised]", "[gasps]", "[amazed]", "[curious]", "[serious]", "[dramatic]",
+        "[whispers]", "[calmly]", "[warmly]", "[sympathetic]", "[hopeful]", "[nervous]", "[fearful]",
+        "[sighs]", "[sarcastic]", "[urgent]", "[emphatic]", "[mysterious]", "[laughs]"]
+for vid in voices:
+    print(f"\n== voice {h.voice_name(vid)}")
+    base = None
+    for t in TAGS:
+        try:
+            a, sr = h.synthesize(f"{t} {S}".strip(), vid, attempts=3)
+        except Exception as e:
+            print(f"{t or 'plain':14s} FAIL {e}"); continue
+        p = f0(a, sr); med = float(np.median(p)) if len(p) else 0; sd = float(np.std(p)) if len(p) else 0
+        rms = 20 * np.log10(float(np.sqrt((a ** 2).mean())) + 1e-9)
+        if base is None: base = (med, rms, len(a) / sr)
+        said = hear(a, sr)
+        leak = t and t.strip("[]").lower() in said.lower()
+        print(f"{t or 'plain':14s} {len(a)/sr:5.2f}s f0 {med:5.0f}Hz ({(med/base[0]-1)*100 if base[0] else 0:+4.0f}%) "
+              f"spread {sd:4.0f} loud {rms:6.1f}dB ({rms-base[1]:+4.1f}) {'READ-OUT ' if leak else ''}| {said[:70]}")
+print("\n== inline tags in one take (sentence by sentence)")
+for txt in ("[sad] Two hundred families lost their homes in the flood. [hopeful] But the town rebuilt in a year.",
+            "[shocked] It was a fake. [angry] And nobody was punished. [serious] Here is how it happened."):
+    a, sr = h.synthesize(txt, voices[0], attempts=3)
+    print(f"{len(a)/sr:5.2f}s heard: {hear(a, sr)!r}")
+    # pitch per half, to see whether the second tag changes the read
+    m = len(a) // 2
+    for nm, seg in (("first half", a[:m]), ("second half", a[m:])):
+        p = f0(seg, sr); print(f"   {nm}: f0 {np.median(p) if len(p) else 0:.0f}Hz loud {20*np.log10(np.sqrt((seg**2).mean())+1e-9):.1f}dB")
+PYEOF
+  )
+  say "Tone probe done — nothing changed"; exit 0
+fi
+
 if [ "$ACTION" = "frames" ]; then
   # Contact sheets of the newest finished videos, base64 in the log (read-only).
   PD=$(cd "$DIR" && "$PY" -c "from backend.app.core.config import settings; print(settings.projects_dir)" 2>/dev/null </dev/null | tail -1)
