@@ -183,34 +183,46 @@ def shape(o, depth=0):
     if isinstance(o, list):
         return [shape(o[0], depth + 1)] if o else []
     return type(o).__name__
-for q in ("?type=public&limit=100", "?type=public", ""):
+import re
+allv, token = [], ""
+for page in range(30):
+    q = "?type=public&limit=100" + (f"&next_token={token}" if token else "")
     st, body, dt = call("GET", "https://api.heygen.com/v3/models/audio/voices" + q)
-    print(f"\nGET voices{q} -> {st} ({dt:.1f}s)")
-    if st == 200:
-        print("shape:", json.dumps(shape(body))[:900])
-        data = body.get("data") if isinstance(body, dict) else body
-        items = data.get("voices") if isinstance(data, dict) else data
-        items = items or (data.get("items") if isinstance(data, dict) else []) or []
-        print("count:", len(items))
-        for v in items[:60]:
-            if isinstance(v, dict):
-                print("  ", {k: v.get(k) for k in v if k not in ("preview_audio", "preview_audio_url", "preview_url", "sample_url")})
+    if st != 200:
+        print("page", page, st, str(body)[:200]); break
+    allv += body.get("data") or []
+    token = body.get("next_token") or ""
+    if not body.get("has_more") or not token:
         break
-    else:
-        print(str(body)[:400])
-voice = os.environ.get("HG_VOICE", "")
-if not voice:
-    try:
-        voice = next(v.get("voice_id") or v.get("id") for v in items if isinstance(v, dict))
-    except Exception:
-        voice = ""
-print("\ntest voice:", voice)
-for model in ("heygen-voice-1-turbo-free",):
+print("public voices:", len(allv), "english:", sum(1 for v in allv if v.get("language") == "en"))
+kw = re.compile(r"narrat|documentar|story|educat|teacher|deep|warm|energ|news|author|calm|friendly|british|american|confident|clear|dramatic|epic|movie|trailer|podcast|radio|host|announcer|young|old|wise|cheer|excit|kid|child|grand|whisper|soft|bold|hype|creator|youtube|explainer|professional|smooth|rich", re.I)
+picks = [v for v in allv if v.get("language") == "en" and kw.search(v.get("name", ""))]
+print("descriptive english voices:", len(picks))
+for v in picks[:150]:
+    print("  ", v["voice_id"], "|", v["name"])
+st, body, dt = call("GET", "https://api.heygen.com/v3/models/audio/voices?type=private")
+print("\nprivate ->", st, str(body)[:400])
+# do tags get performed or read out? transcribe the take
+try:
+    from faster_whisper import WhisperModel
+    wm = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+except Exception as e:
+    wm = None; print("no whisper:", e)
+vid = next((v["voice_id"] for v in picks if "Deep Authority" in v["name"]), picks[0]["voice_id"] if picks else "")
+for text in ("Octopuses have three hearts.", "[excited] Octopuses have three hearts.",
+             "[whispers] Octopuses have three hearts.", "[dramatic] Octopuses have three hearts.",
+             "Octopuses have three hearts. [laughs] Really!"):
     st, body, dt = call("POST", "https://api.heygen.com/v3/models/audio/tts",
-                        {"model": model, "voice_id": voice,
-                         "text": "[excited] Did you know octopuses have three hearts? [whispers] And blue blood."})
-    print(f"POST tts {model} -> {st} ({dt:.1f}s)")
-    print("  ", json.dumps(body)[:700] if not isinstance(body, str) else body[:700])
+                        {"model": "heygen-voice-1-turbo-free", "voice_id": vid, "text": text})
+    if st != 200:
+        print(text, "->", st, str(body)[:200]); continue
+    url = body["data"]["audio_url"]; dur = body["data"].get("duration")
+    said = ""
+    if wm:
+        import tempfile
+        f = tempfile.mktemp(suffix=".wav"); urllib.request.urlretrieve(url, f)
+        segs, _ = wm.transcribe(f); said = " ".join(s.text for s in segs).strip(); os.remove(f)
+    print(f"{text!r} -> {dur:.2f}s heard: {said!r} ({dt:.1f}s)")
 PYEOF
   say "HeyGen probe done — nothing changed"; exit 0
 fi
