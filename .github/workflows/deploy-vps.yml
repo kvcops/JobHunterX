@@ -21,7 +21,7 @@ on:
       action:
         description: keygen (step 1 of a sealed hand-over), inspect (read-only), logs (read-only, the app's recent errors), deploy, or repair (restart services that are failed)
         type: choice
-        options: [inspect, logs, deploy, repair, reboot, keygen, creatoros-inspect, creatoros-diagnose, creatoros-bench, creatoros-frames, creatoros-deploy]
+        options: [inspect, logs, deploy, repair, reboot, keygen, creatoros-inspect, creatoros-diagnose, creatoros-bench, creatoros-frames, creatoros-setenv, creatoros-deploy]
         default: inspect
       sealed:
         description: Sealed credentials (only for the hand-over; leave empty when the VPS_* secrets are set)
@@ -95,6 +95,11 @@ jobs:
             rm -rf vpskey
             get() { printf '%s' "$json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('$1') or '')"; }
             S_HOST=$(get host); S_PORT=$(get port); S_USER=$(get user); S_PASS=$(get password)
+            # optional {"env": {"NAME": "value"}}: values for the app's .env
+            # (creatoros-setenv). Masked, and only ever sent over ssh stdin.
+            ENV_B64=$(printf '%s' "$json" | python3 -c "import sys,json,base64; e=json.load(sys.stdin).get('env') or {}; print(base64.b64encode(json.dumps(e).encode()).decode())")
+            printf '%s' "$json" | python3 -c "import sys,json; [print('::add-mask::'+str(v)) for v in (json.load(sys.stdin).get('env') or {}).values() if v]"
+            echo "ENV_B64=$ENV_B64" >> "$GITHUB_ENV"; echo "::add-mask::$ENV_B64"
           fi
           [ -n "$S_HOST" ] && [ -n "$S_PASS" ] || { echo "::error::No credentials: set the VPS_* secrets or use a sealed hand-over."; exit 1; }
           for v in "$S_HOST" "$S_PORT" "$S_PASS"; do [ -n "$v" ] && echo "::add-mask::$v"; done
@@ -111,7 +116,11 @@ jobs:
             [[ "$v" =~ ^[A-Za-z0-9._/-]*$ ]] || { echo "::error::Refusing an input with unsafe characters"; exit 1; }
           done
           SSH=(sshpass -e ssh -p "$VPS_PORT" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o LogLevel=ERROR "$VPS_USER@$VPS_HOST")
-          if [[ "$ACTION" == creatoros-* ]]; then
+          if [[ "$ACTION" == creatoros-setenv ]]; then
+            [ -n "${ENV_B64:-}" ] || { echo "::error::creatoros-setenv needs a sealed {env: {...}}"; exit 1; }
+            "${SSH[@]}" "umask 077; cat > /root/.creatoros_setenv.py" < deploy/creatoros-setenv.py
+            printf '%s' "$ENV_B64" | "${SSH[@]}" "python3 /root/.creatoros_setenv.py '$REPO_DIR'; rm -f /root/.creatoros_setenv.py"
+          elif [[ "$ACTION" == creatoros-* ]]; then
             # CreatorOS on the same server: key NAMES only, never values
             "${SSH[@]}" "bash -s -- '${ACTION#creatoros-}' '$REPO_DIR' '$BRANCH'" < deploy/creatoros-vps.sh
           else
