@@ -21,7 +21,7 @@ on:
       action:
         description: keygen (step 1 of a sealed hand-over), inspect (read-only), logs (read-only, the app's recent errors), deploy, or repair (restart services that are failed)
         type: choice
-        options: [inspect, logs, deploy, repair, reboot, keygen]
+        options: [inspect, logs, deploy, repair, reboot, keygen, creatoros-inspect, creatoros-deploy]
         default: inspect
       sealed:
         description: Sealed credentials (only for the hand-over; leave empty when the VPS_* secrets are set)
@@ -33,6 +33,10 @@ on:
         default: ""
       repo_dir:
         description: Path of the checkout on the server (leave empty to find it)
+        type: string
+        default: ""
+      branch:
+        description: creatoros-deploy only — the CreatorOS branch to run
         type: string
         default: ""
 
@@ -101,9 +105,18 @@ jobs:
         env:
           ACTION: ${{ inputs.action }}
           REPO_DIR: ${{ inputs.repo_dir }}
+          BRANCH: ${{ inputs.branch }}
         run: |
-          sshpass -e ssh -p "$VPS_PORT" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o LogLevel=ERROR \
-            "$VPS_USER@$VPS_HOST" "bash -s -- '$ACTION' '$REPO_DIR'" < deploy/vps-update.sh
+          for v in "$ACTION" "$REPO_DIR" "$BRANCH"; do
+            [[ "$v" =~ ^[A-Za-z0-9._/-]*$ ]] || { echo "::error::Refusing an input with unsafe characters"; exit 1; }
+          done
+          SSH=(sshpass -e ssh -p "$VPS_PORT" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 -o LogLevel=ERROR "$VPS_USER@$VPS_HOST")
+          if [[ "$ACTION" == creatoros-* ]]; then
+            # CreatorOS on the same server: key NAMES only, never values
+            "${SSH[@]}" "bash -s -- '${ACTION#creatoros-}' '$REPO_DIR' '$BRANCH'" < deploy/creatoros-vps.sh
+          else
+            "${SSH[@]}" "bash -s -- '$ACTION' '$REPO_DIR'" < deploy/vps-update.sh
+          fi
 
       - name: Delete the one-time key
         if: always() && inputs.key_run != ''
