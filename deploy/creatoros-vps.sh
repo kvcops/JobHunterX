@@ -242,6 +242,28 @@ for text in ("Octopuses have three hearts.", "[excited] Octopuses have three hea
         segs, _ = wm.transcribe(a); said = " ".join(s.text for s in segs).strip(); os.remove(f)
     print(f"{text!r} -> {dur:.2f}s heard: {said!r} ({dt:.1f}s)")
 PYEOF
+  say "App code: HeyGen narrator end to end"
+  ( cd "$DIR" && set -a && . ./.env 2>/dev/null; set +a; "$PY" - <<'PYEOF'
+import time, tempfile
+from pathlib import Path
+from backend.app.audio import heygen_tts
+from backend.app.audio.tts_kokoro import synthesize_speech
+print("enabled:", heygen_tts.enabled(), "| model:", heygen_tts.model())
+pool = heygen_tts.cast_pool()
+print("cast pool:", {k: len(v) for k, v in pool.items()})
+for k, v in pool.items():
+    print(" ", k, ":", ", ".join(x.get("name", "") for x in v[:8]))
+for look, ct in (("noir", "documentary"), ("pop", "viral"), ("keynote", "explainer"), ("studio", "story")):
+    vid = heygen_tts.cast("proj_test1234", look, ct)
+    print(f"cast {look}/{ct}: {heygen_tts.voice_name(vid)}")
+vid = heygen_tts.cast("proj_test1234", "keynote", "explainer")
+out = Path(tempfile.mkdtemp()) / "s.wav"
+t = time.time()
+d, sr, _ = synthesize_speech("Octopus blood runs blue, not red. Why did evolution pick copper?",
+                             voice_id="heygen:" + vid, output_path=out, mood="curious", energy=0.6)
+print(f"synthesize_speech via HeyGen: {d:.2f}s audio at {sr} Hz in {time.time()-t:.1f}s")
+PYEOF
+  )
   say "HeyGen probe done — nothing changed"; exit 0
 fi
 
