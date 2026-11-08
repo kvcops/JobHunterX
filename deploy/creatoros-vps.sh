@@ -268,65 +268,45 @@ PYEOF
 fi
 
 if [ "$ACTION" = "tone" ]; then
-  # Measures HeyGen audio tags: is the tag read out, and what it does to pitch,
-  # loudness and pace. Read-only; the key in .env is never printed.
+  # App-level tone check: the tone director's labels for sample scenes (real
+  # LLM), the HeyGen line it builds, and pitch/loudness per sentence of the
+  # take. Read-only; the key in .env is never printed.
   ( cd "$DIR" && set -a && . ./.env 2>/dev/null; set +a; "$PY" - <<'PYEOF'
-import time, numpy as np
-from backend.app.audio import heygen_tts as h
-try:
-    from faster_whisper import WhisperModel
-    wm = WhisperModel("tiny.en", device="cpu", compute_type="int8")
-except Exception as e:
-    wm = None; print("no whisper:", e)
+import asyncio, numpy as np
+from backend.app.audio import tone, heygen_tts as h
+scenes = [
+  {"scene_id": "s1", "text": "Over 2,000 people died when the dam burst at night! It was the deadliest flood in a century."},
+  {"scene_id": "s2", "text": "But within a year, the town had rebuilt every single home. Volunteers came from forty countries."},
+  {"scene_id": "s3", "text": "Then investigators found that officials stole the relief money. Nobody was ever punished."},
+  {"scene_id": "s4", "text": "Octopuses have three hearts and blue blood! Why would evolution build an animal like that?"},
+  {"scene_id": "s5", "text": "India just won the World Cup in a last-ball thriller! The whole country partied all night."},
+]
+print("story tone (flood topic):", tone.story_tone("The night the dam burst", scenes[:3]))
+plan = asyncio.run(tone.plan("The night the dam burst", scenes[:3]))
+plan.update(asyncio.run(tone.plan("Weird animals and sports", scenes[3:])))
+for sc in scenes:
+    sents = tone.split_sentences(sc["text"])
+    for s_, t_ in zip(sents, plan[sc["scene_id"]]):
+        print(f"  {t_:9s} {h.TONE_TAGS.get(t_, ''):12s} | {s_}")
 def f0(a, sr):
     fr, hop, out = int(sr * .04), int(sr * .01), []
     lo, hi = int(sr / 400), int(sr / 70)
     for i in range(0, len(a) - fr, hop):
         x = a[i:i + fr]; x = x - x.mean()
-        e = float((x * x).sum())
-        if e < 1e-4 * fr: continue
-        c = np.correlate(x, x, "full")[fr - 1:]
-        k = lo + int(np.argmax(c[lo:hi]))
+        if float((x * x).sum()) < 1e-4 * fr: continue
+        c = np.correlate(x, x, "full")[fr - 1:]; k = lo + int(np.argmax(c[lo:hi]))
         if c[k] > .45 * c[0]: out.append(sr / k)
-    return np.array(out)
-def hear(a, sr):
-    if not wm: return ""
-    b = np.interp(np.linspace(0, len(a), int(len(a) * 16000 / sr), endpoint=False), np.arange(len(a)), a).astype("float32")
-    return " ".join(s.text for s in wm.transcribe(b)[0]).strip()
-pool = h.cast_pool()
-voices = [pool["authority"][0]["voice_id"], pool["story"][0]["voice_id"]]
-S = "Nobody expected what happened next in the village."
-TAGS = ["", "[excited]", "[happy]", "[cheerful]", "[sad]", "[somber]", "[crying]", "[angry]", "[frustrated]",
-        "[shouts]", "[shocked]", "[surprised]", "[gasps]", "[amazed]", "[curious]", "[serious]", "[dramatic]",
-        "[whispers]", "[calmly]", "[warmly]", "[sympathetic]", "[hopeful]", "[nervous]", "[fearful]",
-        "[sighs]", "[sarcastic]", "[urgent]", "[emphatic]", "[mysterious]", "[laughs]"]
-for vid in voices:
-    print(f"\n== voice {h.voice_name(vid)}")
-    base = None
-    for t in TAGS:
-        try:
-            a, sr = h.synthesize(f"{t} {S}".strip(), vid, attempts=3)
-        except Exception as e:
-            print(f"{t or 'plain':14s} FAIL {e}"); continue
-        p = f0(a, sr); med = float(np.median(p)) if len(p) else 0; sd = float(np.std(p)) if len(p) else 0
-        rms = 20 * np.log10(float(np.sqrt((a ** 2).mean())) + 1e-9)
-        if base is None: base = (med, rms, len(a) / sr)
-        said = hear(a, sr)
-        leak = t and t.strip("[]").lower() in said.lower()
-        print(f"{t or 'plain':14s} {len(a)/sr:5.2f}s f0 {med:5.0f}Hz ({(med/base[0]-1)*100 if base[0] else 0:+4.0f}%) "
-              f"spread {sd:4.0f} loud {rms:6.1f}dB ({rms-base[1]:+4.1f}) {'READ-OUT ' if leak else ''}| {said[:70]}")
-print("\n== inline tags in one take (sentence by sentence)")
-for txt in ("[sad] Two hundred families lost their homes in the flood. [hopeful] But the town rebuilt in a year.",
-            "[shocked] It was a fake. [angry] And nobody was punished. [serious] Here is how it happened."):
-    a, sr = h.synthesize(txt, voices[0], attempts=3)
-    print(f"{len(a)/sr:5.2f}s heard: {hear(a, sr)!r}")
-    # pitch per half, to see whether the second tag changes the read
-    m = len(a) // 2
-    for nm, seg in (("first half", a[:m]), ("second half", a[m:])):
-        p = f0(seg, sr); print(f"   {nm}: f0 {np.median(p) if len(p) else 0:.0f}Hz loud {20*np.log10(np.sqrt((seg**2).mean())+1e-9):.1f}dB")
+    return float(np.median(out)) if out else 0
+vid = h.cast_pool()["authority"][0]["voice_id"]
+for sid in ("s1", "s2", "s5"):
+    sc = next(x for x in scenes if x["scene_id"] == sid)
+    sents = tone.split_sentences(sc["text"]); line = h.tagged_sentences(sents, plan[sid])
+    a, sr = h.synthesize(line, vid, attempts=3); m = len(a) // 2
+    print(f"{sid}: {line!r}\n    {len(a)/sr:.2f}s  first half f0 {f0(a[:m], sr):.0f}Hz, second half f0 {f0(a[m:], sr):.0f}Hz, "
+          f"loud {20*np.log10(np.sqrt((a**2).mean())+1e-9):.1f}dB")
 PYEOF
   )
-  say "Tone probe done — nothing changed"; exit 0
+  say "Tone check done — nothing changed"; exit 0
 fi
 
 if [ "$ACTION" = "frames" ]; then
