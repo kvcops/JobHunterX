@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Sign in — JobHunterX</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+  <meta name="theme-color" content="#f4f3f0" />
+  <style>
+    body { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+    .login { width: 100%; max-width: 400px; padding: 32px 28px; display: grid; gap: 18px; }
+    .login .brand { display: flex; align-items: center; gap: 10px; justify-content: center; }
+    .login h1 { font-size: 1.35rem; margin: 0; text-align: center; }
+    .login p { margin: 0; text-align: center; }
+    .login form { display: grid; gap: 14px; }
+    .login .field { display: grid; gap: 6px; }
+    .login .btn { width: 100%; justify-content: center; }
+    .login-error { color: var(--danger, #c0392b); font-size: .9rem; min-height: 1.3em; text-align: center; }
+    .pw-row { display: flex; gap: 6px; align-items: center; }
+    .pw-row .input { flex: 1; }
+  </style>
+</head>
+<body>
+  <main class="card login" aria-labelledby="login-title">
+    <div class="brand">
+      <span class="brand-mark"><img src="/assets/logo.svg" alt="" width="34" height="34" /></span>
+      <span class="brand-name">JobHunter<span class="serif">X</span></span>
+    </div>
+    <h1 id="login-title">Sign in</h1>
+    <p class="muted small">Use the username and password your admin gave you.</p>
+    <form id="login-form" autocomplete="on" novalidate>
+      <label class="field" for="username"><span class="field-label">Username</span>
+        <input id="username" name="username" class="input" autocomplete="username" autocapitalize="none" spellcheck="false"
+          maxlength="80" required autofocus />
+      </label>
+      <label class="field" for="password"><span class="field-label">Password</span>
+        <span class="pw-row">
+          <input id="password" name="password" class="input" type="password" autocomplete="current-password" maxlength="200" required />
+          <button type="button" class="icon-btn" id="pw-toggle" aria-label="Show password">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" /><circle cx="12" cy="12" r="3" /></svg>
+          </button>
+        </span>
+      </label>
+      <div class="login-error" id="login-error" role="alert" aria-live="polite"></div>
+      <button type="submit" class="btn btn-primary" id="login-btn"><span class="btn-label">Sign in</span></button>
+    </form>
+    <p class="muted small" id="signup-link" hidden>New here? <a href="/signup">Create an account</a></p>
+  </main>
+  <noscript>JobHunterX needs JavaScript enabled.</noscript>
+  <script type="module" src="/js/login.js"></script>
+</body>
+</html>

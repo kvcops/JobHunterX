@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>{% include "_base.css.j2" %} p { margin: 0 0 9px 0; }</style></head>
+<body>
+<div class="name">{{ header.name }}</div>
+<div class="contact">{{ [header.email, header.phone, header.location] | select | join(' · ') }}</div>
+<div style="height:16px"></div>
+<p>{{ doc.greeting }}</p>
+{% for para in doc.paragraphs %}<p>{{ para }}</p>{% endfor %}
+<p>{{ doc.closing }}<br>{{ doc.signature }}</p>
+</body></html>

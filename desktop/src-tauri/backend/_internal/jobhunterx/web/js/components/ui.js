@@ -1,0 +1,581 @@
+// Shared presentational components and motion hooks. No data fetching here.
+import { html, render, useState, useEffect, useLayoutEffect, useRef, useId } from '../lib/preact.js';
+import { useStore } from '../state/store.js';
+import { closeConfirm, dismissToast } from '../actions.js';
+import { VERDICT_LABEL } from '../lib/format.js';
+
+const ICONS = {
+  search: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm10 17-5.2-5.2',
+  users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 10a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7.5M18 14a6 6 0 0 1 4 7',
+  logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9a8 8 0 0 1 16 0',
+  doc: 'M7 3h7l5 5v13H7zM14 3v5h5M9.5 13h7M9.5 17h7',
+  board: 'M4 5h16v14H4zM9 5v14M15 5v14',
+  globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm-9 9h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z',
+  hand: 'M8 13V5.5a1.5 1.5 0 0 1 3 0V12m0-6.5v-1a1.5 1.5 0 0 1 3 0V12m0-5.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1a6 6 0 0 1-5.2-3L3.5 13a1.5 1.5 0 0 1 2.6-1.5L8 14',
+  gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm8.5 3a8.5 8.5 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a8 8 0 0 0-2.2-1.3L15.5 2h-4l-.4 2.6a8 8 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.6a8.5 8.5 0 0 0 0 2.6l-2 1.6 2 3.4 2.4-1a8 8 0 0 0 2.2 1.3l.4 2.6h4l.4-2.6a8 8 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3z',
+  star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.7l5.9-.9z',
+  x: 'M6 6l12 12M18 6 6 18',
+  minus: 'M5 12h14',
+  enlarge: 'M14 4h6v6M10 20H4v-6M20 4l-6 6M4 20l6-6',
+  shrink: 'M20 10h-6V4M4 14h6v6M14 10l6-6M10 14l-6 6',
+  corner: 'M4 4h16v16H4zM13 13h7v7h-7z',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  alert: 'M12 4 2.5 20h19zM12 10v4.5M12 17.5v.5',
+  info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 8v6m0-9.5v.5',
+  external: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
+  download: 'M12 4v11m-5-5 5 5 5-5M5 20h14',
+  upload: 'M12 20V9m-5 5 5-5 5 5M5 4h14',
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  moon: 'M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z',
+  spark: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
+  back: 'M15 5l-7 7 7 7',
+  next: 'M9 5l7 7-7 7',
+  stop: 'M6 6h12v12H6z',
+  plus: 'M12 5v14M5 12h14',
+  arrow: 'M5 12h14M13 6l6 6-6 6',
+  sliders: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 4.5v5M9 14.5v5',
+  pin: 'M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  layers: 'M12 3 3 8l9 5 9-5zM3 13l9 5 9-5',
+  shield: 'M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6z',
+  key: 'M14.5 4a5.5 5.5 0 1 1-4.9 8L4 17.5V20h3v-2h2v-2h2l1.1-1.1A5.5 5.5 0 0 1 14.5 4zm1.5 4h.01',
+  chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+  bolt: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  play: 'M7 4.5v15l12-7.5z',
+  cursor: 'M5 3l14 7-6 2-2 6z',
+  type: 'M5 7V5h14v2M12 5v14M9 19h6',
+  eye: 'M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7zm9.5 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
+  scroll: 'M12 4v16m-4-4 4 4 4-4M8 8l4-4 4 4',
+};
+
+export function Icon({ name, size = 18, label }) {
+  return html`<svg class="icon" width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden=${label ? undefined : 'true'}
+    role=${label ? 'img' : undefined} aria-label=${label}><path d=${ICONS[name] || ''} /></svg>`;
+}
+
+// ---------------------------------------------------------------------------- motion hooks
+// Motion preference: html[data-motion] = full | reduced | system (system follows the OS setting).
+export const reduced = () => {
+  const m = document.documentElement.dataset.motion;
+  if (m === 'reduced') return true;
+  if (m === 'full') return false;
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+};
+
+/** Animate a number towards `value` (ease-out cubic). Starts from the previous value, so live counters glide. */
+export function useCountUp(value, ms = 900, enabled = true) {
+  const target = Number(value) || 0;
+  const still = !enabled || reduced();
+  const [v, setV] = useState(still ? target : 0);
+  const cur = useRef(still ? target : 0);
+  useEffect(() => {
+    if (still) { cur.current = target; setV(target); return undefined; }
+    const from = cur.current;
+    const start = performance.now();
+    let raf;
+    const tick = (t) => {
+      const k = Math.min(1, (t - start) / ms);
+      const next = from + (target - from) * (1 - (1 - k) ** 3);
+      cur.current = next;
+      setV(next);
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, still]);
+  // Keep the precision of the target (1.6 yrs must not read as 2).
+  const dp = Number.isInteger(target) ? 0 : Math.min(2, (String(target).split('.')[1] || '').length);
+  return dp ? Number(v.toFixed(dp)) : Math.round(v);
+}
+
+export function CountUp({ value, ms }) {
+  return html`${useCountUp(value, ms)}`;
+}
+
+/** true one frame after mount: lets CSS transitions run from their initial state. */
+export function useMounted(enabled = true) {
+  const [on, setOn] = useState(!enabled);
+  useEffect(() => { if (!enabled) return undefined; const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
+  return on;
+}
+
+// ---------------------------------------------------------------------------- primitives
+export function Spinner({ size = 16 }) {
+  return html`<span class="spinner" style=${{ width: `${size}px`, height: `${size}px` }} aria-hidden="true"></span>`;
+}
+
+export function Button({ variant = 'secondary', size, icon, busy, disabled, children, class: cls = '', ...rest }) {
+  return html`<button type="button" class=${`btn btn-${variant} ${size ? `btn-${size}` : ''} ${busy ? 'is-busy' : ''} ${cls}`}
+    disabled=${disabled || busy} aria-busy=${busy ? 'true' : undefined} ...${rest}>
+    ${busy ? html`<${Spinner} size=${15} />` : icon ? html`<${Icon} name=${icon} size=${16} />` : null}
+    ${children ? html`<span class="btn-label">${children}</span>` : null}
+  </button>`;
+}
+
+export function Badge({ tone = 'neutral', children, title }) {
+  return html`<span class=${`badge tone-${tone}`} title=${title}>${children}</span>`;
+}
+
+export const VERDICT_TONE = { strong: 'success', good: 'info', stretch: 'warning', weak: 'danger', incompatible: 'danger' };
+
+/** Thin ring that draws itself in on mount and glides between values; the number counts up with it. */
+/** animate: count up and sweep the ring when it appears. Off in long lists, where rings appear constantly as you scroll. */
+export function ScoreRing({ score, verdict, size = 52, animate = true }) {
+  const has = typeof score === 'number';
+  const tone = VERDICT_TONE[verdict] || 'unknown';
+  const mounted = useMounted(animate);
+  const shown = useCountUp(has ? score : 0, 1100, animate);
+  const r = 21;
+  const c = 2 * Math.PI * r;
+  const pct = has && mounted ? Math.max(0, Math.min(100, score)) : 0;
+  return html`<div class=${`score-ring tone-${tone} ${size >= 70 ? 'big' : ''}`} style=${{ width: `${size}px`, height: `${size}px` }}
+      role="img" aria-label=${has ? `Match score ${score} of 100, ${VERDICT_LABEL[verdict] || ''}` : 'Not scored yet'}>
+    <svg viewBox="0 0 48 48" width=${size} height=${size} aria-hidden="true">
+      <circle cx="24" cy="24" r=${r} class="ring-bg" />
+      <circle cx="24" cy="24" r=${r} class="ring-fg" stroke-dasharray=${`${(pct / 100) * c} ${c}`} transform="rotate(-90 24 24)" />
+    </svg>
+    <span class="score-num" aria-hidden="true">${has ? shown : '–'}</span>
+  </div>`;
+}
+
+export function Stat({ label, value, hint, count }) {
+  return html`<div class="stat"><div class="label">${label}</div>
+    <div class="value">${typeof count === 'number' ? html`<${CountUp} value=${count} />` : value}</div>${hint ? html`<div class="hint">${hint}</div>` : null}</div>`;
+}
+
+export function Meter({ value, tone }) {
+  const mounted = useMounted();
+  const pct = Math.round(Math.max(0, Math.min(1, value || 0)) * 100);
+  return html`<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${pct}>
+    <div class=${`meter-fill tone-${tone || (pct >= 70 ? 'success' : pct >= 45 ? 'warning' : 'danger')}`} style=${{ width: `${mounted ? pct : 0}%` }}></div>
+  </div>`;
+}
+
+export function Skeleton({ lines = 3, card, rows }) {
+  if (rows) {
+    return html`<div class="sk-rows" aria-hidden="true">${Array.from({ length: rows }, (_, i) => html`<div class="sk-row" style=${{ '--i': i }}>
+      <div class="sk-block sk-avatar"></div><div class="grow"><div class="sk-block" style=${{ width: '38%' }}></div>
+      <div class="sk-block" style=${{ width: '72%', height: '14px', marginTop: '8px' }}></div><div class="sk-block" style=${{ width: '54%', marginTop: '8px' }}></div></div>
+      <div class="sk-block sk-ring"></div></div>`)}</div>`;
+  }
+  return html`<div class=${card ? 'skeleton-card' : 'skeleton'} aria-hidden="true">
+    ${Array.from({ length: lines }, (_, i) => html`<div class="sk-block" style=${{ width: `${92 - i * 15}%` }}></div>`)}
+  </div>`;
+}
+
+export function EmptyState({ icon = 'info', title, children, action }) {
+  return html`<div class="empty"><div class="empty-icon"><span class="empty-halo"></span><${Icon} name=${icon} size=${26} /></div>
+    <h3>${title}</h3>${children ? html`<p>${children}</p>` : null}${action || null}</div>`;
+}
+
+export function ErrorBox({ message, onRetry }) {
+  return html`<div class="error-box" role="alert"><${Icon} name="alert" />
+    <div class="grow">${message}</div>
+    ${onRetry ? html`<${Button} size="sm" icon="refresh" onClick=${onRetry}>Retry</${Button}>` : null}</div>`;
+}
+
+export function Notice({ tone = 'info', children }) {
+  return html`<div class=${`notice tone-${tone}`}><${Icon} name=${tone === 'warning' ? 'alert' : 'info'} size=${16} /><div>${children}</div></div>`;
+}
+
+export function Field({ label, hint, children, wide }) {
+  const id = useId();
+  return html`<label class=${`field ${wide ? 'field-wide' : ''}`} for=${id}>
+    <span class="field-label">${label}</span>
+    ${typeof children === 'function' ? children(id) : children}
+    ${hint ? html`<span class="field-hint">${hint}</span>` : null}
+  </label>`;
+}
+
+export function Monogram({ name, size }) {
+  const ch = ((name || '?').trim()[0] || '?').toUpperCase();
+  // Stable pastel per company so the list has gentle variety without random flicker.
+  let h = 0;
+  for (const c of name || '') h = (h * 31 + c.charCodeAt(0)) % 360;
+  return html`<span class="monogram" style=${{ '--h': h, ...(size ? { width: `${size}px`, height: `${size}px` } : {}) }} aria-hidden="true">${ch}</span>`;
+}
+
+/**
+ * Free-text chips (no fixed vocabulary). Enter, comma or Tab adds; pasting "Pune, Hyderabad; Remote" adds all;
+ * Backspace on an empty field removes the last. `suggestions` are one-click additions shown underneath.
+ */
+export function ChipsInput({ value = [], onChange, placeholder, label, suggestions = [], max = 30, onQuery }) {
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef();
+  // Leaving the field adds what was typed — but a tap on a suggestion also leaves the field first. Wait a moment, so
+  // the tapped suggestion ("Bengaluru") wins over the half-typed text ("benga").
+  const blurTimer = useRef(0);
+  useEffect(() => () => clearTimeout(blurTimer.current), []);
+  const has = (x) => value.some((v) => v.toLowerCase() === x.toLowerCase());
+  const add = (raw) => {
+    const parts = String(raw).split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+    const next = [...value];
+    parts.forEach((p) => { if (next.length < max && !next.some((v) => v.toLowerCase() === p.toLowerCase())) next.push(p); });
+    if (next.length !== value.length) onChange(next);
+    setDraft('');
+    if (onQuery) onQuery('');
+  };
+  const sugg = [...new Map(suggestions.filter((x) => x && String(x).trim()).map((x) => [String(x).trim().toLowerCase(), String(x).trim()])).values()]
+    .filter((x) => !has(x)).slice(0, 8);
+  return html`<div class="chips-wrap">
+    <div class="chips-input" onClick=${(e) => { if (e.target === e.currentTarget) inputRef.current && inputRef.current.focus(); }}>
+      ${value.map((v, i) => html`<span class="chip chip-pop" key=${v}>${v}
+        <button type="button" class="chip-x" aria-label=${`Remove ${v}`} onClick=${() => onChange(value.filter((_, j) => j !== i))}><${Icon} name="x" size=${12} /></button></span>`)}
+      <input ref=${inputRef} aria-label=${label || placeholder} value=${draft} placeholder=${value.length ? 'Add another…' : placeholder}
+        onInput=${(e) => { const v = e.currentTarget.value; if (/[,;]/.test(v)) add(v); else { setDraft(v); if (onQuery) onQuery(v); } }}
+        onPaste=${(e) => { const t = (e.clipboardData || window.clipboardData).getData('text'); if (/[,;\n]/.test(t)) { e.preventDefault(); add(t); } }}
+        onKeyDown=${(e) => {
+          if ((e.key === 'Enter' || (e.key === 'Tab' && draft.trim())) && draft.trim()) { e.preventDefault(); add(draft); }
+          else if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1));
+        }}
+        onBlur=${() => { clearTimeout(blurTimer.current); blurTimer.current = setTimeout(() => {
+          const typedNow = inputRef.current ? inputRef.current.value : '';
+          if (typedNow.trim()) add(typedNow);
+        }, 200); }} />
+      ${draft.trim() ? html`<button type="button" class="chip-add" onMouseDown=${(e) => e.preventDefault()} onClick=${() => add(draft)}>
+        <${Icon} name="plus" size=${12} /> Add “${draft.trim()}”</button>` : null}
+    </div>
+    ${sugg.length ? html`<div class="chip-suggest" aria-label="Suggestions">${sugg.map((x) => html`<button type="button" key=${x} class="chip chip-ghost"
+      onMouseDown=${(e) => e.preventDefault()} onClick=${() => { clearTimeout(blurTimer.current); add(x); }}><${Icon} name="plus" size=${11} />${x}</button>`)}</div>` : null}
+  </div>`;
+}
+
+/** Textarea that grows with its content (no inner scrollbar, no manual resizing). */
+export function AutoTextarea({ value, onInput, rows = 2, ...rest }) {
+  const ref = useRef();
+  const fit = () => { const el = ref.current; if (!el) return; el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; };
+  useLayoutEffect(fit, [value]);
+  useEffect(() => {
+    if (!window.ResizeObserver || !ref.current) return undefined;
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  return html`<textarea ref=${ref} class="input auto-grow" rows=${rows} value=${value} onInput=${(e) => { onInput && onInput(e); fit(); }} ...${rest}></textarea>`;
+}
+
+export function Seg({ options, value, onChange, label, multi }) {
+  const on = (k) => (multi ? value.includes(k) : value === k);
+  const toggle = (k) => (multi ? onChange(on(k) ? value.filter((x) => x !== k) : [...value, k]) : onChange(k));
+  return html`<div class="seg" role="group" aria-label=${label}>
+    ${options.map(([k, l]) => html`<button type="button" key=${k} class=${`seg-btn ${on(k) ? 'on' : ''}`} aria-pressed=${on(k) ? 'true' : 'false'} onClick=${() => toggle(k)}>
+      ${multi && on(k) ? html`<${Icon} name="check" size=${13} />` : null}${l}</button>`)}</div>`;
+}
+
+// ---------------------------------------------------------------------------- tabs (sliding indicator)
+export function Tabs({ tabs, value, onChange, label, size }) {
+  const ref = useRef();
+  const [ind, setInd] = useState(null);
+  const sig = tabs.map((t) => `${t.key}:${t.count ?? ''}`).join('|');
+  const measure = () => {
+    const el = ref.current && ref.current.querySelector('[aria-selected="true"]');
+    if (el) setInd({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight });   // y/h: small tab bars may wrap
+  };
+  useLayoutEffect(measure, [value, sig]);
+  useEffect(() => {
+    if (!window.ResizeObserver || !ref.current) return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  const onKey = (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const i = tabs.findIndex((t) => t.key === value);
+    const n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    onChange(n.key);
+    requestAnimationFrame(() => { const el = ref.current && ref.current.querySelector('[aria-selected="true"]'); el && el.focus(); });
+  };
+  return html`<div class=${`tabs ${size === 'sm' ? 'tabs-sm' : ''}`} role="tablist" aria-label=${label} ref=${ref} onKeyDown=${onKey}>
+    ${ind ? html`<span class="tab-ind" aria-hidden="true" style=${{ transform: `translate(${ind.x}px, ${ind.y - 4}px)`, width: `${ind.w}px`, height: `${ind.h}px`, bottom: 'auto' }}></span>` : null}
+    ${tabs.map((t) => html`<button type="button" role="tab" key=${t.key} aria-selected=${value === t.key ? 'true' : 'false'} tabindex=${value === t.key ? '0' : '-1'}
+      class=${`tab ${value === t.key ? 'active' : ''}`} onClick=${() => onChange(t.key)}>
+      ${t.label}${typeof t.count === 'number' ? html`<span class="tab-count">${t.count}</span>` : null}</button>`)}</div>`;
+}
+
+// ---------------------------------------------------------------------------- loaders & illustrations
+/** The signature loader: an orange core with breathing halos and orbiting satellites. */
+export function Orb({ size = 160, active = true, done = false }) {
+  return html`<div class=${`orb ${active ? 'is-active' : ''} ${done ? 'is-done' : ''}`} style=${{ '--s': `${size}px` }} aria-hidden="true">
+    <span class="orb-wave"></span><span class="orb-wave w2"></span><span class="orb-wave w3"></span>
+    <span class="orb-ring r1"><i></i></span><span class="orb-ring r2"><i></i></span><span class="orb-ring r3"><i></i></span>
+    <span class="orb-core">${done ? html`<${Icon} name="check" size=${Math.round(size / 6)} />` : null}</span>
+  </div>`;
+}
+
+/** A sheet of paper being read: a scanning beam sweeps while lines fill in. */
+export function ScanDoc() {
+  return html`<div class="scan-doc" aria-hidden="true">
+    <div class="scan-sheet">
+      <i class="l-title"></i><i class="l-sub"></i><i></i><i class="s"></i><i></i><i class="m"></i><i class="s"></i><i></i><i class="m"></i>
+      <span class="scan-beam"></span>
+    </div>
+    <span class="scan-chip c1">Experience</span><span class="scan-chip c2">Skills</span><span class="scan-chip c3">Projects</span>
+  </div>`;
+}
+
+/** Real time since `since` (ms epoch), ticking every second — honest feedback while a single long call runs. */
+export function Elapsed({ since }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const sec = Math.max(0, Math.round((now - (since || now)) / 1000));
+  return html`<span class="elapsed">${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}</span>`;
+}
+
+/** Resume reading stages as the server reports them (`profile.upload` events). */
+export const UPLOAD_STAGES = [
+  ['sending', 'Uploading the PDF'], ['extracting', 'Reading roles, dates, skills and projects'], ['understanding', 'Working out your career tracks'],
+];
+export function uploadStageLabel(stage) {
+  const hit = UPLOAD_STAGES.find(([k]) => k === (stage === 'received' ? 'extracting' : stage));
+  return hit ? hit[1] : 'Reading your resume';
+}
+
+// ---------------------------------------------------------------------------- overlays
+function useFocusTrap(ref, onClose) {
+  useEffect(() => {
+    const prev = document.activeElement;
+    const el = ref.current;
+    const first = el && el.querySelector('input, button, select, textarea, [tabindex]');
+    first && first.focus();
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      if (e.key === 'Tab' && el) {
+        const items = [...el.querySelectorAll('a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+        if (!items.length) return;
+        const a = items[0];
+        const b = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === a) { e.preventDefault(); b.focus(); }
+        else if (!e.shiftKey && document.activeElement === b) { e.preventDefault(); a.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => { document.removeEventListener('keydown', onKey, true); prev && prev.focus && prev.focus(); };
+  }, []);
+}
+
+export function ConfirmDialog() {
+  const c = useStore((s) => s.confirm);
+  if (!c) return null;
+  return html`<${ConfirmInner} c=${c} />`;
+}
+function ConfirmInner({ c }) {
+  const ref = useRef();
+  const [typed, setTyped] = useState('');
+  useFocusTrap(ref, () => closeConfirm(false));
+  const blocked = c.typeToConfirm && typed !== c.typeToConfirm;
+  return html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && closeConfirm(false)}>
+    <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" ref=${ref}>
+      <div class=${`dialog-icon tone-${c.tone === 'danger' ? 'danger' : 'info'}`}><${Icon} name=${c.tone === 'danger' ? 'alert' : 'info'} size=${20} /></div>
+      <h2 id="dlg-title">${c.title}</h2>
+      <p class="muted">${c.body}</p>
+      ${c.typeToConfirm ? html`<${Field} label=${`Type ${c.typeToConfirm} to confirm`}>${(id) => html`<input id=${id} class="input" value=${typed} onInput=${(e) => setTyped(e.currentTarget.value)} />`}</${Field}>` : null}
+      <div class="dialog-actions">
+        <${Button} onClick=${() => closeConfirm(false)}>Cancel</${Button}>
+        <${Button} variant=${c.tone === 'danger' ? 'danger' : 'primary'} disabled=${blocked} onClick=${() => closeConfirm(true)}>${c.confirm || 'Confirm'}</${Button}>
+      </div>
+    </div></div>`;
+}
+
+export function Toasts() {
+  const toasts = useStore((s) => s.toasts);
+  return html`<div class="toasts" role="status" aria-live="polite">
+    ${toasts.map((t) => html`<div key=${t.id} class=${`toast tone-${t.tone}`}>
+      <span class="toast-dot"></span><span class="grow">${t.message}</span>
+      <button type="button" class="icon-btn" aria-label="Dismiss" onClick=${() => dismissToast(t.id)}><${Icon} name="x" size=${14} /></button>
+      <span class="toast-time" style=${{ animationDuration: `${t.ms || 4500}ms` }}></span>
+    </div>`)}</div>`;
+}
+
+export function Drawer({ onClose, children, label }) {
+  const ref = useRef();
+  useFocusTrap(ref, onClose);
+  // in <body>: a frosted card around it would otherwise pin the "full screen" drawer inside that card
+  return html`<${Portal}><div class="drawer-overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label=${label} ref=${ref} tabindex="-1">${children}</aside></div></${Portal}>`;
+}
+
+const PHONE = '(max-width: 900px)';
+/**
+ * Phone layout shows either a list or the item opened from it, and the whole page scrolls. Opening an item starts it
+ * at the top; going back returns to the spot in the list you left.
+ */
+export function usePhonePane(showingItem) {
+  const listY = useRef(0);
+  useLayoutEffect(() => {
+    if (!window.matchMedia(PHONE).matches) return undefined;
+    if (showingItem) { window.scrollTo(0, 0); return undefined; }
+    window.scrollTo(0, listY.current);
+    const keep = () => { listY.current = window.scrollY; };
+    window.addEventListener('scroll', keep, { passive: true });
+    return () => window.removeEventListener('scroll', keep);
+  }, [showingItem]);
+}
+
+/** Anchored panel; closes on outside click or Escape. Parent must be position: relative. */
+export function Popover({ open, onClose, children, label, align = 'left' }) {
+  const ref = useRef();
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest('[data-popover-anchor], .select-list')) onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  if (!open) return null;
+  return html`<div class=${`popover pop-${align}`} role="dialog" aria-label=${label} ref=${ref}>${children}</div>`;
+}
+
+/** Compact page header: title (with a serif accent word) on the left, contextual actions on the right. */
+export function PageHead({ title, sub, actions }) {
+  return html`<div class="page-head"><div class="page-head-text"><h1>${title}</h1>${sub ? html`<p class="page-sub">${sub}</p>` : null}</div>
+    ${actions ? html`<div class="page-actions">${actions}</div>` : null}</div>`;
+}
+
+// ---------------------------------------------------------------------------- portal + select
+/** Renders children into <body> so dropdowns are never clipped by scrolling panes or transformed cards. */
+export function Portal({ children }) {
+  const host = useRef(null);
+  if (!host.current) { host.current = document.createElement('div'); host.current.className = 'portal'; }
+  useEffect(() => {
+    document.body.appendChild(host.current);
+    return () => { render(null, host.current); host.current.remove(); };
+  }, []);
+  useEffect(() => { render(children, host.current); });
+  return null;
+}
+
+/**
+ * Styled dropdown replacing native <select>. options: [[value, label, hint?], ...].
+ * Keyboard: ↑/↓ move, Enter/Space pick, Esc closes, typing a letter jumps.
+ */
+export function Select({ value, options, onChange, label, id, size, disabled, icon, block, tone }) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const [pos, setPos] = useState(null);
+  const wrap = useRef();
+  const btn = useRef();
+  const idx = options.findIndex((o) => String(o[0]) === String(value));
+  const cur = options[idx];
+  const place = () => {
+    const r = btn.current.getBoundingClientRect();
+    const h = Math.min(320, options.length * 38 + 12);
+    const below = window.innerHeight - r.bottom - 12;
+    const up = below < h && r.top > below;
+    setPos({ left: Math.min(r.left, window.innerWidth - Math.max(r.width, 200) - 8), width: r.width,
+      ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }), up });
+  };
+  const show = () => { if (disabled) return; place(); setHi(idx < 0 ? 0 : idx); setOpen(true); };
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (!wrap.current.contains(e.target) && !e.target.closest('.select-list')) setOpen(false); };
+    const onScroll = (e) => { if (!(e.target.closest && e.target.closest('.select-list'))) setOpen(false); };
+    document.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => { document.removeEventListener('pointerdown', onDown, true); window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', onScroll); };
+  }, [open]);
+  const pick = (v) => { setOpen(false); if (String(v) !== String(value)) onChange(v); btn.current && btn.current.focus(); };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { show(); return; }
+      setHi((h) => (h + (e.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (open) pick(options[hi][0]); else show();
+    } else if (e.key === 'Escape' && open) {
+      e.preventDefault(); e.stopPropagation(); setOpen(false);
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    } else if (e.key.length === 1 && /\S/.test(e.key)) {
+      const j = options.findIndex((o) => String(o[1]).toLowerCase().startsWith(e.key.toLowerCase()));
+      if (j >= 0) { if (open) setHi(j); else onChange(options[j][0]); }
+    }
+  };
+  const listId = `${useId()}-list`;
+  return html`<div class=${`select ${size === 'sm' ? 'select-sm' : ''} ${block ? 'select-block' : ''} ${open ? 'open' : ''} ${tone || ''}`} ref=${wrap}>
+    <button type="button" id=${id} ref=${btn} class="select-btn" role="combobox" aria-haspopup="listbox" aria-expanded=${open ? 'true' : 'false'}
+      aria-controls=${listId} aria-label=${label} disabled=${disabled} onClick=${() => (open ? setOpen(false) : show())} onKeyDown=${onKey}>
+      ${tone ? html`<span class="select-dot"></span>` : icon ? html`<${Icon} name=${icon} size=${15} />` : null}
+      <span class="select-value">${cur ? cur[1] : 'Choose…'}</span>
+      <svg class="select-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 10l5 5 5-5" /></svg>
+    </button>
+    ${open && pos ? html`<${Portal}><ul id=${listId} class=${`select-list ${pos.up ? 'up' : ''}`} role="listbox" aria-label=${label}
+        style=${{ left: `${pos.left}px`, minWidth: `${Math.max(pos.width, 180)}px`, ...(pos.up ? { bottom: `${pos.bottom}px` } : { top: `${pos.top}px` }) }}>
+      ${options.map(([v, l, hint], i) => html`<li key=${String(v)} role="option" aria-selected=${i === idx ? 'true' : 'false'}
+          class=${`${i === hi ? 'hi' : ''} ${i === idx ? 'sel' : ''}`} style=${{ '--i': i }} onPointerEnter=${() => setHi(i)} onClick=${() => pick(v)}>
+        <span class="opt-text"><span>${l}</span>${hint ? html`<small>${hint}</small>` : null}</span>
+        ${i === idx ? html`<${Icon} name="check" size=${15} />` : null}</li>`)}
+    </ul></${Portal}>` : null}
+  </div>`;
+}
+
+/**
+ * Text field with a styled suggestion list under it: type anything, or pick a suggestion (replaces the browser's
+ * <datalist>, which cannot be styled and on phones shows as a bare grey strip). The list opens on focus with every
+ * suggestion, narrows while typing, and picking one puts exactly that suggestion in the field.
+ * Keyboard: ↑/↓ move, Enter picks, Esc closes.
+ */
+export function ComboInput({ id, value, onChange, options = [], placeholder, autocomplete = 'off', onBlur, label }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState(false);
+  const [hi, setHi] = useState(-1);
+  const [pos, setPos] = useState(null);
+  const input = useRef();
+  const q = String(value || '').trim().toLowerCase();
+  const all = [...new Set(options.filter((o) => o && String(o).trim()).map((o) => String(o).trim()))];
+  const shown = (typed && q
+    ? [...all.filter((o) => o.toLowerCase().startsWith(q)), ...all.filter((o) => !o.toLowerCase().startsWith(q) && o.toLowerCase().includes(q))]
+    : all).slice(0, 80);
+  const place = () => {
+    const el = input.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom - 12;
+    const up = below < 180 && r.top > below;
+    setPos({ left: r.left, width: r.width, up, max: Math.max(120, Math.min(280, (up ? r.top : below) - 12)),
+      ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }) });
+  };
+  useEffect(() => {
+    if (!open) return undefined;
+    // follow the field (page scroll, phone keyboard opening) instead of closing under the user's finger
+    const onMove = (e) => { if (!(e.target && e.target.closest && e.target.closest('.combo-list'))) place(); };
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => { window.removeEventListener('scroll', onMove, true); window.removeEventListener('resize', onMove); };
+  }, [open]);
+  const pick = (o) => { onChange(o); setOpen(false); setTyped(false); setHi(-1); };
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!open) { place(); setOpen(true); return; }
+      const n = shown.length;
+      if (n) setHi((h) => (e.key === 'ArrowDown' ? (h + 1) % n : (h <= 0 ? n - 1 : h - 1)));
+    } else if (e.key === 'Enter' && open && hi >= 0 && shown[hi]) {
+      e.preventDefault(); pick(shown[hi]);
+    } else if (e.key === 'Escape' && open) {
+      e.preventDefault(); e.stopPropagation(); setOpen(false);
+    }
+  };
+  const listId = `${useId()}-list`;
+  return html`<div class="combo">
+    <input id=${id} ref=${input} class="input" value=${value || ''} placeholder=${placeholder} autocomplete=${autocomplete} aria-label=${label}
+      role="combobox" aria-autocomplete="list" aria-expanded=${open && shown.length ? 'true' : 'false'} aria-controls=${listId}
+      onFocus=${() => { place(); setTyped(false); setHi(-1); setOpen(true); }}
+      onClick=${() => { if (!open) { place(); setOpen(true); } }}
+      onInput=${(e) => { onChange(e.currentTarget.value); setTyped(true); setHi(-1); place(); setOpen(true); }}
+      onKeyDown=${onKey} onBlur=${(e) => { setOpen(false); if (onBlur) onBlur(e); }} />
+    ${open && pos && shown.length ? html`<${Portal}><ul id=${listId} class=${`select-list combo-list ${pos.up ? 'up' : ''}`} role="listbox" aria-label=${label || placeholder}
+        style=${{ left: `${pos.left}px`, width: `${pos.width}px`, maxHeight: `${pos.max}px`, ...(pos.up ? { bottom: `${pos.bottom}px` } : { top: `${pos.top}px` }) }}>
+      ${shown.map((o, i) => html`<li key=${o} role="option" aria-selected=${String(o).toLowerCase() === q ? 'true' : 'false'}
+          class=${`${i === hi ? 'hi' : ''} ${String(o).toLowerCase() === q ? 'sel' : ''}`} style=${{ '--i': Math.min(i, 8) }}
+          onPointerEnter=${() => setHi(i)} onMouseDown=${(e) => e.preventDefault()} onClick=${() => pick(o)}>
+        <span>${o}</span>${String(o).toLowerCase() === q ? html`<${Icon} name="check" size=${15} />` : null}</li>`)}
+    </ul></${Portal}>` : null}
+  </div>`;
+}

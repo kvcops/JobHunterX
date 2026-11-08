@@ -154,6 +154,67 @@ PYEOF
   say "Bench done — nothing changed"; exit 0
 fi
 
+if [ "$ACTION" = "heygen" ]; then
+  # Read-only probe of the HeyGen voice API with the key in .env (never printed).
+  "$PY" - "$DIR" <<'PYEOF'
+import json, os, sys, time, urllib.request, urllib.error
+d = sys.argv[1]
+key = ""
+for f in (os.path.join(d, ".env"), os.path.join(d, "backend", ".env")):
+    if os.path.isfile(f):
+        for line in open(f):
+            if line.startswith("HEYGEN_API_KEY="):
+                key = line.split("=", 1)[1].strip()
+print("HEYGEN_API_KEY:", "set" if key else "MISSING")
+if not key:
+    sys.exit()
+H = {"X-Api-Key": key, "Content-Type": "application/json", "Accept": "application/json"}
+def call(method, url, body=None):
+    req = urllib.request.Request(url, data=json.dumps(body).encode() if body else None, headers=H, method=method)
+    t = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return r.status, json.loads(r.read().decode() or "{}"), time.time() - t
+    except urllib.error.HTTPError as e:
+        return e.code, (e.read().decode()[:600]), time.time() - t
+def shape(o, depth=0):
+    if isinstance(o, dict):
+        return {k: shape(v, depth + 1) if depth < 2 else type(v).__name__ for k, v in list(o.items())[:25]}
+    if isinstance(o, list):
+        return [shape(o[0], depth + 1)] if o else []
+    return type(o).__name__
+for q in ("?type=public&limit=100", "?type=public", ""):
+    st, body, dt = call("GET", "https://api.heygen.com/v3/models/audio/voices" + q)
+    print(f"\nGET voices{q} -> {st} ({dt:.1f}s)")
+    if st == 200:
+        print("shape:", json.dumps(shape(body))[:900])
+        data = body.get("data") if isinstance(body, dict) else body
+        items = data.get("voices") if isinstance(data, dict) else data
+        items = items or (data.get("items") if isinstance(data, dict) else []) or []
+        print("count:", len(items))
+        for v in items[:60]:
+            if isinstance(v, dict):
+                print("  ", {k: v.get(k) for k in v if k not in ("preview_audio", "preview_audio_url", "preview_url", "sample_url")})
+        break
+    else:
+        print(str(body)[:400])
+voice = os.environ.get("HG_VOICE", "")
+if not voice:
+    try:
+        voice = next(v.get("voice_id") or v.get("id") for v in items if isinstance(v, dict))
+    except Exception:
+        voice = ""
+print("\ntest voice:", voice)
+for model in ("heygen-voice-1-turbo-free",):
+    st, body, dt = call("POST", "https://api.heygen.com/v3/models/audio/tts",
+                        {"model": model, "voice_id": voice,
+                         "text": "[excited] Did you know octopuses have three hearts? [whispers] And blue blood."})
+    print(f"POST tts {model} -> {st} ({dt:.1f}s)")
+    print("  ", json.dumps(body)[:700] if not isinstance(body, str) else body[:700])
+PYEOF
+  say "HeyGen probe done — nothing changed"; exit 0
+fi
+
 if [ "$ACTION" = "frames" ]; then
   # Contact sheets of the newest finished videos, base64 in the log (read-only).
   PD=$(cd "$DIR" && "$PY" -c "from backend.app.core.config import settings; print(settings.projects_dir)" 2>/dev/null </dev/null | tail -1)

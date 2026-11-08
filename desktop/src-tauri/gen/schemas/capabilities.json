@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Only the bundled splash page may use the app's own APIs. The JobHunterX page served on 127.0.0.1 gets none.","local":true,"windows":["main"],"permissions":["core:default"]}}

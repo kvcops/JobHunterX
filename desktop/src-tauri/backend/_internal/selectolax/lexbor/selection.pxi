@@ -1,0 +1,305 @@
+cimport cython
+from cpython.exc cimport PyErr_SetObject
+from cpython.list cimport PyList_GET_SIZE
+
+
+cdef inline size_t _wrapper_to_skip_for(LexborNode node):
+    """Return the address of the artificial wrapper a search must not report.
+
+    A fragment's top-level nodes are searched through the ``<html>`` wrapper that
+    Lexbor builds to hold them, so that wrapper is what the selector engine is
+    pointed at. With ``LXB_SELECTORS_OPT_MATCH_ROOT`` set, the search root is
+    itself a candidate for every query, which would make that internal wrapper
+    turn up in results -- ``parser.css('html')`` would answer with it, and
+    ``parser.css('*')`` would list it alongside the fragment's real nodes. Acting
+    on it is destructive: it owns the whole fragment, so decomposing or unwrapping
+    it discards everything the caller asked about.
+
+    Excluding it as the tree is walked, rather than dropping it from the finished
+    results, keeps ``find_first`` correct: the search continues past the wrapper,
+    so a genuine ``<html>`` element further on is still found.
+
+    The parser holds the wrapper, so this covers every way a search can be
+    rooted -- ``css``, ``select``, or a node's own lookup. A non-fragment parser
+    leaves the wrapper ``NULL``, which never compares equal to a live node.
+
+    Parameters
+    ----------
+    node : LexborNode
+        The node the search is rooted at.
+
+    Returns
+    -------
+    size_t
+        Address of the wrapper to skip, or ``0`` when there is none.
+    """
+    if node is None or node.parser is None:
+        return 0
+    return <size_t> node.parser._fragment_wrapper
+
+
+@cython.final
+cdef class LexborCSSSelector:
+
+    def __init__(self):
+        self._create_css_parser()
+        self.results = []
+        self.current_node = None
+        self._wrapper_to_skip = 0
+
+    cdef int _create_css_parser(self) except -1:
+        cdef lxb_status_t status
+
+        self.parser = lxb_css_parser_create()
+        if self.parser == NULL:
+            PyErr_SetObject(SelectolaxError, "Can't create CSS parser.")
+            return -1
+
+        status = lxb_css_parser_init(self.parser, NULL)
+        if status != LXB_STATUS_OK:
+            lxb_css_parser_destroy(self.parser, True)
+            self.parser = NULL
+            PyErr_SetObject(SelectolaxError, "Can't initialize CSS parser.")
+            return -1
+
+        self.css_selectors = lxb_css_selectors_create()
+        if self.css_selectors == NULL:
+            lxb_css_parser_destroy(self.parser, True)
+            self.parser = NULL
+            PyErr_SetObject(SelectolaxError, "Can't create CSS selector.")
+            return -1
+
+        status = lxb_css_selectors_init(self.css_selectors)
+        if status != LXB_STATUS_OK:
+            lxb_css_selectors_destroy(self.css_selectors, True)
+            self.css_selectors = NULL
+            lxb_css_parser_destroy(self.parser, True)
+            self.parser = NULL
+            PyErr_SetObject(SelectolaxError, "Can't initialize CSS selector.")
+            return -1
+
+        lxb_css_parser_selectors_set(self.parser, self.css_selectors)
+
+        self.selectors = lxb_selectors_create()
+        if self.selectors == NULL:
+            lxb_css_selectors_destroy(self.css_selectors, True)
+            self.css_selectors = NULL
+            lxb_css_parser_destroy(self.parser, True)
+            self.parser = NULL
+            PyErr_SetObject(SelectolaxError, "Can't create selector.")
+            return -1
+
+        status = lxb_selectors_init(self.selectors)
+        if status != LXB_STATUS_OK:
+            lxb_selectors_destroy(self.selectors, True)
+            self.selectors = NULL
+            lxb_css_selectors_destroy(self.css_selectors, True)
+            self.css_selectors = NULL
+            lxb_css_parser_destroy(self.parser, True)
+            self.parser = NULL
+            PyErr_SetObject(SelectolaxError, "Can't initialize selector.")
+            return -1
+
+        lxb_selectors_opt_set(self.selectors, LXB_SELECTORS_OPT_MATCH_ROOT)
+        return 0
+
+    cpdef list find(self, str query, LexborNode node):
+        return self._find(query, node, 0)
+
+    cpdef list find_first(self, str query, LexborNode node):
+        return self._find(query, node, 1)
+
+    cpdef list _find(self, str query, LexborNode node, bint only_first):
+        cdef lxb_css_selector_list_t* selectors
+        cdef lxb_char_t* c_selector
+        cdef lxb_css_selector_list_t * selectors_list
+
+        if not isinstance(query, str):
+            raise TypeError("Query must be a string.")
+
+        bytes_query = query.encode(_ENCODING)
+        selectors_list = lxb_css_selectors_parse(self.parser, <lxb_char_t *> bytes_query, <size_t>len(bytes_query))
+
+        if selectors_list == NULL:
+            raise SelectolaxError("Can't parse CSS selector.")
+
+        self.current_node = node
+        self._wrapper_to_skip = _wrapper_to_skip_for(node)
+        self.results = []
+        if only_first:
+            status = lxb_selectors_find(self.selectors, node.node, selectors_list,
+                                        <lxb_selectors_cb_f>css_finder_callback_first, <void*>self)
+        else:
+            status = lxb_selectors_find(self.selectors, node.node, selectors_list,
+                                        <lxb_selectors_cb_f>css_finder_callback, <void*>self)
+        results = list(self.results)
+        self.results = []
+        self.current_node = None
+        self._wrapper_to_skip = 0
+        lxb_css_selector_list_destroy_memory(selectors_list)
+        self.parser.memory = NULL
+        return results
+
+    cpdef int any_matches(self, str query, LexborNode node) except -1:
+        cdef lxb_css_selector_list_t * selectors
+        cdef lxb_char_t * c_selector
+        cdef lxb_css_selector_list_t * selectors_list
+        cdef int result
+
+        if not isinstance(query, str):
+            raise TypeError("Query must be a string.")
+
+        bytes_query = query.encode(_ENCODING)
+        selectors_list = lxb_css_selectors_parse(self.parser, <lxb_char_t *> bytes_query, <size_t> len(bytes_query))
+
+        if selectors_list == NULL:
+            PyErr_SetObject(SelectolaxError, "Can't parse CSS selector.")
+            return -1
+
+        self.results = []
+        self._wrapper_to_skip = _wrapper_to_skip_for(node)
+        status = lxb_selectors_find(self.selectors, node.node, selectors_list,
+                                    <lxb_selectors_cb_f> css_matcher_callback, <void *> self)
+        self._wrapper_to_skip = 0
+        if status != LXB_STATUS_OK:
+            lxb_css_selector_list_destroy_memory(selectors_list)
+            self.parser.memory = NULL
+            PyErr_SetObject(SelectolaxError, "Can't parse CSS selector.")
+            return -1
+
+        result = PyList_GET_SIZE(self.results) > 0
+        self.results = []
+        lxb_css_selector_list_destroy_memory(selectors_list)
+        self.parser.memory = NULL
+        return result
+
+    def __dealloc__(self):
+        if self.selectors != NULL:
+            lxb_selectors_destroy(self.selectors, True)
+        if self.parser != NULL:
+            lxb_css_parser_destroy(self.parser, True)
+        if self.css_selectors != NULL:
+            lxb_css_selectors_destroy(self.css_selectors, True)
+
+
+cdef inline bint _attribute_longer_than(
+    LexborNode node, str attribute, int length, str start
+):
+    # Absent and valueless attributes read back as None; an empty value reads
+    # back as "" and has the length 0, as string-length in XPath.
+    cdef object attr = node.attributes.get(attribute)
+
+    if attr is None:
+        return False
+
+    if start and start in attr:
+        attr = attr[attr.find(start) + len(start):]
+
+    return len(attr) > length
+
+
+cdef class LexborSelector:
+    """An advanced CSS selector that supports additional operations.
+
+    Think of it as a toolkit that mimics some of the features of XPath.
+
+    Please note, this is an experimental feature that can change in the future.
+    """
+    cdef LexborNode node
+    cdef list nodes
+
+    def __init__(self, LexborNode node, query):
+        self.node = node
+        # Searched the way css() does, so a fragment root covers the whole
+        # fragment rather than only its first top-level node.
+        self.nodes = self.node.parser.selector.find(query, node._get_node()) if query else [node, ]
+
+    cpdef css(self, str query):
+        """Evaluate CSS selector against current scope."""
+        raise NotImplementedError("This feature is not supported by the lexbor backend.")
+
+    @property
+    def matches(self) -> list:
+        """Returns all possible matches"""
+        return self.nodes
+
+    @property
+    def any_matches(self) -> bool:
+        """Returns True if there are any matches"""
+        return bool(self.nodes)
+
+    def text_contains(self, str text, bool deep=True, str separator='', bool strip=False) -> LexborSelector:
+        """Filter all current matches given text."""
+        cdef list nodes = []
+        for node in self.nodes:
+            node_text = node.text(deep=deep, separator=separator, strip=strip)
+            if node_text and text in node_text:
+                nodes.append(node)
+        self.nodes = nodes
+        return self
+
+    def any_text_contains(self, str text, bool deep=True, str separator='', bool strip=False) -> bool:
+        """Returns True if any node in the current search scope contains specified text"""
+        cdef LexborNode node
+        for node in self.nodes:
+            node_text = node.text(deep=deep, separator=separator, strip=strip)
+            if node_text and text in node_text:
+                return True
+        return False
+
+    def attribute_longer_than(self, str attribute, int length, str start  = None) -> LexborSelector:
+        """Filter all current matches by attribute length.
+
+        Similar to `string-length` in XPath.
+        """
+        cdef list nodes = []
+        for node in self.nodes:
+            if _attribute_longer_than(node, attribute, length, start):
+                nodes.append(node)
+        self.nodes = nodes
+        return self
+
+    def any_attribute_longer_than(self, str attribute, int length, str start  = None) -> bool:
+        """Returns True any href attribute longer than a specified length.
+
+        Similar to `string-length` in XPath.
+        """
+        cdef LexborNode node
+        for node in self.nodes:
+            if _attribute_longer_than(node, attribute, length, start):
+                return True
+        return False
+
+    def __bool__(self):
+        return bool(self.nodes)
+
+
+cdef lxb_status_t css_finder_callback(lxb_dom_node_t *node, lxb_css_selector_specificity_t *spec, void *ctx):
+    cdef LexborNode lxb_node
+    cdef LexborCSSSelector cls
+    cls = <LexborCSSSelector> ctx
+    if <size_t> node == cls._wrapper_to_skip:
+        return LXB_STATUS_OK
+    lxb_node = LexborNode.new(<lxb_dom_node_t *> node, cls.current_node.parser)
+    cls.results.append(lxb_node)
+    return LXB_STATUS_OK
+
+cdef lxb_status_t css_finder_callback_first(lxb_dom_node_t *node, lxb_css_selector_specificity_t *spec, void *ctx):
+    cdef LexborNode lxb_node
+    cdef LexborCSSSelector cls
+    cls = <LexborCSSSelector> ctx
+    if <size_t> node == cls._wrapper_to_skip:
+        return LXB_STATUS_OK
+    lxb_node = LexborNode.new(<lxb_dom_node_t *> node, cls.current_node.parser)
+    cls.results.append(lxb_node)
+    return LXB_STATUS_STOP
+
+
+cdef lxb_status_t css_matcher_callback(lxb_dom_node_t *node, lxb_css_selector_specificity_t *spec, void *ctx):
+    cdef LexborNode lxb_node
+    cdef LexborCSSSelector cls
+    cls = <LexborCSSSelector> ctx
+    if <size_t> node == cls._wrapper_to_skip:
+        return LXB_STATUS_OK
+    cls.results.append(True)
+    return LXB_STATUS_STOP

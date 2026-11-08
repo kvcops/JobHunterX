@@ -1,0 +1,13 @@
+../../../bin/svg2pdf,sha256=OZIRPccgot2RoZ_2BYCJ7Qt392jiEw1FlLR32Gb4IMs,302
+svglib-2.3.2.dist-info/INSTALLER,sha256=5hhM4Q4mYTT9z6QB6PGpUAW81PGNFrYrdXMj4oM_6ak,2
+svglib-2.3.2.dist-info/METADATA,sha256=2pUv9k7zgfCAc-dSfStrz1hxqXs06bEKhIryi7GYkv8,14081
+svglib-2.3.2.dist-info/RECORD,,
+svglib-2.3.2.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+svglib-2.3.2.dist-info/WHEEL,sha256=W3fkpkm7-wf9vBI5Z-7s0eWkeM-spu78I8Neb98DeEg,87
+svglib-2.3.2.dist-info/entry_points.txt,sha256=43gMoq7Tsg8rvfDpCbVix3tZxv4PEYa5lFfWCgUu_FE,40
+svglib-2.3.2.dist-info/licenses/LICENSE.txt,sha256=nM8mz-hF4OuLtYBT5HNm56traXrgEPdlCXjUtxt9H8E,7637
+svglib/__init__.py,sha256=dIWHvGLR0Y1u54sgtQhK1Yg3qTEBiZR8xa7T0TEPXmk,6552
+svglib/fonts.py,sha256=eOMtryv43ZLGTaABhnb7bfXZhnDGm67h3j-RIwmvqBA,21805
+svglib/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+svglib/svglib.py,sha256=BHvlgUJJrGYS1akuGm4e04ZBLqugUspI4ThvnmcgBZo,115363
+svglib/utils.py,sha256=93eXV4m3jQAgWdyZmRO3TQ6yRB93cpEqwSYYyF4YFXk,19726

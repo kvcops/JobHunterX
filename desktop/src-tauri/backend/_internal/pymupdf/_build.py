@@ -1,0 +1,11 @@
+pymupdf_git_branch = 'main'
+pymupdf_git_comment = 'changes.txt: fix mupdf version number.'
+pymupdf_git_diff = ''
+pymupdf_git_diff_n = 0
+pymupdf_git_sha = 'e9cdfc9e7fe3260efcc9d28713903f075ab05bce'
+mupdf_location = '/host/home/runner/work/aptest/aptest/aptest-git-mupdf'
+pymupdf_version = '1.28.0'
+pymupdf_version_tuple = (1, 28, 0)
+swig_version = '4.4.1'
+swig_version_tuple = (4, 4, 1)
+fake_no_gil = False

@@ -1,0 +1,351 @@
+import { html, useState, useEffect } from '../lib/preact.js';
+import { useStore, getState } from '../state/store.js';
+import {
+  loadDetail, toggleSaved, setTracking, verifyJob, rescoreJob, connectJob, copyText, generateDocument, generateCv, loadDocuments, autoApply, deleteJob, navigate, recordOutcome,
+} from '../actions.js';
+import {
+  Button, Badge, ScoreRing, Meter, Skeleton, ErrorBox, Drawer, Icon, Notice, Tabs, Monogram, Select, VERDICT_TONE, Elapsed,
+} from '../components/ui.js';
+import {
+  VERDICT_LABEL, VALIDATION_LABEL, VALIDATION_TONE, CHECK_LABEL, CHECK_STATUS_LABEL, CHECK_STATUS_TONE,
+  CONSTRAINT_TONE, CONSTRAINT_LABEL, TRACKING_LABEL, DEFAULT_TRACKING, WORK_MODE_LABEL, DOC_KIND_LABEL,
+  fmtDate, relTime, fmtSalary, safeUrl, humanize, experienceText, REACH_LABEL, REACH_TONE,
+  COMPANY_VERDICT_LABEL, COMPANY_VERDICT_TONE, COMPETITION_LABEL, EARLY_CAREER_LABEL,
+} from '../lib/format.js';
+import { genKey } from '../state/domain.js';
+
+function ReachSection({ reach }) {
+  if (!reach) return null;
+  return html`<section class="reach-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>Chance a person actually reads your application</h3>
+      <${Badge} tone=${REACH_TONE[reach.level]}>${REACH_LABEL[reach.level]} · ${reach.score}/100</${Badge}></div>
+    <p class="muted small">Separate from fit. Public LinkedIn / Naukri posts get hundreds to thousands of applicants —
+      a fresh post on the company's own site, a smaller company or a direct email gives you a real chance.</p>
+    <ul class="reach-signals">${reach.signals.map((s) => html`<li key=${s.key} class=${s.points > 0 ? 'up' : s.points < 0 ? 'down' : ''}>
+      <span class="pts">${s.points > 0 ? `+${s.points}` : s.points}</span><span>${s.detail}</span></li>`)}</ul>
+    ${reach.application_email ? html`<${Notice} tone="success">The posting asks for applications at <strong>${reach.application_email}</strong> (found in the job text).
+      A short, specific email with your proof of work beats a portal application.</${Notice}>` : null}
+  </section>`;
+}
+
+const BAND = {
+  reachable: ['success', 'Within reach'],
+  direct: ['info', 'Apply directly or with a referral'],
+  stretch: ['warning', 'Stretch — referral preferred'],
+  out_of_range: ['danger', 'Out of range'],
+};
+
+/** Early career: how reachable the posting is despite the years it asks, the safety-net track and scam warnings. */
+function FresherCard({ m }) {
+  const e = m.experience || {};
+  const band = BAND[e.band];
+  if (!band && m.track !== 'floor' && !m.scam) return null;
+  return html`<section class="fresher-box">
+    ${m.scam ? html`<${Notice} tone=${m.scam.level === 'medium' ? 'warning' : 'danger'}>
+      <strong>${m.scam.level === 'critical' ? 'Possible scam — not recommended' : 'Be careful with this posting'}</strong>
+      <ul class="bullets">${m.scam.flags.map((f) => html`<li key=${f.rule}>${f.detail}</li>`)}</ul>
+      Report fraud at cybercrime.gov.in or call 1930.</${Notice}>` : null}
+    ${band ? html`<div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>Can you get this one?</h3>
+      <${Badge} tone=${band[0]}>${band[1]}</${Badge}>
+      ${e.candidate_label ? html`<span class="muted small">Your experience as recruiters count it: <strong>${e.candidate_label}</strong></span>` : null}</div>
+      ${e.advice ? html`<p class="small">${e.advice}</p>` : null}` : null}
+    ${m.track === 'floor' ? html`<${Notice} tone="info"><strong>Safety-net track.</strong> Large IT-services employers hire freshers in volume
+      through national tests and off-campus drives. Register on their official hiring portal and note the test dates — keep applying to
+      targeted roles alongside. You can turn this track off in Settings → Search tuning.</${Notice}>` : null}
+  </section>`;
+}
+
+const CHANNEL_OPTIONS = [['own_site', "Company's own site"], ['referral', 'Referral'], ['hiring_team', 'Note to the hiring team'],
+  ['founder_outreach', 'Founder outreach'], ['linkedin', 'LinkedIn'], ['job_board', 'Other job board'], ['challenge', 'Hiring challenge'],
+  ['it_services_test', 'IT-services test / drive'], ['email', 'Email to the posting'], ['other', 'Other']];
+const EVENT_LABEL = { reply: 'A person replied', screen: 'Screening call', interview: 'Interview', offer: 'Offer', rejected: 'Rejected' };
+
+/** What happened after applying — feeds the per-channel results in the tracker. */
+function OutcomeSection({ job }) {
+  const o = job.outcome;
+  const [busy, setBusy] = useState(false);
+  const save = async (extra) => { setBusy(true); await recordOutcome(job.id, extra); setBusy(false); };
+  const done = new Set((o && o.events || []).map((e) => e.kind));
+  return html`<section class="outcome-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>How did you apply, and what happened?</h3>
+      ${o ? html`<span class="muted small">Applied ${relTime(o.applied_at)}${o.age_days_at_apply != null ? ` · the posting was ${o.age_days_at_apply} days old` : ''}</span>` : null}</div>
+    <p class="muted small">Logging this shows which route actually works for you (Tracker → Results).</p>
+    <div class="row gap wrap">
+      <${Select} label="How you applied" value=${(o && o.channel) || ''} options=${(o && o.channel) ? CHANNEL_OPTIONS : [['', 'How you applied…'], ...CHANNEL_OPTIONS]}
+        onChange=${(v) => { if (v) save({ channel: v }); }} />
+      <label class="switch small"><input type="checkbox" checked=${!!(o && o.human_path)} disabled=${busy}
+        onChange=${(e) => save({ human_path: e.currentTarget.checked })} /><span class="switch-ui"></span> A person referred me / I wrote to the team</label>
+    </div>
+    <div class="row gap wrap" style=${{ marginTop: '8px' }}>${Object.entries(EVENT_LABEL).map(([k, label]) => html`
+      <button type="button" key=${k} class=${`chip ${done.has(k) ? 'chip-good' : ''}`} disabled=${busy || done.has(k)} onClick=${() => save({ event: k })}>${done.has(k) ? '✓ ' : '+ '}${label}</button>`)}</div>
+  </section>`;
+}
+
+const ROUTE_ICON = { email: 'doc', careers: 'external', recruiters: 'user', team: 'user', alumni: 'star', xray: 'search' };
+
+/** The Connector's referral kit: real routes to a person at the company and two drafts in the candidate's voice. */
+function ConnectSection({ job }) {
+  const busy = useStore((s) => !!s.pending.connect[job.id]);
+  const k = job.connection;
+  const strongish = job.match && ['strong', 'good', 'stretch'].includes(job.match.verdict);
+  if (!k && !strongish) return null;
+  const mail = k && k.routes.find((r) => r.kind === 'email');
+  const mailto = mail ? `${mail.url}?subject=${encodeURIComponent(k.subject || '')}&body=${encodeURIComponent(k.message || '')}` : null;
+  return html`<section class="connect-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>Reach a real person</h3>
+      <span class="connect-by"><span class="dot"></span>Connector</span>
+      ${k ? html`<${Badge} tone=${k.method === 'llm' ? 'success' : 'neutral'}>${k.method === 'llm' ? 'Written for you' : 'Plain template'}</${Badge}>` : null}</div>
+    <p class="muted small">A referral or a short note to the right person gets read; a portal application often does not.
+      These are search links — you choose the person. Apply on the company's site first, then reach out.</p>
+    ${k ? html`
+      <div class="connect-routes">${k.routes.map((r) => { const u = safeUrl(r.url) || (r.url.startsWith('mailto:') ? r.url : null); return u ? html`
+        <a key=${r.kind + r.url} class=${`connect-route kind-${r.kind}`} href=${r.kind === 'email' && mailto ? mailto : u} target="_blank" rel="noopener noreferrer" title=${r.note}>
+          <${Icon} name=${ROUTE_ICON[r.kind] || 'external'} size=${15} /><span><strong>${r.label}</strong><small>${r.note}</small></span></a>` : null; })}</div>
+      <div class="connect-drafts">
+        <div class="connect-draft"><div class="row gap"><strong>LinkedIn connection note</strong><span class="muted small">${k.note.length}/300</span>
+          <${Button} size="sm" onClick=${() => copyText(k.note, 'Note copied')}>Copy</${Button}></div>
+          <p>${k.note}</p></div>
+        <div class="connect-draft"><div class="row gap"><strong>Email / message</strong>${k.subject ? html`<span class="muted small">${k.subject}</span>` : null}
+          <${Button} size="sm" onClick=${() => copyText(k.subject ? `${k.subject}\n\n${k.message}` : k.message, 'Message copied')}>Copy</${Button}></div>
+          <p class="pre">${k.message}</p></div>
+      </div>
+      ${k.referral && k.referral.blurb ? html`<div class="connect-draft referral-pack">
+        <div class="row gap"><strong>Referral pack</strong><span class="muted small">for the person who refers you — their portal asks for the job and a few lines</span>
+          <${Button} size="sm" onClick=${() => copyText([k.referral.job_url, k.referral.job_id ? `Job ID: ${k.referral.job_id}` : '', '', k.referral.blurb].filter((x, i) => x || i === 2).join('\n'), 'Referral pack copied')}>Copy</${Button}></div>
+        <p class="pre">${k.referral.blurb}</p>
+        <div class="muted small">${k.referral.job_id ? `Job ID ${k.referral.job_id} · ` : ''}${safeUrl(k.referral.job_url) ? html`<a href=${safeUrl(k.referral.job_url)} target="_blank" rel="noopener noreferrer">job link</a>` : ''}
+          ${job.documents && job.documents.resume ? ' · attach your tailored resume from Documents' : ' · make a tailored resume first (Application kit)'}</div></div>` : null}
+      <div class="row gap wrap"><span class="muted small">Uses only: ${(k.facts || []).join(' · ') || 'your profile'}</span>
+        <${Button} size="sm" icon="refresh" busy=${busy} onClick=${() => connectJob(job.id)}>Write again</${Button}></div>`
+    : html`<div><${Button} size="sm" variant="primary" icon="user" busy=${busy} onClick=${() => connectJob(job.id)}>Find people & draft a referral note</${Button}></div>`}
+  </section>`;
+}
+
+export function CompanySection({ c }) {
+  if (!c) return null;
+  const rv = c.reviews || {};
+  const careers = safeUrl(c.careers_url);
+  return html`<section class="company-box">
+    <div class="row gap wrap"><h3 class="sec-title" style=${{ margin: 0 }}>About ${c.name}</h3>
+      <${Badge} tone=${COMPANY_VERDICT_TONE[c.verdict]}>${COMPANY_VERDICT_LABEL[c.verdict] || c.verdict}</${Badge}>
+      ${c.competition ? html`<${Badge} tone=${c.competition === 'low' ? 'success' : c.competition === 'very_high' ? 'danger' : 'neutral'}>${COMPETITION_LABEL[c.competition]}</${Badge}>` : null}
+      <${Badge} tone=${c.hires_early_career === 'yes' ? 'success' : c.hires_early_career === 'rare' ? 'warning' : 'neutral'}>${EARLY_CAREER_LABEL[c.hires_early_career] || ''}</${Badge}></div>
+    ${c.why ? html`<p>${c.why}</p>` : null}
+    <div class="facts-grid">
+      <div><span class="muted small">What they do</span><div>${c.what_they_do || '—'}</div></div>
+      <div><span class="muted small">Real AI work</span><div>${c.ai_work || '—'}</div></div>
+      <div><span class="muted small">Size · stage</span><div>${[c.size, humanize(c.stage)].filter((x) => x && x !== 'unknown' && x !== 'Unknown').join(' · ') || 'Unknown'}</div></div>
+      <div><span class="muted small">Ratings</span><div>${rv.ambitionbox ? `AmbitionBox ${rv.ambitionbox}${rv.ambitionbox_reviews ? ` (${rv.ambitionbox_reviews} reviews)` : ''}` : ''}
+        ${rv.glassdoor ? ` · Glassdoor ${rv.glassdoor}${rv.glassdoor_reviews ? ` (${rv.glassdoor_reviews})` : ''}` : ''}${!rv.ambitionbox && !rv.glassdoor ? 'Not found' : ''}</div></div>
+      <div><span class="muted small">Heavy DSA interviews</span><div>${humanize(c.dsa_heavy_interviews) || 'Unknown'}</div></div>
+      <div><span class="muted small">Pay signal</span><div>${c.pay_signal || 'Unknown'}</div></div>
+    </div>
+    ${rv.summary ? html`<div><span class="muted small">What employees say</span><p>${rv.summary}</p></div>` : null}
+    ${c.red_flags && c.red_flags.length ? html`<div><span class="muted small">Red flags</span><ul class="bullets bad">${c.red_flags.map((x) => html`<li>${x}</li>`)}</ul></div>` : null}
+    <div class="row gap wrap">
+      ${careers ? html`<a class="btn btn-sm btn-secondary" href=${careers} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${14} /><span>Careers page</span></a>` : null}
+      ${(c.sources || []).slice(0, 4).map((u, i) => { const s = safeUrl(u); return s ? html`<a class="small" href=${s} target="_blank" rel="noopener noreferrer">source ${i + 1}</a>` : null; })}
+      ${c.researched_on ? html`<span class="muted small">researched ${c.researched_on}</span>` : null}
+    </div>
+  </section>`;
+}
+
+function MatchTab({ job }) {
+  const m = job.match;
+  if (!m) return html`<${Notice}>This job has not been scored yet.</${Notice}>`;
+  return html`<div class="stack">
+    ${m.headline ? html`<p class="detail-headline">${m.headline}</p>` : null}
+    <${FresherCard} m=${m} />
+    <${ReachSection} reach=${m.reach} />
+    <${ConnectSection} job=${job} />
+    ${['applied', 'interviewing', 'offer', 'rejected'].includes(job.tracking_status) || job.outcome ? html`<${OutcomeSection} job=${job} />` : null}
+    <${CompanySection} c=${job.company_profile} />
+    ${m.method === 'fallback' ? html`<${Notice} tone="warning">Partial analysis — the AI could not read this posting fully, so skill coverage and requirements may be incomplete.</${Notice}>` : null}
+    <section>
+      <h3 class="sec-title">Hard requirements</h3>
+      <ul class="constraints">
+        ${m.hard_constraints.map((c) => html`<li key=${c.key} class=${`constraint tone-${CONSTRAINT_TONE[c.status]}`}>
+          <${Badge} tone=${CONSTRAINT_TONE[c.status]}>${CONSTRAINT_LABEL[c.status]}</${Badge}>
+          <div><strong>${c.label}</strong>${!c.hard ? html` <span class="muted small">(advisory)</span>` : null}<div class="muted">${c.detail}</div></div>
+        </li>`)}
+      </ul>
+    </section>
+    <section>
+      <h3 class="sec-title">How the score was built</h3>
+      <div class="components">
+        ${m.components.map((c) => html`<div class="component" key=${c.key}>
+          <div class="component-head"><span>${c.label}</span><span class="muted small">weight ${Math.round(c.weight * 100)}% · ${Math.round(c.score * 100)}/100</span></div>
+          <${Meter} value=${c.score} /><div class="muted small" style=${{ marginTop: '6px' }}>${c.detail}</div></div>`)}
+      </div>
+      ${m.rejected_reasons.length ? html`<p class="muted small">Because a hard requirement failed, the score is capped no matter how many skills overlap.</p>` : null}
+    </section>
+    <div class="two-col">
+      <section><h3 class="sec-title">Strengths</h3>
+        ${m.strengths.length ? html`<ul class="bullets good">${m.strengths.map((x) => html`<li>${x}</li>`)}</ul>` : html`<p class="muted">None identified.</p>`}</section>
+      <section><h3 class="sec-title">Gaps</h3>
+        ${m.gaps.length ? html`<ul class="bullets bad">${m.gaps.map((x) => html`<li>${x}</li>`)}</ul>` : html`<p class="muted">No gaps found.</p>`}</section>
+    </div>
+    ${m.unknowns.length ? html`<section><h3 class="sec-title">Unknown — could not be verified</h3><ul class="bullets unk">${m.unknowns.map((x) => html`<li>${x}</li>`)}</ul></section>` : null}
+    <section><h3 class="sec-title">Skills</h3>
+      <div class="skill-cloud">
+        ${m.matched_required.map((s) => html`<span class="chip chip-good" title="Required — you have it">${s}</span>`)}
+        ${m.missing_required.map((s) => html`<span class="chip chip-bad" title="Required — not shown in your profile">${s}</span>`)}
+        ${m.matched_preferred.map((s) => html`<span class="chip chip-good soft" title="Nice to have — you have it">${s}</span>`)}
+        ${m.missing_preferred.map((s) => html`<span class="chip soft" title="Nice to have — not shown">${s}</span>`)}
+      </div>
+      <p class="muted small">Green: you have it. Red: required but not in your profile. Faded: nice-to-have.</p>
+    </section>
+  </div>`;
+}
+
+function VerifyTab({ job }) {
+  const v = job.validation;
+  return html`<div class="stack">
+    <div class="row gap"><${Badge} tone=${VALIDATION_TONE[v.status]}>${VALIDATION_LABEL[v.status]}</${Badge}>
+      <span class="muted small">confidence ${Math.round((v.confidence || 0) * 100)}% · checked ${v.checked_at ? relTime(v.checked_at) : 'never'}</span></div>
+    ${v.notes && v.notes.length ? html`<ul class="bullets">${v.notes.map((n) => html`<li>${n}</li>`)}</ul>` : null}
+    <table class="checks"><thead><tr><th>Check</th><th>Status</th><th>Value / evidence</th></tr></thead><tbody>
+      ${Object.entries(v.checks || {}).map(([k, c]) => html`<tr key=${k}>
+        <td>${CHECK_LABEL[k] || humanize(k)}</td>
+        <td><${Badge} tone=${CHECK_STATUS_TONE[c.status]}>${CHECK_STATUS_LABEL[c.status]}</${Badge}></td>
+        <td><div>${c.value || '—'}</div>${c.evidence ? html`<div class="muted small">${c.evidence}</div>` : null}</td></tr>`)}
+    </tbody></table>
+    <section><h3 class="sec-title">Sources</h3><ul class="sources">
+      ${job.sources.map((s) => { const u = safeUrl(s.url); return html`<li>
+        <${Badge} tone=${s.first_party ? 'success' : 'neutral'}>${s.first_party ? 'First-party' : humanize(s.kind)}</${Badge}>
+        ${u ? html`<a href=${u} target="_blank" rel="noopener noreferrer">${s.name}</a>` : s.name}
+        <span class="muted small">seen ${relTime(s.fetched_at)}</span></li>`; })}
+    </ul></section>
+  </div>`;
+}
+
+function RequirementsTab({ job }) {
+  const r = job.requirements;
+  const [full, setFull] = useState(false);
+  return html`<div class="stack">
+    <div class="facts-grid">
+      <div><span class="muted small">Experience</span><div>${r.experience_min != null ? `${r.experience_min}${r.experience_max != null ? `–${r.experience_max}` : '+'} years` : 'Not stated'}</div>
+        ${r.experience_evidence ? html`<div class="muted small">“${r.experience_evidence}”</div>` : null}</div>
+      <div><span class="muted small">Education</span><div>${r.education_level === 'unknown' ? 'Not stated' : `${humanize(r.education_level)}${r.education_mandatory ? ' (required)' : ''}`}</div></div>
+      <div><span class="muted small">Employment</span><div>${humanize(job.employment_type) || 'Not stated'}</div></div>
+      <div><span class="muted small">Work mode</span><div>${WORK_MODE_LABEL[job.work_mode]}</div></div>
+      <div><span class="muted small">Salary</span><div>${job.salary ? fmtSalary(job.salary) : 'Not stated'}</div></div>
+      <div><span class="muted small">Notice period</span><div>${r.notice_period_max_days != null ? `≤ ${r.notice_period_max_days} days` : 'Not stated'}</div></div>
+    </div>
+    ${r.must_have_skills.length ? html`<section><h3 class="sec-title">Mandatory</h3><div class="chip-row">${r.must_have_skills.map((s) => html`<span class="chip">${s}</span>`)}</div></section>` : null}
+    <section><h3 class="sec-title">Required skills</h3><div class="chip-row">${r.required_skills.length ? r.required_skills.map((s) => html`<span class="chip">${s}</span>`) : html`<span class="muted">None extracted</span>`}</div></section>
+    ${r.preferred_skills.length ? html`<section><h3 class="sec-title">Nice to have</h3><div class="chip-row">${r.preferred_skills.map((s) => html`<span class="chip soft">${s}</span>`)}</div></section>` : null}
+    ${r.responsibilities.length ? html`<section><h3 class="sec-title">What you would do</h3><ul class="bullets">${r.responsibilities.map((x) => html`<li>${x}</li>`)}</ul></section>` : null}
+    <section><h3 class="sec-title">Full description</h3>
+      <div class=${`jd-text ${full ? '' : 'clamped'}`}>${job.description || 'No description available.'}</div>
+      ${job.description && job.description.length > 900 ? html`<button type="button" class="link-btn" onClick=${() => setFull(!full)}>${full ? 'Show less' : 'Show full description'}</button>` : null}
+    </section>
+  </div>`;
+}
+
+function DocActions({ job }) {
+  const gen = useStore((s) => s.gen);
+  const docs = useStore((s) => s.docs.items);
+  useEffect(() => { if (getState().docs.status === 'idle') loadDocuments(); }, []);
+  const row = (kind) => {
+    const g = gen[genKey(job.id, kind)];
+    const docId = (g && g.documentId) || (job.documents && job.documents[kind]);
+    const latest = (job.document_list || []).find((d) => d.id === docId);
+    const busy = g && g.status === 'generating';
+    return html`<div class=${`kit-item ${busy ? 'is-busy' : ''}`} key=${kind}>
+      <div class="kit-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>${busy ? html`<span class="scan-beam"></span>` : null}</div>
+      <div class="grow"><strong>${DOC_KIND_LABEL[kind]}</strong>
+        <div class="muted small">${busy ? html`Writing and fact-checking against your profile · <${Elapsed} since=${g.startedAt} />`
+          : latest ? `Generated ${relTime(latest.created_at)}${latest.stale ? ' · profile changed since' : ''}${latest.warnings_count ? ` · ${latest.warnings_count} note(s)` : ''}` : 'Tailored to this job, using only facts from your profile.'}</div>
+        ${g && g.status === 'failed' ? html`<div class="error-text small" role="alert">${g.error}</div>` : null}
+      </div>
+      <div class="row gap">
+        ${docId ? html`<${Button} size="sm" onClick=${() => navigate(`#/documents/${docId}`)}>Open</${Button}>` : null}
+        <${Button} size="sm" variant=${docId ? 'secondary' : 'primary'} icon=${g && g.status === 'failed' ? 'refresh' : 'spark'}
+          busy=${busy} onClick=${() => generateDocument(job.id, kind)}>
+          ${g && g.status === 'failed' ? 'Retry' : docId ? 'Regenerate' : 'Generate'}</${Button}>
+      </div></div>`;
+  };
+  const cvGen = gen[genKey(null, 'cv')];
+  const cvDoc = docs.find((d) => d.kind === 'cv');
+  const cvBusy = cvGen && cvGen.status === 'generating';
+  const cvId = (cvGen && cvGen.documentId) || (cvDoc && cvDoc.id);
+  const cvRow = html`<div class=${`kit-item ${cvBusy ? 'is-busy' : ''}`} key="cv">
+    <div class="kit-thumb" aria-hidden="true"><div class="sheet"><i></i><i></i><i></i><i></i><i></i></div>${cvBusy ? html`<span class="scan-beam"></span>` : null}</div>
+    <div class="grow"><strong>CV</strong>
+      <div class="muted small">${cvBusy ? html`Writing your CV · <${Elapsed} since=${cvGen.startedAt} />` : cvDoc ? `Made ${relTime(cvDoc.created_at)} · your full career story, shared by every application` : 'Your full career story (not job-specific). Some forms ask for it.'}</div>
+      ${cvGen && cvGen.status === 'failed' ? html`<div class="error-text small" role="alert">${cvGen.error}</div>` : null}</div>
+    <div class="row gap">
+      ${cvId ? html`<${Button} size="sm" onClick=${() => navigate(`#/documents/${cvId}`)}>Open</${Button}>` : null}
+      <${Button} size="sm" variant=${cvId ? 'secondary' : 'primary'} icon="spark" busy=${cvBusy} onClick=${() => generateCv('')}>${cvId ? 'Regenerate' : 'Generate'}</${Button}>
+    </div></div>`;
+  return html`<div class="stack"><p class="muted small"><strong>Resume</strong> = one page, tailored to this job. <strong>CV</strong> = your longer, general career story.
+    Every AI edit is checked against your profile; anything it cannot back up is rejected. Auto-apply makes any missing ones for you.</p>
+    ${row('resume')}${row('cover_letter')}${cvRow}</div>`;
+}
+
+const TABS = [
+  { key: 'match', label: 'Why this score' }, { key: 'req', label: 'Requirements' },
+  { key: 'verify', label: 'Verification' }, { key: 'kit', label: 'Application kit' },
+];
+
+/** The job workspace. Used inline (Discover) and inside a drawer (Tracker). */
+export function JobDetail({ jobId, onClose }) {
+  const entry = useStore((s) => s.details[jobId]);
+  const tracking = useStore((s) => (s.meta.data && s.meta.data.tracking_statuses) || DEFAULT_TRACKING);
+  const pending = useStore((s) => s.pending);
+  const [tab, setTab] = useState('match');
+  const job = entry && entry.job;
+  if (!entry || (entry.status === 'loading' && !job)) {
+    return html`<div class="detail"><div class="detail-top"><div class="row gap"><div class="sk-block sk-ring big"></div>
+      <div class="grow"><div class="sk-block" style=${{ width: '30%' }}></div><div class="sk-block" style=${{ width: '60%', height: '22px', marginTop: '10px' }}></div></div></div></div>
+      <div class="detail-body"><${Skeleton} lines=${6} /></div></div>`;
+  }
+  if (entry.status === 'error' && !job) return html`<div class="detail"><div class="detail-body"><${ErrorBox} message=${entry.error} onRetry=${() => loadDetail(jobId)} /></div></div>`;
+  const apply = safeUrl(job.apply_url);
+  return html`<div class="detail">
+    <header class="detail-top">
+      <div class="detail-tools">
+        <button type="button" class="icon-btn detail-x" aria-label="Close" onClick=${onClose}><${Icon} name="x" /></button>
+        <button type="button" class="btn btn-sm phone-back" onClick=${onClose}><${Icon} name="back" size=${15} />Back</button>
+        <div class="row gap">
+          <button type="button" class=${`icon-btn save-btn ${job.saved ? 'on' : ''}`} aria-pressed=${job.saved ? 'true' : 'false'}
+            aria-label=${job.saved ? 'Unsave job' : 'Save job'} disabled=${!!pending.save[jobId]} onClick=${() => toggleSaved(jobId)}><${Icon} name="star" size=${16} /></button>
+          <button type="button" class="icon-btn" aria-label="Remove job" onClick=${() => deleteJob(jobId)}><${Icon} name="trash" size=${16} /></button>
+        </div>
+      </div>
+      <div class="detail-header">
+        <${ScoreRing} score=${job.match ? job.match.score : null} verdict=${job.match && job.match.verdict} size=${78} />
+        <div class="grow">
+          <div class="detail-company"><${Monogram} name=${job.company} size=${22} /> ${job.company} · ${job.location || 'Location not stated'}</div>
+          <h2>${job.title}</h2>
+          <div class="row gap wrap">
+            ${job.match ? html`<${Badge} tone=${VERDICT_TONE[job.match.verdict]}>${VERDICT_LABEL[job.match.verdict]}</${Badge}>` : null}
+            <${Badge} tone=${VALIDATION_TONE[job.validation.status]}>${VALIDATION_LABEL[job.validation.status]}</${Badge}>
+            ${job.match && job.match.experience ? html`<span class="muted small">${experienceText(job.match.experience)}</span>` : null}
+            ${job.posted_at ? html`<span class="muted small">Posted ${fmtDate(job.posted_at)}</span>` : null}
+          </div>
+        </div>
+      </div>
+      <div class="action-bar">
+        ${apply ? html`<a class="btn btn-primary btn-sm" href=${apply} target="_blank" rel="noopener noreferrer"><${Icon} name="external" size=${15} /><span>Open posting</span></a>` : null}
+        <${Select} size="sm" label="Tracking status" tone=${`s-${job.tracking_status}`} value=${job.tracking_status} disabled=${!!pending.track[jobId]}
+          onChange=${(v) => setTracking(jobId, v)} options=${tracking.map((t) => [t, TRACKING_LABEL[t] || humanize(t)])} />
+        <${Button} size="sm" icon="refresh" busy=${!!pending.verify[jobId]} onClick=${() => verifyJob(jobId)}>Re-verify</${Button}>
+        <${Button} size="sm" icon="bolt" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score</${Button}>
+        <${Button} size="sm" icon="globe" busy=${!!pending.apply[jobId]} onClick=${() => autoApply(jobId)}>Auto-apply</${Button}>
+      </div>
+      ${job.match_stale ? html`<${Notice} tone="warning">Your profile changed since this job was scored.
+        <${Button} size="sm" busy=${!!pending.rescore[jobId]} onClick=${() => rescoreJob(jobId)}>Re-score now</${Button}></${Notice}>` : null}
+      <${Tabs} label="Job sections" value=${tab} onChange=${setTab} tabs=${TABS} size="sm" />
+    </header>
+    <div class="detail-body scroll" role="tabpanel" key=${tab}>
+      ${tab === 'match' ? html`<${MatchTab} job=${job} />` : tab === 'req' ? html`<${RequirementsTab} job=${job} />`
+        : tab === 'verify' ? html`<${VerifyTab} job=${job} />` : html`<${DocActions} job=${job} />`}
+    </div>
+  </div>`;
+}
+
+export function JobDetailDrawer({ jobId, onClose }) {
+  return html`<${Drawer} onClose=${onClose} label="Job details"><${JobDetail} jobId=${jobId} onClose=${onClose} /></${Drawer}>`;
+}
