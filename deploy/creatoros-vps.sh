@@ -154,6 +154,35 @@ PYEOF
   say "Bench done — nothing changed"; exit 0
 fi
 
+if [ "$ACTION" = "frames" ]; then
+  # Contact sheets of the newest finished videos, base64 in the log (read-only).
+  PD="$DIR/projects"; [ -d "$PD" ] || PD=$(find "$DIR" -maxdepth 3 -type d -name projects | head -1)
+  FF=$(command -v ffmpeg || echo "$DIR/.venv/bin/ffmpeg")
+  for v in $(ls -t "$PD"/proj_*/*.mp4 2>/dev/null | grep -v '/scenes/' | head -3); do
+    d=$(dirname "$v"); dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$v" 2>/dev/null </dev/null)
+    say "VIDEO $(basename "$d") $(basename "$v") ${dur}s"
+    "$PY" - "$d/manifest.json" <<'PYEOF'
+import json, sys, collections
+try:
+    m = json.load(open(sys.argv[1]))
+except Exception as e:
+    print("no manifest", e); sys.exit()
+print("topic:", m.get("topic"), "| look:", (m.get("look") or {}).get("id") if isinstance(m.get("look"), dict) else m.get("look"))
+c = collections.Counter(); t = collections.Counter()
+for s in m.get("scenes") or []:
+    t[str(s.get("template") or s.get("visual_type"))] += 1
+    for x in s.get("shots") or s.get("media") or []:
+        c[str(x.get("provider"))] += 1
+print("scenes:", dict(t)); print("media providers:", dict(c))
+PYEOF
+    n=18; fps=$(awk -v d="$dur" -v n=$n 'BEGIN{printf "%.4f", n/(d>1?d:1)}')
+    T=$(mktemp --suffix=.jpg)
+    "$FF" -nostdin -v error -y -i "$v" -vf "fps=$fps,scale=300:-2,tile=6x3" -frames:v 1 -q:v 6 "$T"
+    echo "SHEET-BEGIN"; base64 -w0 "$T"; echo; echo "SHEET-END"; rm -f "$T"
+  done
+  say "Frames done — nothing changed"; exit 0
+fi
+
 [ "$ACTION" = "deploy" ] || { say "Inspect only — nothing changed"; exit 0; }
 
 # ---------------------------------------------------------------- deploy
