@@ -309,6 +309,67 @@ PYEOF
   say "Tone check done — nothing changed"; exit 0
 fi
 
+if [ "$ACTION" = "sync" ]; then
+  # Caption/voice sync check on the newest finished videos (read-only):
+  # transcribe the final video's audio, match spoken words to the caption
+  # words on screen, report the gap every 10 s; per-scene audio vs clip.
+  PD=$(cd "$DIR" && "$PY" -c "from backend.app.core.config import settings; print(settings.projects_dir)" 2>/dev/null </dev/null | tail -1)
+  [ -d "$PD" ] || PD="$DIR/projects"
+  ( cd "$DIR" && "$PY" - "$PD" <<'PYEOF'
+import sys, json, glob, os, subprocess, difflib, re
+import numpy as np, soundfile as sf
+pd = sys.argv[1]
+def dur(path, sel="format"):
+    q = ["ffprobe", "-v", "error"] + (["-select_streams", sel[0]] if sel != "format" else []) + \
+        ["-show_entries", ("stream" if sel != "format" else "format") + "=duration", "-of", "csv=p=0", path]
+    try: return float(subprocess.run(q, capture_output=True, text=True).stdout.strip().split("\n")[0])
+    except Exception: return -1
+from faster_whisper import WhisperModel
+wm = WhisperModel("base.en", device="cpu", compute_type="int8")
+mans = sorted(glob.glob(os.path.join(pd, "proj_*", "manifest.json")), key=os.path.getmtime, reverse=True)
+done = 0
+for mp in mans:
+    m = json.load(open(mp)); d = os.path.dirname(mp)
+    fv = m.get("final_video") or ""
+    fv = fv if os.path.isabs(fv) else os.path.join(d, os.path.basename(fv))
+    if not os.path.isfile(fv): continue
+    done += 1
+    if done > 2: break
+    print(f"\n== {os.path.basename(d)} | {m.get('topic')!r} | {m.get('format')} | voice {((m.get('audio_plan') or {}).get('voice') or '')}")
+    print(f"final: video {dur(fv,'v'):.2f}s audio {dur(fv,'a'):.2f}s")
+    t0 = 0.0; cap = []
+    for sc in m.get("scenes") or []:
+        sid = sc["scene_id"]; wav = os.path.join(d, "audio", sid + ".wav"); clip = os.path.join(d, "scenes", sid + ".mp4")
+        info = sf.info(wav) if os.path.isfile(wav) else None
+        cd = dur(clip, "v") if os.path.isfile(clip) else -1
+        spans = os.path.join(d, "audio", sid + ".spans.json")
+        ns = len(json.load(open(spans))) if os.path.isfile(spans) else 0
+        caps = sc.get("captions") or []
+        last = max([c["end_sec"] for c in caps] or [0])
+        print(f"  {sid}: wav {info.samplerate if info else '-'}Hz {info.duration if info else -1:.2f}s | clip {cd:.2f}s | manifest {sc.get('duration_sec')} | spans {ns} | captions end {last:.2f} | words {len(sc.get('text','').split())}")
+        for c in caps:
+            ws = c["text"].split(); n = max(1, len(ws))
+            for i, w in enumerate(ws):
+                cap.append((re.sub(r"[^a-z0-9]", "", w.lower()), t0 + c["start_sec"] + (c["end_sec"] - c["start_sec"]) * i / n))
+        t0 += cd if cd > 0 else float(sc.get("duration_sec") or 0)
+    a = subprocess.run(["ffmpeg", "-v", "error", "-i", fv, "-ac", "1", "-ar", "16000", "-f", "f32le", "-"], capture_output=True).stdout
+    audio = np.frombuffer(a, dtype=np.float32)
+    segs, _ = wm.transcribe(audio, word_timestamps=True, language="en", beam_size=1, condition_on_previous_text=False)
+    spoken = [(re.sub(r"[^a-z0-9]", "", w.word.lower()), w.start) for s in segs for w in (s.words or [])]
+    sm = difflib.SequenceMatcher(a=[x[0] for x in spoken], b=[x[0] for x in cap], autojunk=False)
+    pairs = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            pairs += [(spoken[i1 + k][1], cap[j1 + k][1]) for k in range(i2 - i1)]
+    print(f"  matched {len(pairs)} of {len(cap)} caption words / {len(spoken)} spoken")
+    for b in range(0, int(t0) + 10, 10):
+        g = [c - s for s, c in pairs if b <= s < b + 10]
+        if g: print(f"   t={b:3d}-{b+10:3d}s  caption minus voice: median {np.median(g):+.2f}s  (n={len(g)}, min {min(g):+.2f}, max {max(g):+.2f})")
+PYEOF
+  )
+  say "Sync check done — nothing changed"; exit 0
+fi
+
 if [ "$ACTION" = "frames" ]; then
   # Contact sheets of the newest finished videos, base64 in the log (read-only).
   PD=$(cd "$DIR" && "$PY" -c "from backend.app.core.config import settings; print(settings.projects_dir)" 2>/dev/null </dev/null | tail -1)
