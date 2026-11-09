@@ -334,8 +334,9 @@ for mp in mans:
     fv = fv if os.path.isabs(fv) else os.path.join(d, os.path.basename(fv))
     if not os.path.isfile(fv): continue
     done += 1
-    if done > 2: break
-    print(f"\n== {os.path.basename(d)} | {m.get('topic')!r} | {m.get('format')} | voice {((m.get('audio_plan') or {}).get('voice') or '')}")
+    if done > 6: break
+    import time as _t
+    print(f"\n== {os.path.basename(d)} | {m.get('topic')!r} | {m.get('format')} | made {_t.strftime('%m-%d %H:%M', _t.gmtime(os.path.getmtime(fv)))} UTC")
     print(f"final: video {dur(fv,'v'):.2f}s audio {dur(fv,'a'):.2f}s")
     t0 = 0.0; cap = []
     for sc in m.get("scenes") or []:
@@ -347,10 +348,21 @@ for mp in mans:
         caps = sc.get("captions") or []
         last = max([c["end_sec"] for c in caps] or [0])
         print(f"  {sid}: wav {info.samplerate if info else '-'}Hz {info.duration if info else -1:.2f}s | clip {cd:.2f}s | manifest {sc.get('duration_sec')} | spans {ns} | captions end {last:.2f} | words {len(sc.get('text','').split())}")
-        for c in caps:
-            ws = c["text"].split(); n = max(1, len(ws))
-            for i, w in enumerate(ws):
-                cap.append((re.sub(r"[^a-z0-9]", "", w.lower()), t0 + c["start_sec"] + (c["end_sec"] - c["start_sec"]) * i / n))
+        # the captions burned into the picture: the .ass the clip was made
+        # with; each event's start is when its highlighted word lights up
+        ass = os.path.join(d, "scenes", sid + ".ass"); evs = 0
+        if os.path.isfile(ass):
+            for ln in open(ass, encoding="utf-8", errors="ignore"):
+                if not ln.startswith("Dialogue:"): continue
+                f = ln.split(",", 9); h, mi, se = f[1].split(":"); st = int(h) * 3600 + int(mi) * 60 + float(se)
+                body = f[9]
+                hit = re.search(r"\\c&H(?!FFFFFF)[0-9A-Fa-f]{6}&\}([^{\s]+)", body)
+                if hit:
+                    cap.append((re.sub(r"[^a-z0-9]", "", hit.group(1).lower()), t0 + st)); evs += 1
+                else:
+                    plain = re.sub(r"\{[^}]*\}", "", body).split()
+                    if plain: cap.append((re.sub(r"[^a-z0-9]", "", plain[0].lower()), t0 + st)); evs += 1
+        print(f"      .ass events {evs}")
         t0 += cd if cd > 0 else float(sc.get("duration_sec") or 0)
     a = subprocess.run(["ffmpeg", "-v", "error", "-i", fv, "-ac", "1", "-ar", "16000", "-f", "f32le", "-"], capture_output=True).stdout
     audio = np.frombuffer(a, dtype=np.float32)
