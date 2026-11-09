@@ -389,7 +389,16 @@ if [ "$ACTION" = "frames" ]; then
   echo "projects: $PD ($(ls -d "$PD"/proj_* 2>/dev/null | wc -l) folders, $(find "$PD" -maxdepth 2 -name '*.mp4' 2>/dev/null | wc -l) finished videos)"
   FF=$(command -v ffmpeg || echo "$DIR/.venv/bin/ffmpeg")
   VIDS=$(find "$PD" -maxdepth 2 -name '*.mp4' 2>/dev/null)
-  for v in $([ -n "$VIDS" ] && ls -t $VIDS | head -3); do
+  # the 2 newest landscape and the 2 newest portrait videos
+  PICK=""; NL=0; NP=0
+  for v in $([ -n "$VIDS" ] && ls -t $VIDS); do
+    wh=$(ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0 "$v" 2>/dev/null </dev/null)
+    w=${wh%,*}; h=${wh#*,}
+    if [ "${w:-0}" -gt "${h:-0}" ]; then [ $NL -lt 2 ] && { PICK="$PICK $v"; NL=$((NL+1)); }
+    else [ $NP -lt 2 ] && { PICK="$PICK $v"; NP=$((NP+1)); }; fi
+    [ $NL -ge 2 ] && [ $NP -ge 2 ] && break
+  done
+  for v in $PICK; do
     d=$(dirname "$v"); dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$v" 2>/dev/null </dev/null)
     say "VIDEO $(basename "$d") $(basename "$v") ${dur}s"
     "$PY" - "$d/manifest.json" <<'PYEOF'
@@ -406,9 +415,11 @@ for s in m.get("scenes") or []:
         c[str(x.get("provider"))] += 1
 print("scenes:", dict(t)); print("media providers:", dict(c))
 PYEOF
-    n=18; fps=$(awk -v d="$dur" -v n=$n 'BEGIN{printf "%.4f", n/(d>1?d:1)}')
+    wh=$(ffprobe -v error -select_streams v -show_entries stream=width,height -of csv=p=0 "$v" 2>/dev/null </dev/null)
+    if [ "${wh%,*}" -gt "${wh#*,}" ]; then n=16; TILE="scale=480:-2,tile=4x4"; else n=18; TILE="scale=300:-2,tile=6x3"; fi
+    fps=$(awk -v d="$dur" -v n=$n 'BEGIN{printf "%.4f", n/(d>1?d:1)}')
     T=$(mktemp --suffix=.jpg)
-    "$FF" -nostdin -v error -y -i "$v" -vf "fps=$fps,scale=300:-2,tile=6x3" -frames:v 1 -q:v 6 "$T"
+    "$FF" -nostdin -v error -y -i "$v" -vf "fps=$fps,$TILE" -frames:v 1 -q:v 5 "$T"
     echo "SHEET-BEGIN"; base64 -w0 "$T"; echo; echo "SHEET-END"; rm -f "$T"
   done
   say "Frames done — nothing changed"; exit 0
