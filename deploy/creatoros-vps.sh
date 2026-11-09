@@ -382,6 +382,77 @@ PYEOF
   say "Sync check done — nothing changed"; exit 0
 fi
 
+if [ "$ACTION" = "godot" ]; then
+  # Install the Godot 2D film renderer (CPU): Godot 4.4.1 at /opt/godot/godot,
+  # Xvfb (virtual display) and Mesa llvmpipe (software OpenGL). Idempotent.
+  say "Packages"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y -q xvfb xauth libgl1 libgl1-mesa-dri libegl1 libglx-mesa0 libxcursor1 libxinerama1 \
+    libxrandr2 libxi6 libfontconfig1 unzip >/dev/null 2>&1 || { apt-get update -q >/dev/null 2>&1; \
+    apt-get install -y -q xvfb xauth libgl1 libgl1-mesa-dri libegl1 libglx-mesa0 libxcursor1 libxinerama1 \
+    libxrandr2 libxi6 libfontconfig1 unzip >/dev/null 2>&1; }
+  command -v xvfb-run && echo "xvfb ok"
+  say "Godot"
+  if [ ! -x /opt/godot/godot ]; then
+    mkdir -p /opt/godot && cd /opt/godot && \
+    curl -sSL -o g.zip https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip && \
+    unzip -oq g.zip && mv Godot_v4.4.1-stable_linux.x86_64 godot && chmod +x godot && rm -f g.zip
+  fi
+  /opt/godot/godot --version 2>/dev/null | tail -1
+  cd "$DIR" || exit 1
+  say "Test render (a 2-second film at 1080x1920)"
+  ( cd "$DIR" && "$PY" - <<'PYEOF'
+import time, tempfile
+from pathlib import Path
+from render.godot.runner import available, render_film
+print("available:", available())
+spec = {"width": 1080, "height": 1920, "scenes": [{"duration": 2, "seed": 1,
+  "setting": {"place": "park", "time": "day"}, "actors": [{"id": "hero", "character": "scientist", "x": 0.4,
+  "commands": [{"t": 0.1, "do": "walk_to", "x": 0.55}]}], "events": [], "camera": {"mode": "wide"}}]}
+out = Path(tempfile.mkdtemp()) / "t.avi"
+t = time.time(); render_film(spec, out)
+print(f"rendered {out.stat().st_size // 1024} KB in {time.time() - t:.1f}s (2 s of film)")
+PYEOF
+  )
+  say "Godot setup done"; exit 0
+fi
+
+if [ "$ACTION" = "godotfilm" ]; then
+  # A real animated film through the app's pipeline (real director model,
+  # HeyGen, Godot), then a contact sheet in the log. Writes only its own
+  # project folder (projects/proj_godotcheck).
+  PD=$(cd "$DIR" && "$PY" -c "from backend.app.core.config import settings; print(settings.projects_dir)" 2>/dev/null </dev/null | tail -1)
+  [ -d "$PD" ] || PD="$DIR/projects"
+  ( cd "$DIR" && set -a && . ./.env 2>/dev/null; set +a; "$PY" - "$PD" "${BRANCH:-short}" <<'PYEOF'
+import asyncio, sys, time, subprocess, base64, shutil
+from pathlib import Path
+from backend.app.orchestration.godot_pipeline import generate_godot_film
+fmt = sys.argv[2] if sys.argv[2] in ("short", "youtube") else "short"
+pp = Path(sys.argv[1]) / f"proj_godotcheck_{fmt}"
+shutil.rmtree(pp, ignore_errors=True)
+def cb(stage, pct, meta):
+    if stage != "render.progress":
+        print(f"  {pct:.2f} {stage} {({k: v for k, v in meta.items() if k in ('voice', 'title', 'scenes', 'places', 'claims')})}", flush=True)
+t = time.time()
+m = asyncio.run(generate_godot_film(topic="Why do cats always land on their feet", format_name=fmt,
+    voice_id="heygen:auto", target_duration_sec=30 if fmt == "short" else 60, project_id=pp.name,
+    project_path=pp, progress_cb=cb, options={"research": False}))
+print(f"FILM {m['working_title']!r} {m['duration_sec']}s in {time.time() - t:.0f}s voice={m['voice']}")
+for sc in m["scenes"]:
+    print(f"  {sc['scene_id']} {sc['place']}/{sc['time']} {sc['cast']} mood={sc['mood']} | {sc['text'][:90]}")
+fv = m["final_video"]
+tile = "6x3" if fmt == "short" else "4x4"
+sc = "300:-2" if fmt == "short" else "480:-2"
+n = 18 if fmt == "short" else 16
+fps = n / max(1.0, m["duration_sec"])
+sheet = str(pp / "sheet.jpg")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", fv, "-vf", f"fps={fps:.4f},scale={sc},tile={tile}", "-frames:v", "1", "-q:v", "5", sheet])
+print("SHEET-BEGIN"); print(base64.b64encode(open(sheet, "rb").read()).decode()); print("SHEET-END")
+PYEOF
+  )
+  say "Godot film check done"; exit 0
+fi
+
 if [ "$ACTION" = "frames" ]; then
   # Contact sheets of the newest finished videos, base64 in the log (read-only).
   PD=$(cd "$DIR" && "$PY" -c "from backend.app.core.config import settings; print(settings.projects_dir)" 2>/dev/null </dev/null | tail -1)
