@@ -417,6 +417,76 @@ PYEOF
   say "Godot setup done"; exit 0
 fi
 
+if [ "$ACTION" = "imgdiag" ]; then
+  # Raw answers of every free image route (status + first bytes, key NAMES only).
+  ( cd "$DIR" && set -a && . ./.env 2>/dev/null; set +a; "$PY" - <<'PYEOF'
+import time, io, base64, json, httpx
+from PIL import Image
+from backend.app.media import image_gen as g
+P = "flat vector cartoon illustration, a cute orange tabby cat, whole body, side view, thick dark outline, plain white background"
+tiles = []
+def show(tag, r, t0):
+    ct = r.headers.get("content-type", "")
+    print(f"{tag}: HTTP {r.status_code} {ct} {len(r.content)}B {time.time()-t0:.1f}s | {'' if ct.startswith('image') else r.text[:260].replace(chr(10),' ')}")
+def keep(tag, data):
+    try:
+        im = Image.open(io.BytesIO(data)).convert("RGB"); print("   image", tag, im.size); im.thumbnail((400, 300)); tiles.append(im)
+    except Exception as e: print("   not an image", tag, e)
+c = httpx.Client(timeout=httpx.Timeout(50.0, connect=10.0), follow_redirects=True)
+gk = g._key("GEMINI_API_KEY"); nk = g._key("NVIDIA_API_KEY"); kk = g._key("KILO_API_KEY")
+print("keys:", {"GEMINI": bool(gk), "NVIDIA": bool(nk), "KILO": bool(kk), "LLM7": bool(g._key("LLM7_TOKEN"))})
+try:
+    t0 = time.time(); r = c.post("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-image:generateContent", headers={"x-goog-api-key": gk},
+        json={"contents": [{"parts": [{"text": P}]}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}}); show("gemini lite-image", r, t0)
+except Exception as e: print("gemini EXC", e)
+try:
+    r = c.get("https://integrate.api.nvidia.com/v1/models", headers={"Authorization": f"Bearer {nk}"})
+    ids = [m.get("id", "") for m in r.json().get("data", [])]
+    print("nim models:", len(ids), [i for i in ids if any(w in i.lower() for w in ("flux", "diffusion", "sdxl", "sana", "image", "bria", "kandinsky", "qwen-im"))])
+except Exception as e: print("nim list EXC", e)
+for model, body in [("black-forest-labs/flux.1-schnell", {"prompt": P, "width": 1024, "height": 1024, "seed": 1, "steps": 4}),
+                    ("stabilityai/stable-diffusion-3-medium", {"prompt": P, "aspect_ratio": "1:1", "seed": 1, "steps": 28, "cfg_scale": 5}),
+                    ("stabilityai/sdxl-turbo", {"text_prompts": [{"text": P}], "seed": 1, "steps": 2}),
+                    ("black-forest-labs/flux.1-dev", {"prompt": P, "width": 1024, "height": 1024, "seed": 1, "steps": 20, "cfg_scale": 3.5, "mode": "base"})]:
+    try:
+        t0 = time.time(); r = c.post(f"https://ai.api.nvidia.com/v1/genai/{model}", json=body, headers={"Authorization": f"Bearer {nk}", "Accept": "application/json"})
+        ct = r.headers.get("content-type", ""); j = r.json() if "json" in ct else {}
+        print(f"nvidia {model}: HTTP {r.status_code} {time.time()-t0:.1f}s keys={list(j)[:5]} | {r.text[:160] if r.status_code != 200 else ''}")
+        d = j.get("image") or next((a.get("base64") for a in j.get("artifacts") or []), None)
+        if d: keep("nvidia " + model, base64.b64decode(d.split(",", 1)[-1]))
+    except Exception as e: print(f"nvidia {model} EXC {type(e).__name__} {str(e)[:120]}")
+try:
+    r = c.get("https://api.kilo.ai/api/gateway/models", headers=({"Authorization": f"Bearer {kk}"} if kk else {}))
+    ms = r.json().get("data", [])
+    im = [(m.get("id"), m.get("isFree"), (m.get("architecture") or {}).get("output_modalities"), (m.get("pricing") or {}).get("image")) for m in ms
+          if "image" in json.dumps((m.get("architecture") or {}).get("output_modalities") or []) or "image" in str(m.get("id"))]
+    print("kilo models:", len(ms), "image-capable:", im[:25])
+except Exception as e: print("kilo EXC", e)
+try:
+    r = c.get("https://api.llm7.io/v1/models"); ms = r.json() if isinstance(r.json(), list) else r.json().get("data", [])
+    print("llm7 image-ish:", [(m.get("id"), m.get("tier")) for m in ms if "image" in json.dumps(m).lower()][:12])
+except Exception as e: print("llm7 EXC", e)
+try:
+    r = c.get("https://image.pollinations.ai/models"); print("pollinations models:", r.status_code, r.text[:300])
+except Exception as e: print("poll models EXC", e)
+import urllib.parse
+for i, (tag, params) in enumerate([("flux", {"model": "flux"}), ("flux-again", {"model": "flux"}), ("turbo", {"model": "turbo"}), ("default-ref", {"referrer": "creatoros"})]):
+    try:
+        t0 = time.time(); r = c.get("https://image.pollinations.ai/prompt/" + urllib.parse.quote(P, safe=""), params={"width": 1024, "height": 1024, "seed": 5 + i, "nologo": "true", **params})
+        show("pollinations " + tag, r, t0); print("   headers", {k: v for k, v in r.headers.items() if k.lower() in ("retry-after", "x-ratelimit-remaining", "x-error")})
+        if r.headers.get("content-type", "").startswith("image"): keep("poll " + tag, r.content)
+        if i == 1: time.sleep(16)
+    except Exception as e: print("pollinations", tag, "EXC", type(e).__name__, str(e)[:100])
+if tiles:
+    sheet = Image.new("RGB", (410 * len(tiles), 310), (30, 30, 36))
+    for i, t in enumerate(tiles): sheet.paste(t, (i * 410 + 5, 5))
+    b = io.BytesIO(); sheet.save(b, "JPEG", quality=75)
+    print("SHEET-BEGIN"); print(base64.b64encode(b.getvalue()).decode()); print("SHEET-END")
+PYEOF
+  )
+  say "Image diag done"; exit 0
+fi
+
 if [ "$ACTION" = "imgprobe" ]; then
   # Which AI image providers answer on this server (key NAMES only), how
   # long they take, and a contact sheet of what they draw. Writes only to
