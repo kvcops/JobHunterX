@@ -417,6 +417,50 @@ PYEOF
   say "Godot setup done"; exit 0
 fi
 
+if [ "$ACTION" = "imgprobe" ]; then
+  # Which AI image providers answer on this server (key NAMES only), how
+  # long they take, and a contact sheet of what they draw. Writes only to
+  # the film-art cache folder.
+  ( cd "$DIR" && set -a && . ./.env 2>/dev/null; set +a; "$PY" - "${BRANCH:-all}" <<'PYEOF'
+import sys, time, io, base64, httpx
+from PIL import Image
+from backend.app.media import image_gen as g
+which = [p for p in ("gemini", "nvidia", "pollinations") if sys.argv[1] in ("all", p)]
+print("keys:", {n: bool(g._key(n)) for n in ("GEMINI_API_KEY", "NVIDIA_API_KEY")})
+with httpx.Client(timeout=30) as c:
+    print("gemini image models:", g.gemini_models(c))
+tiles = []
+jobs = [("bg-tall", lambda o: g.backdrop("a cozy bakery kitchen with a brick oven, wooden shelves of bread and flour sacks", True, only=o)),
+        ("bg-wide", lambda o: g.backdrop("a quiet village street with small houses, a tree and a street lamp", False, "sunset", only=o)),
+        ("cat", lambda o: g.sprite("orange tabby cat", True, only=o)),
+        ("bread", lambda o: g.sprite("golden loaf of bread", False, only=o))]
+for prov in which:
+    for name, fn in jobs:
+        t = time.time()
+        try:
+            path = fn(prov)
+        except Exception as e:
+            path = None; print("  EXC", prov, name, str(e)[:200])
+        print(f"{prov:13s} {name:8s} {'OK ' + path.name if path else 'FAILED'} {time.time() - t:.1f}s")
+        if path:
+            im = Image.open(path).convert("RGBA")
+            bgc = Image.new("RGBA", im.size, (120, 170, 220, 255)); bgc.alpha_composite(im)
+            im = bgc.convert("RGB"); im.thumbnail((420, 300)); tiles.append(im)
+    for k, v in g.LAST_ERRORS.items():
+        if k.startswith(prov):
+            print("   err", k, "->", v[:220])
+if tiles:
+    W = 430 * 4; H = 310 * ((len(tiles) + 3) // 4)
+    sheet = Image.new("RGB", (W, H), (30, 30, 36))
+    for i, t in enumerate(tiles):
+        sheet.paste(t, ((i % 4) * 430 + 5, (i // 4) * 310 + 5))
+    b = io.BytesIO(); sheet.save(b, "JPEG", quality=72)
+    print("SHEET-BEGIN"); print(base64.b64encode(b.getvalue()).decode()); print("SHEET-END")
+PYEOF
+  )
+  say "Image probe done"; exit 0
+fi
+
 if [ "$ACTION" = "godotfilm" ]; then
   # A real animated film through the app's pipeline (real director model,
   # HeyGen, Godot), then a contact sheet in the log. Writes only its own
@@ -427,19 +471,22 @@ if [ "$ACTION" = "godotfilm" ]; then
 import asyncio, sys, time, subprocess, base64, shutil
 from pathlib import Path
 from backend.app.orchestration.godot_pipeline import generate_godot_film
-fmt = sys.argv[2] if sys.argv[2] in ("short", "youtube") else "short"
+arg = sys.argv[2].split("/", 1)
+fmt = arg[0] if arg[0] in ("short", "youtube") else "short"
+topic = arg[1].replace("_", " ") if len(arg) > 1 and arg[1] else "Why do cats always land on their feet"
 pp = Path(sys.argv[1]) / f"proj_godotcheck_{fmt}"
 shutil.rmtree(pp, ignore_errors=True)
 def cb(stage, pct, meta):
     if stage != "render.progress":
         print(f"  {pct:.2f} {stage} {({k: v for k, v in meta.items() if k in ('voice', 'title', 'scenes', 'places', 'claims')})}", flush=True)
 t = time.time()
-m = asyncio.run(generate_godot_film(topic="Why do cats always land on their feet", format_name=fmt,
+m = asyncio.run(generate_godot_film(topic=topic, format_name=fmt,
     voice_id="heygen:auto", target_duration_sec=30 if fmt == "short" else 60, project_id=pp.name,
     project_path=pp, progress_cb=cb, options={"research": False}))
-print(f"FILM {m['working_title']!r} {m['duration_sec']}s in {time.time() - t:.0f}s voice={m['voice']}")
+print(f"FILM {m['working_title']!r} {m['duration_sec']}s in {time.time() - t:.0f}s voices={m.get('voices')}")
+print("  cast:", m.get("cast")); print("  art:", m.get("art"))
 for sc in m["scenes"]:
-    print(f"  {sc['scene_id']} {sc['place']}/{sc['time']} {sc['cast']} mood={sc['mood']} | {sc['text'][:90]}")
+    print(f"  {sc['scene_id']} {sc['place']}/{sc['time']} {sc['cast']} mood={sc['mood']} set={str(sc.get('backdrop'))[:70]!r} items={sc.get('items')} | {sc['text'][:90]}")
 fv = m["final_video"]
 tile = "6x3" if fmt == "short" else "4x4"
 sc = "300:-2" if fmt == "short" else "480:-2"
