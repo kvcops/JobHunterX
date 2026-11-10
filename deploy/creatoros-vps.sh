@@ -473,7 +473,7 @@ from pathlib import Path
 from backend.app.orchestration.godot_pipeline import generate_godot_film
 arg = sys.argv[2].split("/", 1)
 fmt = arg[0] if arg[0] in ("short", "youtube") else "short"
-topic = arg[1].replace("_", " ") if len(arg) > 1 and arg[1] else "Why do cats always land on their feet"
+topic = arg[1].replace("-", " ").replace("_", " ") if len(arg) > 1 and arg[1] else "Why do cats always land on their feet"
 pp = Path(sys.argv[1]) / f"proj_godotcheck_{fmt}"
 shutil.rmtree(pp, ignore_errors=True)
 def cb(stage, pct, meta):
