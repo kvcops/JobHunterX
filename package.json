@@ -1,0 +1,1 @@
+{"name":"jobhunterx-site","private":true,"scripts":{"build":"esbuild src/main.js --bundle --minify --format=iife --target=es2020 --outfile=assets/app.js"},"devDependencies":{"esbuild":"^0.25.0","three":"^0.170.0","gsap":"^3.13.0","lenis":"^1.1.20"}}
