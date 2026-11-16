@@ -147,9 +147,13 @@ if (!reduce && innerWidth > 760) {
 /* ---------- features: a screenshot follows the pointer ---------- */
 if (fine) {
   const peek = $('#peek'), img = $('#peekI'), x = gsap.quickTo(peek, 'x', { duration: .7, ease: 'expo.out' }), y = gsap.quickTo(peek, 'y', { duration: .7, ease: 'expo.out' });
+  const hide = () => gsap.to(peek, { opacity: 0, scale: .6, duration: .3, ease: 'power3.in', overwrite: true });
+  $('#feat').addEventListener('pointerleave', hide);
+  addEventListener('scroll', () => { const h = document.elementFromPoint(lastPX, lastPY); if (!h || !h.closest('#feat li')) hide(); }, { passive: true });
+  let lastPX = 0, lastPY = 0; addEventListener('pointermove', (e) => { lastPX = e.clientX; lastPY = e.clientY; }, { passive: true });
   $$('#feat li').forEach((li) => { new Image().src = `assets/shots/${li.dataset.img}.webp`;
-    li.addEventListener('pointerenter', () => { img.src = `assets/shots/${li.dataset.img}.webp`; gsap.to(peek, { opacity: 1, scale: 1, duration: .6, ease: 'expo.out' }); });
-    li.addEventListener('pointerleave', () => gsap.to(peek, { opacity: 0, scale: .6, duration: .4, ease: 'power3.in' }));
+    li.addEventListener('pointerenter', () => { img.src = `assets/shots/${li.dataset.img}.webp`; gsap.to(peek, { opacity: 1, scale: 1, duration: .6, ease: 'expo.out', overwrite: true }); });
+    li.addEventListener('pointerleave', hide);
     li.addEventListener('pointermove', (e) => { const w = peek.offsetWidth; x(clamp(e.clientX + 30, 10, innerWidth - w - 10)); y(clamp(e.clientY - peek.offsetHeight * .55, 10, innerHeight - peek.offsetHeight - 10)); }); });
 }
 
