@@ -7,7 +7,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-const LIME = '#C8FF3D', BONE = '#ECE8DF', INK = '#0B0B0B';
+const LIME = '#FF4A1C', BONE = '#ECE8DF', INK = '#0B0B0B';
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const ss = (t) => t * t * (3 - 2 * t);
@@ -45,7 +45,7 @@ function paper(kind) {
   const W = 768, H = 1056, cv = document.createElement('canvas'); cv.width = W; cv.height = H; const c = cv.getContext('2d');
   c.fillStyle = '#F6F3EC'; c.fillRect(0, 0, W, H);
   const bar = (x, y, w, h = 12, col = '#D9D5CA') => { c.fillStyle = col; rrect(c, x, y, w, h, h / 2); c.fill(); };
-  const hl = (x, y, w, h = 34) => { c.fillStyle = 'rgba(200,255,61,.75)'; c.fillRect(x, y, w, h); };
+  const hl = (x, y, w, h = 34) => { c.fillStyle = 'rgba(255,74,28,.32)'; c.fillRect(x, y, w, h); };
   c.fillStyle = INK;
   if (kind === 'cover') {
     c.font = '500 20px "Geist Mono", monospace'; c.fillStyle = '#8b887f'; c.fillText('COVER LETTER · UNDER 300 WORDS', 64, 90);
@@ -88,7 +88,7 @@ function agentScreen() {
     F.forEach(([l, v, a, b], i) => {
       const y = 170 + i * 72, on = t >= a && t < b + .3;
       c.fillStyle = '#55534c'; c.font = '600 18px "Geist", sans-serif'; c.fillText(l, 56, y + 32);
-      c.fillStyle = '#fff'; rrect(c, 190, y, 560, 48, 10); c.fill(); c.lineWidth = on ? 3 : 1.5; c.strokeStyle = on ? '#9BD41F' : '#d3cfc4'; c.stroke();
+      c.fillStyle = '#fff'; rrect(c, 190, y, 560, 48, 10); c.fill(); c.lineWidth = on ? 3 : 1.5; c.strokeStyle = on ? '#FF4A1C' : '#d3cfc4'; c.stroke();
       const n = Math.floor(clamp((t - a) / (b - a), 0, 1) * v.length); c.fillStyle = INK; c.font = '500 20px "Geist", sans-serif'; c.fillText(v.slice(0, n) + (on && n < v.length ? '|' : ''), 206, y + 31);
     });
     c.fillStyle = '#55534c'; c.font = '600 18px "Geist", sans-serif'; c.fillText('Resume', 56, 490);
@@ -144,7 +144,7 @@ export function initGL(canvas, { reduce }) {
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvLoc = uv; vState = aState; vMapUv = (uv + aCell) * .25;');
     s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vState; varying vec2 vLoc;')
       .replace('#include <map_fragment>', '#include <map_fragment>\nif(!gl_FrontFacing) diffuseColor.rgb = vec3(.035);\ndiffuseColor.rgb *= mix(1., .16, vState.y);')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nfloat ed = min(min(vLoc.x,1.-vLoc.x)*1.6, min(vLoc.y,1.-vLoc.y));\nfloat rim = 1.-smoothstep(.0,.07,ed);\ntotalEmissiveRadiance += vec3(.58,1.,.045) * vState.x * (rim*1.5 + .02) + diffuseColor.rgb * vState.x * .05;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nfloat ed = min(min(vLoc.x,1.-vLoc.x)*1.6, min(vLoc.y,1.-vLoc.y));\nfloat rim = 1.-smoothstep(.0,.07,ed);\ntotalEmissiveRadiance += vec3(1.,.07,.012) * vState.x * (rim*1.5 + .02) + diffuseColor.rgb * vState.x * .05;');
   };
   const cards = new THREE.InstancedMesh(geo, mat, N); cards.frustumCulled = false; cards.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(cards);
 

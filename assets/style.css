@@ -2,7 +2,7 @@
 @font-face{font-family:"Instrument Serif";src:url(fonts/serif-i.woff2) format("woff2");font-style:italic;font-weight:400;font-display:swap}
 @font-face{font-family:"Geist";src:url(fonts/geist.woff2) format("woff2");font-weight:100 900;font-display:swap}
 @font-face{font-family:"Geist Mono";src:url(fonts/mono.woff2) format("woff2");font-weight:100 900;font-display:swap}
-:root{--bg:#060606;--bone:#ECE8DF;--bone2:#DFDAD0;--ink:#0B0B0B;--lime:#C8FF3D;--mute:#8D8B84;--line:rgba(236,232,223,.14);--red:#FF5B3A;
+:root{--bg:#060606;--bone:#ECE8DF;--bone2:#DFDAD0;--ink:#0B0B0B;--lime:#FF4A1C;--mute:#8D8B84;--line:rgba(236,232,223,.14);--red:#A8A49A;
   --fd:"Bricolage Grotesque","Arial Narrow",Arial,sans-serif;--fi:"Instrument Serif",Georgia,serif;--fs:"Geist",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--fm:"Geist Mono",ui-monospace,Menlo,Consolas,monospace;
   --pad:clamp(18px,3.6vw,56px);--e:cubic-bezier(.16,1,.3,1);--e2:cubic-bezier(.65,0,.35,1)}
 *,*::before,*::after{box-sizing:border-box}
@@ -107,8 +107,8 @@ main{overflow-x:clip}
 .facts li{display:grid;grid-template-columns:130px 1fr;gap:14px;padding:11px 0;border-bottom:1px solid var(--line);font-size:.92rem;color:#c5c2b9;align-items:baseline}
 .facts b{font-family:var(--fd);font-stretch:80%;font-size:1.3rem;letter-spacing:-.02em;color:var(--lime);font-weight:700}
 .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
-.pills li{font-family:var(--fm);font-size:.72rem;letter-spacing:.04em;padding:6px 12px;border-radius:999px;border:1px solid rgba(200,255,61,.5);color:var(--lime)}
-.pills.no li{border-color:rgba(255,91,58,.55);color:var(--red);text-decoration:line-through;text-decoration-color:rgba(255,91,58,.5)}
+.pills li{font-family:var(--fm);font-size:.72rem;letter-spacing:.04em;padding:6px 12px;border-radius:999px;border:1px solid rgba(255,74,28,.5);color:var(--lime)}
+.pills.no li{border-color:rgba(168,164,154,.55);color:var(--red);text-decoration:line-through;text-decoration-color:rgba(168,164,154,.5)}
 html.js .chap:not(.hero) .copy{opacity:0;transform:translateY(40px);transition:opacity .9s var(--e),transform 1.1s var(--e)}
 html.js .chap.on .copy{opacity:1;transform:none}
 
@@ -168,7 +168,7 @@ html.js .chap.on .copy{opacity:1;transform:none}
 .fl input,.fl select,.file{font:inherit;font-size:.8rem;height:32px;border:1px solid #d3cfc4;border-radius:8px;background:#fff;padding:0 9px;width:100%;min-width:0;color:#1a1916;transition:border-color .2s,box-shadow .2s}
 .fl .ph{display:grid;grid-template-columns:64px 1fr;gap:6px}.fl select{padding:0 4px}
 .file{display:flex;align-items:center;font-family:var(--fm);font-size:.7rem;color:#8a877e;border-style:dashed}.file.done{border-style:solid;color:#1a1916}
-.fl.f input,.fl.f .file{border-color:#8fc41c;box-shadow:0 0 0 3px rgba(200,255,61,.45)}
+.fl.f input,.fl.f .file{border-color:#FF4A1C;box-shadow:0 0 0 3px rgba(255,74,28,.45)}
 .capt{display:flex;gap:10px;align-items:center;border:1px solid #d3cfc4;border-radius:8px;padding:9px 10px;background:#EDEAE1;opacity:.35;transition:opacity .3s,border-color .3s,box-shadow .3s}
 .capt.show{opacity:1}.capt.need{border-color:#E08A22;box-shadow:0 0 0 3px rgba(224,138,34,.25)}
 .capt input{width:17px;height:17px;margin:0;accent-color:#1f7a5c}.capt small{margin-left:auto;font-family:var(--fm);font-size:.6rem;color:#8a877e}
@@ -236,7 +236,7 @@ html.js .chap.on .copy{opacity:1;transform:none}
 /* cases */
 .cases{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;perspective:1400px}
 .case{border-radius:28px;padding:clamp(24px,3vw,44px);background:linear-gradient(160deg,#151515,#0c0c0c);border:1px solid var(--line);display:flex;flex-direction:column;gap:18px;transform-style:preserve-3d;will-change:transform;position:relative;overflow:hidden}
-.case::after{content:"";position:absolute;inset:0;background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(200,255,61,.13),transparent 60%);opacity:0;transition:opacity .5s;pointer-events:none}
+.case::after{content:"";position:absolute;inset:0;background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%),rgba(255,74,28,.13),transparent 60%);opacity:0;transition:opacity .5s;pointer-events:none}
 .case:hover::after{opacity:1}
 .case .who{font-family:var(--fm);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--lime)}
 .case h3{font-family:var(--fi);font-style:italic;font-weight:400;font-size:clamp(1.8rem,3.2vw,3.2rem);line-height:1.02;letter-spacing:-.015em}
