@@ -150,7 +150,10 @@ if (fine) {
   const hide = () => gsap.to(peek, { opacity: 0, scale: .6, duration: .3, ease: 'power3.in', overwrite: true });
   $('#feat').addEventListener('pointerleave', hide);
   addEventListener('scroll', () => { const h = document.elementFromPoint(lastPX, lastPY); if (!h || !h.closest('#feat li')) hide(); }, { passive: true });
-  let lastPX = 0, lastPY = 0; addEventListener('pointermove', (e) => { lastPX = e.clientX; lastPY = e.clientY; }, { passive: true });
+  let lastPX = -1, lastPY = -1; const chk = () => { const h = lastPX < 0 ? null : document.elementFromPoint(lastPX, lastPY); if (!h || !h.closest('#feat li')) { gsap.killTweensOf(peek); gsap.set(peek, { opacity: 0, scale: .6 }); } };
+  addEventListener('pointermove', (e) => { lastPX = e.clientX; lastPY = e.clientY; chk(); }, { passive: true });
+  addEventListener('wheel', chk, { passive: true }); document.addEventListener('pointerleave', () => { lastPX = -1; chk(); }); addEventListener('blur', () => { lastPX = -1; chk(); });
+  gsap.ticker.add(chk);
   $$('#feat li').forEach((li) => { new Image().src = `assets/shots/${li.dataset.img}.webp`;
     li.addEventListener('pointerenter', () => { img.src = `assets/shots/${li.dataset.img}.webp`; gsap.to(peek, { opacity: 1, scale: 1, duration: .6, ease: 'expo.out', overwrite: true }); });
     li.addEventListener('pointerleave', hide);
